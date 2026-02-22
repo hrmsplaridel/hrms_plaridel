@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../constants/app_theme.dart';
 import '../widgets/section_container.dart';
 
+/// Footer: Data Privacy Notice, Terms of Service, Copyright, Municipality branding.
 class FooterSection extends StatelessWidget {
   const FooterSection({super.key});
 
@@ -16,28 +17,36 @@ class FooterSection extends StatelessWidget {
         backgroundColor: AppTheme.primaryNavy,
         padding: EdgeInsets.symmetric(
           horizontal: isWide ? 80 : 24,
-          vertical: 32,
+          vertical: 20,
         ),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Text(
-              'Municipality of Plaridel - Human Resource Management Office',
-              textAlign: TextAlign.center,
+              'Municipality of Plaridel',
               style: TextStyle(
                 color: AppTheme.white,
-                fontSize: isWide ? 18 : 16,
-                fontWeight: FontWeight.w600,
+                fontSize: isWide ? 20 : 18,
+                fontWeight: FontWeight.w700,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 2),
+            Text(
+              'Human Resource Management System (HRMS)',
+              style: TextStyle(
+                color: AppTheme.white.withOpacity(0.9),
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 12),
             Wrap(
               alignment: WrapAlignment.center,
-              spacing: 8,
+              spacing: 12,
               runSpacing: 8,
               children: [
                 TextButton(
-                  onPressed: () => _handlePrivacyPolicy(context),
+                  onPressed: () => _onDataPrivacy(context),
                   style: TextButton.styleFrom(
                     foregroundColor: AppTheme.white,
                     padding: EdgeInsets.zero,
@@ -45,7 +54,7 @@ class FooterSection extends StatelessWidget {
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                   child: const Text(
-                    'Privacy Policy',
+                    'Data Privacy Notice',
                     style: TextStyle(
                       decoration: TextDecoration.underline,
                       fontSize: 14,
@@ -55,12 +64,12 @@ class FooterSection extends StatelessWidget {
                 Text(
                   '|',
                   style: TextStyle(
-                    color: AppTheme.white.withOpacity(0.8),
+                    color: AppTheme.white.withOpacity(0.7),
                     fontSize: 14,
                   ),
                 ),
                 TextButton(
-                  onPressed: () => _handleTermsOfService(context),
+                  onPressed: () => _onTermsOfService(context),
                   style: TextButton.styleFrom(
                     foregroundColor: AppTheme.white,
                     padding: EdgeInsets.zero,
@@ -77,22 +86,9 @@ class FooterSection extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Text(
-                'This portal complies with Republic Act No. 10173 or the Data Privacy Act of 2012. All personal information collected is processed in accordance with the provisions of the law.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppTheme.white.withOpacity(0.9),
-                  fontSize: 12,
-                  height: 1.5,
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 10),
             Text(
-              '© 2026 Municipality of Plaridel. All rights reserved.',
+              '© ${DateTime.now().year} Municipality of Plaridel. All rights reserved.',
               style: TextStyle(
                 color: AppTheme.white.withOpacity(0.85),
                 fontSize: 12,
@@ -104,11 +100,11 @@ class FooterSection extends StatelessWidget {
     );
   }
 
-  void _handlePrivacyPolicy(BuildContext context) {
-    // Ready for backend integration
+  void _onDataPrivacy(BuildContext context) {
+    // Ready for backend / policy page
   }
 
-  void _handleTermsOfService(BuildContext context) {
-    // Ready for backend integration
+  void _onTermsOfService(BuildContext context) {
+    // Ready for backend / terms page
   }
 }

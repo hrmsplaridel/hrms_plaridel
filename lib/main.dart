@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'constants/app_theme.dart';
-import 'screens/landing_page.dart';
+import 'landingpage/constants/app_theme.dart';
+import 'landingpage/screens/landing_page.dart';
 
 void main() {
   runApp(const MyApp());

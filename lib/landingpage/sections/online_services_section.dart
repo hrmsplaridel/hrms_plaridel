@@ -19,39 +19,58 @@ class OnlineServicesSection extends StatelessWidget {
 
     return SectionContainer(
       backgroundColor: AppTheme.sectionAlt,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Stack(
+        clipBehavior: Clip.none,
         children: [
-          Text(
-            'Online Services',
-            style: TextStyle(
-              color: AppTheme.primaryNavy,
-              fontSize: AppTheme.sectionTitleSize,
-              fontWeight: FontWeight.w700,
+          // Action button in upper right
+          Positioned(
+            top: 0,
+            right: 0,
+            child: TextButton.icon(
+              onPressed: () => _handleViewAllServices(context),
+              icon: const Icon(Icons.grid_view_outlined, size: 18),
+              label: const Text('View All'),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              ),
             ),
           ),
-          const SizedBox(height: 32),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final crossAxisCount = isWide ? 3 : (constraints.maxWidth > 500 ? 2 : 1);
-              return GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: crossAxisCount,
-                mainAxisSpacing: 16,
-                crossAxisSpacing: 16,
-                childAspectRatio: isWide ? 2.2 : 2.0,
-                children: services
-                    .map(
-                      (s) => _ServiceCard(
-                        title: s.$1,
-                        icon: s.$2,
-                        onTap: () => _handleServiceTap(context, s.$1),
-                      ),
-                    )
-                    .toList(),
-              );
-            },
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Online Services',
+                style: TextStyle(
+                  color: AppTheme.primaryNavy,
+                  fontSize: AppTheme.sectionTitleSize,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 32),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final crossAxisCount = isWide ? 3 : (constraints.maxWidth > 500 ? 2 : 1);
+                  return GridView.count(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    crossAxisCount: crossAxisCount,
+                    mainAxisSpacing: 16,
+                    crossAxisSpacing: 16,
+                    childAspectRatio: isWide ? 2.2 : 2.0,
+                    children: services
+                        .map(
+                          (s) => _ServiceCard(
+                            title: s.$1,
+                            icon: s.$2,
+                            onTap: () => _handleServiceTap(context, s.$1),
+                          ),
+                        )
+                        .toList(),
+                  );
+                },
+              ),
+            ],
           ),
         ],
       ),
@@ -59,6 +78,10 @@ class OnlineServicesSection extends StatelessWidget {
   }
 
   void _handleServiceTap(BuildContext context, String service) {
+    // Ready for backend integration
+  }
+
+  void _handleViewAllServices(BuildContext context) {
     // Ready for backend integration
   }
 }
