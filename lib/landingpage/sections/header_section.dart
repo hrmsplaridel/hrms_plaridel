@@ -50,9 +50,16 @@ class HeaderSection extends StatelessWidget {
             child: isWide
             ? Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  _LguBranding(isNarrow: isNarrow, isWide: isWide, showBackground: false),
+                  Expanded(
+                    child: _LguBranding(
+                      isNarrow: isNarrow,
+                      isWide: isWide,
+                      showBackground: false,
+                      expandWidth: true,
+                    ),
+                  ),
+                  const SizedBox(width: 40),
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.center,
@@ -197,78 +204,84 @@ class _NavLinkState extends State<_NavLink> {
 
 /// Upper-left LGU branding: light grey background, blue/beige accents, circular logo, text hierarchy.
 /// When [showBackground] is false, only logo + text (for use inside the full-width header bar).
+/// When [expandWidth] is true, the text column stretches to fill space beside the logo (wide header).
 class _LguBranding extends StatelessWidget {
   const _LguBranding({
     required this.isNarrow,
     required this.isWide,
     this.showBackground = true,
+    this.expandWidth = false,
   });
 
   final bool isNarrow;
   final bool isWide;
   final bool showBackground;
+  final bool expandWidth;
 
   Widget _buildContent(BuildContext context) {
-    return Row(
+    final textColumn = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          'Republic of the Philippines',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: isNarrow ? 8 : 10,
+            fontWeight: FontWeight.w500,
+            letterSpacing: 0.8,
+          ),
+        ),
+        Text(
+          'PROVINCE OF MISAMIS OCCIDENTAL',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: isNarrow ? 8 : 10,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 1.0,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Container(
+          width: double.infinity,
+          height: 2,
+          color: Colors.black,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'MUNICIPALITY OF PLARIDEL',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: isNarrow ? 14 : (isWide ? 22 : 18),
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.0,
+            height: 1.2,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          'HUMAN RESOURCE MANAGEMENT AND DEVELOPMENT OFFICE',
+          style: TextStyle(
+            color: const Color(0xFFB85C38),
+            fontSize: isNarrow ? 8 : (isWide ? 12 : 10),
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.6,
+            height: 1.2,
+          ),
+        ),
+      ],
+    );
+
+    return Row(
+      mainAxisSize: expandWidth ? MainAxisSize.max : MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         _MunicipalityLogoCircular(size: isNarrow ? 64 : (isWide ? 90 : 72)),
         SizedBox(width: isWide ? 20 : 12),
-        IntrinsicWidth(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Republic of the Philippines',
-                style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: isNarrow ? 8 : 10,
-                  fontWeight: FontWeight.w500,
-                  letterSpacing: 0.5,
-                ),
-              ),
-              Text(
-                'PROVINCE OF MISAMIS OCCIDENTAL',
-                style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: isNarrow ? 8 : 10,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.8,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Container(
-                width: double.infinity,
-                height: 2,
-                color: Colors.black,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'MUNICIPALITY OF PLARIDEL',
-                style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: isNarrow ? 14 : (isWide ? 22 : 18),
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.6,
-                  height: 1.2,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                'HUMAN RESOURCE MANAGEMENT AND DEVELOPMENT OFFICE',
-                style: TextStyle(
-                  color: const Color(0xFFB85C38),
-                  fontSize: isNarrow ? 8 : (isWide ? 12 : 10),
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.3,
-                  height: 1.2,
-                ),
-              ),
-            ],
-          ),
-        ),
+        if (expandWidth)
+          Expanded(child: textColumn)
+        else
+          IntrinsicWidth(child: textColumn),
       ],
     );
   }
