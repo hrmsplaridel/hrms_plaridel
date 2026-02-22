@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../data/job_vacancy_announcement.dart';
+import '../../login/screens/login_page.dart';
 import '../constants/app_theme.dart';
 import '../sections/header_section.dart';
 import '../sections/hero_section.dart';
@@ -23,6 +25,9 @@ class _LandingPageState extends State<LandingPage> {
   final GlobalKey _jobVacanciesKey = GlobalKey();
   final GlobalKey _recruitmentProcessKey = GlobalKey();
   final GlobalKey _contactKey = GlobalKey();
+
+  late final Future<JobVacancyAnnouncement> _announcementFuture =
+      JobVacancyAnnouncementRepo.instance.fetch();
 
   void _scrollTo(GlobalKey key) {
     final context = key.currentContext;
@@ -53,7 +58,11 @@ class _LandingPageState extends State<LandingPage> {
   }
 
   void _onLogin() {
-    // Login - ready for backend (e.g. route to login screen or show role selection)
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const LoginPage(),
+      ),
+    );
   }
 
   @override
@@ -81,10 +90,20 @@ class _LandingPageState extends State<LandingPage> {
                     onTrackApplicationTap: _onTrackApplication,
                     onViewJobVacanciesTap: _onViewJobVacancies,
                   ),
-                  JobVacanciesSection(
-                    key: _jobVacanciesKey,
-                    hasVacancies: true,
-                    onGoToRecruitmentTap: () => _scrollTo(_recruitmentProcessKey),
+                  FutureBuilder<JobVacancyAnnouncement>(
+                    future: _announcementFuture,
+                    builder: (context, snapshot) {
+                      final a = snapshot.data ??
+                          const JobVacancyAnnouncement(hasVacancies: true);
+                      return JobVacanciesSection(
+                        key: _jobVacanciesKey,
+                        hasVacancies: a.hasVacancies,
+                        headline: a.headline,
+                        body: a.body,
+                        onGoToRecruitmentTap: () =>
+                            _scrollTo(_recruitmentProcessKey),
+                      );
+                    },
                   ),
                   RecruitmentProcessSection(
                     key: _recruitmentProcessKey,
