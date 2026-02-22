@@ -70,7 +70,10 @@ class HeroSection extends StatelessWidget {
                   style: FilledButton.styleFrom(
                     backgroundColor: AppTheme.primaryNavy,
                     foregroundColor: AppTheme.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 16,
+                    ),
                     minimumSize: const Size(0, 48),
                   ),
                 ),
@@ -81,7 +84,10 @@ class HeroSection extends StatelessWidget {
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppTheme.primaryNavy,
                     side: const BorderSide(color: AppTheme.primaryNavy),
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 16,
+                    ),
                     minimumSize: const Size(0, 48),
                   ),
                 ),
@@ -92,7 +98,10 @@ class HeroSection extends StatelessWidget {
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppTheme.primaryNavy,
                     side: const BorderSide(color: AppTheme.primaryNavy),
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 16,
+                    ),
                     minimumSize: const Size(0, 48),
                   ),
                 ),
