@@ -56,7 +56,7 @@ class ContactSection extends StatelessWidget {
                                 icon: Icons.location_on_outlined,
                                 label: 'Office Address',
                                 value:
-                                    'JPC5+GXV, Dipolog - Oroquieta National Rd, Plaridel, Misamis Occidental',
+                                    'Municipal Hall of Plaridel, Misamis Occidental',
                               ),
                               SizedBox(height: 24),
                               _ContactItem(
@@ -68,7 +68,8 @@ class ContactSection extends StatelessWidget {
                               _ContactItem(
                                 icon: Icons.email_outlined,
                                 label: 'Official Email',
-                                value: 'plaridel_misocc@yahoo.com',
+                                value:
+                                    'plaridel_misocc@yahoo.com / asensoplaridel@gmail.com',
                               ),
                               SizedBox(height: 24),
                               _ContactItem(
@@ -119,7 +120,6 @@ class ContactSection extends StatelessWidget {
       ),
     );
   }
-
 }
 
 class _ContactItem extends StatelessWidget {
@@ -201,13 +201,16 @@ class _OfficeMap extends StatelessWidget {
                 initialCenter: _officeLocation,
                 initialZoom: 16,
                 interactionOptions: const InteractionOptions(
-                  flags: InteractiveFlag.drag | InteractiveFlag.pinchZoom | InteractiveFlag.scrollWheelZoom,
+                  flags:
+                      InteractiveFlag.drag |
+                      InteractiveFlag.pinchZoom |
+                      InteractiveFlag.scrollWheelZoom,
                 ),
               ),
               children: [
                 TileLayer(
                   urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.example.hrms_plaridel',
+                  userAgentPackageName: 'hrms_plaridel',
                 ),
                 MarkerLayer(
                   markers: [
@@ -229,13 +232,23 @@ class _OfficeMap extends StatelessWidget {
           Material(
             color: AppTheme.white,
             child: InkWell(
-              onTap: () => launchUrl(Uri.parse(_googleMapsUrl), mode: LaunchMode.externalApplication),
+              onTap: () => launchUrl(
+                Uri.parse(_googleMapsUrl),
+                mode: LaunchMode.externalApplication,
+              ),
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                padding: const EdgeInsets.symmetric(
+                  vertical: 10,
+                  horizontal: 12,
+                ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.open_in_new, size: 18, color: AppTheme.primaryNavy),
+                    Icon(
+                      Icons.open_in_new,
+                      size: 18,
+                      color: AppTheme.primaryNavy,
+                    ),
                     const SizedBox(width: 8),
                     Text(
                       'Open in Google Maps',

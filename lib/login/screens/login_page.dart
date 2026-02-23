@@ -4,7 +4,6 @@ import '../constants/login_theme.dart';
 import '../models/login_role.dart';
 import '../../dashboard/screens/admin_dashboard.dart';
 import '../../dashboard/screens/employee_dashboard.dart';
-import 'sign_up_page.dart';
 
 /// Login screen: left = blue branding/illustration, right = white form.
 /// Reference: Welcome Back, Email/Employee ID, Password, Remember Me, Forgot Password, Login to HRMS.
@@ -339,30 +338,6 @@ class _LoginFormSection extends StatelessWidget {
                       _LoginToHrmsButton(
                         onPressed: isLoading ? null : onLogin,
                         isLoading: isLoading,
-                      ),
-                      const SizedBox(height: 20),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            "Don't have an account? ",
-                            style: TextStyle(color: LoginTheme.textSecondary, fontSize: 14),
-                          ),
-                          TextButton(
-                            onPressed: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute(builder: (context) => const SignUpPage()),
-                              );
-                            },
-                            style: TextButton.styleFrom(
-                              foregroundColor: LoginTheme.bluePrimary,
-                              padding: const EdgeInsets.symmetric(horizontal: 4),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            child: const Text('Sign up'),
-                          ),
-                        ],
                       ),
                       const SizedBox(height: 48),
                       Row(

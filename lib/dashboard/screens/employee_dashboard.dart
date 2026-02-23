@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../landingpage/constants/app_theme.dart';
+import 'settings_page.dart';
 
 /// Employee dashboard reference: dark blue sidebar (HR branding), nav items,
 /// welcome + Clock In, Attendance, Leave Balance, Payslip cards, Announcements,
@@ -373,6 +374,8 @@ class _EmployeeUserMenu extends StatelessWidget {
         const PopupMenuDivider(height: 1),
         PopupMenuItem(value: 'profile', padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8), child: Row(children: [Icon(Icons.person_outline_rounded, size: 22, color: AppTheme.textSecondary), const SizedBox(width: 14), Text('My Profile', style: TextStyle(fontSize: 14, color: AppTheme.textPrimary))])),
         const PopupMenuDivider(height: 1),
+        PopupMenuItem(value: 'settings', padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8), child: Row(children: [Icon(Icons.settings_outlined, size: 22, color: AppTheme.textSecondary), const SizedBox(width: 14), Text('Settings', style: TextStyle(fontSize: 14, color: AppTheme.textPrimary))])),
+        const PopupMenuDivider(height: 1),
         PopupMenuItem(value: 'signout', padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12), child: Row(children: [Icon(Icons.logout_rounded, size: 22, color: Color(0xFFC62828)), const SizedBox(width: 14), Text('Sign out', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFFC62828)))])),
       ],
       onSelected: (value) {
@@ -382,6 +385,9 @@ class _EmployeeUserMenu extends StatelessWidget {
         }
         if (value == 'profile') {
           // TODO: navigate when implemented
+        }
+        if (value == 'settings') {
+          Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage()));
         }
       },
     );
@@ -477,9 +483,9 @@ class _ClockInCard extends StatelessWidget {
         children: [
           Text('Clock In', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.w500)),
           const SizedBox(height: 12),
-          Text('08:45 AM', style: TextStyle(color: AppTheme.textPrimary, fontSize: 26, fontWeight: FontWeight.w800)),
+          Text('—', style: TextStyle(color: AppTheme.textPrimary, fontSize: 26, fontWeight: FontWeight.w800)),
           const SizedBox(height: 6),
-          Text('Location: Office 3rd Floor', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+          Text('Location: —', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
@@ -520,13 +526,13 @@ class _AttendanceCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.baseline,
             textBaseline: TextBaseline.alphabetic,
             children: [
-              Text('21', style: TextStyle(color: AppTheme.textPrimary, fontSize: 28, fontWeight: FontWeight.w800)),
+              Text('—', style: TextStyle(color: AppTheme.textPrimary, fontSize: 28, fontWeight: FontWeight.w800)),
               const SizedBox(width: 8),
               Text('Present Days', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
             ],
           ),
           const SizedBox(height: 8),
-          Text('▲1 this week', style: TextStyle(color: const Color(0xFF388E3C), fontSize: 13, fontWeight: FontWeight.w600)),
+          Text('—', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
           const SizedBox(height: 14),
           TextButton(
             onPressed: () {},
@@ -555,20 +561,20 @@ class _LeaveBalanceCard extends StatelessWidget {
         children: [
           Text('Leave Balance', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.w500)),
           const SizedBox(height: 12),
-          Text('5.5', style: TextStyle(color: AppTheme.textPrimary, fontSize: 28, fontWeight: FontWeight.w800)),
+          Text('—', style: TextStyle(color: AppTheme.textPrimary, fontSize: 28, fontWeight: FontWeight.w800)),
           const SizedBox(height: 4),
           Text('Remaining Days', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
           const SizedBox(height: 14),
           Row(children: [
-            Icon(Icons.arrow_downward_rounded, size: 16, color: const Color(0xFF388E3C)),
+            Icon(Icons.arrow_downward_rounded, size: 16, color: AppTheme.textSecondary),
             const SizedBox(width: 6),
-            Text('Vacation 3.0', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
+            Text('Vacation —', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
           ]),
           const SizedBox(height: 6),
           Row(children: [
             Icon(Icons.medical_services_outlined, size: 16, color: AppTheme.textSecondary),
             const SizedBox(width: 6),
-            Text('Sick 2.5', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
+            Text('Sick —', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
           ]),
         ],
       ),
@@ -592,11 +598,11 @@ class _PayslipCard extends StatelessWidget {
         children: [
           Text('My Payslip', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.w500)),
           const SizedBox(height: 8),
-          Text('April 2024', style: TextStyle(color: AppTheme.textPrimary, fontSize: 14)),
+          Text('—', style: TextStyle(color: AppTheme.textPrimary, fontSize: 14)),
           const SizedBox(height: 8),
-          Text('Php 42,500', style: TextStyle(color: AppTheme.textPrimary, fontSize: 24, fontWeight: FontWeight.w800)),
+          Text('—', style: TextStyle(color: AppTheme.textPrimary, fontSize: 24, fontWeight: FontWeight.w800)),
           const SizedBox(height: 4),
-          Text('Next Payday: April 30', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+          Text('Next Payday: —', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
@@ -655,9 +661,7 @@ class _EmployeeAnnouncementsCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Employee training session on April 30 at 10:00 AM', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600, fontSize: 14)),
-                const SizedBox(height: 8),
-                Text('Please attend the mandatory training session. Room 301.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4)),
+                Text('No announcements yet.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 14, height: 1.4)),
               ],
             ),
           ),
@@ -705,18 +709,9 @@ class _EmployeeUpcomingLeaveCard extends StatelessWidget {
             child: Row(
               children: [
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Vacation Leave', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600, fontSize: 14)),
-                      const SizedBox(height: 4),
-                      Text('Thursday, April 25, 2024', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
-                      const SizedBox(height: 8),
-                      Text('Please complete handover before leave.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-                    ],
-                  ),
+                  child: Text('No upcoming leave.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
                 ),
-                Icon(Icons.flight_takeoff_rounded, color: AppTheme.textSecondary.withOpacity(0.5), size: 40),
+                Icon(Icons.event_rounded, color: AppTheme.textSecondary.withOpacity(0.5), size: 40),
               ],
             ),
           ),

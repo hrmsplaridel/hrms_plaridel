@@ -166,7 +166,25 @@ After this, the login and sign-up forms will work with Supabase.
 
 The **RSP** module in the admin dashboard lets you control what the **landing page** shows in the Job Vacancies section (e.g. “We are currently accepting applications” vs “There are no job vacancies”). The app reads and writes a single row in Supabase.
 
+### Fix: "Could not find the 'vacancies' column" (PGRST204)
+
+**If you get:** `PostgrestException ... Could not find the 'vacancies' column of 'job_vacancy_announcement'` when you tap **Save and display on landing page**, your table was created before the multiple-vacancies feature. Add the column in Supabase:
+
+1. Open **Supabase Dashboard → SQL Editor → New query**.
+2. Paste and run:
+
+```sql
+alter table public.job_vacancy_announcement
+  add column if not exists vacancies jsonb default '[]'::jsonb;
+```
+
+3. Try saving again from the admin form.
+
+---
+
 ### Query 5: Create `job_vacancy_announcement` table
+
+**If you get:** `Could not find the table 'public.job_vacancy_announcement'` (PGRST205) when saving the form, run the SQL below in Supabase: **Dashboard → SQL Editor → New query** → paste → **Run**.
 
 Run this in **SQL Editor** after Part 2–3.
 
@@ -177,9 +195,10 @@ create table if not exists public.job_vacancy_announcement (
   has_vacancies boolean not null default true,
   headline text,
   body text,
+  vacancies jsonb default '[]'::jsonb,
   updated_at timestamptz default now()
 );
-
+  
 -- Ensure one row exists
 insert into public.job_vacancy_announcement (id, has_vacancies, headline, body)
 values ('default', true, null, null)
@@ -198,7 +217,227 @@ create policy "Authenticated can update job vacancy announcement"
   on public.job_vacancy_announcement for update
   using (auth.role() = 'authenticated');
 
+-- Allow authenticated to insert (so first save can create the default row if missing)
+create policy "Authenticated can insert job vacancy announcement"
+  on public.job_vacancy_announcement for insert
+  with check (auth.role() = 'authenticated');
+
 comment on table public.job_vacancy_announcement is 'Single row: controls Job Vacancies section on landing page. RSP form in admin dashboard.';
 ```
 
-After this, the RSP form in the admin dashboard can save the announcement, and the landing page will display it.
+**If the table already exists** (you ran Query 5 before), add the multiple-vacancies column:
+
+```sql
+alter table public.job_vacancy_announcement
+  add column if not exists vacancies jsonb default '[]'::jsonb;
+```
+
+After this, the RSP form in the admin dashboard can save the announcement (and multiple job vacancy entries), and the landing page will display it.
+
+---
+
+## Part 6: Recruitment applications and exam results (RSP monitoring)
+
+Applicants submit basic info and take a screening exam. Admins view all applications and exam results in the RSP module.
+
+### Query 6: Create `recruitment_applications` and `recruitment_exam_results` tables
+
+Run this in **SQL Editor** after Part 5.
+
+```sql
+-- Applications: basic info submitted in Step 1 (documents).
+create table if not exists public.recruitment_applications (
+  id uuid primary key default gen_random_uuid(),
+  full_name text not null,
+  email text not null,
+  phone text,
+  resume_notes text,
+  status text not null default 'submitted' check (status in ('submitted', 'document_approved', 'document_declined', 'exam_taken', 'passed', 'failed', 'registered')),
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+-- Exam results: one row per application after they take the exam.
+create table if not exists public.recruitment_exam_results (
+  id uuid primary key default gen_random_uuid(),
+  application_id uuid not null references public.recruitment_applications (id) on delete cascade,
+  score_percent numeric not null,
+  passed boolean not null,
+  answers_json jsonb,
+  submitted_at timestamptz default now(),
+  unique(application_id)
+);
+
+alter table public.recruitment_applications enable row level security;
+alter table public.recruitment_exam_results enable row level security;
+
+-- Anyone can insert (applicants without login)
+create policy "Anyone can insert recruitment applications"
+  on public.recruitment_applications for insert with check (true);
+
+-- Applicants can read own (by email in session we could add later); for now allow public read for simplicity or restrict. Admin needs read.
+create policy "Public can read recruitment applications"
+  on public.recruitment_applications for select using (true);
+
+-- Only authenticated can update (e.g. admin marking status)
+create policy "Authenticated can update recruitment applications"
+  on public.recruitment_applications for update using (auth.role() = 'authenticated');
+
+-- Anyone can insert exam result (applicant submits exam)
+create policy "Anyone can insert exam results"
+  on public.recruitment_exam_results for insert with check (true);
+
+-- Public read so admin (authenticated) can read
+create policy "Public can read exam results"
+  on public.recruitment_exam_results for select using (true);
+
+create index idx_recruitment_applications_created on public.recruitment_applications (created_at desc);
+create index idx_recruitment_exam_results_application on public.recruitment_exam_results (application_id);
+```
+
+---
+
+### Query 6b: Add attachment columns and Storage bucket (for applicant file upload)
+
+Applicants can attach a file (e.g. resume); admins can view, download, and **approve or decline** it from RSP. Only **document_approved** applications can proceed to the exam.
+
+**If you already ran Query 6 with the old status check**, run this to allow the new statuses (document_approved, document_declined):
+
+```sql
+alter table public.recruitment_applications drop constraint if exists recruitment_applications_status_check;
+alter table public.recruitment_applications add constraint recruitment_applications_status_check
+  check (status in ('submitted', 'document_approved', 'document_declined', 'exam_taken', 'passed', 'failed', 'registered'));
+```
+
+**1. Add columns to `recruitment_applications`** (run in SQL Editor):
+
+```sql
+alter table public.recruitment_applications
+  add column if not exists attachment_path text,
+  add column if not exists attachment_name text;
+```
+
+**2. Allow applicants (anon) to save attachment path after upload**
+
+Applicants are not logged in when they submit. The app uploads the file to Storage, then updates the application row with `attachment_path` and `attachment_name`. The default update policy only allows `authenticated` users, so that update was failing and the admin never saw the attachment. Run this so **anon** can update the row only when the row stays in `submitted` status (so they can only set attachment path/name, not change status):
+
+```sql
+create policy "Anon can set attachment on submitted application"
+  on public.recruitment_applications for update
+  to anon
+  using (true)
+  with check (status = 'submitted');
+```
+
+**3. Create Storage bucket and policies**
+
+- In **Dashboard → Storage**, click **New bucket**. Name: `recruitment-attachments`. Leave it **private** (so only authenticated users can download).
+- Go to **Storage → Policies** (or **recruitment-attachments → Policies**). Add:
+
+  - **Policy 1 (upload):** Name `Allow public upload`, Operation **INSERT**, Target **All roles** (or **anon**), WITH CHECK expression: `bucket_id = 'recruitment-attachments'`.
+  - **Policy 2 (download/list):** Name `Allow authenticated read`, Operation **SELECT**, Target **authenticated**, USING expression: `bucket_id = 'recruitment-attachments'`. This lets admins download files and list objects (needed for **Sync attachments from storage** in the admin panel).
+
+So applicants (no login) can upload; only logged-in admins can read, download, and list.
+
+**If attachments still show as "No file" in admin:**
+
+1. **For new applications:** Run the SQL in step 2 above so that applicants (anon) can update the application row with `attachment_path` and `attachment_name` after uploading.
+2. **For applications that already submitted (file in storage but DB not updated):** In the admin **Applications & Exam Results** view, click **Sync attachments from storage**. This links existing files in the bucket to applications that are missing attachment path. Then refresh to see the download option.
+
+**"Sync attachments from storage" shows "No files found" or "listing not allowed":**
+
+- **Admin must be logged in with Supabase Auth.** The app uses `Supabase.instance.client.auth.currentSession`; if there is no session (e.g. you opened the admin UI without going through the normal Login with Supabase), storage list will fail or return empty. Use the app’s **Login** (Supabase Email/Password) so the client has an authenticated session. Do not rely on a custom users table only; the Storage bucket is private and list/download require the authenticated role.
+- **Storage policy:** Ensure Policy 2 (SELECT for `authenticated`) exists on the bucket `recruitment-attachments`. In **Dashboard → Storage → recruitment-attachments → Policies**, you should have a policy with Operation **SELECT** and Target **authenticated**, USING `bucket_id = 'recruitment-attachments'`. This allows listing and downloading; without it, listing returns empty or permission denied.
+- **Download:** The admin UI uses signed URLs (`createSignedUrl`) to download; that also requires an authenticated session and the same SELECT policy.
+
+---
+
+### Query 6c: Exam questions (admin-editable BEI and other exam questions)
+
+Run this so admins can view and edit exam questions (e.g. the 8 BEI questions). Applicants see the questions from this table.
+
+```sql
+create table if not exists public.recruitment_exam_questions (
+  id uuid primary key default gen_random_uuid(),
+  exam_type text not null default 'bei',
+  sort_order int not null default 0,
+  question_text text not null,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+alter table public.recruitment_exam_questions enable row level security;
+
+-- Anyone can read (applicants need to load questions)
+create policy "Public can read exam questions"
+  on public.recruitment_exam_questions for select using (true);
+
+-- Only authenticated (admin) can insert/update/delete
+create policy "Authenticated can insert exam questions"
+  on public.recruitment_exam_questions for insert with check (auth.role() = 'authenticated');
+create policy "Authenticated can update exam questions"
+  on public.recruitment_exam_questions for update using (auth.role() = 'authenticated');
+create policy "Authenticated can delete exam questions"
+  on public.recruitment_exam_questions for delete using (auth.role() = 'authenticated');
+
+create index idx_recruitment_exam_questions_type_order on public.recruitment_exam_questions (exam_type, sort_order);
+```
+
+**For General Exam (multiple choice), add columns** (run after creating the table):
+
+```sql
+alter table public.recruitment_exam_questions
+  add column if not exists options_json jsonb,
+  add column if not exists correct_index int;
+```
+
+Optional: seed the default 8 BEI questions (run once so admin can edit them in the app):
+
+```sql
+insert into public.recruitment_exam_questions (exam_type, sort_order, question_text) values
+  ('bei', 1, 'Tell me about a time when you had to collaborate with a co-worker that you had a hard time getting along with?'),
+  ('bei', 2, 'Describe for me a time when you were under a significant amount of pressure at work. How did you deal with it?'),
+  ('bei', 3, 'Tell me about a time when you were ask to work on a task that you had never done before.'),
+  ('bei', 4, 'Tell me about a time when you had to cultivate a relationship with a new client. What did you do?'),
+  ('bei', 5, 'Describe a time when you disagreed with your boss. What did you do?'),
+  ('bei', 6, 'Describe your greatest challenge.'),
+  ('bei', 7, 'What was your greatest accomplishment?'),
+  ('bei', 8, 'Tell me about a time you failed.');
+```
+
+Optional: seed the default 5 General Exam questions (run once so admin can edit them):
+
+```sql
+insert into public.recruitment_exam_questions (exam_type, sort_order, question_text, options_json, correct_index) values
+  ('general', 1, '_____ : play ; sing : anthem', '["Play", "Scene", "Theatre", "Field"]'::jsonb, 2),
+  ('general', 2, 'Choose the right order. (1) Her father understood that she boiled the egg for the first time. (2) He took up a newspaper and read for ten minutes. (3) Father asked Kate to boil an egg soft for his breakfast. (4) Kate answered that it wasn''t ready because it was still very hard. (5) Then he asked Kate if the egg was ready.', '["3, 2, 5, 4, 1", "4, 2, 3, 1, 5", "2, 4, 3, 1, 5", "5, 3, 1, 2, 4", "1, 3, 4, 5, 2"]'::jsonb, 0),
+  ('general', 3, 'Clock : Time : : Thermometer : _____', '["Heat", "Radiation", "Energy", "Temperature"]'::jsonb, 3),
+  ('general', 4, '(Idiomatic Expression) "Even though they had a nasty fight, they decided to bury the hatchet and move on." What does "bury the hatchet" mean?', '["Kill the enemy", "Remember the past", "Bury the dead", "Forget the past quarrel"]'::jsonb, 3),
+  ('general', 5, 'What should come in the place of (?) in the following letter series? BE GJ LO QT ?', '["VZ", "WZ", "VY", "UY"]'::jsonb, 2);
+```
+
+Optional: seed the default 9 Mathematics exam questions (run once so admin can edit them):
+
+```sql
+insert into public.recruitment_exam_questions (exam_type, sort_order, question_text, options_json, correct_index) values
+  ('math', 1, 'Linus needs ribbon for three bookmarks. One bookmark is 12½ inches long and the other two are 7¼ inches long each. What total length of ribbon does he need?', '["26 inches", "19 inches", "19¾ inches", "27 inches"]'::jsonb, 3),
+  ('math', 2, 'What is the next number in the sequence? 320, 160, 80, 40, ____', '["35", "30", "10", "20"]'::jsonb, 3),
+  ('math', 3, 'Multiply the second-highest odd number and the second-lowest in the list: 2, 3, 4, 7, 1, 68.', '["3", "6", "7", "21"]'::jsonb, 1),
+  ('math', 4, 'Amy worked 4/5 of the days last year. How many days did she work in a year?', '["273", "300", "292", "281"]'::jsonb, 2),
+  ('math', 5, 'What is the next number in the sequence? 13, 21, 34, 55, 89, ____?', '["95", "104", "123", "144"]'::jsonb, 3),
+  ('math', 6, 'If 0.75 : x :: 5 : 8, then x is equal to', '["1.12", "1.2", "1.28", "1.30"]'::jsonb, 1),
+  ('math', 7, 'Lindsay purchased a pocketbook for P 45 and a pair of shoes for P 55. The sales tax on the items was 6%. How much sales tax did she pay?', '["P 2.70", "P 3.30", "P 6.00", "P 6.60"]'::jsonb, 2),
+  ('math', 8, 'A baseball pitcher won 80% of the games he pitched. If he pitched 35 ballgames, how many games did he win?', '["70", "28", "43", "35"]'::jsonb, 1),
+  ('math', 9, 'A large pipe dispenses 750 gallons of water in 50 seconds. At this rate, how long will it take to dispense 330 gallons?', '["14 seconds", "33 seconds", "22 seconds", "27 seconds"]'::jsonb, 2);
+```
+
+Optional: seed the default 5 General Information exam questions (run once so admin can edit them):
+
+```sql
+insert into public.recruitment_exam_questions (exam_type, sort_order, question_text, options_json, correct_index) values
+  ('general_info', 1, 'The right to just and favourable working conditions guarantees every Filipino Worker a right to ________.', '["None of these", "Limited opportunities", "Stricter rules on break time", "Fair remuneration for equal work"]'::jsonb, 3),
+  ('general_info', 2, 'In order for the state to promote social justice to ensure the dignity, welfare and security of all people, it has to ________.', '["Equability diffuse property ownership and right", "Regulate the disposition of private property", "Regulate the acquisition of private property", "All of the above"]'::jsonb, 3),
+  ('general_info', 3, 'It states that ''no person shall be deprived of life, liberty, or property without due process of law, nor any person be denied the equal protection of the laws.''', '["Article VI", "Bill of Rights", "Republic Act", "Court Order"]'::jsonb, 1),
+  ('general_info', 4, 'The 1987 Constitution contains at least 3 sets of provisions, which one of the following provision is not included?', '["Constitution of Government", "Constitution of Universality", "Constitution of Sovereignty", "Constitution of Liberty"]'::jsonb, 1),
+  ('general_info', 5, 'All of the following is true except.', '["No person shall be compelled to be a witness against himself", "No person shall be imprisoned for non-payment of debt or poll tax", "No ex post facto law or bill of attainder shall not be enacted.", "No person shall be detained solely by reason of his political beliefs and aspirations."]'::jsonb, 2);
+```

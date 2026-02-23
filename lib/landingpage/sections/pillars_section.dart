@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../recruitment/screens/track_application_page.dart';
 import '../constants/app_theme.dart';
 import '../widgets/section_container.dart';
 
@@ -255,7 +256,9 @@ class _PillarCardState extends State<_PillarCard> {
   }
 
   void _handleTrackStatus(BuildContext context) {
-    // Ready for backend integration
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (context) => const TrackApplicationPage()),
+    );
   }
 
   void _handleViewSchedule(BuildContext context) {
