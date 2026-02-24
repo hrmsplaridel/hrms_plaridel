@@ -1,12 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../constants/app_theme.dart';
 import '../widgets/section_container.dart';
 
-/// Exact location: JPC5+GXV, Dipolog - Oroquieta National Rd, Plaridel, Misamis Occidental
-const _officeLocation = LatLng(8.6214, 123.7102);
 const _googleMapsUrl =
     'https://www.google.com/maps/search/?api=1&query=JPC5%2BGXV%2C+Dipolog+-+Oroquieta+National+Rd%2C+Plaridel%2C+Misamis+Occidental';
 
@@ -168,12 +164,11 @@ class _ContactItem extends StatelessWidget {
   }
 }
 
-/// OpenStreetMap showing HRMD Office (no API key required).
-/// Tap "Open in Google Maps" to view in Google Maps.
+/// Location card with link to open the office in Google Maps.
 class _OfficeMap extends StatelessWidget {
   const _OfficeMap();
 
-  static const _mapHeight = 240.0;
+  static const _mapHeight = 200.0;
 
   @override
   Widget build(BuildContext context) {
@@ -181,6 +176,7 @@ class _OfficeMap extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: AppTheme.lightGray),
+        color: AppTheme.white,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.06),
@@ -192,41 +188,37 @@ class _OfficeMap extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox(
             width: double.infinity,
             height: _mapHeight,
-            child: FlutterMap(
-              options: MapOptions(
-                initialCenter: _officeLocation,
-                initialZoom: 16,
-                interactionOptions: const InteractionOptions(
-                  flags:
-                      InteractiveFlag.drag |
-                      InteractiveFlag.pinchZoom |
-                      InteractiveFlag.scrollWheelZoom,
-                ),
-              ),
-              children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'hrms_plaridel',
-                ),
-                MarkerLayer(
-                  markers: [
-                    Marker(
-                      point: _officeLocation,
-                      width: 40,
-                      height: 40,
-                      child: const Icon(
-                        Icons.location_on,
-                        color: AppTheme.primaryNavy,
-                        size: 40,
+            child: ColoredBox(
+              color: AppTheme.offWhite,
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.location_on_rounded,
+                      size: 56,
+                      color: AppTheme.primaryNavy.withOpacity(0.6),
+                    ),
+                    const SizedBox(height: 12),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Text(
+                        'Municipal Hall of Plaridel\nMisamis Occidental',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: AppTheme.smallSize,
+                        ),
                       ),
                     ),
                   ],
                 ),
-              ],
+              ),
             ),
           ),
           Material(
@@ -238,7 +230,7 @@ class _OfficeMap extends StatelessWidget {
               ),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
-                  vertical: 10,
+                  vertical: 12,
                   horizontal: 12,
                 ),
                 child: Row(

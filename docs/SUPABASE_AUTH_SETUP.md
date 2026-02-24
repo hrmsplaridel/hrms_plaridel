@@ -441,3 +441,281 @@ insert into public.recruitment_exam_questions (exam_type, sort_order, question_t
   ('general_info', 4, 'The 1987 Constitution contains at least 3 sets of provisions, which one of the following provision is not included?', '["Constitution of Government", "Constitution of Universality", "Constitution of Sovereignty", "Constitution of Liberty"]'::jsonb, 1),
   ('general_info', 5, 'All of the following is true except.', '["No person shall be compelled to be a witness against himself", "No person shall be imprisoned for non-payment of debt or poll tax", "No ex post facto law or bill of attainder shall not be enacted.", "No person shall be detained solely by reason of his political beliefs and aspirations."]'::jsonb, 2);
 ```
+
+---
+
+## Part 7: Background Investigation (BI) and Performance Evaluation forms (RSP)
+
+The RSP module includes two admin forms: **Background Investigation (BI) Form** and **Performance / Functional Evaluation Form**. Run the following in **SQL Editor** to create the tables.
+
+### Query 7a: Background Investigation (BI) form entries
+
+One row per respondent evaluation (an applicant can have multiple respondents). Competency ratings are 1–5 (1 = Much development needed, 5 = Shows strength).
+
+```sql
+create table if not exists public.bi_form_entries (
+  id uuid primary key default gen_random_uuid(),
+  applicant_name text not null,
+  applicant_department text,
+  applicant_position text,
+  position_applied_for text,
+  respondent_name text not null,
+  respondent_position text,
+  respondent_relationship text not null check (respondent_relationship in ('supervisor', 'peer', 'subordinate')),
+  rating_1 smallint check (rating_1 >= 1 and rating_1 <= 5),
+  rating_2 smallint check (rating_2 >= 1 and rating_2 <= 5),
+  rating_3 smallint check (rating_3 >= 1 and rating_3 <= 5),
+  rating_4 smallint check (rating_4 >= 1 and rating_4 <= 5),
+  rating_5 smallint check (rating_5 >= 1 and rating_5 <= 5),
+  rating_6 smallint check (rating_6 >= 1 and rating_6 <= 5),
+  rating_7 smallint check (rating_7 >= 1 and rating_7 <= 5),
+  rating_8 smallint check (rating_8 >= 1 and rating_8 <= 5),
+  rating_9 smallint check (rating_9 >= 1 and rating_9 <= 5),
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+alter table public.bi_form_entries enable row level security;
+
+create policy "Authenticated can manage bi_form_entries"
+  on public.bi_form_entries for all
+  using (auth.role() = 'authenticated')
+  with check (auth.role() = 'authenticated');
+
+create index idx_bi_form_entries_created on public.bi_form_entries (created_at desc);
+comment on table public.bi_form_entries is 'RSP: Background Investigation form submissions (one row per respondent evaluation).';
+```
+
+### Query 7b: Performance / Functional Evaluation form entries
+
+Stores functional areas (checkboxes) and the three narrative answers.
+
+```sql
+create table if not exists public.performance_evaluation_entries (
+  id uuid primary key default gen_random_uuid(),
+  applicant_name text,
+  functional_areas jsonb default '[]'::jsonb,
+  other_functional_area text,
+  performance_3_years text,
+  challenges_coping text,
+  compliance_attendance text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+alter table public.performance_evaluation_entries enable row level security;
+
+create policy "Authenticated can manage performance_evaluation_entries"
+  on public.performance_evaluation_entries for all
+  using (auth.role() = 'authenticated')
+  with check (auth.role() = 'authenticated');
+
+create index idx_performance_evaluation_entries_created on public.performance_evaluation_entries (created_at desc);
+comment on table public.performance_evaluation_entries is 'RSP: Performance/Functional evaluation form (functional areas + 3 narrative questions).';
+```
+
+### Query 7c: Individual Development Plan (IDP) entries
+
+Stores employee IDP data: personal/position info, qualifications, succession analysis (target positions, performance/competence ratings, priority), and development plan rows (objectives, L&D program, requirements, time frame).
+
+```sql
+create table if not exists public.idp_entries (
+  id uuid primary key default gen_random_uuid(),
+  name text,
+  position text,
+  category text,
+  division text,
+  department text,
+  education text,
+  experience text,
+  training text,
+  eligibility text,
+  target_position_1 text,
+  target_position_2 text,
+  avg_rating text,
+  opcr text,
+  ipcr text,
+  performance_rating text check (performance_rating is null or performance_rating in ('poor', 'unsatisfactory', 'very_satisfactory', 'outstanding')),
+  competency_description text,
+  competence_rating text check (competence_rating is null or competence_rating in ('basic', 'intermediate', 'advanced', 'superior')),
+  succession_priority_score text,
+  succession_priority_rating text check (succession_priority_rating is null or succession_priority_rating in ('priority', 'priority_2', 'priority_3')),
+  development_plan_rows jsonb default '[]'::jsonb,
+  prepared_by text,
+  reviewed_by text,
+  noted_by text,
+  approved_by text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+alter table public.idp_entries enable row level security;
+
+create policy "Authenticated can manage idp_entries"
+  on public.idp_entries for all
+  using (auth.role() = 'authenticated')
+  with check (auth.role() = 'authenticated');
+
+create index idx_idp_entries_created on public.idp_entries (created_at desc);
+comment on table public.idp_entries is 'RSP: Individual Development Plan (IDP) form entries.';
+```
+
+### Query 7d: Applicants Profile entries
+
+Stores applicants profile worksheets: job vacancy details (position, minimum requirements, posting/closing dates) and a list of applicants (name, course, address, sex, age, civil status, remark/disability). One row per profile; applicants are stored as a jsonb array.
+
+```sql
+create table if not exists public.applicants_profile_entries (
+  id uuid primary key default gen_random_uuid(),
+  position_applied_for text,
+  minimum_requirements text,
+  date_of_posting text,
+  closing_date text,
+  applicants jsonb default '[]'::jsonb,
+  prepared_by text,
+  checked_by text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+alter table public.applicants_profile_entries enable row level security;
+
+create policy "Authenticated can manage applicants_profile_entries"
+  on public.applicants_profile_entries for all
+  using (auth.role() = 'authenticated')
+  with check (auth.role() = 'authenticated');
+
+create index idx_applicants_profile_entries_created on public.applicants_profile_entries (created_at desc);
+comment on table public.applicants_profile_entries is 'RSP: Applicants Profile form (job vacancy details + list of applicants per profile).';
+```
+
+Each element in the `applicants` jsonb array has: `name`, `course`, `address`, `sex`, `age`, `civil_status`, `remark_disability` (all optional text).
+
+### Query 7e: Comparative Assessment of Candidates for Promotion
+
+Stores the Merit Promotion and Selection Board comparative assessment form: position to be filled, minimum requirements (education, experience, eligibility, training), and a list of candidates with columns: present position/salary, education, training hours, related experience, eligibility, performance rating, remarks. Form only—no pre-filled names or values.
+
+```sql
+create table if not exists public.comparative_assessment_entries (
+  id uuid primary key default gen_random_uuid(),
+  position_to_be_filled text,
+  min_req_education text,
+  min_req_experience text,
+  min_req_eligibility text,
+  min_req_training text,
+  candidates jsonb default '[]'::jsonb,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+alter table public.comparative_assessment_entries enable row level security;
+
+create policy "Authenticated can manage comparative_assessment_entries"
+  on public.comparative_assessment_entries for all
+  using (auth.role() = 'authenticated')
+  with check (auth.role() = 'authenticated');
+
+create index idx_comparative_assessment_entries_created on public.comparative_assessment_entries (created_at desc);
+comment on table public.comparative_assessment_entries is 'RSP: Comparative Assessment of Candidates for Promotion (form structure only).';
+```
+
+Each element in `candidates` has: `candidate_name`, `present_position_salary`, `education`, `training_hrs`, `related_experience`, `eligibility`, `performance_rating`, `remarks` (all optional text).
+
+### Query 7f: Promotion Certification / Screening form
+
+Stores the certification form: table of candidates with five data columns per candidate, certification date (day, month, year), and signatory. Form only—no pre-filled names or values.
+
+```sql
+create table if not exists public.promotion_certification_entries (
+  id uuid primary key default gen_random_uuid(),
+  position_for_promotion text,
+  candidates jsonb default '[]'::jsonb,
+  date_day text,
+  date_month text,
+  date_year text,
+  signatory_name text,
+  signatory_title text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+alter table public.promotion_certification_entries enable row level security;
+
+create policy "Authenticated can manage promotion_certification_entries"
+  on public.promotion_certification_entries for all
+  using (auth.role() = 'authenticated')
+  with check (auth.role() = 'authenticated');
+
+create index idx_promotion_certification_entries_created on public.promotion_certification_entries (created_at desc);
+comment on table public.promotion_certification_entries is 'RSP: Certification that candidate(s) have been screened and found qualified for promotion (form structure only).';
+```
+
+Each element in `candidates` has: `name`, `col1`, `col2`, `col3`, `col4`, `col5` (all optional text).
+
+### Query 7g: Selection Line-up entries
+
+Stores the Selection Line-up form: date, name of agency/office, vacant position, item no., and a table of applicants (name, education, experience, training, eligibility). Prepared-by signatory. Form only—no pre-filled names or values.
+
+```sql
+create table if not exists public.selection_lineup_entries (
+  id uuid primary key default gen_random_uuid(),
+  date text,
+  name_of_agency_office text,
+  vacant_position text,
+  item_no text,
+  applicants jsonb default '[]'::jsonb,
+  prepared_by_name text,
+  prepared_by_title text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+alter table public.selection_lineup_entries enable row level security;
+
+create policy "Authenticated can manage selection_lineup_entries"
+  on public.selection_lineup_entries for all
+  using (auth.role() = 'authenticated')
+  with check (auth.role() = 'authenticated');
+
+create index idx_selection_lineup_entries_created on public.selection_lineup_entries (created_at desc);
+comment on table public.selection_lineup_entries is 'RSP: Selection Line-up form (applicants table: name, education, experience, training, eligibility). Form only.';
+```
+
+Each element in `applicants` has: `name`, `education`, `experience`, `training`, `eligibility` (all optional text).
+
+### Query 7h: Turn-Around Time entries
+
+Stores the Merit Promotion and Selection Board Turn-Around Time form: position, office, no. of vacant position, date of publication, end search, Q.S., and a table of applicants with columns (name, date initial assessment, date contract exam, skills trade/exam result, date deliberation, date job offer, acceptance date, date assumption to duty, no. of days to fill-up, overall cost per hire). Prepared by / Noted by signatories. Form only—no pre-filled names or values.
+
+```sql
+create table if not exists public.turn_around_time_entries (
+  id uuid primary key default gen_random_uuid(),
+  position text,
+  office text,
+  no_of_vacant_position text,
+  date_of_publication text,
+  end_search text,
+  qs text,
+  applicants jsonb default '[]'::jsonb,
+  prepared_by_name text,
+  prepared_by_title text,
+  noted_by_name text,
+  noted_by_title text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+alter table public.turn_around_time_entries enable row level security;
+
+create policy "Authenticated can manage turn_around_time_entries"
+  on public.turn_around_time_entries for all
+  using (auth.role() = 'authenticated')
+  with check (auth.role() = 'authenticated');
+
+create index idx_turn_around_time_entries_created on public.turn_around_time_entries (created_at desc);
+comment on table public.turn_around_time_entries is 'RSP: Turn-Around Time form (recruitment/hiring process tracking per applicant). Form only.';
+```
+
+Each element in `applicants` has: `name`, `date_initial_assessment`, `date_contract_exam`, `skills_trade_exam_result`, `date_deliberation`, `date_job_offer`, `acceptance_date`, `date_assumption_to_duty`, `no_of_days_to_fill_up`, `overall_cost_per_hire` (all optional text).
+
+After running Query 7a–7h, the RSP dashboard can list, create, and edit all RSP forms. All forms use empty inputs by default (no names or values pre-filled).
