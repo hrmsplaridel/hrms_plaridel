@@ -10,6 +10,8 @@ import '../../data/performance_evaluation_form.dart';
 import '../../data/promotion_certification.dart';
 import '../../data/recruitment_application.dart';
 import '../../data/selection_lineup.dart';
+import '../../data/action_brainstorming_coaching.dart';
+import '../../data/training_need_analysis.dart';
 import '../../data/turn_around_time.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../utils/form_pdf.dart';
@@ -17,14 +19,14 @@ import '../../widgets/rsp_form_header_footer.dart';
 import '../../login/models/login_role.dart';
 import 'settings_page.dart';
 
-/// Dashboard accent colors for summary cards and accents.
+/// Dashboard accent colors for summary cards and accents (orange theme).
 class _DashboardColors {
-  static const Color cardBlue = Color(0xFFE3F2FD);
-  static const Color cardGreen = Color(0xFFE8F5E9);
-  static const Color cardAmber = Color(0xFFFFF8E1);
-  static const Color accentBlue = Color(0xFF1976D2);
-  static const Color accentGreen = Color(0xFF388E3C);
-  static const Color accentAmber = Color(0xFFF9A825);
+  static const Color cardBlue = Color(0xFFFFF3E0);
+  static const Color cardGreen = Color(0xFFFFECB3);
+  static const Color cardAmber = Color(0xFFFFE0B2);
+  static const Color accentBlue = Color(0xFFE85D04);
+  static const Color accentGreen = Color(0xFFBF360C);
+  static const Color accentAmber = Color(0xFFFF9800);
 }
 
 /// Admin dashboard matching reference layout; features only from existing system:
@@ -86,9 +88,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           ? const _DashboardContent()
                           : _selectedNavIndex == 1
                               ? const _RspContent()
-                              : _selectedNavIndex == 4
-                                  ? const _AdminSignUpContent()
-                                  : _PlaceholderContent(title: _navItems[_selectedNavIndex]),
+                              : _selectedNavIndex == 2
+                                  ? const _LdContent()
+                                  : _selectedNavIndex == 4
+                                      ? const _AdminSignUpContent()
+                                      : _PlaceholderContent(title: _navItems[_selectedNavIndex]),
                     ),
                   ),
                 ],
@@ -5451,7 +5455,7 @@ class _DocumentReviewCell extends StatelessWidget {
             icon: const Icon(Icons.check_circle_outline, size: 18),
             label: const Text('Approve'),
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF388E3C),
+              backgroundColor: const Color(0xFFE85D04),
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               minimumSize: Size.zero,
@@ -5743,6 +5747,741 @@ class _RoleChip extends StatelessWidget {
           ),
           child: Center(child: Text(label, style: TextStyle(color: selected ? Colors.white : AppTheme.textPrimary, fontWeight: FontWeight.w600, fontSize: 14))),
         ),
+      ),
+    );
+  }
+}
+
+/// L&D (Learning & Development) module: hub with Training Need Analysis and Consolidated Report.
+class _LdContent extends StatefulWidget {
+  const _LdContent();
+
+  @override
+  State<_LdContent> createState() => _LdContentState();
+}
+
+class _LdContentState extends State<_LdContent> {
+  int _ldSectionIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_ldSectionIndex != 0) ...[
+          TextButton.icon(
+            onPressed: () => setState(() => _ldSectionIndex = 0),
+            icon: const Icon(Icons.arrow_back_rounded, size: 20),
+            label: const Text('Back to L&D'),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
+          ),
+          const SizedBox(height: 16),
+        ],
+        if (_ldSectionIndex == 0) ...[
+          Text('L&D', style: TextStyle(color: AppTheme.textPrimary, fontSize: 22, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          Text('Learning & Development. Choose a feature below.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
+          const SizedBox(height: 24),
+          Wrap(
+            spacing: 16,
+            runSpacing: 16,
+            children: [
+              _RspFeatureCard(
+                title: 'Training Need Analysis and Consolidated Report',
+                subtitle: 'FOR CY [year], DEPARTMENT. Table: Name/Position, Goal, Behavior, Skills/Knowledge, Need for Training, Training Recommendations.',
+                icon: Icons.school_rounded,
+                onTap: () => setState(() => _ldSectionIndex = 1),
+              ),
+              _RspFeatureCard(
+                title: 'Action Brainstorming and Coaching Worksheet',
+                subtitle: 'DEPARTMENT, DATE. Table: Name, Stop Doing, Do Less Of, Keep Doing, Do More Of, Start Doing, Goal. Certified by Department Head.',
+                icon: Icons.lightbulb_outline_rounded,
+                onTap: () => setState(() => _ldSectionIndex = 2),
+              ),
+            ],
+          ),
+        ] else if (_ldSectionIndex == 1)
+          const _TrainingNeedAnalysisSection()
+        else
+          const _ActionBrainstormingSection(),
+      ],
+    );
+  }
+}
+
+class _TrainingNeedAnalysisSection extends StatefulWidget {
+  const _TrainingNeedAnalysisSection();
+
+  @override
+  State<_TrainingNeedAnalysisSection> createState() => _TrainingNeedAnalysisSectionState();
+}
+
+class _TrainingNeedAnalysisSectionState extends State<_TrainingNeedAnalysisSection> {
+  List<TrainingNeedAnalysisEntry> _entries = [];
+  bool _loading = true;
+  TrainingNeedAnalysisEntry? _editing;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final list = await TrainingNeedAnalysisRepo.instance.list();
+      if (mounted) setState(() { _entries = list; _loading = false; });
+    } catch (_) {
+      if (mounted) setState(() { _entries = []; _loading = false; });
+    }
+  }
+
+  void _startNew() => setState(() => _editing = const TrainingNeedAnalysisEntry());
+  void _edit(TrainingNeedAnalysisEntry e) => setState(() => _editing = e);
+  void _cancelEdit() => setState(() => _editing = null);
+
+  Future<void> _onSave(TrainingNeedAnalysisEntry entry) async {
+    try {
+      if (entry.id == null) await TrainingNeedAnalysisRepo.instance.insert(entry);
+      else await TrainingNeedAnalysisRepo.instance.update(entry);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Training Need Analysis saved.')));
+        setState(() => _editing = null);
+        _load();
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+    }
+  }
+
+  Future<void> _onDelete(String id) async {
+    try {
+      await TrainingNeedAnalysisRepo.instance.delete(id);
+      if (mounted) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Deleted.'))); _load(); }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
+    }
+  }
+
+  Future<void> _printTna(TrainingNeedAnalysisEntry entry) async {
+    try {
+      final doc = FormPdf.buildTrainingNeedAnalysisPdf(entry);
+      await FormPdf.printDocument(doc, name: 'Training_Need_Analysis.pdf');
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Print failed: $e')));
+    }
+  }
+
+  Future<void> _downloadTna(TrainingNeedAnalysisEntry entry) async {
+    try {
+      final doc = FormPdf.buildTrainingNeedAnalysisPdf(entry);
+      await FormPdf.sharePdf(doc, name: 'Training_Need_Analysis.pdf');
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('PDF ready to save or share.')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Training Need Analysis and Consolidated Report', style: TextStyle(color: AppTheme.textPrimary, fontSize: 22, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 8),
+        Text('FOR CY [year], DEPARTMENT. Table: Name/Position, Goal, Behavior, Skills/Knowledge, Need for Training, Training Recommendations.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
+        const SizedBox(height: 24),
+        if (_editing != null) ...[
+          _TrainingNeedAnalysisFormEditor(key: ValueKey(_editing?.id ?? 'new'), entry: _editing!, onSave: _onSave, onCancel: _cancelEdit, onPrint: _printTna, onDownloadPdf: _downloadTna),
+          const SizedBox(height: 24),
+        ],
+        Row(
+          children: [
+            FilledButton.icon(onPressed: _loading ? null : _startNew, icon: const Icon(Icons.add_rounded, size: 20), label: const Text('Add report')),
+            const SizedBox(width: 12),
+            TextButton.icon(onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh_rounded, size: 20), label: const Text('Refresh')),
+          ],
+        ),
+        const SizedBox(height: 16),
+        if (_loading)
+          const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()))
+        else if (_entries.isEmpty)
+          Padding(padding: const EdgeInsets.all(24), child: Text('No Training Need Analysis reports yet. Tap "Add report" to add one.', style: TextStyle(color: AppTheme.textSecondary)))
+        else
+          _TrainingNeedAnalysisList(entries: _entries, onEdit: _edit, onDelete: _onDelete, onPrint: _printTna, onDownloadPdf: _downloadTna),
+      ],
+    );
+  }
+}
+
+class _TrainingNeedAnalysisFormEditor extends StatefulWidget {
+  const _TrainingNeedAnalysisFormEditor({super.key, required this.entry, required this.onSave, required this.onCancel, required this.onPrint, required this.onDownloadPdf});
+
+  final TrainingNeedAnalysisEntry entry;
+  final void Function(TrainingNeedAnalysisEntry) onSave;
+  final VoidCallback onCancel;
+  final Future<void> Function(TrainingNeedAnalysisEntry) onPrint;
+  final Future<void> Function(TrainingNeedAnalysisEntry) onDownloadPdf;
+
+  @override
+  State<_TrainingNeedAnalysisFormEditor> createState() => _TrainingNeedAnalysisFormEditorState();
+}
+
+class _TrainingNeedAnalysisFormEditorState extends State<_TrainingNeedAnalysisFormEditor> {
+  late TextEditingController _cyYear;
+  late TextEditingController _department;
+  late List<Map<String, TextEditingController>> _rows;
+
+  static Map<String, TextEditingController> _rowControllers(String namePos, String goal, String behavior, String skills, String need, String rec) {
+    return {
+      'name_position': TextEditingController(text: namePos),
+      'goal': TextEditingController(text: goal),
+      'behavior': TextEditingController(text: behavior),
+      'skills_knowledge': TextEditingController(text: skills),
+      'need_for_training': TextEditingController(text: need),
+      'training_recommendations': TextEditingController(text: rec),
+    };
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.entry;
+    _cyYear = TextEditingController(text: e.cyYear ?? '');
+    _department = TextEditingController(text: e.department ?? '');
+    _rows = e.rows.isEmpty
+        ? [_rowControllers('', '', '', '', '', '')]
+        : e.rows.map((r) => _rowControllers(r.namePosition ?? '', r.goal ?? '', r.behavior ?? '', r.skillsKnowledge ?? '', r.needForTraining ?? '', r.trainingRecommendations ?? '')).toList();
+  }
+
+  @override
+  void dispose() {
+    _cyYear.dispose();
+    _department.dispose();
+    for (final row in _rows) { for (final c in row.values) c.dispose(); }
+    super.dispose();
+  }
+
+  void _addRow() => setState(() => _rows.add(_rowControllers('', '', '', '', '', '')));
+  void _removeRow(int i) {
+    if (_rows.length <= 1) return;
+    setState(() {
+      for (final c in _rows[i].values) c.dispose();
+      _rows.removeAt(i);
+    });
+  }
+
+  TrainingNeedAnalysisEntry _buildCurrentEntry() {
+    final list = _rows.map((r) => TrainingNeedAnalysisRow(
+      namePosition: r['name_position']!.text.trim().isEmpty ? null : r['name_position']!.text.trim(),
+      goal: r['goal']!.text.trim().isEmpty ? null : r['goal']!.text.trim(),
+      behavior: r['behavior']!.text.trim().isEmpty ? null : r['behavior']!.text.trim(),
+      skillsKnowledge: r['skills_knowledge']!.text.trim().isEmpty ? null : r['skills_knowledge']!.text.trim(),
+      needForTraining: r['need_for_training']!.text.trim().isEmpty ? null : r['need_for_training']!.text.trim(),
+      trainingRecommendations: r['training_recommendations']!.text.trim().isEmpty ? null : r['training_recommendations']!.text.trim(),
+    )).toList();
+    return TrainingNeedAnalysisEntry(
+      id: widget.entry.id,
+      cyYear: _cyYear.text.trim().isEmpty ? null : _cyYear.text.trim(),
+      department: _department.text.trim().isEmpty ? null : _department.text.trim(),
+      rows: list,
+      createdAt: widget.entry.createdAt,
+      updatedAt: widget.entry.updatedAt,
+    );
+  }
+
+  void _save() => widget.onSave(_buildCurrentEntry());
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: AppTheme.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black.withOpacity(0.06)),
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const RspFormHeader(formTitle: 'TRAINING NEED ANALYSIS'),
+            Text('AND CONSOLIDATED REPORT', style: TextStyle(color: AppTheme.primaryNavy, fontSize: 14, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            TextFormField(controller: _cyYear, decoration: rspUnderlinedField('FOR CY (e.g. 2025):')),
+            TextFormField(controller: _department, decoration: rspUnderlinedField('DEPARTMENT:')),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Table', style: TextStyle(color: AppTheme.primaryNavy, fontSize: 14, fontWeight: FontWeight.w600)),
+                TextButton.icon(onPressed: _addRow, icon: const Icon(Icons.add, size: 18), label: const Text('Add row')),
+              ],
+            ),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                columns: const [
+                  DataColumn(label: Text('NAME/POSITION')),
+                  DataColumn(label: Text('GOAL')),
+                  DataColumn(label: Text('BEHAVIOR')),
+                  DataColumn(label: Text('SKILLS/KNOWLEDGE')),
+                  DataColumn(label: Text('NEED FOR TRAINING')),
+                  DataColumn(label: Text('TRAINING RECOMMENDATIONS')),
+                  DataColumn(label: Text('')),
+                ],
+                rows: List.generate(_rows.length, (i) {
+                  final r = _rows[i];
+                  return DataRow(
+                    cells: [
+                      DataCell(SizedBox(width: 140, child: TextFormField(controller: r['name_position'], decoration: const InputDecoration(isDense: true, border: UnderlineInputBorder())))),
+                      DataCell(SizedBox(width: 120, child: TextFormField(controller: r['goal'], decoration: const InputDecoration(isDense: true, border: UnderlineInputBorder())))),
+                      DataCell(SizedBox(width: 120, child: TextFormField(controller: r['behavior'], decoration: const InputDecoration(isDense: true, border: UnderlineInputBorder())))),
+                      DataCell(SizedBox(width: 120, child: TextFormField(controller: r['skills_knowledge'], decoration: const InputDecoration(isDense: true, border: UnderlineInputBorder())))),
+                      DataCell(SizedBox(width: 120, child: TextFormField(controller: r['need_for_training'], decoration: const InputDecoration(isDense: true, border: UnderlineInputBorder())))),
+                      DataCell(SizedBox(width: 140, child: TextFormField(controller: r['training_recommendations'], decoration: const InputDecoration(isDense: true, border: UnderlineInputBorder())))),
+                      DataCell(IconButton(icon: const Icon(Icons.remove_circle_outline, size: 20), onPressed: _rows.length > 1 ? () => _removeRow(i) : null)),
+                    ],
+                  );
+                }),
+              ),
+            ),
+            const SizedBox(height: 24),
+            const RspFormFooter(),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                FilledButton(onPressed: _save, child: const Text('Save')),
+                const SizedBox(width: 12),
+                TextButton(onPressed: widget.onCancel, child: const Text('Cancel')),
+                const SizedBox(width: 12),
+                IconButton(onPressed: () => widget.onPrint(_buildCurrentEntry()), icon: const Icon(Icons.print_rounded), tooltip: 'Print'),
+                IconButton(onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()), icon: const Icon(Icons.picture_as_pdf_rounded), tooltip: 'Download PDF'),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TrainingNeedAnalysisList extends StatelessWidget {
+  const _TrainingNeedAnalysisList({required this.entries, required this.onEdit, required this.onDelete, required this.onPrint, required this.onDownloadPdf});
+
+  final List<TrainingNeedAnalysisEntry> entries;
+  final void Function(TrainingNeedAnalysisEntry) onEdit;
+  final void Function(String id) onDelete;
+  final Future<void> Function(TrainingNeedAnalysisEntry) onPrint;
+  final Future<void> Function(TrainingNeedAnalysisEntry) onDownloadPdf;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: DataTable(
+        columns: const [
+          DataColumn(label: Text('CY')),
+          DataColumn(label: Text('Department')),
+          DataColumn(label: Text('Rows')),
+          DataColumn(label: Text('Actions')),
+        ],
+        rows: entries.map((e) {
+          return DataRow(
+            cells: [
+              DataCell(Text(e.cyYear ?? '—')),
+              DataCell(Text(e.department ?? '—')),
+              DataCell(Text('${e.rows.length}')),
+              DataCell(Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextButton(onPressed: () => onEdit(e), child: const Text('Edit')),
+                  IconButton(onPressed: () => onPrint(e), icon: const Icon(Icons.print_rounded, size: 20), tooltip: 'Print'),
+                  IconButton(onPressed: () => onDownloadPdf(e), icon: const Icon(Icons.picture_as_pdf_rounded, size: 20), tooltip: 'Download PDF'),
+                  TextButton(
+                    onPressed: () async {
+                      final ok = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Delete this report?'),
+                          content: const Text('This cannot be undone.'),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+                            FilledButton(onPressed: () => Navigator.of(ctx).pop(true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('Delete')),
+                          ],
+                        ),
+                      );
+                      if (ok == true && e.id != null) onDelete(e.id!);
+                    },
+                    child: const Text('Delete', style: TextStyle(color: Colors.red)),
+                  ),
+                ],
+              )),
+            ],
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+/// L&D: Action Brainstorming and Coaching Worksheet — department, date, instruction, table (Name, Stop Doing, Do Less Of, Keep Doing, Do More Of, Start Doing, Goal), Certified by.
+class _ActionBrainstormingSection extends StatefulWidget {
+  const _ActionBrainstormingSection();
+
+  @override
+  State<_ActionBrainstormingSection> createState() => _ActionBrainstormingSectionState();
+}
+
+class _ActionBrainstormingSectionState extends State<_ActionBrainstormingSection> {
+  List<ActionBrainstormingEntry> _entries = [];
+  bool _loading = true;
+  ActionBrainstormingEntry? _editing;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final list = await ActionBrainstormingRepo.instance.list();
+      if (mounted) setState(() { _entries = list; _loading = false; });
+    } catch (_) {
+      if (mounted) setState(() { _entries = []; _loading = false; });
+    }
+  }
+
+  void _startNew() => setState(() => _editing = const ActionBrainstormingEntry());
+  void _edit(ActionBrainstormingEntry e) => setState(() => _editing = e);
+  void _cancelEdit() => setState(() => _editing = null);
+
+  Future<void> _onSave(ActionBrainstormingEntry entry) async {
+    try {
+      if (entry.id == null) await ActionBrainstormingRepo.instance.insert(entry);
+      else await ActionBrainstormingRepo.instance.update(entry);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Action Brainstorming worksheet saved.')));
+        setState(() => _editing = null);
+        _load();
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+    }
+  }
+
+  Future<void> _onDelete(String id) async {
+    try {
+      await ActionBrainstormingRepo.instance.delete(id);
+      if (mounted) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Deleted.'))); _load(); }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
+    }
+  }
+
+  Future<void> _printAb(ActionBrainstormingEntry entry) async {
+    try {
+      final doc = FormPdf.buildActionBrainstormingCoachingPdf(entry);
+      await FormPdf.printDocument(doc, name: 'Action_Brainstorming_Coaching.pdf');
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Print failed: $e')));
+    }
+  }
+
+  Future<void> _downloadAb(ActionBrainstormingEntry entry) async {
+    try {
+      final doc = FormPdf.buildActionBrainstormingCoachingPdf(entry);
+      await FormPdf.sharePdf(doc, name: 'Action_Brainstorming_Coaching.pdf');
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('PDF ready to save or share.')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Action Brainstorming and Coaching Worksheet', style: TextStyle(color: AppTheme.textPrimary, fontSize: 22, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 8),
+        Text('Use the worksheet to brainstorm/coach staff on new ideas to move the department closer to department goal.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
+        const SizedBox(height: 24),
+        if (_editing != null) ...[
+          _ActionBrainstormingFormEditor(key: ValueKey(_editing?.id ?? 'new'), entry: _editing!, onSave: _onSave, onCancel: _cancelEdit, onPrint: _printAb, onDownloadPdf: _downloadAb),
+          const SizedBox(height: 24),
+        ],
+        Row(
+          children: [
+            FilledButton.icon(onPressed: _loading ? null : _startNew, icon: const Icon(Icons.add_rounded, size: 20), label: const Text('Add worksheet')),
+            const SizedBox(width: 12),
+            TextButton.icon(onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh_rounded, size: 20), label: const Text('Refresh')),
+          ],
+        ),
+        const SizedBox(height: 16),
+        if (_loading)
+          const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()))
+        else if (_entries.isEmpty)
+          Padding(padding: const EdgeInsets.all(24), child: Text('No worksheets yet. Tap "Add worksheet" to add one.', style: TextStyle(color: AppTheme.textSecondary)))
+        else
+          _ActionBrainstormingList(entries: _entries, onEdit: _edit, onDelete: _onDelete, onPrint: _printAb, onDownloadPdf: _downloadAb),
+      ],
+    );
+  }
+}
+
+class _ActionBrainstormingFormEditor extends StatefulWidget {
+  const _ActionBrainstormingFormEditor({super.key, required this.entry, required this.onSave, required this.onCancel, required this.onPrint, required this.onDownloadPdf});
+
+  final ActionBrainstormingEntry entry;
+  final void Function(ActionBrainstormingEntry) onSave;
+  final VoidCallback onCancel;
+  final Future<void> Function(ActionBrainstormingEntry) onPrint;
+  final Future<void> Function(ActionBrainstormingEntry) onDownloadPdf;
+
+  @override
+  State<_ActionBrainstormingFormEditor> createState() => _ActionBrainstormingFormEditorState();
+}
+
+class _ActionBrainstormingFormEditorState extends State<_ActionBrainstormingFormEditor> {
+  late TextEditingController _department;
+  late TextEditingController _date;
+  late TextEditingController _certifiedBy;
+  late TextEditingController _certificationDate;
+  late List<Map<String, TextEditingController>> _rows;
+
+  static Map<String, TextEditingController> _rowCtrl(String name, String stop, String less, String keep, String more, String start, String goal) {
+    return {
+      'name': TextEditingController(text: name),
+      'stop_doing': TextEditingController(text: stop),
+      'do_less_of': TextEditingController(text: less),
+      'keep_doing': TextEditingController(text: keep),
+      'do_more_of': TextEditingController(text: more),
+      'start_doing': TextEditingController(text: start),
+      'goal': TextEditingController(text: goal),
+    };
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.entry;
+    _department = TextEditingController(text: e.department ?? '');
+    _date = TextEditingController(text: e.date ?? '');
+    _certifiedBy = TextEditingController(text: e.certifiedBy ?? '');
+    _certificationDate = TextEditingController(text: e.certificationDate ?? '');
+    _rows = e.rows.isEmpty
+        ? List.generate(15, (_) => _rowCtrl('', '', '', '', '', '', ''))
+        : e.rows.map((r) => _rowCtrl(r.name ?? '', r.stopDoing ?? '', r.doLessOf ?? '', r.keepDoing ?? '', r.doMoreOf ?? '', r.startDoing ?? '', r.goal ?? '')).toList();
+    if (_rows.length < 15) while (_rows.length < 15) _rows.add(_rowCtrl('', '', '', '', '', '', ''));
+  }
+
+  @override
+  void dispose() {
+    _department.dispose();
+    _date.dispose();
+    _certifiedBy.dispose();
+    _certificationDate.dispose();
+    for (final row in _rows) { for (final c in row.values) c.dispose(); }
+    super.dispose();
+  }
+
+  void _addRow() => setState(() => _rows.add(_rowCtrl('', '', '', '', '', '', '')));
+  void _removeRow(int i) {
+    if (_rows.length <= 1) return;
+    setState(() {
+      for (final c in _rows[i].values) c.dispose();
+      _rows.removeAt(i);
+    });
+  }
+
+  ActionBrainstormingEntry _buildCurrentEntry() {
+    final list = _rows.map((r) => ActionBrainstormingRow(
+      name: r['name']!.text.trim().isEmpty ? null : r['name']!.text.trim(),
+      stopDoing: r['stop_doing']!.text.trim().isEmpty ? null : r['stop_doing']!.text.trim(),
+      doLessOf: r['do_less_of']!.text.trim().isEmpty ? null : r['do_less_of']!.text.trim(),
+      keepDoing: r['keep_doing']!.text.trim().isEmpty ? null : r['keep_doing']!.text.trim(),
+      doMoreOf: r['do_more_of']!.text.trim().isEmpty ? null : r['do_more_of']!.text.trim(),
+      startDoing: r['start_doing']!.text.trim().isEmpty ? null : r['start_doing']!.text.trim(),
+      goal: r['goal']!.text.trim().isEmpty ? null : r['goal']!.text.trim(),
+    )).toList();
+    return ActionBrainstormingEntry(
+      id: widget.entry.id,
+      department: _department.text.trim().isEmpty ? null : _department.text.trim(),
+      date: _date.text.trim().isEmpty ? null : _date.text.trim(),
+      rows: list,
+      certifiedBy: _certifiedBy.text.trim().isEmpty ? null : _certifiedBy.text.trim(),
+      certificationDate: _certificationDate.text.trim().isEmpty ? null : _certificationDate.text.trim(),
+      createdAt: widget.entry.createdAt,
+      updatedAt: widget.entry.updatedAt,
+    );
+  }
+
+  void _save() => widget.onSave(_buildCurrentEntry());
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: AppTheme.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black.withOpacity(0.06)),
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const RspFormHeader(formTitle: 'ACTION BRAINSTORMING AND COACHING WORKSHEET'),
+            TextFormField(controller: _department, decoration: rspUnderlinedField('DEPARTMENT:')),
+            TextFormField(controller: _date, decoration: rspUnderlinedField('DATE:')),
+            const SizedBox(height: 12),
+            Text('Instruction: Use the worksheet to brainstorm/coach staff of the new ideas to move the department closer to department goal.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Table', style: TextStyle(color: AppTheme.primaryNavy, fontSize: 14, fontWeight: FontWeight.w600)),
+                TextButton.icon(onPressed: _addRow, icon: const Icon(Icons.add, size: 18), label: const Text('Add row')),
+              ],
+            ),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                columns: const [
+                  DataColumn(label: Text('#')),
+                  DataColumn(label: Text('NAME')),
+                  DataColumn(label: Text('STOP DOING')),
+                  DataColumn(label: Text('DO LESS OF')),
+                  DataColumn(label: Text('KEEP DOING')),
+                  DataColumn(label: Text('DO MORE OF')),
+                  DataColumn(label: Text('START DOING')),
+                  DataColumn(label: Text('GOAL')),
+                  DataColumn(label: Text('')),
+                ],
+                rows: List.generate(_rows.length, (i) {
+                  final r = _rows[i];
+                  return DataRow(
+                    cells: [
+                      DataCell(Text('${i + 1}')),
+                      DataCell(SizedBox(width: 100, child: TextFormField(controller: r['name'], decoration: const InputDecoration(isDense: true, border: UnderlineInputBorder())))),
+                      DataCell(SizedBox(width: 100, child: TextFormField(controller: r['stop_doing'], decoration: const InputDecoration(isDense: true, border: UnderlineInputBorder())))),
+                      DataCell(SizedBox(width: 100, child: TextFormField(controller: r['do_less_of'], decoration: const InputDecoration(isDense: true, border: UnderlineInputBorder())))),
+                      DataCell(SizedBox(width: 100, child: TextFormField(controller: r['keep_doing'], decoration: const InputDecoration(isDense: true, border: UnderlineInputBorder())))),
+                      DataCell(SizedBox(width: 100, child: TextFormField(controller: r['do_more_of'], decoration: const InputDecoration(isDense: true, border: UnderlineInputBorder())))),
+                      DataCell(SizedBox(width: 100, child: TextFormField(controller: r['start_doing'], decoration: const InputDecoration(isDense: true, border: UnderlineInputBorder())))),
+                      DataCell(SizedBox(width: 100, child: TextFormField(controller: r['goal'], decoration: const InputDecoration(isDense: true, border: UnderlineInputBorder())))),
+                      DataCell(IconButton(icon: const Icon(Icons.remove_circle_outline, size: 20), onPressed: _rows.length > 1 ? () => _removeRow(i) : null)),
+                    ],
+                  );
+                }),
+              ),
+            ),
+            const SizedBox(height: 24),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Certified by:', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
+                      TextFormField(controller: _certifiedBy, decoration: rspUnderlinedField('')),
+                      Text('Department Head', style: TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 24),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Date:', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
+                      TextFormField(controller: _certificationDate, decoration: rspUnderlinedField('')),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            const RspFormFooter(),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                FilledButton(onPressed: _save, child: const Text('Save')),
+                const SizedBox(width: 12),
+                TextButton(onPressed: widget.onCancel, child: const Text('Cancel')),
+                const SizedBox(width: 12),
+                IconButton(onPressed: () => widget.onPrint(_buildCurrentEntry()), icon: const Icon(Icons.print_rounded), tooltip: 'Print'),
+                IconButton(onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()), icon: const Icon(Icons.picture_as_pdf_rounded), tooltip: 'Download PDF'),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionBrainstormingList extends StatelessWidget {
+  const _ActionBrainstormingList({required this.entries, required this.onEdit, required this.onDelete, required this.onPrint, required this.onDownloadPdf});
+
+  final List<ActionBrainstormingEntry> entries;
+  final void Function(ActionBrainstormingEntry) onEdit;
+  final void Function(String id) onDelete;
+  final Future<void> Function(ActionBrainstormingEntry) onPrint;
+  final Future<void> Function(ActionBrainstormingEntry) onDownloadPdf;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: DataTable(
+        columns: const [
+          DataColumn(label: Text('Department')),
+          DataColumn(label: Text('Date')),
+          DataColumn(label: Text('Rows')),
+          DataColumn(label: Text('Actions')),
+        ],
+        rows: entries.map((e) {
+          return DataRow(
+            cells: [
+              DataCell(Text(e.department ?? '—')),
+              DataCell(Text(e.date ?? '—')),
+              DataCell(Text('${e.rows.length}')),
+              DataCell(Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextButton(onPressed: () => onEdit(e), child: const Text('Edit')),
+                  IconButton(onPressed: () => onPrint(e), icon: const Icon(Icons.print_rounded, size: 20), tooltip: 'Print'),
+                  IconButton(onPressed: () => onDownloadPdf(e), icon: const Icon(Icons.picture_as_pdf_rounded, size: 20), tooltip: 'Download PDF'),
+                  TextButton(
+                    onPressed: () async {
+                      final ok = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Delete this worksheet?'),
+                          content: const Text('This cannot be undone.'),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+                            FilledButton(onPressed: () => Navigator.of(ctx).pop(true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('Delete')),
+                          ],
+                        ),
+                      );
+                      if (ok == true && e.id != null) onDelete(e.id!);
+                    },
+                    child: const Text('Delete', style: TextStyle(color: Colors.red)),
+                  ),
+                ],
+              )),
+            ],
+          );
+        }).toList(),
       ),
     );
   }

@@ -861,7 +861,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           ),
           child: Column(
             children: [
-              Icon(_examPassed ? Icons.check_circle : Icons.cancel, size: 56, color: _examPassed ? const Color(0xFF388E3C) : Colors.orange.shade700),
+              Icon(_examPassed ? Icons.check_circle : Icons.cancel, size: 56, color: _examPassed ? const Color(0xFFE85D04) : Colors.deepOrange.shade700),
               const SizedBox(height: 16),
               Text(_examPassed ? 'Passed' : 'Not passed', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: AppTheme.textPrimary)),
               const SizedBox(height: 8),

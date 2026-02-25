@@ -718,4 +718,60 @@ comment on table public.turn_around_time_entries is 'RSP: Turn-Around Time form 
 
 Each element in `applicants` has: `name`, `date_initial_assessment`, `date_contract_exam`, `skills_trade_exam_result`, `date_deliberation`, `date_job_offer`, `acceptance_date`, `date_assumption_to_duty`, `no_of_days_to_fill_up`, `overall_cost_per_hire` (all optional text).
 
-After running Query 7a–7h, the RSP dashboard can list, create, and edit all RSP forms. All forms use empty inputs by default (no names or values pre-filled).
+### Query 7i: Training Need Analysis entries (L&D)
+
+Stores the L&D Training Need Analysis and Consolidated Report: FOR CY [year], DEPARTMENT, and a table of rows with columns: name_position, goal, behavior, skills_knowledge, need_for_training, training_recommendations. Form only—no pre-filled names or values.
+
+```sql
+create table if not exists public.training_need_analysis_entries (
+  id uuid primary key default gen_random_uuid(),
+  cy_year text,
+  department text,
+  rows jsonb default '[]'::jsonb,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+alter table public.training_need_analysis_entries enable row level security;
+
+create policy "Authenticated can manage training_need_analysis_entries"
+  on public.training_need_analysis_entries for all
+  using (auth.role() = 'authenticated')
+  with check (auth.role() = 'authenticated');
+
+create index idx_training_need_analysis_entries_created on public.training_need_analysis_entries (created_at desc);
+comment on table public.training_need_analysis_entries is 'L&D: Training Need Analysis and Consolidated Report (CY year, department, table rows). Form only.';
+```
+
+Each element in `rows` has: `name_position`, `goal`, `behavior`, `skills_knowledge`, `need_for_training`, `training_recommendations` (all optional text).
+
+### Query 7j: Action Brainstorming and Coaching Worksheet entries (L&D)
+
+Stores the L&D Action Brainstorming and Coaching Worksheet: DEPARTMENT, DATE, instruction, table rows (name, stop_doing, do_less_of, keep_doing, do_more_of, start_doing, goal), certified_by, certification_date. Form only—no pre-filled names or values.
+
+```sql
+create table if not exists public.action_brainstorming_coaching_entries (
+  id uuid primary key default gen_random_uuid(),
+  department text,
+  date text,
+  "rows" jsonb default '[]'::jsonb,
+  certified_by text,
+  certification_date text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+alter table public.action_brainstorming_coaching_entries enable row level security;
+
+create policy "Authenticated can manage action_brainstorming_coaching_entries"
+  on public.action_brainstorming_coaching_entries for all
+  using (auth.role() = 'authenticated')
+  with check (auth.role() = 'authenticated');
+
+create index idx_action_brainstorming_coaching_entries_created on public.action_brainstorming_coaching_entries (created_at desc);
+comment on table public.action_brainstorming_coaching_entries is 'L&D: Action Brainstorming and Coaching Worksheet (department, date, table rows, certified by). Form only.';
+```
+
+Each element in `rows` has: `name`, `stop_doing`, `do_less_of`, `keep_doing`, `do_more_of`, `start_doing`, `goal` (all optional text).
+
+After running Query 7a–7j, the RSP and L&D dashboard can list, create, and edit all RSP and L&D forms. All forms use empty inputs by default (no names or values pre-filled).

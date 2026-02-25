@@ -9,7 +9,9 @@ import '../data/comparative_assessment.dart';
 import '../data/individual_development_plan.dart';
 import '../data/performance_evaluation_form.dart';
 import '../data/promotion_certification.dart';
+import '../data/action_brainstorming_coaching.dart';
 import '../data/selection_lineup.dart';
+import '../data/training_need_analysis.dart';
 import '../data/turn_around_time.dart';
 
 /// Builds PDF documents from RSP form entries and supports print / share.
@@ -286,30 +288,78 @@ class FormPdf {
     return doc;
   }
 
+  static final PdfColor _letterheadNavy = PdfColor.fromInt(0xFF1A237E);
+  static final PdfColor _letterheadOrange = PdfColor.fromInt(0xFFE85D04);
+
   static pw.Widget _pdfHeader(String formTitle) {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.center,
       children: [
-        pw.Text(
-          'Republic of the Philippines',
-          style: const pw.TextStyle(fontSize: 9),
-        ),
-        pw.Text(
-          'PROVINCE OF MISAMIS OCCIDENTAL',
-          style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
-        ),
-        pw.Text(
-          'MUNICIPALITY OF PLARIDEL',
-          style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
-        ),
-        pw.Text(
-          'HUMAN RESOURCE MANAGEMENT AND DEVELOPMENT OFFICE',
-          style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.center,
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Container(
+              width: 52,
+              height: 52,
+              decoration: pw.BoxDecoration(
+                shape: pw.BoxShape.circle,
+                border: pw.Border.all(color: _letterheadNavy, width: 1.5),
+                color: PdfColors.white,
+              ),
+            ),
+            pw.SizedBox(width: 12),
+            pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              mainAxisSize: pw.MainAxisSize.min,
+              children: [
+                pw.Text(
+                  'Republic of the Philippines',
+                  style: pw.TextStyle(fontSize: 9, color: _letterheadNavy),
+                ),
+                pw.Text(
+                  'PROVINCE OF MISAMIS OCCIDENTAL',
+                  style: pw.TextStyle(
+                    fontSize: 9,
+                    fontWeight: pw.FontWeight.bold,
+                    color: _letterheadNavy,
+                  ),
+                ),
+                pw.Text(
+                  'MUNICIPALITY OF PLARIDEL',
+                  style: pw.TextStyle(
+                    fontSize: 12,
+                    fontWeight: pw.FontWeight.bold,
+                    color: _letterheadNavy,
+                  ),
+                ),
+                pw.SizedBox(height: 3),
+                pw.Container(
+                  width: 180,
+                  height: 2,
+                  color: PdfColors.black,
+                ),
+                pw.SizedBox(height: 4),
+                pw.Text(
+                  'HUMAN RESOURCE MANAGEMENT AND DEVELOPMENT OFFICE',
+                  style: pw.TextStyle(
+                    fontSize: 8,
+                    fontWeight: pw.FontWeight.bold,
+                    color: _letterheadOrange,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
         pw.SizedBox(height: 10),
         pw.Text(
           formTitle,
-          style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
+          style: pw.TextStyle(
+            fontSize: 14,
+            fontWeight: pw.FontWeight.bold,
+            color: _letterheadOrange,
+          ),
         ),
         pw.SizedBox(height: 14),
       ],
@@ -321,25 +371,76 @@ class FormPdf {
       padding: const pw.EdgeInsets.only(top: 16),
       child: pw.Row(
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
           pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              pw.Text(
-                '(088) 3448-200   (088) 3448-358',
-                style: const pw.TextStyle(fontSize: 8),
+              pw.Row(
+                children: [
+                  _pdfFooterIcon(),
+                  pw.SizedBox(width: 6),
+                  pw.Text(
+                    '(088) 3448-200',
+                    style: const pw.TextStyle(fontSize: 8),
+                  ),
+                  pw.SizedBox(width: 12),
+                  _pdfFooterIcon(),
+                  pw.SizedBox(width: 6),
+                  pw.Text(
+                    '(088) 3448-358',
+                    style: const pw.TextStyle(fontSize: 8),
+                  ),
+                ],
               ),
-              pw.Text(
-                'plaridel_misocc@yahoo.com',
-                style: const pw.TextStyle(fontSize: 8),
+              pw.SizedBox(height: 4),
+              pw.Row(
+                children: [
+                  _pdfFooterIcon(),
+                  pw.SizedBox(width: 6),
+                  pw.Text(
+                    'plaridel_misocc@yahoo.com',
+                    style: const pw.TextStyle(fontSize: 8),
+                  ),
+                ],
               ),
             ],
           ),
-          pw.Text(
-            'Asenso PLARIDEL',
-            style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+          pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.end,
+            mainAxisSize: pw.MainAxisSize.min,
+            children: [
+              pw.Text(
+                'Asenso',
+                style: pw.TextStyle(
+                  fontSize: 9,
+                  fontStyle: pw.FontStyle.italic,
+                  fontWeight: pw.FontWeight.bold,
+                  color: _letterheadNavy,
+                ),
+              ),
+              pw.Text(
+                'PLARIDEL',
+                style: pw.TextStyle(
+                  fontSize: 11,
+                  fontWeight: pw.FontWeight.bold,
+                  color: _letterheadOrange,
+                ),
+              ),
+            ],
           ),
         ],
+      ),
+    );
+  }
+
+  static pw.Widget _pdfFooterIcon() {
+    return pw.Container(
+      width: 14,
+      height: 14,
+      decoration: pw.BoxDecoration(
+        shape: pw.BoxShape.circle,
+        color: _letterheadNavy,
       ),
     );
   }
@@ -568,27 +669,52 @@ class FormPdf {
       children: [
         pw.Text(
           'Republic of the Philippines',
-          style: const pw.TextStyle(fontSize: 9),
+          style: pw.TextStyle(fontSize: 9, color: _letterheadNavy),
         ),
         pw.Text(
           'PROVINCE OF MISAMIS OCCIDENTAL',
-          style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+          style: pw.TextStyle(
+            fontSize: 9,
+            fontWeight: pw.FontWeight.bold,
+            color: _letterheadNavy,
+          ),
         ),
         pw.Text(
-          'Municipality of Plaridel',
-          style: const pw.TextStyle(fontSize: 9),
+          'MUNICIPALITY OF PLARIDEL',
+          style: pw.TextStyle(
+            fontSize: 10,
+            fontWeight: pw.FontWeight.bold,
+            color: _letterheadNavy,
+          ),
+        ),
+        pw.SizedBox(height: 3),
+        pw.Container(
+          width: 160,
+          height: 1.5,
+          color: PdfColors.black,
         ),
         pw.SizedBox(height: 6),
         pw.Text(
           'HUMAN RESOURCE MERIT PROMOTION AND SELECTION BOARD',
-          style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+          style: pw.TextStyle(
+            fontSize: 9,
+            fontWeight: pw.FontWeight.bold,
+            color: _letterheadOrange,
+          ),
         ),
         if (officeName != null && officeName.isNotEmpty)
-          pw.Text(officeName, style: const pw.TextStyle(fontSize: 8)),
+          pw.Text(
+            officeName,
+            style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
+          ),
         pw.SizedBox(height: 8),
         pw.Text(
           formTitle,
-          style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
+          style: pw.TextStyle(
+            fontSize: 14,
+            fontWeight: pw.FontWeight.bold,
+            color: _letterheadOrange,
+          ),
         ),
         pw.SizedBox(height: 12),
       ],
@@ -1069,6 +1195,210 @@ class FormPdf {
                 ),
               ),
             ),
+            _pdfFooter(),
+          ],
+        ),
+      ),
+    );
+    return doc;
+  }
+
+  /// Training Need Analysis and Consolidated Report (L&D) — header with CY and Department, then 6-column table.
+  static pw.Document buildTrainingNeedAnalysisPdf(TrainingNeedAnalysisEntry e) {
+    final doc = pw.Document();
+    doc.addPage(
+      pw.Page(
+        pageFormat: pageLetter,
+        build: (ctx) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+          children: [
+            _pdfHeader('TRAINING NEED ANALYSIS'),
+            pw.Text(
+              'AND CONSOLIDATED REPORT',
+              style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 8),
+            pw.Text('FOR CY ${_s(e.cyYear)}', style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
+            pw.Text('DEPARTMENT: ${_s(e.department)}', style: const pw.TextStyle(fontSize: 10)),
+            pw.SizedBox(height: 14),
+            pw.Expanded(
+              child: pw.Container(
+                padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: e.rows.isEmpty
+                    ? pw.Text('—', style: const pw.TextStyle(fontSize: 10))
+                    : pw.Table(
+                        border: pw.TableBorder.all(width: 0.5, color: PdfColors.grey800),
+                        columnWidths: const {
+                          0: pw.FlexColumnWidth(1.2),
+                          1: pw.FlexColumnWidth(1),
+                          2: pw.FlexColumnWidth(1),
+                          3: pw.FlexColumnWidth(1),
+                          4: pw.FlexColumnWidth(1),
+                          5: pw.FlexColumnWidth(1.2),
+                        },
+                        children: [
+                          pw.TableRow(
+                            decoration: const pw.BoxDecoration(color: PdfColors.grey300),
+                            children: [
+                              'NAME/POSITION',
+                              'GOAL',
+                              'BEHAVIOR',
+                              'SKILLS/KNOWLEDGE',
+                              'NEED FOR TRAINING',
+                              'TRAINING RECOMMENDATIONS',
+                            ]
+                                .map(
+                                  (h) => pw.Padding(
+                                    padding: const pw.EdgeInsets.all(4),
+                                    child: pw.Text(
+                                      h,
+                                      style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold),
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                          ...e.rows.map(
+                            (r) => pw.TableRow(
+                              children: [
+                                _s(r.namePosition),
+                                _s(r.goal),
+                                _s(r.behavior),
+                                _s(r.skillsKnowledge),
+                                _s(r.needForTraining),
+                                _s(r.trainingRecommendations),
+                              ]
+                                  .map(
+                                    (v) => pw.Padding(
+                                      padding: const pw.EdgeInsets.all(4),
+                                      child: pw.Text(v, style: const pw.TextStyle(fontSize: 8)),
+                                    ),
+                                  )
+                                  .toList(),
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+            ),
+            _pdfFooter(),
+          ],
+        ),
+      ),
+    );
+    return doc;
+  }
+
+  /// Action Brainstorming and Coaching Worksheet (L&D) — DEPARTMENT, DATE, instruction, 7-column table, Certified by / Date.
+  static pw.Document buildActionBrainstormingCoachingPdf(ActionBrainstormingEntry e) {
+    final doc = pw.Document();
+    doc.addPage(
+      pw.Page(
+        pageFormat: pageLetter,
+        build: (ctx) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+          children: [
+            _pdfHeader('ACTION BRAINSTORMING AND COACHING WORKSHEET'),
+            _row('DEPARTMENT:', _s(e.department)),
+            _row('DATE:', _s(e.date)),
+            pw.SizedBox(height: 8),
+            pw.Text(
+              'Instruction: Use the worksheet to brainstorm/coach staff of the new ideas to move the department closer to department goal.',
+              style: const pw.TextStyle(fontSize: 9),
+            ),
+            pw.SizedBox(height: 12),
+            pw.Expanded(
+              child: pw.Container(
+                padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: e.rows.isEmpty
+                    ? pw.Text('—', style: const pw.TextStyle(fontSize: 10))
+                    : pw.Table(
+                        border: pw.TableBorder.all(width: 0.5, color: PdfColors.grey800),
+                        columnWidths: const {
+                          0: pw.FlexColumnWidth(0.4),
+                          1: pw.FlexColumnWidth(1),
+                          2: pw.FlexColumnWidth(1),
+                          3: pw.FlexColumnWidth(1),
+                          4: pw.FlexColumnWidth(1),
+                          5: pw.FlexColumnWidth(1),
+                          6: pw.FlexColumnWidth(1),
+                          7: pw.FlexColumnWidth(1),
+                        },
+                        children: [
+                          pw.TableRow(
+                            decoration: const pw.BoxDecoration(color: PdfColors.grey300),
+                            children: [
+                              '#',
+                              'NAME',
+                              'STOP DOING',
+                              'DO LESS OF',
+                              'KEEP DOING',
+                              'DO MORE OF',
+                              'START DOING',
+                              'GOAL',
+                            ]
+                                .map(
+                                  (h) => pw.Padding(
+                                    padding: const pw.EdgeInsets.all(3),
+                                    child: pw.Text(
+                                      h,
+                                      style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold),
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                          ...e.rows.asMap().entries.map(
+                                (entry) {
+                                  final i = entry.key + 1;
+                                  final r = entry.value;
+                                  return pw.TableRow(
+                                    children: [
+                                      pw.Padding(
+                                        padding: const pw.EdgeInsets.all(3),
+                                        child: pw.Text('$i', style: const pw.TextStyle(fontSize: 8)),
+                                      ),
+                                      pw.Padding(padding: const pw.EdgeInsets.all(3), child: pw.Text(_s(r.name), style: const pw.TextStyle(fontSize: 7))),
+                                      pw.Padding(padding: const pw.EdgeInsets.all(3), child: pw.Text(_s(r.stopDoing), style: const pw.TextStyle(fontSize: 7))),
+                                      pw.Padding(padding: const pw.EdgeInsets.all(3), child: pw.Text(_s(r.doLessOf), style: const pw.TextStyle(fontSize: 7))),
+                                      pw.Padding(padding: const pw.EdgeInsets.all(3), child: pw.Text(_s(r.keepDoing), style: const pw.TextStyle(fontSize: 7))),
+                                      pw.Padding(padding: const pw.EdgeInsets.all(3), child: pw.Text(_s(r.doMoreOf), style: const pw.TextStyle(fontSize: 7))),
+                                      pw.Padding(padding: const pw.EdgeInsets.all(3), child: pw.Text(_s(r.startDoing), style: const pw.TextStyle(fontSize: 7))),
+                                      pw.Padding(padding: const pw.EdgeInsets.all(3), child: pw.Text(_s(r.goal), style: const pw.TextStyle(fontSize: 7))),
+                                    ],
+                                  );
+                                },
+                              ),
+                        ],
+                      ),
+              ),
+            ),
+            pw.SizedBox(height: 12),
+            pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Expanded(
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text('Certified by:', style: const pw.TextStyle(fontSize: 9)),
+                      pw.Text(_s(e.certifiedBy), style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                      pw.Text('Department Head', style: const pw.TextStyle(fontSize: 8)),
+                    ],
+                  ),
+                ),
+                pw.Expanded(
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text('Date:', style: const pw.TextStyle(fontSize: 9)),
+                      pw.Text(_s(e.certificationDate), style: const pw.TextStyle(fontSize: 9)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 12),
             _pdfFooter(),
           ],
         ),

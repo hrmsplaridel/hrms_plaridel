@@ -333,7 +333,7 @@ class _StepTile extends StatelessWidget {
     IconData icon;
     switch (status) {
       case _StepStatus.done:
-        iconColor = const Color(0xFF388E3C);
+        iconColor = const Color(0xFFE85D04);
         icon = Icons.check_circle_rounded;
         break;
       case _StepStatus.current:

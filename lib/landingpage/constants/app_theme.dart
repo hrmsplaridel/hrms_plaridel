@@ -1,15 +1,19 @@
 import 'package:flutter/material.dart';
 
 /// Government-standard HRMS theme constants.
-/// Navy blue and white color scheme, professional typography.
+/// Orange and white color scheme, professional typography.
 class AppTheme {
   AppTheme._();
 
-  // Primary colors - Government standard
-  static const Color primaryNavy = Color(0xFF1E3A8A);
-  static const Color primaryNavyDark = Color(0xFF0F2744);
-  static const Color primaryNavyLight = Color(0xFF2E4A9E);
+  // Primary colors - Orange theme
+  static const Color primaryNavy = Color(0xFFE85D04);
+  static const Color primaryNavyDark = Color(0xFFBF360C);
+  static const Color primaryNavyLight = Color(0xFFFF9800);
   static const Color white = Color(0xFFFFFFFF);
+
+  // Letterhead (government header) - navy for Republic/Province/Municipality text
+  static const Color letterheadNavy = Color(0xFF1A237E);
+  static const Color letterheadOrange = Color(0xFFE85D04);
   static const Color offWhite = Color(0xFFF8F9FA);
   static const Color lightGray = Color(0xFFE9ECEF);
   static const Color textPrimary = Color(0xFF212529);

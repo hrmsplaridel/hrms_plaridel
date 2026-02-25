@@ -761,7 +761,7 @@ class _EmployeeAttendanceOverviewCard extends StatelessWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      _ChartLegend(color: const Color(0xFF1976D2), label: 'Present'),
+                      _ChartLegend(color: const Color(0xFFE85D04), label: 'Present'),
                       const SizedBox(width: 20),
                       _ChartLegend(color: const Color(0xFF81C784), label: 'Absent'),
                       const SizedBox(width: 20),
