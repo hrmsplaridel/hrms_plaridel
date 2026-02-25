@@ -352,6 +352,25 @@ So applicants (no login) can upload; only logged-in admins can read, download, a
 
 ---
 
+#### Profile images (My Profile avatar)
+
+The **My Profile** screen lets users add a profile image. Images are stored in Supabase Storage.
+
+**1. Create the `avatars` bucket**
+
+- In **Dashboard → Storage**, click **New bucket**. Name: `avatars`.
+- Set the bucket to **private** (recommended). The app uses signed URLs to display the image.
+- Add policies for the `avatars` bucket:
+  - **INSERT:** Allow **authenticated** users to upload. WITH CHECK: `bucket_id = 'avatars' AND (storage.foldername(name))[1] = auth.uid()::text` (so users can only upload under their own `userId/` folder).
+  - **SELECT:** Allow **authenticated** users to read. USING: `bucket_id = 'avatars'`.
+  - **UPDATE:** Allow **authenticated** to update their own object. USING: `bucket_id = 'avatars' AND (storage.foldername(name))[1] = auth.uid()::text`.
+
+Alternatively, for a quick setup: allow **authenticated** INSERT and SELECT on `bucket_id = 'avatars'` without the folder restriction (less secure but simpler).
+
+The app stores the path in `user_metadata.avatar_path` (e.g. `userId/avatar.jpg`) and uses `createSignedUrl` to display the image.
+
+---
+
 ### Query 6c: Exam questions (admin-editable BEI and other exam questions)
 
 Run this so admins can view and edit exam questions (e.g. the 8 BEI questions). Applicants see the questions from this table.

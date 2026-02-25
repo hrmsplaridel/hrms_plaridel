@@ -16,7 +16,9 @@ import '../../data/turn_around_time.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../utils/form_pdf.dart';
 import '../../widgets/rsp_form_header_footer.dart';
+import '../../widgets/user_avatar.dart';
 import '../../login/models/login_role.dart';
+import 'profile_page.dart';
 import 'settings_page.dart';
 
 /// Dashboard accent colors for summary cards and accents (orange theme).
@@ -40,13 +42,14 @@ class AdminDashboard extends StatefulWidget {
 
 class _AdminDashboardState extends State<AdminDashboard> {
   int _selectedNavIndex = 0;
-  static const _navItems = ['Dashboard', 'RSP', 'L&D', 'DTR', 'Create Account'];
+  static const _navItems = ['Dashboard', 'RSP', 'L&D', 'DTR', 'DocuTracker', 'Create Account'];
 
   @override
   Widget build(BuildContext context) {
     final user = Supabase.instance.client.auth.currentUser;
     final email = user?.email ?? 'Admin';
     final displayName = user?.userMetadata?['full_name'] as String? ?? user?.email?.split('@').first ?? 'Admin';
+    final avatarPath = user?.userMetadata?['avatar_path'] as String?;
     final width = MediaQuery.of(context).size.width;
     final isWide = width > 900;
     final contentPadding = width > 900 ? 24.0 : (width > 600 ? 20.0 : 16.0);
@@ -59,6 +62,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               child: SafeArea(
                 child: _Sidebar(
                   selectedIndex: _selectedNavIndex,
+                  avatarPath: avatarPath,
                   onTap: (i) {
                     setState(() => _selectedNavIndex = i);
                     if (context.mounted) Navigator.of(context).pop();
@@ -68,7 +72,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             ),
       body: Row(
         children: [
-          if (isWide) _Sidebar(selectedIndex: _selectedNavIndex, onTap: (i) => setState(() => _selectedNavIndex = i)),
+          if (isWide) _Sidebar(selectedIndex: _selectedNavIndex, avatarPath: avatarPath, onTap: (i) => setState(() => _selectedNavIndex = i)),
           Expanded(
             child: Container(
               decoration: BoxDecoration(
@@ -80,7 +84,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               ),
               child: Column(
                 children: [
-                  _TopBar(email: email, displayName: displayName, showMenuButton: !isWide),
+                  _TopBar(email: email, displayName: displayName, avatarPath: avatarPath, showMenuButton: !isWide),
                   Expanded(
                     child: SingleChildScrollView(
                       padding: EdgeInsets.all(contentPadding),
@@ -91,8 +95,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               : _selectedNavIndex == 2
                                   ? const _LdContent()
                                   : _selectedNavIndex == 4
-                                      ? const _AdminSignUpContent()
-                                      : _PlaceholderContent(title: _navItems[_selectedNavIndex]),
+                                      ? const _DocuTrackerPlaceholder()
+                                      : _selectedNavIndex == 5
+                                          ? const _AdminSignUpContent()
+                                          : _PlaceholderContent(title: _navItems[_selectedNavIndex]),
                     ),
                   ),
                 ],
@@ -106,9 +112,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
 }
 
 class _Sidebar extends StatelessWidget {
-  const _Sidebar({required this.selectedIndex, required this.onTap});
+  const _Sidebar({required this.selectedIndex, this.avatarPath, required this.onTap});
 
   final int selectedIndex;
+  final String? avatarPath;
   final ValueChanged<int> onTap;
 
   @override
@@ -198,7 +205,8 @@ class _Sidebar extends StatelessWidget {
           _NavTile(icon: Icons.how_to_reg_rounded, label: 'RSP', selected: selectedIndex == 1, onTap: () => onTap(1)),
           _NavTile(icon: Icons.school_rounded, label: 'L&D', selected: selectedIndex == 2, onTap: () => onTap(2)),
           _NavTile(icon: Icons.schedule_rounded, label: 'DTR', selected: selectedIndex == 3, onTap: () => onTap(3)),
-          _NavTile(icon: Icons.person_add_rounded, label: 'Create Account', selected: selectedIndex == 4, onTap: () => onTap(4)),
+          _NavTile(icon: Icons.folder_rounded, label: 'DocuTracker', selected: selectedIndex == 4, onTap: () => onTap(4)),
+          _NavTile(icon: Icons.person_add_rounded, label: 'Create Account', selected: selectedIndex == 5, onTap: () => onTap(5)),
           const Spacer(),
           const Divider(height: 1),
           Padding(
@@ -211,11 +219,7 @@ class _Sidebar extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  CircleAvatar(
-                    radius: 22,
-                    backgroundColor: AppTheme.primaryNavy,
-                    child: const Icon(Icons.person_rounded, color: Colors.white, size: 22),
-                  ),
+                  UserAvatar(avatarPath: avatarPath, radius: 22),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -309,10 +313,11 @@ class _NavTileState extends State<_NavTile> {
 }
 
 class _TopBar extends StatelessWidget {
-  const _TopBar({required this.email, required this.displayName, this.showMenuButton = false});
+  const _TopBar({required this.email, required this.displayName, this.avatarPath, this.showMenuButton = false});
 
   final String email;
   final String displayName;
+  final String? avatarPath;
   final bool showMenuButton;
 
   @override
@@ -371,7 +376,7 @@ class _TopBar extends StatelessWidget {
             ],
           ),
           SizedBox(width: isCompact ? 6 : 12),
-          _AdminDropdown(email: email, displayName: displayName, compact: isCompact),
+          _AdminDropdown(email: email, displayName: displayName, avatarPath: avatarPath, compact: isCompact),
         ],
       ),
     );
@@ -379,10 +384,11 @@ class _TopBar extends StatelessWidget {
 }
 
 class _AdminDropdown extends StatelessWidget {
-  const _AdminDropdown({required this.email, required this.displayName, this.compact = false});
+  const _AdminDropdown({required this.email, required this.displayName, this.avatarPath, this.compact = false});
 
   final String email;
   final String displayName;
+  final String? avatarPath;
   final bool compact;
 
   @override
@@ -404,7 +410,7 @@ class _AdminDropdown extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircleAvatar(radius: compact ? 17 : 20, backgroundColor: AppTheme.primaryNavy, child: Icon(Icons.person_rounded, color: Colors.white, size: compact ? 18 : 22)),
+            UserAvatar(avatarPath: avatarPath, radius: compact ? 17 : 20),
             if (!compact) ...[const SizedBox(width: 12), Text(displayName, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.textPrimary))],
             const SizedBox(width: 4),
             Icon(Icons.keyboard_arrow_down_rounded, size: compact ? 20 : 24, color: AppTheme.textSecondary),
@@ -421,7 +427,7 @@ class _AdminDropdown extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  CircleAvatar(radius: 28, backgroundColor: AppTheme.primaryNavy.withOpacity(0.12), child: Icon(Icons.person_rounded, color: AppTheme.primaryNavy, size: 28)),
+                  UserAvatar(avatarPath: avatarPath, radius: 28, backgroundColor: AppTheme.primaryNavy.withOpacity(0.12), placeholderIconColor: AppTheme.primaryNavy),
                   const SizedBox(width: 14),
                   Expanded(
                     child: Column(
@@ -452,7 +458,7 @@ class _AdminDropdown extends StatelessWidget {
           if (context.mounted) Navigator.of(context).popUntil((route) => route.isFirst);
         }
         if (value == 'profile') {
-          // TODO: navigate when implemented
+          Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfilePage()));
         }
         if (value == 'settings') {
           Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage()));
@@ -5249,8 +5255,11 @@ class _RspApplicationsMonitor extends StatefulWidget {
 class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   List<RecruitmentApplication> _applications = [];
   Map<String, RecruitmentExamResult> _examResults = {};
+  /// All files in storage per applicationId so admin can see every file (not just DB primary).
+  Map<String, List<({String path, String fileName})>> _storageFilesByAppId = {};
   bool _loading = true;
   bool _syncing = false;
+  final ScrollController _horizontalScrollController = ScrollController();
 
   @override
   void initState() {
@@ -5258,14 +5267,31 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _horizontalScrollController.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
       final apps = await RecruitmentRepo.instance.listApplications();
       final results = await RecruitmentRepo.instance.getExamResultsByApplication();
+      Map<String, List<({String path, String fileName})>> byApp = {};
+      try {
+        final entries = await RecruitmentRepo.instance.listStorageAttachmentPaths();
+        for (final e in entries) {
+          final id = e['applicationId']!;
+          byApp.putIfAbsent(id, () => []).add((path: e['path']!, fileName: e['fileName']!));
+        }
+      } catch (_) {
+        // e.g. not authenticated; keep byApp empty and fall back to DB attachment
+      }
       if (mounted) setState(() {
         _applications = apps;
         _examResults = results;
+        _storageFilesByAppId = byApp;
         _loading = false;
       });
     } catch (_) {
@@ -5331,6 +5357,16 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     }
   }
 
+  Widget _tableCell(double width, Widget child) {
+    return TableCell(
+      verticalAlignment: TableCellVerticalAlignment.middle,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: SizedBox(width: width, child: child),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -5369,45 +5405,218 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                       padding: const EdgeInsets.all(32),
                       child: Center(child: Text('No applications yet. Applicants will appear here after they submit Step 1 from the recruitment flow.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 14))),
                     )
-                  : SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: DataTable(
-                        headingRowColor: WidgetStateProperty.all(AppTheme.primaryNavy.withOpacity(0.08)),
-                        columns: const [
-                          DataColumn(label: Text('Name', style: TextStyle(fontWeight: FontWeight.w700))),
-                          DataColumn(label: Text('Email', style: TextStyle(fontWeight: FontWeight.w700))),
-                          DataColumn(label: Text('Phone', style: TextStyle(fontWeight: FontWeight.w700))),
-                          DataColumn(label: Text('Status', style: TextStyle(fontWeight: FontWeight.w700))),
-                          DataColumn(label: Text('Exam', style: TextStyle(fontWeight: FontWeight.w700))),
-                          DataColumn(label: Text('Score', style: TextStyle(fontWeight: FontWeight.w700))),
-                          DataColumn(label: Text('Attachment', style: TextStyle(fontWeight: FontWeight.w700))),
-                          DataColumn(label: Text('Document review', style: TextStyle(fontWeight: FontWeight.w700))),
-                        ],
-                        rows: _applications.map((app) {
-                          final exam = _examResults[app.id];
-                          return DataRow(
-                            cells: [
-                              DataCell(Text(app.fullName)),
-                              DataCell(Text(app.email)),
-                              DataCell(Text(app.phone ?? '—')),
-                              DataCell(Text(app.status)),
-                              DataCell(Text(exam == null ? '—' : (exam.passed ? 'Passed' : 'Failed'))),
-                              DataCell(Text(exam == null ? '—' : '${exam.scorePercent.toStringAsFixed(0)}%')),
-                              DataCell(
-                                app.attachmentPath != null && app.attachmentName != null
-                                    ? _DownloadAttachmentButton(path: app.attachmentPath!, fileName: app.attachmentName!)
-                                    : Tooltip(
-                                        message: 'No file attached or attachment not saved. See docs: anon must be allowed to update attachment path after upload.',
-                                        child: Text('No file', style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 13)),
+                  : LayoutBuilder(
+                      builder: (context, constraints) {
+                        final scrollWidth = constraints.maxWidth.isFinite
+                            ? constraints.maxWidth
+                            : MediaQuery.sizeOf(context).width;
+                        return SizedBox(
+                          width: scrollWidth,
+                          child: Scrollbar(
+                            controller: _horizontalScrollController,
+                            thumbVisibility: true,
+                            child: SingleChildScrollView(
+                            controller: _horizontalScrollController,
+                            scrollDirection: Axis.horizontal,
+                            physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.vertical,
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(minWidth: 1374),
+                                child: Table(
+                          columnWidths: const {
+                            0: FixedColumnWidth(160),
+                            1: FixedColumnWidth(260),
+                            2: FixedColumnWidth(108),
+                            3: FixedColumnWidth(170),
+                            4: FixedColumnWidth(76),
+                            5: FixedColumnWidth(64),
+                            6: FixedColumnWidth(288),
+                            7: FixedColumnWidth(248),
+                          },
+                          defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                          border: TableBorder.symmetric(
+                            inside: BorderSide(color: Colors.black.withOpacity(0.08)),
+                          ),
+                          children: [
+                            TableRow(
+                              decoration: BoxDecoration(color: AppTheme.primaryNavy.withOpacity(0.08)),
+                              children: [
+                                _tableCell(160, const Text('Name', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
+                                _tableCell(260, const Text('Email', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
+                                _tableCell(108, const Text('Phone', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
+                                _tableCell(170, const Text('Status', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
+                                _tableCell(76, const Text('Exam', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
+                                _tableCell(64, const Text('Score', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
+                                _tableCell(288, const Text('Attachment', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
+                                _tableCell(248, const Text('Document review', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
+                              ],
+                            ),
+                            ..._applications.map((app) {
+                              final exam = _examResults[app.id];
+                              final textStyle = TextStyle(fontSize: 13, color: AppTheme.textPrimary);
+                              return TableRow(
+                                children: [
+                                  _tableCell(160, Tooltip(message: app.fullName, child: Text(app.fullName, style: textStyle, overflow: TextOverflow.ellipsis, maxLines: 2, softWrap: true))),
+                                  _tableCell(260, Tooltip(message: app.email, child: Text(app.email, style: textStyle, overflow: TextOverflow.ellipsis, maxLines: 2, softWrap: true))),
+                                  _tableCell(108, Text(app.phone ?? '—', style: textStyle)),
+                                  _tableCell(170, Tooltip(message: app.status, child: Text(app.status, style: textStyle, overflow: TextOverflow.ellipsis, maxLines: 1))),
+                                  _tableCell(76, Text(exam == null ? '—' : (exam.passed ? 'Passed' : 'Failed'), style: textStyle)),
+                                  _tableCell(64, Text(exam == null ? '—' : '${exam.scorePercent.toStringAsFixed(0)}%', style: textStyle)),
+                                  TableCell(
+                                    verticalAlignment: TableCellVerticalAlignment.middle,
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                      child: _AttachmentCell(
+                                        app: app,
+                                        storageFiles: _storageFilesByAppId[app.id],
+                                        onFileRemoved: _load,
                                       ),
+                                    ),
+                                  ),
+                                  TableCell(
+                                    verticalAlignment: TableCellVerticalAlignment.middle,
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                      child: SizedBox(
+                                        width: 248,
+                                        child: _DocumentReviewCell(app: app, onUpdated: _load),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            }),
+                          ],
+                        ),
                               ),
-                              DataCell(_DocumentReviewCell(app: app, onUpdated: _load)),
-                            ],
-                          );
-                        }).toList(),
-                      ),
+                            ),
+                          ),
+                        ),
+                        );
+                      },
                     ),
         ),
+      ],
+    );
+  }
+}
+
+/// Shows all attachments for an application (from storage). Falls back to DB primary or "No file".
+/// Expands row only when there are multiple files (or long content); single file stays compact.
+class _AttachmentCell extends StatelessWidget {
+  const _AttachmentCell({
+    required this.app,
+    required this.storageFiles,
+    this.onFileRemoved,
+  });
+
+  final RecruitmentApplication app;
+  final List<({String path, String fileName})>? storageFiles;
+  final VoidCallback? onFileRemoved;
+
+  /// Display name for storage files like "1736123456_0_Resume.pdf" -> "Resume.pdf"
+  static String displayName(String pathOrName) {
+    final name = pathOrName.contains('/') ? pathOrName.split('/').last : pathOrName;
+    final parts = name.split('_');
+    if (parts.length >= 3 && int.tryParse(parts[0]) != null && int.tryParse(parts[1]) != null) {
+      return parts.sublist(2).join('_');
+    }
+    return name;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final files = storageFiles ?? [];
+    if (files.isNotEmpty) {
+      // Expand row only when multiple files (or many files); single file = compact row
+      final shouldExpand = files.length > 1;
+      const minHeight = 48.0;
+      const maxHeight = 320.0;
+      const padding = 24.0;
+      final contentHeight = shouldExpand
+          ? (files.length * 36.0 + padding).clamp(minHeight, maxHeight)
+          : minHeight;
+      final useScroll = files.length > 8;
+      final column = Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: files
+            .map((f) => Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: _AttachmentRow(
+                    path: f.path,
+                    fileName: displayName(f.fileName),
+                    onRemove: onFileRemoved != null
+                        ? () => _removeFile(context, f.path, onFileRemoved!)
+                        : null,
+                  ),
+                ))
+            .toList(),
+      );
+      return SizedBox(
+        width: 268,
+        height: contentHeight,
+        child: useScroll
+            ? SingleChildScrollView(child: column)
+            : column,
+      );
+    }
+    if (app.attachmentPath != null && app.attachmentName != null) {
+      return _AttachmentRow(
+        path: app.attachmentPath!,
+        fileName: displayName(app.attachmentName!),
+        onRemove: null,
+      );
+    }
+    return Tooltip(
+      message: 'No file attached or sync from storage to see uploaded files.',
+      child: Text('No file', style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 13)),
+    );
+  }
+
+  static Future<void> _removeFile(BuildContext context, String path, VoidCallback onRefresh) async {
+    try {
+      await RecruitmentRepo.instance.deleteAttachment(path);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('File removed.')));
+        onRefresh();
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to remove file: $e')));
+      }
+    }
+  }
+}
+
+/// One attachment: download button + optional remove (admin).
+class _AttachmentRow extends StatelessWidget {
+  const _AttachmentRow({required this.path, required this.fileName, this.onRemove});
+
+  final String path;
+  final String fileName;
+  final VoidCallback? onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Expanded(
+          child: _DownloadAttachmentButton(path: path, fileName: fileName),
+        ),
+        if (onRemove != null)
+          IconButton(
+            icon: const Icon(Icons.close, size: 18),
+            onPressed: onRemove,
+            tooltip: 'Remove file',
+            style: IconButton.styleFrom(
+              padding: const EdgeInsets.all(4),
+              minimumSize: const Size(28, 28),
+              foregroundColor: Theme.of(context).colorScheme.error,
+            ),
+          ),
       ],
     );
   }
@@ -5457,8 +5666,8 @@ class _DocumentReviewCell extends StatelessWidget {
             style: FilledButton.styleFrom(
               backgroundColor: const Color(0xFFE85D04),
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              minimumSize: Size.zero,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              minimumSize: const Size(100, 38),
             ),
           ),
           OutlinedButton.icon(
@@ -5468,8 +5677,8 @@ class _DocumentReviewCell extends StatelessWidget {
             style: OutlinedButton.styleFrom(
               foregroundColor: const Color(0xFFC62828),
               side: const BorderSide(color: Color(0xFFC62828)),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              minimumSize: Size.zero,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              minimumSize: const Size(100, 38),
             ),
           ),
         ],
@@ -5519,11 +5728,17 @@ class _DownloadAttachmentButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return TextButton.icon(
-      onPressed: () => _onTap(context),
-      icon: const Icon(Icons.download_rounded, size: 18),
-      label: Text(fileName, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)),
-      style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy, padding: const EdgeInsets.symmetric(horizontal: 8)),
+    return Tooltip(
+      message: fileName,
+      child: TextButton.icon(
+        onPressed: () => _onTap(context),
+        icon: const Icon(Icons.download_rounded, size: 18),
+        label: SizedBox(
+          width: 240,
+          child: Text(fileName, overflow: TextOverflow.ellipsis, maxLines: 1, style: const TextStyle(fontSize: 13)),
+        ),
+        style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy, padding: const EdgeInsets.symmetric(horizontal: 8), alignment: Alignment.centerLeft),
+      ),
     );
   }
 }
@@ -6482,6 +6697,48 @@ class _ActionBrainstormingList extends StatelessWidget {
             ],
           );
         }).toList(),
+      ),
+    );
+  }
+}
+
+/// DocuTracker module placeholder — features to be announced.
+class _DocuTrackerPlaceholder extends StatelessWidget {
+  const _DocuTrackerPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    final isNarrow = MediaQuery.of(context).size.width < 500;
+    return Center(
+      child: Container(
+        padding: EdgeInsets.symmetric(horizontal: isNarrow ? 24 : 48, vertical: isNarrow ? 32 : 48),
+        margin: EdgeInsets.all(isNarrow ? 16 : 24),
+        decoration: BoxDecoration(
+          color: AppTheme.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 20, offset: const Offset(0, 8))],
+          border: Border.all(color: Colors.black.withOpacity(0.06)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: EdgeInsets.all(isNarrow ? 20 : 24),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryNavy.withOpacity(0.08),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.folder_rounded, size: isNarrow ? 44 : 56, color: AppTheme.primaryNavy.withOpacity(0.7)),
+            ),
+            SizedBox(height: isNarrow ? 20 : 24),
+            Text('DocuTracker', style: TextStyle(color: AppTheme.textPrimary, fontSize: isNarrow ? 18 : 22, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            Text('Features to be announced', style: TextStyle(color: AppTheme.primaryNavy, fontSize: 14, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 12),
+            Text('This module is coming soon. Stay tuned for updates.', style: TextStyle(color: AppTheme.textSecondary, fontSize: isNarrow ? 13 : 14), textAlign: TextAlign.center),
+          ],
+        ),
       ),
     );
   }

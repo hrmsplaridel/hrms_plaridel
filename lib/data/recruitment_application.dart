@@ -103,13 +103,33 @@ class RecruitmentRepo {
     await _client.from(RecruitmentApplication.tableName).update({'status': status, 'updated_at': DateTime.now().toIso8601String()}).eq('id', id);
   }
 
-  /// Upload attachment to storage and set path on application. Path = {applicationId}/{fileName}.
+  /// Upload a single attachment to storage and set path on application. Path = {applicationId}/{fileName}.
   Future<void> uploadAttachment(String applicationId, List<int> fileBytes, String fileName) async {
     final path = '$applicationId/$fileName';
     await _client.storage.from(RecruitmentApplication.storageBucket).uploadBinary(path, Uint8List.fromList(fileBytes));
     await _client.from(RecruitmentApplication.tableName).update({
       'attachment_path': path,
       'attachment_name': fileName,
+      'updated_at': DateTime.now().toIso8601String(),
+    }).eq('id', applicationId);
+  }
+
+  /// Upload multiple attachments to storage. Each file gets a unique path; application row is set to the first file.
+  Future<void> uploadAttachments(String applicationId, List<({List<int> bytes, String fileName})> files) async {
+    if (files.isEmpty) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    for (var i = 0; i < files.length; i++) {
+      final f = files[i];
+      final uniquePath = '$applicationId/${now}_${i}_${f.fileName}';
+      await _client.storage
+          .from(RecruitmentApplication.storageBucket)
+          .uploadBinary(uniquePath, Uint8List.fromList(f.bytes));
+    }
+    final first = files.first;
+    final firstPath = '$applicationId/${now}_0_${first.fileName}';
+    await _client.from(RecruitmentApplication.tableName).update({
+      'attachment_path': firstPath,
+      'attachment_name': first.fileName,
       'updated_at': DateTime.now().toIso8601String(),
     }).eq('id', applicationId);
   }
@@ -122,6 +142,11 @@ class RecruitmentRepo {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Remove an attachment file from storage (admin). Path is e.g. applicationId/filename.
+  Future<void> deleteAttachment(String path) async {
+    await _client.storage.from(RecruitmentApplication.storageBucket).remove([path]);
   }
 
   /// Thrown when storage listing is attempted without an authenticated session.

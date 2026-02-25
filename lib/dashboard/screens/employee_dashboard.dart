@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../landingpage/constants/app_theme.dart';
+import '../../widgets/user_avatar.dart';
+import 'profile_page.dart';
 import 'settings_page.dart';
 
 /// Employee dashboard reference: dark blue sidebar (HR branding), nav items,
@@ -22,6 +24,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     final user = Supabase.instance.client.auth.currentUser;
     final displayName = user?.userMetadata?['full_name'] as String? ?? user?.email?.split('@').first ?? 'Employee';
     final email = user?.email ?? '';
+    final avatarPath = user?.userMetadata?['avatar_path'] as String?;
     final width = MediaQuery.of(context).size.width;
     final isWide = width > 900;
     final contentPadding = width > 900 ? 24.0 : (width > 600 ? 20.0 : 16.0);
@@ -35,6 +38,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                 child: _EmployeeSidebar(
                   displayName: displayName,
                   selectedIndex: _selectedNavIndex,
+                  avatarPath: avatarPath,
                   onTap: (i) {
                     setState(() => _selectedNavIndex = i);
                     if (context.mounted) Navigator.of(context).pop();
@@ -48,18 +52,21 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
             _EmployeeSidebar(
               displayName: displayName,
               selectedIndex: _selectedNavIndex,
+              avatarPath: avatarPath,
               onTap: (i) => setState(() => _selectedNavIndex = i),
             ),
           Expanded(
             child: Column(
               children: [
-                _EmployeeTopBar(displayName: displayName, email: email),
+                _EmployeeTopBar(displayName: displayName, email: email, avatarPath: avatarPath, onProfileTap: () => setState(() => _selectedNavIndex = 1)),
                 Expanded(
                   child: SingleChildScrollView(
                     padding: EdgeInsets.all(contentPadding),
                     child: _selectedNavIndex == 0
                         ? _EmployeeDashboardContent(displayName: displayName)
-                        : _EmployeePlaceholderContent(title: _navItems[_selectedNavIndex]),
+                        : _selectedNavIndex == 1
+                            ? const ProfileContent()
+                            : _EmployeePlaceholderContent(title: _navItems[_selectedNavIndex]),
                   ),
                 ),
               ],
@@ -76,11 +83,13 @@ class _EmployeeSidebar extends StatelessWidget {
   const _EmployeeSidebar({
     required this.displayName,
     required this.selectedIndex,
+    this.avatarPath,
     required this.onTap,
   });
 
   final String displayName;
   final int selectedIndex;
+  final String? avatarPath;
   final ValueChanged<int> onTap;
 
   @override
@@ -178,10 +187,11 @@ class _EmployeeSidebar extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
             child: Row(
               children: [
-                CircleAvatar(
+                UserAvatar(
+                  avatarPath: avatarPath,
                   radius: 24,
                   backgroundColor: Colors.white.withOpacity(0.25),
-                  child: const Icon(Icons.person_rounded, color: Colors.white, size: 28),
+                  placeholderIconColor: Colors.white,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -262,10 +272,12 @@ class _EmployeeNavTile extends StatelessWidget {
 
 /// Light gray top bar: search, notifications (badge), settings, user.
 class _EmployeeTopBar extends StatelessWidget {
-  const _EmployeeTopBar({required this.displayName, required this.email});
+  const _EmployeeTopBar({required this.displayName, required this.email, this.avatarPath, this.onProfileTap});
 
   final String displayName;
   final String email;
+  final String? avatarPath;
+  final VoidCallback? onProfileTap;
 
   @override
   Widget build(BuildContext context) {
@@ -312,7 +324,7 @@ class _EmployeeTopBar extends StatelessWidget {
             ],
           ),
           const SizedBox(width: 8),
-          _EmployeeUserMenu(displayName: displayName, email: email, isCompact: isCompact),
+          _EmployeeUserMenu(displayName: displayName, email: email, avatarPath: avatarPath, isCompact: isCompact, onProfileTap: onProfileTap),
         ],
       ),
     );
@@ -320,11 +332,13 @@ class _EmployeeTopBar extends StatelessWidget {
 }
 
 class _EmployeeUserMenu extends StatelessWidget {
-  const _EmployeeUserMenu({required this.displayName, required this.email, this.isCompact = false});
+  const _EmployeeUserMenu({required this.displayName, required this.email, this.avatarPath, this.isCompact = false, this.onProfileTap});
 
   final String displayName;
   final String email;
+  final String? avatarPath;
   final bool isCompact;
+  final VoidCallback? onProfileTap;
 
   @override
   Widget build(BuildContext context) {
@@ -339,7 +353,7 @@ class _EmployeeUserMenu extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircleAvatar(radius: isCompact ? 16 : 18, backgroundColor: AppTheme.primaryNavy, child: const Icon(Icons.person_rounded, color: Colors.white, size: 20)),
+            UserAvatar(avatarPath: avatarPath, radius: isCompact ? 16 : 18),
             if (!isCompact) ...[const SizedBox(width: 10), Text(displayName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: AppTheme.textPrimary)), const SizedBox(width: 4), Icon(Icons.keyboard_arrow_down_rounded, size: 20, color: AppTheme.textSecondary)],
           ],
         ),
@@ -354,7 +368,7 @@ class _EmployeeUserMenu extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  CircleAvatar(radius: 28, backgroundColor: AppTheme.primaryNavy.withOpacity(0.12), child: Icon(Icons.person_rounded, color: AppTheme.primaryNavy, size: 28)),
+                  UserAvatar(avatarPath: avatarPath, radius: 28, backgroundColor: AppTheme.primaryNavy.withOpacity(0.12), placeholderIconColor: AppTheme.primaryNavy),
                   const SizedBox(width: 14),
                   Expanded(
                     child: Column(
@@ -384,7 +398,7 @@ class _EmployeeUserMenu extends StatelessWidget {
           if (context.mounted) Navigator.of(context).popUntil((route) => route.isFirst);
         }
         if (value == 'profile') {
-          // TODO: navigate when implemented
+          onProfileTap?.call();
         }
         if (value == 'settings') {
           Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage()));

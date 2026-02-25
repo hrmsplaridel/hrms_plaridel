@@ -26,28 +26,6 @@ class SettingsPage extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _SettingsSection(
-              title: 'Account',
-              children: [
-                ListTile(
-                  leading: Icon(Icons.person_outline_rounded, color: AppTheme.primaryNavy),
-                  title: Text('Profile', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w500)),
-                  subtitle: Text('Name, email, and contact', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
-                  trailing: const Icon(Icons.chevron_right_rounded, color: AppTheme.textSecondary),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  onTap: () {},
-                ),
-                ListTile(
-                  leading: Icon(Icons.lock_outline_rounded, color: AppTheme.primaryNavy),
-                  title: Text('Password', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w500)),
-                  subtitle: Text('Change your password', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
-                  trailing: const Icon(Icons.chevron_right_rounded, color: AppTheme.textSecondary),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  onTap: () {},
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            _SettingsSection(
               title: 'Preferences',
               children: [
                 ListTile(

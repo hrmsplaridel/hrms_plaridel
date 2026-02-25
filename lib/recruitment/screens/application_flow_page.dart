@@ -36,7 +36,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
   final _continueEmailController = TextEditingController();
-  PlatformFile? _pickedFile;
+  final List<PlatformFile> _pickedFiles = [];
   List<String>? _beiQuestionsLoaded;
   List<TextEditingController> _beiControllers = [];
   bool _submitting = false;
@@ -78,10 +78,20 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     }
   }
 
-  Future<void> _pickFile() async {
-    final result = await FilePicker.platform.pickFiles(allowMultiple: false, type: FileType.any);
+  Future<void> _pickFiles() async {
+    final result = await FilePicker.platform.pickFiles(allowMultiple: true, type: FileType.any);
     if (result != null && result.files.isNotEmpty && mounted) {
-      setState(() => _pickedFile = result.files.first);
+      setState(() {
+        for (final f in result.files) {
+          if (f.name.isNotEmpty && f.bytes != null) _pickedFiles.add(f);
+        }
+      });
+    }
+  }
+
+  void _removeFile(int index) {
+    if (index >= 0 && index < _pickedFiles.length) {
+      setState(() => _pickedFiles.removeAt(index));
     }
   }
 
@@ -102,9 +112,17 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         resumeNotes: null,
         status: 'submitted',
       ));
-      if (_pickedFile != null && (_pickedFile!.bytes != null) && _pickedFile!.name.isNotEmpty && mounted) {
+      final filesToUpload = _pickedFiles.where((f) => f.bytes != null && f.name.isNotEmpty).toList();
+      if (filesToUpload.isNotEmpty && mounted) {
         try {
-          await RecruitmentRepo.instance.uploadAttachment(id, _pickedFile!.bytes!, _pickedFile!.name);
+          if (filesToUpload.length == 1) {
+            await RecruitmentRepo.instance.uploadAttachment(id, filesToUpload.first.bytes!, filesToUpload.first.name);
+          } else {
+            await RecruitmentRepo.instance.uploadAttachments(
+              id,
+              filesToUpload.map((f) => (bytes: f.bytes!, fileName: f.name)).toList(),
+            );
+          }
         } catch (e) {
           if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Application saved but file upload failed: $e')));
         }
@@ -458,12 +476,12 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         const SizedBox(height: 16),
         TextField(controller: _phoneController, decoration: _dec('Phone (optional)'), keyboardType: TextInputType.phone),
         const SizedBox(height: 16),
-        Text('Attach file (resume, document)', style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w500)),
+        Text('Attach files (resume, documents)', style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w500)),
         const SizedBox(height: 8),
         OutlinedButton.icon(
-          onPressed: _submitting ? null : _pickFile,
+          onPressed: _submitting ? null : _pickFiles,
           icon: const Icon(Icons.attach_file, size: 20),
-          label: Text(_pickedFile != null ? _pickedFile!.name : 'Choose file (optional)'),
+          label: Text(_pickedFiles.isEmpty ? 'Choose files (optional)' : 'Add more files'),
           style: OutlinedButton.styleFrom(
             foregroundColor: AppTheme.primaryNavy,
             side: const BorderSide(color: AppTheme.primaryNavy),
@@ -471,19 +489,31 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             alignment: Alignment.centerLeft,
           ),
         ),
-        if (_pickedFile != null) ...[
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Icon(Icons.check_circle, size: 18, color: Colors.green.shade700),
-              const SizedBox(width: 8),
-              Expanded(child: Text(_pickedFile!.name, style: TextStyle(color: AppTheme.textSecondary, fontSize: 13), overflow: TextOverflow.ellipsis)),
-              TextButton(
-                onPressed: _submitting ? null : () => setState(() => _pickedFile = null),
-                child: const Text('Remove'),
+        if (_pickedFiles.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          ...List.generate(_pickedFiles.length, (i) {
+            final f = _pickedFiles[i];
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  Icon(Icons.check_circle, size: 18, color: Colors.green.shade700),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      f.name,
+                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _submitting ? null : () => _removeFile(i),
+                    child: const Text('Remove'),
+                  ),
+                ],
               ),
-            ],
-          ),
+            );
+          }),
         ],
         const SizedBox(height: 28),
         SizedBox(
