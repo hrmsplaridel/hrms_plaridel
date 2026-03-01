@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../providers/auth_provider.dart';
+import '../../dtr/dtr_provider.dart';
 import '../../widgets/user_avatar.dart';
 import 'profile_page.dart';
 import 'settings_page.dart';
@@ -77,9 +77,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                   child: SingleChildScrollView(
                     padding: EdgeInsets.all(contentPadding),
                     child: _selectedNavIndex == 0
-                        ? _EmployeeDashboardContent(displayName: displayName)
+                        ? _EmployeeDashboardContent(
+                            displayName: displayName,
+                            onViewAttendance: () => setState(() => _selectedNavIndex = 2),
+                          )
                         : _selectedNavIndex == 1
                         ? const ProfileContent()
+                        : _selectedNavIndex == 2
+                        ? const _EmployeeAttendanceContent()
                         : _EmployeePlaceholderContent(
                             title: _navItems[_selectedNavIndex],
                           ),
@@ -686,10 +691,31 @@ class _EmployeeUserMenu extends StatelessWidget {
 }
 
 /// Main content: welcome, 4 cards (Clock In, Attendance, Leave Balance, My Payslip), Announcements, Upcoming Leave, Attendance Overview.
-class _EmployeeDashboardContent extends StatelessWidget {
-  const _EmployeeDashboardContent({required this.displayName});
+class _EmployeeDashboardContent extends StatefulWidget {
+  const _EmployeeDashboardContent({
+    required this.displayName,
+    this.onViewAttendance,
+  });
 
   final String displayName;
+  final VoidCallback? onViewAttendance;
+
+  @override
+  State<_EmployeeDashboardContent> createState() => _EmployeeDashboardContentState();
+}
+
+class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<DtrProvider>().loadTodayRecord();
+      final now = DateTime.now();
+      final start = DateTime(now.year, now.month, 1);
+      final end = DateTime(now.year, now.month + 1, 0);
+      context.read<DtrProvider>().loadTimeRecordsForUser(startDate: start, endDate: end);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -698,7 +724,7 @@ class _EmployeeDashboardContent extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Welcome back, $displayName!',
+          'Welcome back, ${widget.displayName}!',
           style: TextStyle(
             color: AppTheme.textPrimary,
             fontSize: isNarrow ? 22 : 26,
@@ -714,7 +740,10 @@ class _EmployeeDashboardContent extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 24),
-        _EmployeeSummaryCards(isNarrow: isNarrow),
+        _EmployeeSummaryCards(
+          isNarrow: isNarrow,
+          onViewAttendance: widget.onViewAttendance,
+        ),
         const SizedBox(height: 24),
         _EmployeeAnnouncementsCard(),
         const SizedBox(height: 24),
@@ -728,9 +757,13 @@ class _EmployeeDashboardContent extends StatelessWidget {
 }
 
 class _EmployeeSummaryCards extends StatelessWidget {
-  const _EmployeeSummaryCards({required this.isNarrow});
+  const _EmployeeSummaryCards({
+    required this.isNarrow,
+    this.onViewAttendance,
+  });
 
   final bool isNarrow;
+  final VoidCallback? onViewAttendance;
 
   @override
   Widget build(BuildContext context) {
@@ -739,7 +772,7 @@ class _EmployeeSummaryCards extends StatelessWidget {
     final twoRows = w < 800 && !singleColumn;
 
     Widget clockIn = _ClockInCard();
-    Widget attendance = _AttendanceCard();
+    Widget attendance = _AttendanceCard(onViewAttendance: onViewAttendance);
     Widget leaveBalance = _LeaveBalanceCard();
     Widget payslip = _PayslipCard();
 
@@ -794,139 +827,194 @@ class _EmployeeSummaryCards extends StatelessWidget {
 class _ClockInCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
+    return Consumer<DtrProvider>(
+      builder: (context, dtr, _) {
+        final record = dtr.todayRecord;
+        final hasClockedIn = record != null && record.timeIn != null;
+        final hasClockedOut = record != null && record.timeOut != null;
+        String timeText = '—';
+        if (record?.timeIn != null) {
+          final local = record!.timeIn!.toLocal();
+          timeText = '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+        }
+
+        return Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: AppTheme.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Clock In',
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            '—',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 26,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Location: —',
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: () {},
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.primaryNavy,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                hasClockedIn ? (hasClockedOut ? 'Clocked Out' : 'Clocked In') : 'Clock In',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
-              child: const Text('Clock In'),
-            ),
+              const SizedBox(height: 12),
+              Text(
+                timeText,
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 26,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Location: —',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: dtr.loading
+                      ? null
+                      : () async {
+                          bool ok = false;
+                          if (hasClockedIn && !hasClockedOut) {
+                            ok = await dtr.clockOut();
+                          } else if (!hasClockedIn) {
+                            ok = await dtr.clockIn();
+                          }
+                          if (context.mounted) {
+                            if (dtr.error != null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text(dtr.error!)),
+                              );
+                            } else if (ok) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(hasClockedIn && !hasClockedOut
+                                      ? 'Clocked out successfully.'
+                                      : 'Clocked in successfully.'),
+                                ),
+                              );
+                            }
+                          }
+                        },
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.primaryNavy,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  child: dtr.loading
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : Text(hasClockedIn && !hasClockedOut ? 'Clock Out' : 'Clock In'),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
 
 class _AttendanceCard extends StatelessWidget {
+  const _AttendanceCard({this.onViewAttendance});
+
+  final VoidCallback? onViewAttendance;
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Attendance',
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(
-                '—',
-                style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 28,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Present Days',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+    return Consumer<DtrProvider>(
+      builder: (context, dtr, _) {
+        final presentCount = dtr.timeRecords.where((r) => r.timeIn != null).length;
+        final now = DateTime.now();
+        final monthLabel = '${now.year}-${now.month.toString().padLeft(2, '0')}';
+
+        return Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: AppTheme.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Text(
-            '—',
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Attendance',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Text(
+                    '$presentCount',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Present Days',
+                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                monthLabel,
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+              ),
+              const SizedBox(height: 14),
+              TextButton(
+                onPressed: onViewAttendance,
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.primaryNavy,
+                  padding: EdgeInsets.zero,
+                  minimumSize: Size.zero,
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('View details'),
+                    SizedBox(width: 4),
+                    Icon(Icons.arrow_forward_rounded, size: 16),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 14),
-          TextButton(
-            onPressed: () {},
-            style: TextButton.styleFrom(
-              foregroundColor: AppTheme.primaryNavy,
-              padding: EdgeInsets.zero,
-              minimumSize: Size.zero,
-            ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('Status'),
-                SizedBox(width: 4),
-                Icon(Icons.arrow_forward_rounded, size: 16),
-              ],
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -1358,6 +1446,183 @@ class _ChartLegend extends StatelessWidget {
           label,
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
         ),
+      ],
+    );
+  }
+}
+
+/// My Attendance: employee's own time records.
+class _EmployeeAttendanceContent extends StatefulWidget {
+  const _EmployeeAttendanceContent();
+
+  @override
+  State<_EmployeeAttendanceContent> createState() => _EmployeeAttendanceContentState();
+}
+
+class _EmployeeAttendanceContentState extends State<_EmployeeAttendanceContent> {
+  DateTime? _startDate;
+  DateTime? _endDate;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  Future<void> _load() async {
+    final dtr = context.read<DtrProvider>();
+    final now = DateTime.now();
+    final start = _startDate ?? DateTime(now.year, now.month, 1);
+    final end = _endDate ?? DateTime(now.year, now.month + 1, 0);
+    await dtr.loadTimeRecordsForUser(startDate: start, endDate: end);
+  }
+
+  static String _formatTime(DateTime? dt) {
+    if (dt == null) return '—';
+    final local = dt.toLocal();
+    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
+
+  static String _formatDate(DateTime d) {
+    return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dtr = context.watch<DtrProvider>();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'My Attendance',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'View your time-in/out records.',
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+        ),
+        const SizedBox(height: 24),
+        Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            OutlinedButton.icon(
+              onPressed: () async {
+                final date = await showDatePicker(
+                  context: context,
+                  initialDate: _startDate ?? DateTime.now(),
+                  firstDate: DateTime(2020),
+                  lastDate: DateTime(2030),
+                );
+                if (date != null) {
+                  setState(() => _startDate = date);
+                  _load();
+                }
+              },
+              icon: const Icon(Icons.calendar_today_rounded, size: 18),
+              label: Text(_startDate != null ? _formatDate(_startDate!) : 'Start date'),
+            ),
+            OutlinedButton.icon(
+              onPressed: () async {
+                final date = await showDatePicker(
+                  context: context,
+                  initialDate: _endDate ?? DateTime.now(),
+                  firstDate: DateTime(2020),
+                  lastDate: DateTime(2030),
+                );
+                if (date != null) {
+                  setState(() => _endDate = date);
+                  _load();
+                }
+              },
+              icon: const Icon(Icons.calendar_today_rounded, size: 18),
+              label: Text(_endDate != null ? _formatDate(_endDate!) : 'End date'),
+            ),
+            TextButton.icon(
+              onPressed: () {
+                setState(() {
+                  _startDate = null;
+                  _endDate = null;
+                });
+                _load();
+              },
+              icon: const Icon(Icons.clear_rounded, size: 18),
+              label: const Text('Reset'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+        if (dtr.loading)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: CircularProgressIndicator(),
+            ),
+          ),
+        if (!dtr.loading && dtr.timeRecords.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: AppTheme.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.black.withOpacity(0.06)),
+            ),
+            child: Center(
+              child: Text(
+                'No time records for the selected period.',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+              ),
+            ),
+          ),
+        if (!dtr.loading && dtr.timeRecords.isNotEmpty)
+          Container(
+            decoration: BoxDecoration(
+              color: AppTheme.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.black.withOpacity(0.06)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                headingRowColor:
+                    WidgetStateProperty.all(AppTheme.lightGray.withOpacity(0.5)),
+                columns: const [
+                  DataColumn(label: Text('Date')),
+                  DataColumn(label: Text('Time In')),
+                  DataColumn(label: Text('Time Out')),
+                  DataColumn(label: Text('Hours')),
+                ],
+                rows: dtr.timeRecords.map((r) {
+                  final timeIn = r.timeIn?.toLocal();
+                  final timeOut = r.timeOut?.toLocal();
+                  final hours = r.totalHours != null
+                      ? '${r.totalHours!.toStringAsFixed(1)} h'
+                      : '—';
+                  return DataRow(
+                    cells: [
+                      DataCell(Text(_formatDate(r.recordDate))),
+                      DataCell(Text(_formatTime(timeIn))),
+                      DataCell(Text(_formatTime(timeOut))),
+                      DataCell(Text(hours)),
+                    ],
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
       ],
     );
   }

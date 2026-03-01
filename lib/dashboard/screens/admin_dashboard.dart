@@ -22,6 +22,7 @@ import '../../widgets/user_avatar.dart';
 import '../../login/models/login_role.dart';
 import 'profile_page.dart';
 import 'settings_page.dart';
+import '../../dtr/dtr_main.dart';
 
 /// Dashboard accent colors for summary cards and accents (orange theme).
 class _DashboardColors {
@@ -57,7 +58,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final email = auth.email.isNotEmpty ? auth.email : 'Admin';
-    final displayName = auth.displayName.isNotEmpty ? auth.displayName : 'Admin';
+    final displayName = auth.displayName.isNotEmpty
+        ? auth.displayName
+        : 'Admin';
     final avatarPath = auth.avatarPath;
     final width = MediaQuery.of(context).size.width;
     final isWide = width > 900;
@@ -113,6 +116,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           ? const _RspContent()
                           : _selectedNavIndex == 2
                           ? const _LdContent()
+                          : _selectedNavIndex == 3
+                          ? const DtrMain()
                           : _selectedNavIndex == 4
                           ? const _DocuTrackerPlaceholder()
                           : _selectedNavIndex == 5
@@ -294,10 +299,7 @@ class _Sidebar extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  UserAvatar(
-                    avatarPath: avatarPath,
-                    radius: 22,
-                  ),
+                  UserAvatar(avatarPath: avatarPath, radius: 22),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -607,10 +609,7 @@ class _AdminDropdown extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            UserAvatar(
-              avatarPath: avatarPath,
-              radius: compact ? 17 : 20,
-            ),
+            UserAvatar(avatarPath: avatarPath, radius: compact ? 17 : 20),
             if (!compact) ...[
               const SizedBox(width: 12),
               Text(
@@ -853,7 +852,7 @@ class _DashboardContent extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Welcome back, Admin!',
+                                'Welcome back, Admin!- Hello Boi Paldooooooooooo',
                                 style: TextStyle(
                                   color: AppTheme.textPrimary,
                                   fontSize: 22,

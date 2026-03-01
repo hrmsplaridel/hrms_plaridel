@@ -794,3 +794,80 @@ comment on table public.action_brainstorming_coaching_entries is 'L&D: Action Br
 Each element in `rows` has: `name`, `stop_doing`, `do_less_of`, `keep_doing`, `do_more_of`, `start_doing`, `goal` (all optional text).
 
 After running Query 7a–7j, the RSP and L&D dashboard can list, create, and edit all RSP and L&D forms. All forms use empty inputs by default (no names or values pre-filled).
+
+---
+
+## Part 8: DTR (Daily Time Record)
+
+### Query 8: Create `time_records` table
+
+Stores employee time-in/out records for attendance tracking. Employees can clock in/out; admins can view, add, edit, and delete all records.
+
+Run this in **SQL Editor**:
+
+```sql
+create table if not exists public.time_records (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  record_date date not null,
+  time_in timestamptz,
+  time_out timestamptz,
+  total_hours numeric(5,2),
+  status text check (status in ('present', 'late', 'absent', 'on_leave') or status is null),
+  remarks text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  unique(user_id, record_date)
+);
+
+alter table public.time_records enable row level security;
+
+-- Employees can read own records
+create policy "Users can read own time records"
+  on public.time_records for select
+  using (auth.uid() = user_id);
+
+-- Employees can insert own records (clock in)
+create policy "Users can insert own time records"
+  on public.time_records for insert
+  with check (auth.uid() = user_id);
+
+-- Employees can update own records (clock out)
+create policy "Users can update own time records"
+  on public.time_records for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+-- Admins can do everything
+create policy "Admins can manage all time records"
+  on public.time_records for all
+  using ((select role from public.profiles where id = auth.uid()) = 'admin')
+  with check ((select role from public.profiles where id = auth.uid()) = 'admin');
+
+create index idx_time_records_user_date on public.time_records (user_id, record_date desc);
+create index idx_time_records_record_date on public.time_records (record_date desc);
+comment on table public.time_records is 'DTR: daily time-in/out records per employee. status: present | late | absent | on_leave.';
+```
+
+### Query 8b: Create `cut_off_periods` table (optional, for payroll cut-off)
+
+Define payroll cut-off periods. When locked, DTR rows in that period cannot be edited.
+
+```sql
+create table if not exists public.cut_off_periods (
+  id uuid primary key default gen_random_uuid(),
+  start_date date not null,
+  end_date date not null,
+  locked boolean default false,
+  created_at timestamptz default now()
+);
+
+alter table public.cut_off_periods enable row level security;
+
+create policy "Authenticated can manage cut_off_periods"
+  on public.cut_off_periods for all
+  using (auth.role() = 'authenticated')
+  with check (auth.role() = 'authenticated');
+
+comment on table public.cut_off_periods is 'DTR: payroll cut-off periods. When locked, DTR in that range cannot be edited.';
+```

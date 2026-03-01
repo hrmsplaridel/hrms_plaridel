@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'landingpage/constants/app_theme.dart';
 import 'landingpage/screens/landing_page.dart';
 import 'providers/auth_provider.dart';
+import 'dtr/dtr_provider.dart';
 import 'supabase/supabase_config.dart';
 
 /// Used by [LandingPage] to refetch job vacancy data when user returns from admin.
@@ -31,6 +32,7 @@ class MyApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => DtrProvider()),
       ],
       child: MaterialApp(
       title: 'HRMS Plaridel',
