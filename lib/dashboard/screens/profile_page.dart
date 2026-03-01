@@ -2,8 +2,10 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../landingpage/constants/app_theme.dart';
+import '../../providers/auth_provider.dart';
 
 const String _avatarBucket = 'avatars';
 
@@ -58,20 +60,19 @@ class _ProfileContentState extends State<ProfileContent> {
   bool _obscureCurrent = true;
   bool _obscureNew = true;
   bool _obscureConfirm = true;
+  bool _loadedFromAuth = false;
 
   @override
-  void initState() {
-    super.initState();
-    _loadUser();
-    _loadAvatarUrl();
-  }
-
-  void _loadUser() {
-    final user = Supabase.instance.client.auth.currentUser;
-    if (user != null) {
-      final name = user.userMetadata?['full_name'] as String? ?? user.email?.split('@').first ?? '';
-      _nameController.text = name;
-      _avatarPath = user.userMetadata?['avatar_path'] as String?;
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_loadedFromAuth) {
+      final auth = context.read<AuthProvider>();
+      if (auth.user != null) {
+        _nameController.text = auth.displayName;
+        _avatarPath = auth.avatarPath;
+        _loadedFromAuth = true;
+        _loadAvatarUrl();
+      }
     }
   }
 
@@ -96,7 +97,7 @@ class _ProfileContentState extends State<ProfileContent> {
   }
 
   Future<void> _pickAndUploadAvatar() async {
-    final user = Supabase.instance.client.auth.currentUser;
+    final user = context.read<AuthProvider>().user;
     if (user == null) return;
     final result = await FilePicker.platform.pickFiles(type: FileType.image, allowMultiple: false);
     if (result == null || result.files.isEmpty || result.files.single.bytes == null) return;
@@ -109,6 +110,7 @@ class _ProfileContentState extends State<ProfileContent> {
       await Supabase.instance.client.storage.from(_avatarBucket).uploadBinary(path, Uint8List.fromList(bytes), fileOptions: const FileOptions(upsert: true));
       await Supabase.instance.client.auth.updateUser(UserAttributes(data: {'avatar_path': path}));
       if (mounted) {
+        await context.read<AuthProvider>().refreshUser();
         setState(() { _avatarPath = path; _imageLoading = false; });
         await _loadAvatarUrl();
         if (mounted) setState(() => _message = 'Profile image updated');
@@ -127,7 +129,10 @@ class _ProfileContentState extends State<ProfileContent> {
     setState(() { _loading = true; _message = null; });
     try {
       await Supabase.instance.client.auth.updateUser(UserAttributes(data: {'full_name': name}));
-      if (mounted) setState(() { _loading = false; _message = 'Profile updated'; });
+      if (mounted) {
+        await context.read<AuthProvider>().refreshUser();
+        setState(() { _loading = false; _message = 'Profile updated'; });
+      }
     } catch (e) {
       if (mounted) setState(() { _loading = false; _message = 'Failed: $e'; });
     }
@@ -148,6 +153,7 @@ class _ProfileContentState extends State<ProfileContent> {
     try {
       await Supabase.instance.client.auth.updateUser(UserAttributes(password: newPass));
       if (mounted) {
+        await context.read<AuthProvider>().refreshUser();
         _currentPasswordController.clear();
         _newPasswordController.clear();
         _confirmPasswordController.clear();
@@ -160,8 +166,7 @@ class _ProfileContentState extends State<ProfileContent> {
 
   @override
   Widget build(BuildContext context) {
-    final user = Supabase.instance.client.auth.currentUser;
-    final email = user?.email ?? '';
+    final email = context.watch<AuthProvider>().email;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
