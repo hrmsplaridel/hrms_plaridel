@@ -94,7 +94,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
   int _selectedMonth = DateTime.now().month;
   int _selectedYear = DateTime.now().year;
   String? _selectedUserId;
-  bool _showHardcodedPreview = true;
+  final bool _showHardcodedPreview = false;
   bool _bannerDismissed = false;
 
   @override
@@ -154,9 +154,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
     final isHardcodedPreview =
         dtr.timeRecords.isEmpty && displayRecords.isNotEmpty;
 
-    return SingleChildScrollView(
-      child: Column(
+    return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Text(
             'Time Logs',
@@ -249,7 +249,15 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
           LayoutBuilder(
             builder: (context, constraints) {
               final isNarrow = constraints.maxWidth < 700;
-              return Wrap(
+              final boundedHeight = constraints.maxHeight.isFinite
+                  ? constraints.maxHeight
+                  : 300.0;
+              return ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: constraints.maxWidth,
+                  maxHeight: boundedHeight,
+                ),
+                child: Wrap(
                 spacing: 12,
                 runSpacing: 8,
                 children: [
@@ -338,6 +346,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                     child: const Text('RESET'),
                   ),
                 ],
+                ),
               );
             },
           ),
@@ -468,7 +477,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -695,7 +704,6 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
               ),
             ),
         ],
-      ),
     );
   }
 

@@ -23,6 +23,12 @@ import '../../login/models/login_role.dart';
 import 'profile_page.dart';
 import 'settings_page.dart';
 import '../../dtr/dtr_main.dart';
+import '../../dtr/dtr_routes.dart';
+import '../manage_employee.dart';
+import '../manage_assignment.dart';
+import '../manage_department.dart';
+import '../manage_position.dart';
+import '../manage_shift.dart';
 
 /// Dashboard accent colors for summary cards and accents (orange theme).
 class _DashboardColors {
@@ -45,10 +51,15 @@ class AdminDashboard extends StatefulWidget {
 
 class _AdminDashboardState extends State<AdminDashboard> {
   int _selectedNavIndex = 0;
+  int _dtrSubIndex = 2; // 0=Dashboard, 1=Time Logs, 2=Reports (default to Tardiness Report)
+  bool _dtrExpanded = false;
+  int _manageSubIndex = 0; // 0=Employees, 1=Assignment, 2=Department, 3=Position, 4=Shift
+  bool _manageExpanded = false;
   static const _navItems = [
     'Dashboard',
     'RSP',
     'L&D',
+    'Manage',
     'DTR',
     'DocuTracker',
     'Create Account',
@@ -74,9 +85,45 @@ class _AdminDashboardState extends State<AdminDashboard> {
               child: SafeArea(
                 child: _Sidebar(
                   selectedIndex: _selectedNavIndex,
+                  dtrExpanded: _dtrExpanded,
+                  dtrSubIndex: _dtrSubIndex,
+                  manageExpanded: _manageExpanded,
+                  manageSubIndex: _manageSubIndex,
                   avatarPath: avatarPath,
                   onTap: (i) {
                     setState(() => _selectedNavIndex = i);
+                    if (context.mounted) Navigator.of(context).pop();
+                  },
+                  onDtrTap: () {
+                    setState(() {
+                      _selectedNavIndex = 4;
+                      _dtrSubIndex = 2;
+                      _dtrExpanded = !_dtrExpanded;
+                    });
+                    if (context.mounted) Navigator.of(context).pop();
+                  },
+                  onDtrSubTap: (subIndex) {
+                    setState(() {
+                      _selectedNavIndex = 4;
+                      _dtrSubIndex = subIndex;
+                      _dtrExpanded = true;
+                    });
+                    if (context.mounted) Navigator.of(context).pop();
+                  },
+                  onManageTap: () {
+                    setState(() {
+                      _selectedNavIndex = 3;
+                      _manageSubIndex = 0;
+                      _manageExpanded = !_manageExpanded;
+                    });
+                    if (context.mounted) Navigator.of(context).pop();
+                  },
+                  onManageSubTap: (subIndex) {
+                    setState(() {
+                      _selectedNavIndex = 3;
+                      _manageSubIndex = subIndex;
+                      _manageExpanded = true;
+                    });
                     if (context.mounted) Navigator.of(context).pop();
                   },
                 ),
@@ -87,8 +134,40 @@ class _AdminDashboardState extends State<AdminDashboard> {
           if (isWide)
             _Sidebar(
               selectedIndex: _selectedNavIndex,
+              dtrExpanded: _dtrExpanded,
+              dtrSubIndex: _dtrSubIndex,
+              manageExpanded: _manageExpanded,
+              manageSubIndex: _manageSubIndex,
               avatarPath: avatarPath,
               onTap: (i) => setState(() => _selectedNavIndex = i),
+              onDtrTap: () {
+                setState(() {
+                  _selectedNavIndex = 4;
+                  _dtrSubIndex = 2;
+                  _dtrExpanded = !_dtrExpanded;
+                });
+              },
+              onDtrSubTap: (subIndex) {
+                setState(() {
+                  _selectedNavIndex = 4;
+                  _dtrSubIndex = subIndex;
+                  _dtrExpanded = true;
+                });
+              },
+              onManageTap: () {
+                setState(() {
+                  _selectedNavIndex = 3;
+                  _manageSubIndex = 0;
+                  _manageExpanded = !_manageExpanded;
+                });
+              },
+              onManageSubTap: (subIndex) {
+                setState(() {
+                  _selectedNavIndex = 3;
+                  _manageSubIndex = subIndex;
+                  _manageExpanded = true;
+                });
+              },
             ),
           Expanded(
             child: Container(
@@ -117,10 +196,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           : _selectedNavIndex == 2
                           ? const _LdContent()
                           : _selectedNavIndex == 3
-                          ? const DtrMain()
+                          ? _ManageContent(subIndex: _manageSubIndex)
                           : _selectedNavIndex == 4
-                          ? const _DocuTrackerPlaceholder()
+                          ? DtrMain(
+                              section: DtrRoutes.sectionFromIndex(_dtrSubIndex),
+                            )
                           : _selectedNavIndex == 5
+                          ? const _DocuTrackerPlaceholder()
+                          : _selectedNavIndex == 6
                           ? const _AdminSignUpContent()
                           : _PlaceholderContent(
                               title: _navItems[_selectedNavIndex],
@@ -140,13 +223,29 @@ class _AdminDashboardState extends State<AdminDashboard> {
 class _Sidebar extends StatelessWidget {
   const _Sidebar({
     required this.selectedIndex,
+    required this.dtrExpanded,
+    required this.dtrSubIndex,
+    required this.manageExpanded,
+    required this.manageSubIndex,
     this.avatarPath,
     required this.onTap,
+    required this.onDtrTap,
+    required this.onDtrSubTap,
+    required this.onManageTap,
+    required this.onManageSubTap,
   });
 
   final int selectedIndex;
+  final bool dtrExpanded;
+  final int dtrSubIndex;
+  final bool manageExpanded;
+  final int manageSubIndex;
   final String? avatarPath;
   final ValueChanged<int> onTap;
+  final VoidCallback onDtrTap;
+  final ValueChanged<int> onDtrSubTap;
+  final VoidCallback onManageTap;
+  final ValueChanged<int> onManageSubTap;
 
   @override
   Widget build(BuildContext context) {
@@ -251,43 +350,59 @@ class _Sidebar extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 28),
-          _NavTile(
-            icon: Icons.dashboard_rounded,
-            label: 'Dashboard',
-            selected: selectedIndex == 0,
-            onTap: () => onTap(0),
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _NavTile(
+                    icon: Icons.dashboard_rounded,
+                    label: 'Dashboard',
+                    selected: selectedIndex == 0,
+                    onTap: () => onTap(0),
+                  ),
+                  _NavTile(
+                    icon: Icons.how_to_reg_rounded,
+                    label: 'RSP',
+                    selected: selectedIndex == 1,
+                    onTap: () => onTap(1),
+                  ),
+                  _NavTile(
+                    icon: Icons.school_rounded,
+                    label: 'L&D',
+                    selected: selectedIndex == 2,
+                    onTap: () => onTap(2),
+                  ),
+                  _ManageNavSection(
+                    expanded: manageExpanded,
+                    selected: selectedIndex == 3,
+                    subIndex: manageSubIndex,
+                    onManageTap: onManageTap,
+                    onSubTap: onManageSubTap,
+                  ),
+                  _DtrNavSection(
+                    expanded: dtrExpanded,
+                    selected: selectedIndex == 4,
+                    subIndex: dtrSubIndex,
+                    onDtrTap: onDtrTap,
+                    onSubTap: onDtrSubTap,
+                  ),
+                  _NavTile(
+                    icon: Icons.folder_rounded,
+                    label: 'DocuTracker',
+                    selected: selectedIndex == 5,
+                    onTap: () => onTap(5),
+                  ),
+                  _NavTile(
+                    icon: Icons.person_add_rounded,
+                    label: 'Create Account',
+                    selected: selectedIndex == 6,
+                    onTap: () => onTap(6),
+                  ),
+                ],
+              ),
+            ),
           ),
-          _NavTile(
-            icon: Icons.how_to_reg_rounded,
-            label: 'RSP',
-            selected: selectedIndex == 1,
-            onTap: () => onTap(1),
-          ),
-          _NavTile(
-            icon: Icons.school_rounded,
-            label: 'L&D',
-            selected: selectedIndex == 2,
-            onTap: () => onTap(2),
-          ),
-          _NavTile(
-            icon: Icons.schedule_rounded,
-            label: 'DTR',
-            selected: selectedIndex == 3,
-            onTap: () => onTap(3),
-          ),
-          _NavTile(
-            icon: Icons.folder_rounded,
-            label: 'DocuTracker',
-            selected: selectedIndex == 4,
-            onTap: () => onTap(4),
-          ),
-          _NavTile(
-            icon: Icons.person_add_rounded,
-            label: 'Create Account',
-            selected: selectedIndex == 5,
-            onTap: () => onTap(5),
-          ),
-          const Spacer(),
           const Divider(height: 1),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
@@ -372,6 +487,311 @@ class _Sidebar extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+}
+
+class _ManageNavSection extends StatelessWidget {
+  const _ManageNavSection({
+    required this.expanded,
+    required this.selected,
+    required this.subIndex,
+    required this.onManageTap,
+    required this.onSubTap,
+  });
+
+  final bool expanded;
+  final bool selected;
+  final int subIndex;
+  final VoidCallback onManageTap;
+  final ValueChanged<int> onSubTap;
+
+  static const _subItems = [
+    (icon: Icons.people_rounded, label: 'Employees'),
+    (icon: Icons.assignment_rounded, label: 'Assignment'),
+    (icon: Icons.business_rounded, label: 'Department'),
+    (icon: Icons.work_rounded, label: 'Position'),
+    (icon: Icons.schedule_rounded, label: 'Shift'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Material(
+            color: selected
+                ? AppTheme.primaryNavy.withOpacity(0.1)
+                : AppTheme.lightGray.withOpacity(0.5),
+            borderRadius: BorderRadius.circular(12),
+            child: InkWell(
+              onTap: onManageTap,
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: selected
+                      ? const Border(
+                          left: BorderSide(
+                            color: AppTheme.primaryNavy,
+                            width: 3,
+                          ),
+                        )
+                      : null,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.settings_rounded,
+                      size: 23,
+                      color: selected
+                          ? AppTheme.primaryNavy
+                          : AppTheme.textSecondary,
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Text(
+                        'Manage',
+                        style: TextStyle(
+                          color: selected
+                              ? AppTheme.primaryNavy
+                              : AppTheme.textPrimary,
+                          fontWeight:
+                              selected ? FontWeight.w700 : FontWeight.w500,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                    AnimatedRotation(
+                      turns: expanded ? 0.5 : 0,
+                      duration: const Duration(milliseconds: 200),
+                      child: Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        size: 22,
+                        color: selected
+                            ? AppTheme.primaryNavy
+                            : AppTheme.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (expanded) ...[
+            for (var i = 0; i < _subItems.length; i++) ...[
+              const SizedBox(height: 4),
+              Padding(
+                padding: const EdgeInsets.only(left: 24),
+                child: Material(
+                  color: selected && subIndex == i
+                      ? AppTheme.primaryNavy.withOpacity(0.08)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                  child: InkWell(
+                    onTap: () => onSubTap(i),
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(10),
+                        border: selected && subIndex == i
+                            ? const Border(
+                                left: BorderSide(
+                                  color: AppTheme.primaryNavy,
+                                  width: 2,
+                                ),
+                              )
+                            : null,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _subItems[i].icon,
+                            size: 20,
+                            color: selected && subIndex == i
+                                ? AppTheme.primaryNavy
+                                : AppTheme.textSecondary,
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            _subItems[i].label,
+                            style: TextStyle(
+                              color: selected && subIndex == i
+                                  ? AppTheme.primaryNavy
+                                  : AppTheme.textPrimary,
+                              fontWeight: selected && subIndex == i
+                                  ? FontWeight.w600
+                                  : FontWeight.w500,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _DtrNavSection extends StatelessWidget {
+  const _DtrNavSection({
+    required this.expanded,
+    required this.selected,
+    required this.subIndex,
+    required this.onDtrTap,
+    required this.onSubTap,
+  });
+
+  final bool expanded;
+  final bool selected;
+  final int subIndex;
+  final VoidCallback onDtrTap;
+  final ValueChanged<int> onSubTap;
+
+  static const _subItems = [
+    (icon: Icons.dashboard_rounded, label: 'Dashboard'),
+    (icon: Icons.schedule_rounded, label: 'Time Logs'),
+    (icon: Icons.summarize_rounded, label: 'Reports'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Material(
+            color: selected
+                ? AppTheme.primaryNavy.withOpacity(0.1)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            child: InkWell(
+              onTap: onDtrTap,
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: selected
+                      ? const Border(
+                          left: BorderSide(color: AppTheme.primaryNavy, width: 3),
+                        )
+                      : null,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.access_time_rounded,
+                      size: 23,
+                      color: selected
+                          ? AppTheme.primaryNavy
+                          : AppTheme.textSecondary,
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Text(
+                        'DTR',
+                        style: TextStyle(
+                          color: selected
+                              ? AppTheme.primaryNavy
+                              : AppTheme.textPrimary,
+                          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                    AnimatedRotation(
+                      turns: expanded ? 0.5 : 0,
+                      duration: const Duration(milliseconds: 200),
+                      child: Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        size: 22,
+                        color: selected
+                            ? AppTheme.primaryNavy
+                            : AppTheme.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (expanded) ...[
+            for (var i = 0; i < _subItems.length; i++) ...[
+              const SizedBox(height: 4),
+              Padding(
+                padding: const EdgeInsets.only(left: 24),
+                child: Material(
+                  color: selected && subIndex == i
+                      ? AppTheme.primaryNavy.withOpacity(0.08)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                  child: InkWell(
+                    onTap: () => onSubTap(i),
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(10),
+                        border: selected && subIndex == i
+                            ? const Border(
+                                left: BorderSide(
+                                  color: AppTheme.primaryNavy,
+                                  width: 2,
+                                ),
+                              )
+                            : null,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _subItems[i].icon,
+                            size: 20,
+                            color: selected && subIndex == i
+                                ? AppTheme.primaryNavy
+                                : AppTheme.textSecondary,
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            _subItems[i].label,
+                            style: TextStyle(
+                              color: selected && subIndex == i
+                                  ? AppTheme.primaryNavy
+                                  : AppTheme.textPrimary,
+                              fontWeight:
+                                  selected && subIndex == i
+                                      ? FontWeight.w600
+                                      : FontWeight.w500,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
         ],
       ),
     );
@@ -739,8 +1159,9 @@ class _AdminDropdown extends StatelessWidget {
       onSelected: (value) async {
         if (value == 'signout') {
           await context.read<AuthProvider>().signOut();
-          if (context.mounted)
+          if (context.mounted) {
             Navigator.of(context).popUntil((route) => route.isFirst);
+          }
         }
         if (value == 'profile') {
           Navigator.of(
@@ -1890,7 +2311,9 @@ class _RspBeiQuestionsEditorState extends State<_RspBeiQuestionsEditor> {
       final list = await RecruitmentRepo.instance.getExamQuestions('bei');
       final questions = list.isNotEmpty ? list : _defaultBeiQuestions;
       if (mounted) {
-        for (final c in _controllers) c.dispose();
+        for (final c in _controllers) {
+          c.dispose();
+        }
         _controllers = questions
             .map((q) => TextEditingController(text: q))
             .toList();
@@ -1898,7 +2321,9 @@ class _RspBeiQuestionsEditorState extends State<_RspBeiQuestionsEditor> {
       }
     } catch (_) {
       if (mounted) {
-        for (final c in _controllers) c.dispose();
+        for (final c in _controllers) {
+          c.dispose();
+        }
         _controllers = _defaultBeiQuestions
             .map((q) => TextEditingController(text: q))
             .toList();
@@ -1909,7 +2334,9 @@ class _RspBeiQuestionsEditorState extends State<_RspBeiQuestionsEditor> {
 
   @override
   void dispose() {
-    for (final c in _controllers) c.dispose();
+    for (final c in _controllers) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -2120,7 +2547,9 @@ class _RspGeneralExamEditorState extends State<_RspGeneralExamEditor> {
   void _disposeItems() {
     for (final item in _items) {
       item.questionController.dispose();
-      for (final c in item.optionControllers) c.dispose();
+      for (final c in item.optionControllers) {
+        c.dispose();
+      }
     }
     _items = [];
   }
@@ -2142,7 +2571,9 @@ class _RspGeneralExamEditorState extends State<_RspGeneralExamEditor> {
                     ?.map((e) => e.toString())
                     .toList() ??
                 <String>[];
-            while (opts.length < 2) opts.add('');
+            while (opts.length < 2) {
+              opts.add('');
+            }
             _items.add(
               _makeItem(
                 q['question_text'] as String? ?? '',
@@ -2378,8 +2809,9 @@ class _RspGeneralExamEditorState extends State<_RspGeneralExamEditor> {
                               onPressed: () {
                                 final removed = _items.removeAt(i);
                                 removed.questionController.dispose();
-                                for (final c in removed.optionControllers)
+                                for (final c in removed.optionControllers) {
                                   c.dispose();
+                                }
                                 setState(() {});
                               },
                               icon: const Icon(Icons.remove_circle_outline),
@@ -2458,7 +2890,9 @@ class _RspMathExamEditorState extends State<_RspMathExamEditor> {
   void _disposeItems() {
     for (final item in _items) {
       item.questionController.dispose();
-      for (final c in item.optionControllers) c.dispose();
+      for (final c in item.optionControllers) {
+        c.dispose();
+      }
     }
     _items = [];
   }
@@ -2480,7 +2914,9 @@ class _RspMathExamEditorState extends State<_RspMathExamEditor> {
                     ?.map((e) => e.toString())
                     .toList() ??
                 <String>[];
-            while (opts.length < 2) opts.add('');
+            while (opts.length < 2) {
+              opts.add('');
+            }
             _items.add(
               _makeItem(
                 q['question_text'] as String? ?? '',
@@ -2713,8 +3149,9 @@ class _RspMathExamEditorState extends State<_RspMathExamEditor> {
                           onPressed: () {
                             final removed = _items.removeAt(i);
                             removed.questionController.dispose();
-                            for (final c in removed.optionControllers)
+                            for (final c in removed.optionControllers) {
                               c.dispose();
+                            }
                             setState(() {});
                           },
                           icon: const Icon(Icons.remove_circle_outline),
@@ -2792,7 +3229,9 @@ class _RspGeneralInfoExamEditorState extends State<_RspGeneralInfoExamEditor> {
   void _disposeItems() {
     for (final item in _items) {
       item.questionController.dispose();
-      for (final c in item.optionControllers) c.dispose();
+      for (final c in item.optionControllers) {
+        c.dispose();
+      }
     }
     _items = [];
   }
@@ -2814,7 +3253,9 @@ class _RspGeneralInfoExamEditorState extends State<_RspGeneralInfoExamEditor> {
                     ?.map((e) => e.toString())
                     .toList() ??
                 <String>[];
-            while (opts.length < 2) opts.add('');
+            while (opts.length < 2) {
+              opts.add('');
+            }
             _items.add(
               _makeItem(
                 q['question_text'] as String? ?? '',
@@ -3049,8 +3490,9 @@ class _RspGeneralInfoExamEditorState extends State<_RspGeneralInfoExamEditor> {
                           onPressed: () {
                             final removed = _items.removeAt(i);
                             removed.questionController.dispose();
-                            for (final c in removed.optionControllers)
+                            for (final c in removed.optionControllers) {
                               c.dispose();
+                            }
                             setState(() {});
                           },
                           icon: const Icon(Icons.remove_circle_outline),
@@ -3193,17 +3635,19 @@ class _RspBiFormSectionState extends State<_RspBiFormSection> {
     setState(() => _loading = true);
     try {
       final list = await BiFormRepo.instance.list();
-      if (mounted)
+      if (mounted) {
         setState(() {
           _entries = list;
           _loading = false;
         });
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _entries = [];
           _loading = false;
         });
+      }
     }
   }
 
@@ -3311,10 +3755,11 @@ class _RspBiFormSectionState extends State<_RspBiFormSection> {
         _load();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+      }
     }
   }
 
@@ -3328,10 +3773,11 @@ class _RspBiFormSectionState extends State<_RspBiFormSection> {
         _load();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
+      }
     }
   }
 
@@ -3339,15 +3785,17 @@ class _RspBiFormSectionState extends State<_RspBiFormSection> {
     try {
       final doc = FormPdf.buildBiFormPdf(entry);
       await FormPdf.printDocument(doc, name: 'BI_Form.pdf');
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
+      }
     }
   }
 
@@ -3355,15 +3803,17 @@ class _RspBiFormSectionState extends State<_RspBiFormSection> {
     try {
       final doc = FormPdf.buildBiFormPdf(entry);
       await FormPdf.sharePdf(doc, name: 'BI_Form.pdf');
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('PDF ready to save or share.')),
         );
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      }
     }
   }
 }
@@ -3879,17 +4329,19 @@ class _RspPerformanceEvaluationSectionState
     setState(() => _loading = true);
     try {
       final list = await PerformanceEvaluationRepo.instance.list();
-      if (mounted)
+      if (mounted) {
         setState(() {
           _entries = list;
           _loading = false;
         });
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _entries = [];
           _loading = false;
         });
+      }
     }
   }
 
@@ -3991,10 +4443,11 @@ class _RspPerformanceEvaluationSectionState
         _load();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+      }
     }
   }
 
@@ -4008,10 +4461,11 @@ class _RspPerformanceEvaluationSectionState
         _load();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
+      }
     }
   }
 
@@ -4019,15 +4473,17 @@ class _RspPerformanceEvaluationSectionState
     try {
       final doc = FormPdf.buildPerformanceEvaluationPdf(entry);
       await FormPdf.printDocument(doc, name: 'Performance_Evaluation.pdf');
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
+      }
     }
   }
 
@@ -4035,15 +4491,17 @@ class _RspPerformanceEvaluationSectionState
     try {
       final doc = FormPdf.buildPerformanceEvaluationPdf(entry);
       await FormPdf.sharePdf(doc, name: 'Performance_Evaluation.pdf');
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('PDF ready to save or share.')),
         );
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      }
     }
   }
 }
@@ -4106,8 +4564,9 @@ class _PerformanceFormEditorState extends State<_PerformanceFormEditor> {
   PerformanceEvaluationEntry _buildCurrentEntry() {
     final areas = <String>[];
     for (var i = 0; i < _functionalChecks.length; i++) {
-      if (_functionalChecks[i])
+      if (_functionalChecks[i]) {
         areas.add(PerformanceEvaluationEntry.functionalAreaOptions[i]);
+      }
     }
     return PerformanceEvaluationEntry(
       id: widget.entry.id,
@@ -4414,17 +4873,19 @@ class _RspIdpSectionState extends State<_RspIdpSection> {
     setState(() => _loading = true);
     try {
       final list = await IdpRepo.instance.list();
-      if (mounted)
+      if (mounted) {
         setState(() {
           _entries = list;
           _loading = false;
         });
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _entries = [];
           _loading = false;
         });
+      }
     }
   }
 
@@ -4447,10 +4908,11 @@ class _RspIdpSectionState extends State<_RspIdpSection> {
         _load();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+      }
     }
   }
 
@@ -4464,10 +4926,11 @@ class _RspIdpSectionState extends State<_RspIdpSection> {
         _load();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
+      }
     }
   }
 
@@ -4475,15 +4938,17 @@ class _RspIdpSectionState extends State<_RspIdpSection> {
     try {
       final doc = FormPdf.buildIdpPdf(entry);
       await FormPdf.printDocument(doc, name: 'IDP.pdf');
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
+      }
     }
   }
 
@@ -4491,15 +4956,17 @@ class _RspIdpSectionState extends State<_RspIdpSection> {
     try {
       final doc = FormPdf.buildIdpPdf(entry);
       await FormPdf.sharePdf(doc, name: 'IDP.pdf');
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('PDF ready to save or share.')),
         );
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      }
     }
   }
 
@@ -4661,9 +5128,13 @@ class _IdpFormEditorState extends State<_IdpFormEditor> {
 
   @override
   void dispose() {
-    for (final c in _controllers) c.dispose();
+    for (final c in _controllers) {
+      c.dispose();
+    }
     for (final row in _planRows) {
-      for (final c in row.values) c.dispose();
+      for (final c in row.values) {
+        c.dispose();
+      }
     }
     super.dispose();
   }
@@ -4675,7 +5146,9 @@ class _IdpFormEditorState extends State<_IdpFormEditor> {
   void _removePlanRow(int index) {
     if (_planRows.length <= 1) return;
     setState(() {
-      for (final c in _planRows[index].values) c.dispose();
+      for (final c in _planRows[index].values) {
+        c.dispose();
+      }
       _planRows.removeAt(index);
     });
   }
@@ -5164,17 +5637,19 @@ class _RspApplicantsProfileSectionState
     setState(() => _loading = true);
     try {
       final list = await ApplicantsProfileRepo.instance.list();
-      if (mounted)
+      if (mounted) {
         setState(() {
           _entries = list;
           _loading = false;
         });
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _entries = [];
           _loading = false;
         });
+      }
     }
   }
 
@@ -5197,10 +5672,11 @@ class _RspApplicantsProfileSectionState
         _load();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+      }
     }
   }
 
@@ -5214,10 +5690,11 @@ class _RspApplicantsProfileSectionState
         _load();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
+      }
     }
   }
 
@@ -5225,15 +5702,17 @@ class _RspApplicantsProfileSectionState
     try {
       final doc = FormPdf.buildApplicantsProfilePdf(entry);
       await FormPdf.printDocument(doc, name: 'Applicants_Profile.pdf');
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
+      }
     }
   }
 
@@ -5241,15 +5720,17 @@ class _RspApplicantsProfileSectionState
     try {
       final doc = FormPdf.buildApplicantsProfilePdf(entry);
       await FormPdf.sharePdf(doc, name: 'Applicants_Profile.pdf');
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('PDF ready to save or share.')),
         );
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      }
     }
   }
 
@@ -5412,7 +5893,9 @@ class _ApplicantsProfileFormEditorState
     _preparedBy.dispose();
     _checkedBy.dispose();
     for (final row in _applicantRows) {
-      for (final c in row.values) c.dispose();
+      for (final c in row.values) {
+        c.dispose();
+      }
     }
     super.dispose();
   }
@@ -5426,7 +5909,9 @@ class _ApplicantsProfileFormEditorState
   void _removeApplicant(int index) {
     if (_applicantRows.length <= 1) return;
     setState(() {
-      for (final c in _applicantRows[index].values) c.dispose();
+      for (final c in _applicantRows[index].values) {
+        c.dispose();
+      }
       _applicantRows.removeAt(index);
     });
   }
@@ -5860,17 +6345,19 @@ class _RspComparativeAssessmentSectionState
     setState(() => _loading = true);
     try {
       final list = await ComparativeAssessmentRepo.instance.list();
-      if (mounted)
+      if (mounted) {
         setState(() {
           _entries = list;
           _loading = false;
         });
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _entries = [];
           _loading = false;
         });
+      }
     }
   }
 
@@ -5881,10 +6368,11 @@ class _RspComparativeAssessmentSectionState
 
   Future<void> _onSave(ComparativeAssessmentEntry entry) async {
     try {
-      if (entry.id == null)
+      if (entry.id == null) {
         await ComparativeAssessmentRepo.instance.insert(entry);
-      else
+      } else {
         await ComparativeAssessmentRepo.instance.update(entry);
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Comparative assessment saved.')),
@@ -5893,10 +6381,11 @@ class _RspComparativeAssessmentSectionState
         _load();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+      }
     }
   }
 
@@ -5910,10 +6399,11 @@ class _RspComparativeAssessmentSectionState
         _load();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
+      }
     }
   }
 
@@ -5921,15 +6411,17 @@ class _RspComparativeAssessmentSectionState
     try {
       final doc = FormPdf.buildComparativeAssessmentPdf(entry);
       await FormPdf.printDocument(doc, name: 'Comparative_Assessment.pdf');
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
+      }
     }
   }
 
@@ -5937,15 +6429,17 @@ class _RspComparativeAssessmentSectionState
     try {
       final doc = FormPdf.buildComparativeAssessmentPdf(entry);
       await FormPdf.sharePdf(doc, name: 'Comparative_Assessment.pdf');
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('PDF ready to save or share.')),
         );
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      }
     }
   }
 
@@ -6108,7 +6602,9 @@ class _ComparativeAssessmentEditorState
     _elig.dispose();
     _training.dispose();
     for (final row in _rows) {
-      for (final c in row.values) c.dispose();
+      for (final c in row.values) {
+        c.dispose();
+      }
     }
     super.dispose();
   }
@@ -6118,7 +6614,9 @@ class _ComparativeAssessmentEditorState
   void _removeRow(int i) {
     if (_rows.length <= 1) return;
     setState(() {
-      for (final c in _rows[i].values) c.dispose();
+      for (final c in _rows[i].values) {
+        c.dispose();
+      }
       _rows.removeAt(i);
     });
   }
@@ -6531,17 +7029,19 @@ class _RspPromotionCertificationSectionState
     setState(() => _loading = true);
     try {
       final list = await PromotionCertificationRepo.instance.list();
-      if (mounted)
+      if (mounted) {
         setState(() {
           _entries = list;
           _loading = false;
         });
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _entries = [];
           _loading = false;
         });
+      }
     }
   }
 
@@ -6552,10 +7052,11 @@ class _RspPromotionCertificationSectionState
 
   Future<void> _onSave(PromotionCertificationEntry entry) async {
     try {
-      if (entry.id == null)
+      if (entry.id == null) {
         await PromotionCertificationRepo.instance.insert(entry);
-      else
+      } else {
         await PromotionCertificationRepo.instance.update(entry);
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Promotion certification saved.')),
@@ -6564,10 +7065,11 @@ class _RspPromotionCertificationSectionState
         _load();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+      }
     }
   }
 
@@ -6581,10 +7083,11 @@ class _RspPromotionCertificationSectionState
         _load();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
+      }
     }
   }
 
@@ -6592,15 +7095,17 @@ class _RspPromotionCertificationSectionState
     try {
       final doc = FormPdf.buildPromotionCertificationPdf(entry);
       await FormPdf.printDocument(doc, name: 'Promotion_Certification.pdf');
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
+      }
     }
   }
 
@@ -6608,15 +7113,17 @@ class _RspPromotionCertificationSectionState
     try {
       final doc = FormPdf.buildPromotionCertificationPdf(entry);
       await FormPdf.sharePdf(doc, name: 'Promotion_Certification.pdf');
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('PDF ready to save or share.')),
         );
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      }
     }
   }
 
@@ -6776,7 +7283,9 @@ class _PromotionCertificationEditorState
     _signName.dispose();
     _signTitle.dispose();
     for (final row in _rows) {
-      for (final c in row.values) c.dispose();
+      for (final c in row.values) {
+        c.dispose();
+      }
     }
     super.dispose();
   }
@@ -6785,7 +7294,9 @@ class _PromotionCertificationEditorState
   void _removeRow(int i) {
     if (_rows.length <= 1) return;
     setState(() {
-      for (final c in _rows[i].values) c.dispose();
+      for (final c in _rows[i].values) {
+        c.dispose();
+      }
       _rows.removeAt(i);
     });
   }
@@ -7211,17 +7722,19 @@ class _RspSelectionLineupSectionState
     setState(() => _loading = true);
     try {
       final list = await SelectionLineupRepo.instance.list();
-      if (mounted)
+      if (mounted) {
         setState(() {
           _entries = list;
           _loading = false;
         });
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _entries = [];
           _loading = false;
         });
+      }
     }
   }
 
@@ -7231,10 +7744,11 @@ class _RspSelectionLineupSectionState
 
   Future<void> _onSave(SelectionLineupEntry entry) async {
     try {
-      if (entry.id == null)
+      if (entry.id == null) {
         await SelectionLineupRepo.instance.insert(entry);
-      else
+      } else {
         await SelectionLineupRepo.instance.update(entry);
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Selection line-up saved.')),
@@ -7243,10 +7757,11 @@ class _RspSelectionLineupSectionState
         _load();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+      }
     }
   }
 
@@ -7260,10 +7775,11 @@ class _RspSelectionLineupSectionState
         _load();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
+      }
     }
   }
 
@@ -7271,15 +7787,17 @@ class _RspSelectionLineupSectionState
     try {
       final doc = FormPdf.buildSelectionLineupPdf(entry);
       await FormPdf.printDocument(doc, name: 'Selection_Lineup.pdf');
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
+      }
     }
   }
 
@@ -7287,15 +7805,17 @@ class _RspSelectionLineupSectionState
     try {
       final doc = FormPdf.buildSelectionLineupPdf(entry);
       await FormPdf.sharePdf(doc, name: 'Selection_Lineup.pdf');
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('PDF ready to save or share.')),
         );
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      }
     }
   }
 
@@ -7450,7 +7970,9 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
     _preparedName.dispose();
     _preparedTitle.dispose();
     for (final row in _rows) {
-      for (final c in row.values) c.dispose();
+      for (final c in row.values) {
+        c.dispose();
+      }
     }
     super.dispose();
   }
@@ -7459,7 +7981,9 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
   void _removeRow(int i) {
     if (_rows.length <= 1) return;
     setState(() {
-      for (final c in _rows[i].values) c.dispose();
+      for (final c in _rows[i].values) {
+        c.dispose();
+      }
       _rows.removeAt(i);
     });
   }
@@ -7849,17 +8373,19 @@ class _RspTurnAroundTimeSectionState extends State<_RspTurnAroundTimeSection> {
     setState(() => _loading = true);
     try {
       final list = await TurnAroundTimeRepo.instance.list();
-      if (mounted)
+      if (mounted) {
         setState(() {
           _entries = list;
           _loading = false;
         });
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _entries = [];
           _loading = false;
         });
+      }
     }
   }
 
@@ -7869,10 +8395,11 @@ class _RspTurnAroundTimeSectionState extends State<_RspTurnAroundTimeSection> {
 
   Future<void> _onSave(TurnAroundTimeEntry entry) async {
     try {
-      if (entry.id == null)
+      if (entry.id == null) {
         await TurnAroundTimeRepo.instance.insert(entry);
-      else
+      } else {
         await TurnAroundTimeRepo.instance.update(entry);
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Turn-around time saved.')),
@@ -7881,10 +8408,11 @@ class _RspTurnAroundTimeSectionState extends State<_RspTurnAroundTimeSection> {
         _load();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+      }
     }
   }
 
@@ -7898,10 +8426,11 @@ class _RspTurnAroundTimeSectionState extends State<_RspTurnAroundTimeSection> {
         _load();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
+      }
     }
   }
 
@@ -7909,15 +8438,17 @@ class _RspTurnAroundTimeSectionState extends State<_RspTurnAroundTimeSection> {
     try {
       final doc = FormPdf.buildTurnAroundTimePdf(entry);
       await FormPdf.printDocument(doc, name: 'Turn_Around_Time.pdf');
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
+      }
     }
   }
 
@@ -7925,15 +8456,17 @@ class _RspTurnAroundTimeSectionState extends State<_RspTurnAroundTimeSection> {
     try {
       final doc = FormPdf.buildTurnAroundTimePdf(entry);
       await FormPdf.sharePdf(doc, name: 'Turn_Around_Time.pdf');
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('PDF ready to save or share.')),
         );
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      }
     }
   }
 
@@ -8095,10 +8628,16 @@ class _TurnAroundTimeEditorState extends State<_TurnAroundTimeEditor> {
 
   @override
   void dispose() {
-    for (final c in _header) c.dispose();
-    for (final c in _signatory) c.dispose();
+    for (final c in _header) {
+      c.dispose();
+    }
+    for (final c in _signatory) {
+      c.dispose();
+    }
     for (final row in _rows) {
-      for (final c in row.values) c.dispose();
+      for (final c in row.values) {
+        c.dispose();
+      }
     }
     super.dispose();
   }
@@ -8107,7 +8646,9 @@ class _TurnAroundTimeEditorState extends State<_TurnAroundTimeEditor> {
   void _removeRow(int i) {
     if (_rows.length <= 1) return;
     setState(() {
-      for (final c in _rows[i].values) c.dispose();
+      for (final c in _rows[i].values) {
+        c.dispose();
+      }
       _rows.removeAt(i);
     });
   }
@@ -8541,7 +9082,9 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
 
   @override
   void dispose() {
-    for (final v in _vacancies) v.dispose();
+    for (final v in _vacancies) {
+      v.dispose();
+    }
     super.dispose();
   }
 
@@ -8935,13 +9478,14 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
       } catch (_) {
         // e.g. not authenticated; keep byApp empty and fall back to DB attachment
       }
-      if (mounted)
+      if (mounted) {
         setState(() {
           _applications = apps;
           _examResults = results;
           _storageFilesByAppId = byApp;
           _loading = false;
         });
+      }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
@@ -9534,10 +10078,11 @@ class _DocumentReviewCell extends StatelessWidget {
         onUpdated();
       }
     } catch (e) {
-      if (context.mounted)
+      if (context.mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed: $e')));
+      }
     }
   }
 
@@ -9554,10 +10099,11 @@ class _DocumentReviewCell extends StatelessWidget {
         onUpdated();
       }
     } catch (e) {
-      if (context.mounted)
+      if (context.mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed: $e')));
+      }
     }
   }
 
@@ -10081,17 +10627,19 @@ class _TrainingNeedAnalysisSectionState
     setState(() => _loading = true);
     try {
       final list = await TrainingNeedAnalysisRepo.instance.list();
-      if (mounted)
+      if (mounted) {
         setState(() {
           _entries = list;
           _loading = false;
         });
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _entries = [];
           _loading = false;
         });
+      }
     }
   }
 
@@ -10102,10 +10650,11 @@ class _TrainingNeedAnalysisSectionState
 
   Future<void> _onSave(TrainingNeedAnalysisEntry entry) async {
     try {
-      if (entry.id == null)
+      if (entry.id == null) {
         await TrainingNeedAnalysisRepo.instance.insert(entry);
-      else
+      } else {
         await TrainingNeedAnalysisRepo.instance.update(entry);
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Training Need Analysis saved.')),
@@ -10114,10 +10663,11 @@ class _TrainingNeedAnalysisSectionState
         _load();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+      }
     }
   }
 
@@ -10131,10 +10681,11 @@ class _TrainingNeedAnalysisSectionState
         _load();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
+      }
     }
   }
 
@@ -10142,15 +10693,17 @@ class _TrainingNeedAnalysisSectionState
     try {
       final doc = FormPdf.buildTrainingNeedAnalysisPdf(entry);
       await FormPdf.printDocument(doc, name: 'Training_Need_Analysis.pdf');
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
+      }
     }
   }
 
@@ -10158,15 +10711,17 @@ class _TrainingNeedAnalysisSectionState
     try {
       final doc = FormPdf.buildTrainingNeedAnalysisPdf(entry);
       await FormPdf.sharePdf(doc, name: 'Training_Need_Analysis.pdf');
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('PDF ready to save or share.')),
         );
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      }
     }
   }
 
@@ -10314,7 +10869,9 @@ class _TrainingNeedAnalysisFormEditorState
     _cyYear.dispose();
     _department.dispose();
     for (final row in _rows) {
-      for (final c in row.values) c.dispose();
+      for (final c in row.values) {
+        c.dispose();
+      }
     }
     super.dispose();
   }
@@ -10324,7 +10881,9 @@ class _TrainingNeedAnalysisFormEditorState
   void _removeRow(int i) {
     if (_rows.length <= 1) return;
     setState(() {
-      for (final c in _rows[i].values) c.dispose();
+      for (final c in _rows[i].values) {
+        c.dispose();
+      }
       _rows.removeAt(i);
     });
   }
@@ -10669,17 +11228,19 @@ class _ActionBrainstormingSectionState
     setState(() => _loading = true);
     try {
       final list = await ActionBrainstormingRepo.instance.list();
-      if (mounted)
+      if (mounted) {
         setState(() {
           _entries = list;
           _loading = false;
         });
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _entries = [];
           _loading = false;
         });
+      }
     }
   }
 
@@ -10690,10 +11251,11 @@ class _ActionBrainstormingSectionState
 
   Future<void> _onSave(ActionBrainstormingEntry entry) async {
     try {
-      if (entry.id == null)
+      if (entry.id == null) {
         await ActionBrainstormingRepo.instance.insert(entry);
-      else
+      } else {
         await ActionBrainstormingRepo.instance.update(entry);
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -10704,10 +11266,11 @@ class _ActionBrainstormingSectionState
         _load();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+      }
     }
   }
 
@@ -10721,10 +11284,11 @@ class _ActionBrainstormingSectionState
         _load();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
+      }
     }
   }
 
@@ -10735,15 +11299,17 @@ class _ActionBrainstormingSectionState
         doc,
         name: 'Action_Brainstorming_Coaching.pdf',
       );
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
+      }
     }
   }
 
@@ -10751,15 +11317,17 @@ class _ActionBrainstormingSectionState
     try {
       final doc = FormPdf.buildActionBrainstormingCoachingPdf(entry);
       await FormPdf.sharePdf(doc, name: 'Action_Brainstorming_Coaching.pdf');
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('PDF ready to save or share.')),
         );
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      }
     }
   }
 
@@ -10907,8 +11475,11 @@ class _ActionBrainstormingFormEditorState
                 ),
               )
               .toList();
-    if (_rows.length < 15)
-      while (_rows.length < 15) _rows.add(_rowCtrl('', '', '', '', '', '', ''));
+    if (_rows.length < 15) {
+      while (_rows.length < 15) {
+        _rows.add(_rowCtrl('', '', '', '', '', '', ''));
+    }
+      }
   }
 
   @override
@@ -10918,7 +11489,9 @@ class _ActionBrainstormingFormEditorState
     _certifiedBy.dispose();
     _certificationDate.dispose();
     for (final row in _rows) {
-      for (final c in row.values) c.dispose();
+      for (final c in row.values) {
+        c.dispose();
+      }
     }
     super.dispose();
   }
@@ -10928,7 +11501,9 @@ class _ActionBrainstormingFormEditorState
   void _removeRow(int i) {
     if (_rows.length <= 1) return;
     setState(() {
-      for (final c in _rows[i].values) c.dispose();
+      for (final c in _rows[i].values) {
+        c.dispose();
+      }
       _rows.removeAt(i);
     });
   }
@@ -11395,6 +11970,62 @@ class _DocuTrackerPlaceholder extends StatelessWidget {
   }
 }
 
+class _ManageContent extends StatelessWidget {
+  const _ManageContent({required this.subIndex});
+
+  final int subIndex;
+
+  static const _titles = [
+    'Employees',
+    'Assignment',
+    'Department',
+    'Position',
+    'Shift',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    if (subIndex == 0) {
+      return const ManageEmployee();
+    }
+    if (subIndex == 1) {
+      return const ManageAssignment();
+    }
+    if (subIndex == 2) {
+      return const ManageDepartment();
+    }
+    if (subIndex == 3) {
+      return const ManagePosition();
+    }
+    if (subIndex == 4) {
+      return const ManageShift();
+    }
+    final title =
+        subIndex >= 0 && subIndex < _titles.length ? _titles[subIndex] : 'Manage';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: 24,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Manage $title. Content coming soon.',
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 14,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _PlaceholderContent extends StatelessWidget {
   const _PlaceholderContent({required this.title});
 
@@ -11440,7 +12071,7 @@ class _PlaceholderContent extends StatelessWidget {
             ),
             SizedBox(height: isNarrow ? 20 : 24),
             Text(
-              '$title',
+              title,
               style: TextStyle(
                 color: AppTheme.textPrimary,
                 fontSize: isNarrow ? 18 : 22,

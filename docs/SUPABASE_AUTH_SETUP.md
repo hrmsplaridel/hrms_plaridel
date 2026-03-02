@@ -162,6 +162,57 @@ After this, the login and sign-up forms will work with Supabase.
 
 ---
 
+### Query 4b: Extend `profiles` for Add Employee form
+
+If you use the **Add Employee** form (Manage → Employees), run this to add extra columns. Run after Query 1–3.
+
+```sql
+-- Add columns for employee details (Add Employee form)
+alter table public.profiles
+  add column if not exists middle_name text,
+  add column if not exists suffix text,
+  add column if not exists sex text,
+  add column if not exists date_of_birth date,
+  add column if not exists contact_number text,
+  add column if not exists address text,
+  add column if not exists avatar_path text,
+  add column if not exists is_active boolean default true;
+
+-- Update trigger function to include new fields from user metadata
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  insert into public.profiles (id, email, full_name, role, middle_name, suffix, sex, date_of_birth, contact_number, address)
+  values (
+    new.id,
+    new.email,
+    coalesce(new.raw_user_meta_data->>'full_name', ''),
+    coalesce(nullif(trim(new.raw_user_meta_data->>'role'), ''), 'employee'),
+    nullif(trim(new.raw_user_meta_data->>'middle_name'), ''),
+    nullif(trim(new.raw_user_meta_data->>'suffix'), ''),
+    nullif(trim(new.raw_user_meta_data->>'sex'), ''),
+    (new.raw_user_meta_data->>'date_of_birth')::date,
+    nullif(trim(new.raw_user_meta_data->>'contact_number'), ''),
+    nullif(trim(new.raw_user_meta_data->>'address'), '')
+  );
+  return new;
+end;
+$$;
+
+-- Allow admins to update any profile (for avatar_path and extra fields after creation)
+drop policy if exists "Admins can update any profile" on public.profiles;
+create policy "Admins can update any profile"
+  on public.profiles for update
+  using ((select role from public.profiles where id = auth.uid()) = 'admin');
+```
+
+**Avatar upload for admin-created employees:** In Storage → `avatars` bucket → Policies, add an INSERT policy that allows admins to upload (e.g. `(select role from public.profiles where id = auth.uid()) = 'admin'`). Otherwise, avatar upload from the Add Employee form may fail; account creation will still succeed.
+
+---
+
 ## Part 5: Job Vacancy Announcement (RSP – landing page)
 
 The **RSP** module in the admin dashboard lets you control what the **landing page** shows in the Job Vacancies section (e.g. “We are currently accepting applications” vs “There are no job vacancies”). The app reads and writes a single row in Supabase.
@@ -870,4 +921,119 @@ create policy "Authenticated can manage cut_off_periods"
   with check (auth.role() = 'authenticated');
 
 comment on table public.cut_off_periods is 'DTR: payroll cut-off periods. When locked, DTR in that range cannot be edited.';
+```
+
+---
+
+## Part 9: Assignments (Manage → Assignment)
+
+The **Manage → Assignment** screen lets admins assign employees to departments, positions, and shifts with start/end times and dates.
+
+### Query 9: Create `departments`, `positions`, `shifts`, and `assignments` tables
+
+Run this in **SQL Editor**:
+
+```sql
+-- Lookup tables
+create table if not exists public.departments (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  description text,
+  is_active boolean default true,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create table if not exists public.positions (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  is_active boolean default true,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create table if not exists public.shifts (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  start_time time,
+  end_time time,
+  is_active boolean default true,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+-- Assignments: links employee to dept/position/shift with time and date
+create table if not exists public.assignments (
+  id uuid primary key default gen_random_uuid(),
+  employee_id uuid not null references public.profiles(id) on delete cascade,
+  department_id uuid not null references public.departments(id) on delete restrict,
+  position_id uuid not null references public.positions(id) on delete restrict,
+  shift_id uuid not null references public.shifts(id) on delete restrict,
+  start_time time,
+  end_time time,
+  date_assigned date not null default current_date,
+  is_active boolean default true,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+alter table public.departments enable row level security;
+alter table public.positions enable row level security;
+alter table public.shifts enable row level security;
+alter table public.assignments enable row level security;
+
+-- Authenticated users can read and manage lookups
+create policy "Authenticated can manage departments"
+  on public.departments for all using (auth.role() = 'authenticated')
+  with check (auth.role() = 'authenticated');
+
+create policy "Authenticated can manage positions"
+  on public.positions for all using (auth.role() = 'authenticated')
+  with check (auth.role() = 'authenticated');
+
+create policy "Authenticated can manage shifts"
+  on public.shifts for all using (auth.role() = 'authenticated')
+  with check (auth.role() = 'authenticated');
+
+-- Authenticated can manage assignments (admin screen)
+create policy "Authenticated can manage assignments"
+  on public.assignments for all using (auth.role() = 'authenticated')
+  with check (auth.role() = 'authenticated');
+
+create index idx_assignments_employee on public.assignments (employee_id);
+create index idx_assignments_date on public.assignments (date_assigned desc);
+
+-- Seed sample data (optional, run once)
+insert into public.departments (name) values ('Administration'), ('Finance'), ('HR'), ('Operations');
+insert into public.positions (name) values ('Clerk'), ('Supervisor'), ('Department Head'), ('Staff');
+insert into public.shifts (name) values ('Morning'), ('Afternoon'), ('Night'), ('Flexible');
+```
+
+**Note:** Run the seed block only once. If you run it again, duplicate departments/positions/shifts will be created. To avoid that, add `unique(name)` to each lookup table.
+
+### Query 9b: Add `description` to `departments` (for Manage → Department screen)
+
+The Department management screen uses a `description` field. Run this if your `departments` table was created without it:
+
+```sql
+alter table public.departments add column if not exists description text;
+```
+
+### Query 9c: Add `description` and `department_id` to `positions` (for Manage → Position screen)
+
+The Position management screen uses `description` and `department_id`. Run this if your `positions` table was created without them:
+
+```sql
+alter table public.positions add column if not exists description text;
+alter table public.positions add column if not exists department_id uuid references public.departments(id) on delete set null;
+create index if not exists idx_positions_department on public.positions (department_id);
+```
+
+### Query 9d: Add `start_time` and `end_time` to `shifts` (for Manage → Shift screen)
+
+The Shift management screen uses `start_time` and `end_time`. Run this if your `shifts` table was created without them:
+
+```sql
+alter table public.shifts add column if not exists start_time time;
+alter table public.shifts add column if not exists end_time time;
 ```

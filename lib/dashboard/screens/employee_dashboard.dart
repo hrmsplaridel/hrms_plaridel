@@ -674,8 +674,9 @@ class _EmployeeUserMenu extends StatelessWidget {
       onSelected: (value) async {
         if (value == 'signout') {
           await context.read<AuthProvider>().signOut();
-          if (context.mounted)
+          if (context.mounted) {
             Navigator.of(context).popUntil((route) => route.isFirst);
+          }
         }
         if (value == 'profile') {
           onProfileTap?.call();
@@ -1209,10 +1210,10 @@ class _EmployeeAnnouncementsCard extends StatelessWidget {
               ),
               TextButton(
                 onPressed: () {},
-                child: const Text('View All >'),
                 style: TextButton.styleFrom(
                   foregroundColor: AppTheme.primaryNavy,
                 ),
+                child: const Text('View All >'),
               ),
             ],
           ),
@@ -1287,10 +1288,10 @@ class _EmployeeUpcomingLeaveCard extends StatelessWidget {
               ),
               TextButton(
                 onPressed: () {},
-                child: const Text('View More >'),
                 style: TextButton.styleFrom(
                   foregroundColor: AppTheme.primaryNavy,
                 ),
+                child: const Text('View More >'),
               ),
             ],
           ),
@@ -1360,10 +1361,10 @@ class _EmployeeAttendanceOverviewCard extends StatelessWidget {
               ),
               TextButton(
                 onPressed: () {},
-                child: const Text('View More >'),
                 style: TextButton.styleFrom(
                   foregroundColor: AppTheme.primaryNavy,
                 ),
+                child: const Text('View More >'),
               ),
             ],
           ),

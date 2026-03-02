@@ -49,7 +49,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     _emailController.dispose();
     _phoneController.dispose();
     _continueEmailController.dispose();
-    for (final c in _beiControllers) c.dispose();
+    for (final c in _beiControllers) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -61,7 +63,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       final list = await RecruitmentRepo.instance.getExamQuestions('bei');
       final questions = list.isNotEmpty ? list : _defaultBeiQuestions;
       if (mounted) {
-        for (final c in _beiControllers) c.dispose();
+        for (final c in _beiControllers) {
+          c.dispose();
+        }
         _beiControllers = questions.map((_) => TextEditingController()).toList();
         _beiQuestionsLoaded = questions;
         _beiLoading = false;
@@ -69,7 +73,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       }
     } catch (_) {
       if (mounted) {
-        for (final c in _beiControllers) c.dispose();
+        for (final c in _beiControllers) {
+          c.dispose();
+        }
         _beiControllers = _defaultBeiQuestions.map((_) => TextEditingController()).toList();
         _beiQuestionsLoaded = _defaultBeiQuestions;
         _beiLoading = false;

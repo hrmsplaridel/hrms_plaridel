@@ -6,9 +6,13 @@ import 'screens/dtr_time_logs.dart';
 import 'screens/dtr_reports.dart';
 
 /// Main DTR (Daily Time Record) module entry.
-/// Handles sub-navigation via [DtrRoutes] and renders the active section.
+/// When [section] is provided (from sidebar), shows only that section without tabs.
+/// When [section] is null, falls back to internal tab navigation.
 class DtrMain extends StatefulWidget {
-  const DtrMain({super.key});
+  const DtrMain({super.key, this.section});
+
+  /// Active section when driven by sidebar; null uses internal tabs.
+  final DtrSection? section;
 
   @override
   State<DtrMain> createState() => _DtrMainState();
@@ -17,8 +21,12 @@ class DtrMain extends StatefulWidget {
 class _DtrMainState extends State<DtrMain> {
   DtrSection _currentSection = DtrSection.dashboard;
 
+  DtrSection get _activeSection => widget.section ?? _currentSection;
+
   @override
   Widget build(BuildContext context) {
+    final useSidebarNav = widget.section != null;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -32,11 +40,15 @@ class _DtrMainState extends State<DtrMain> {
         ),
         const SizedBox(height: 8),
         Text(
-          'Daily Time Record. Choose a feature below.',
+          useSidebarNav
+              ? 'Daily Time Record.'
+              : 'Daily Time Record. Choose a feature below.',
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
         ),
-        const SizedBox(height: 24),
-        _buildSectionNav(),
+        if (!useSidebarNav) ...[
+          const SizedBox(height: 24),
+          _buildSectionNav(),
+        ],
         const SizedBox(height: 24),
         _buildContent(),
       ],
@@ -105,7 +117,7 @@ class _DtrMainState extends State<DtrMain> {
   Widget _buildContent() {
     return ConstrainedBox(
       constraints: const BoxConstraints(minHeight: 200),
-      child: switch (_currentSection) {
+      child: switch (_activeSection) {
         DtrSection.dashboard => const DtrDashboard(),
         DtrSection.timeLogs => const DtrTimeLogs(),
         DtrSection.reports => const DtrReports(),
