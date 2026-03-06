@@ -38,7 +38,7 @@ class RspFormHeader extends StatelessWidget {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.only(left: 56, right: 8, top: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -46,7 +46,7 @@ class RspFormHeader extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Circular seal (Municipality of Plaridel)
+                  // Municipality of Plaridel logo
                   Container(
                     width: 72,
                     height: 72,
@@ -55,10 +55,15 @@ class RspFormHeader extends StatelessWidget {
                       border: Border.all(color: _letterheadNavy, width: 2),
                       color: Colors.white,
                     ),
-                    child: Icon(
-                      Icons.account_balance_rounded,
-                      color: _letterheadNavy,
-                      size: 36,
+                    clipBehavior: Clip.antiAlias,
+                    child: Image.asset(
+                      'assets/images/Plaridel Logo.jpg',
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Icon(
+                        Icons.account_balance_rounded,
+                        color: _letterheadNavy,
+                        size: 36,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -173,13 +178,16 @@ class RspFormHeaderBoard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
       children: [
         Text(
           'Republic of the Philippines',
+          textAlign: TextAlign.center,
           style: TextStyle(color: _letterheadNavy, fontSize: 12),
         ),
         Text(
           'PROVINCE OF MISAMIS OCCIDENTAL',
+          textAlign: TextAlign.center,
           style: TextStyle(
             color: _letterheadNavy,
             fontSize: 12,
@@ -188,6 +196,7 @@ class RspFormHeaderBoard extends StatelessWidget {
         ),
         Text(
           'MUNICIPALITY OF PLARIDEL',
+          textAlign: TextAlign.center,
           style: TextStyle(
             color: _letterheadNavy,
             fontSize: 14,
@@ -195,14 +204,17 @@ class RspFormHeaderBoard extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 4),
-        Container(
-          height: 2,
-          width: 200,
-          color: Colors.black,
+        Center(
+          child: Container(
+            height: 2,
+            width: 200,
+            color: Colors.black,
+          ),
         ),
         const SizedBox(height: 8),
         Text(
           'HUMAN RESOURCE MERIT PROMOTION AND SELECTION BOARD',
+          textAlign: TextAlign.center,
           style: TextStyle(
             color: AppTheme.letterheadOrange,
             fontSize: 12,
@@ -213,12 +225,14 @@ class RspFormHeaderBoard extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             officeName!,
+            textAlign: TextAlign.center,
             style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
           ),
         ],
         const SizedBox(height: 12),
         Text(
           formTitle,
+          textAlign: TextAlign.center,
           style: TextStyle(
             color: AppTheme.letterheadOrange,
             fontSize: 16,

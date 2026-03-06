@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../constants/login_theme.dart';
-import '../models/login_role.dart';
-import '../../dashboard/screens/admin_dashboard.dart';
-import '../../dashboard/screens/employee_dashboard.dart';
+import '../../admin/screens/admin_dashboard.dart';
+import '../../employee/screens/employee_dashboard.dart';
+import '../../main.dart' show kLoginAsKey;
 
 /// Login screen: left = blue branding/illustration, right = white form.
 /// Reference: Welcome Back, Email/Employee ID, Password, Remember Me, Forgot Password, Login to HRMS.
@@ -19,7 +21,7 @@ class _LoginPageState extends State<LoginPage> {
   final _passwordController = TextEditingController();
   final _passwordFocusNode = FocusNode();
   bool _rememberMe = false;
-  LoginRole _role = LoginRole.admin;
+  String _loginAs = 'Admin';
   bool _isLoading = false;
 
   @override
@@ -45,10 +47,11 @@ class _LoginPageState extends State<LoginPage> {
               passwordController: _passwordController,
               passwordFocusNode: _passwordFocusNode,
               rememberMe: _rememberMe,
-              role: _role,
+              loginAs: _loginAs,
               isLoading: _isLoading,
-              onRoleChanged: (r) => setState(() => _role = r),
-              onRememberMeChanged: (v) => setState(() => _rememberMe = v ?? false),
+              onLoginAsChanged: (v) => setState(() => _loginAs = v),
+              onRememberMeChanged: (v) =>
+                  setState(() => _rememberMe = v ?? false),
               onLogin: _onLogin,
               onForgotPassword: _onForgotPassword,
             ),
@@ -78,16 +81,23 @@ class _LoginPageState extends State<LoginPage> {
         password: password,
       );
       if (mounted) {
-        final isEmployee = _role == LoginRole.employee;
+        // Persist Admin vs Employee so we restore to correct dashboard on app restart
+        final prefs = await SharedPreferences.getInstance();
+        final roleToSave = _loginAs == 'Admin' ? 'Admin' : 'Employee';
+        await prefs.setString(kLoginAsKey, roleToSave);
+
+        final isAdmin = _loginAs == 'Admin';
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
-            builder: (context) => isEmployee ? const EmployeeDashboard() : const AdminDashboard(),
+            builder: (context) =>
+                isAdmin ? const AdminDashboard() : const EmployeeDashboard(),
           ),
         );
       }
     } on AuthException catch (e) {
       if (mounted) {
-        final isEmailNotConfirmed = e.message.toLowerCase().contains('email not confirmed') ||
+        final isEmailNotConfirmed =
+            e.message.toLowerCase().contains('email not confirmed') ||
             e.message.toLowerCase().contains('confirm your email');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -102,9 +112,9 @@ class _LoginPageState extends State<LoginPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Login failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Login failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -199,9 +209,17 @@ class _BrandingSection extends StatelessWidget {
               Center(
                 child: Column(
                   children: [
-                    Icon(Icons.groups_rounded, size: 100, color: Colors.white.withOpacity(0.5)),
+                    Icon(
+                      Icons.groups_rounded,
+                      size: 100,
+                      color: Colors.white.withOpacity(0.5),
+                    ),
                     const SizedBox(height: 16),
-                    Icon(Icons.business_center_rounded, size: 64, color: Colors.white.withOpacity(0.4)),
+                    Icon(
+                      Icons.business_center_rounded,
+                      size: 64,
+                      color: Colors.white.withOpacity(0.4),
+                    ),
                   ],
                 ),
               ),
@@ -214,16 +232,16 @@ class _BrandingSection extends StatelessWidget {
   }
 }
 
-/// Right panel: white form — Welcome Back, role (Admin/Employee), fields, Remember Me, Forgot Password, Login to HRMS, footer.
+/// Right panel: white form — Welcome Back, Login as (Admin + DocuTracker roles), fields, Remember Me, Forgot Password, Login to HRMS, footer.
 class _LoginFormSection extends StatelessWidget {
   const _LoginFormSection({
     required this.emailController,
     required this.passwordController,
     required this.passwordFocusNode,
     required this.rememberMe,
-    required this.role,
+    required this.loginAs,
     required this.isLoading,
-    required this.onRoleChanged,
+    required this.onLoginAsChanged,
     required this.onRememberMeChanged,
     required this.onLogin,
     required this.onForgotPassword,
@@ -233,9 +251,9 @@ class _LoginFormSection extends StatelessWidget {
   final TextEditingController passwordController;
   final FocusNode passwordFocusNode;
   final bool rememberMe;
-  final LoginRole role;
+  final String loginAs;
   final bool isLoading;
-  final ValueChanged<LoginRole> onRoleChanged;
+  final ValueChanged<String> onLoginAsChanged;
   final ValueChanged<bool?> onRememberMeChanged;
   final VoidCallback onLogin;
   final VoidCallback onForgotPassword;
@@ -274,18 +292,9 @@ class _LoginFormSection extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 24),
-                      Text(
-                        'Login as',
-                        style: TextStyle(
-                          color: LoginTheme.textDark,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      _RoleSelector(
-                        selectedRole: role,
-                        onChanged: onRoleChanged,
+                      _LoginAsSelector(
+                        selectedLoginAs: loginAs,
+                        onChanged: onLoginAsChanged,
                       ),
                       const SizedBox(height: 24),
                       _LoginTextField(
@@ -328,7 +337,9 @@ class _LoginFormSection extends StatelessWidget {
                             onPressed: onForgotPassword,
                             style: TextButton.styleFrom(
                               foregroundColor: LoginTheme.bluePrimary,
-                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
                             ),
                             child: const Text('Forgot Password?'),
                           ),
@@ -353,31 +364,47 @@ class _LoginFormSection extends StatelessWidget {
                           const SizedBox(width: 8),
                           Text(
                             '|',
-                            style: TextStyle(color: LoginTheme.textSecondary, fontSize: 12),
+                            style: TextStyle(
+                              color: LoginTheme.textSecondary,
+                              fontSize: 12,
+                            ),
                           ),
                           TextButton(
                             onPressed: () {},
                             style: TextButton.styleFrom(
                               foregroundColor: LoginTheme.bluePrimary,
-                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
                               minimumSize: Size.zero,
                               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             ),
-                            child: const Text('Privacy Policy', style: TextStyle(fontSize: 12)),
+                            child: const Text(
+                              'Privacy Policy',
+                              style: TextStyle(fontSize: 12),
+                            ),
                           ),
                           Text(
                             '|',
-                            style: TextStyle(color: LoginTheme.textSecondary, fontSize: 12),
+                            style: TextStyle(
+                              color: LoginTheme.textSecondary,
+                              fontSize: 12,
+                            ),
                           ),
                           TextButton(
                             onPressed: () {},
                             style: TextButton.styleFrom(
                               foregroundColor: LoginTheme.bluePrimary,
-                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
                               minimumSize: Size.zero,
                               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             ),
-                            child: const Text('Terms of Use', style: TextStyle(fontSize: 12)),
+                            child: const Text(
+                              'Terms of Use',
+                              style: TextStyle(fontSize: 12),
+                            ),
                           ),
                         ],
                       ),
@@ -386,15 +413,16 @@ class _LoginFormSection extends StatelessWidget {
                 ),
               ),
             ),
-            Positioned(
-              top: 0,
-              left: 16,
-              child: IconButton(
-                onPressed: () => Navigator.of(context).pop(),
-                icon: const Icon(Icons.arrow_back),
-                color: LoginTheme.textDark,
+            if (kIsWeb)
+              Positioned(
+                top: 0,
+                left: 16,
+                child: IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.arrow_back),
+                  color: LoginTheme.textDark,
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -402,33 +430,48 @@ class _LoginFormSection extends StatelessWidget {
   }
 }
 
-class _RoleSelector extends StatelessWidget {
-  const _RoleSelector({
-    required this.selectedRole,
+class _LoginAsSelector extends StatelessWidget {
+  const _LoginAsSelector({
+    required this.selectedLoginAs,
     required this.onChanged,
   });
 
-  final LoginRole selectedRole;
-  final ValueChanged<LoginRole> onChanged;
+  final String selectedLoginAs;
+  final ValueChanged<String> onChanged;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: _RoleChip(
-            label: 'Admin',
-            isSelected: selectedRole == LoginRole.admin,
-            onTap: () => onChanged(LoginRole.admin),
+        Text(
+          'Login as',
+          style: TextStyle(
+            color: LoginTheme.textDark,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.2,
           ),
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _RoleChip(
-            label: 'Employee',
-            isSelected: selectedRole == LoginRole.employee,
-            onTap: () => onChanged(LoginRole.employee),
-          ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: _RoleChip(
+                label: 'Admin',
+                isSelected: selectedLoginAs == 'Admin',
+                onTap: () => onChanged('Admin'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _RoleChip(
+                label: 'Employee',
+                isSelected: selectedLoginAs == 'Employee',
+                onTap: () => onChanged('Employee'),
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -453,24 +496,37 @@ class _RoleChip extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(10),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
           decoration: BoxDecoration(
             color: isSelected ? LoginTheme.bluePrimary : Colors.white,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: isSelected ? LoginTheme.bluePrimary : LoginTheme.borderLight,
+              color: isSelected
+                  ? LoginTheme.bluePrimary
+                  : LoginTheme.borderLight,
               width: 1.5,
             ),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: LoginTheme.bluePrimary.withOpacity(0.25),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : null,
           ),
           child: Center(
             child: Text(
               label,
               style: TextStyle(
                 color: isSelected ? Colors.white : LoginTheme.textDark,
-                fontSize: 15,
+                fontSize: 14,
                 fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
               ),
+              textAlign: TextAlign.center,
             ),
           ),
         ),
@@ -513,9 +569,15 @@ class _LoginTextField extends StatelessWidget {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: LoginTheme.bluePrimary, width: 1.5),
+          borderSide: const BorderSide(
+            color: LoginTheme.bluePrimary,
+            width: 1.5,
+          ),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
       ),
     );
   }
@@ -549,11 +611,17 @@ class _PasswordTextFieldState extends State<_PasswordTextField> {
       onSubmitted: (_) => widget.onSubmitted?.call(),
       decoration: InputDecoration(
         hintText: 'Password',
-        prefixIcon: Icon(Icons.lock_outline, color: LoginTheme.bluePrimary, size: 22),
+        prefixIcon: Icon(
+          Icons.lock_outline,
+          color: LoginTheme.bluePrimary,
+          size: 22,
+        ),
         suffixIcon: IconButton(
           onPressed: () => setState(() => _obscure = !_obscure),
           icon: Icon(
-            _obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+            _obscure
+                ? Icons.visibility_off_outlined
+                : Icons.visibility_outlined,
             color: LoginTheme.bluePrimary,
             size: 22,
           ),
@@ -571,9 +639,15 @@ class _PasswordTextFieldState extends State<_PasswordTextField> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: LoginTheme.bluePrimary, width: 1.5),
+          borderSide: const BorderSide(
+            color: LoginTheme.bluePrimary,
+            width: 1.5,
+          ),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
       ),
     );
   }
@@ -596,7 +670,10 @@ class _LoginToHrmsButton extends StatelessWidget {
           gradient: LinearGradient(
             colors: onPressed != null && !isLoading
                 ? [LoginTheme.blueLight, LoginTheme.blueDark]
-                : [LoginTheme.blueLight.withOpacity(0.7), LoginTheme.blueDark.withOpacity(0.7)],
+                : [
+                    LoginTheme.blueLight.withOpacity(0.7),
+                    LoginTheme.blueDark.withOpacity(0.7),
+                  ],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -638,4 +715,3 @@ class _LoginToHrmsButton extends StatelessWidget {
     );
   }
 }
-

@@ -1,16 +1,4 @@
-# hrms_plaridel
+## HRMS – Municipality of Plaridel
 
-A new Flutter project.
-
-## Getting Started
-
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Human Resource Management System (HRMS) for the Municipality of Plaridel, Misamis Occidental.  
+This app streamlines recruitment, employee records, time and attendance (DTR), learning and development, and HR forms for both **admin** and **employees**, with responsive layouts for web and mobile.

@@ -1,86 +1,59 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../landingpage/constants/app_theme.dart';
+import '../../landingpage/constants/app_theme.dart';
 
-/// Position record for display/CRUD.
-class _PositionRecord {
-  const _PositionRecord({
+/// Department record for display/CRUD.
+class _DepartmentRecord {
+  const _DepartmentRecord({
     required this.id,
     required this.name,
     this.description,
-    this.departmentId,
-    this.departmentName,
     required this.isActive,
   });
   final String id;
   final String name;
   final String? description;
-  final String? departmentId;
-  final String? departmentName;
   final bool isActive;
 }
 
-/// Position management screen: list with search/department/status filter + form.
-class ManagePosition extends StatefulWidget {
-  const ManagePosition({super.key});
+/// Department management screen: list with search/status filter + form for Add/Update/Deactivate.
+class ManageDepartment extends StatefulWidget {
+  const ManageDepartment({super.key});
 
   @override
-  State<ManagePosition> createState() => _ManagePositionState();
+  State<ManageDepartment> createState() => _ManageDepartmentState();
 }
 
-class _ManagePositionState extends State<ManagePosition> {
+class _ManageDepartmentState extends State<ManageDepartment> {
   final _searchController = TextEditingController();
-  final _titleController = TextEditingController();
+  final _nameController = TextEditingController();
   final _descriptionController = TextEditingController();
 
-  String? _departmentFilterId;
   String _statusFilter = 'Active';
-  List<_PositionRecord> _positions = [];
-  List<Map<String, dynamic>> _departments = [];
+  List<_DepartmentRecord> _departments = [];
   bool _loading = false;
-  _PositionRecord? _selectedPosition;
-  String? _selectedDepartmentId;
+  _DepartmentRecord? _selectedDepartment;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadDepartments();
-      _loadPositions();
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadDepartments());
   }
 
   @override
   void dispose() {
     _searchController.dispose();
-    _titleController.dispose();
+    _nameController.dispose();
     _descriptionController.dispose();
     super.dispose();
   }
 
   Future<void> _loadDepartments() async {
-    try {
-      final res = await Supabase.instance.client
-          .from('departments')
-          .select('id, name')
-          .or('is_active.is.null,is_active.eq.true')
-          .order('name');
-      _departments = List<Map<String, dynamic>>.from(res);
-    } catch (e) {
-      debugPrint('Load departments failed: $e');
-      _departments = [];
-    }
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _loadPositions() async {
     setState(() => _loading = true);
     try {
       var query = Supabase.instance.client
-          .from('positions')
-          .select(
-            'id, name, description, department_id, is_active, departments(name)',
-          );
+          .from('departments')
+          .select('id, name, description, is_active');
 
       if (_statusFilter == 'Active') {
         query = query.or('is_active.is.null,is_active.eq.true');
@@ -88,71 +61,61 @@ class _ManagePositionState extends State<ManagePosition> {
         query = query.eq('is_active', false);
       }
 
-      if (_departmentFilterId != null) {
-        query = query.eq('department_id', _departmentFilterId!);
-      }
-
       final res = await query.order('name');
-      _positions = (res as List).map((e) {
+      _departments = (res as List).map((e) {
         final m = e as Map<String, dynamic>;
-        final dept = m['departments'];
-        return _PositionRecord(
+        return _DepartmentRecord(
           id: m['id'] as String,
           name: m['name'] as String? ?? '',
           description: m['description'] as String?,
-          departmentId: m['department_id'] as String?,
-          departmentName: (dept is Map ? dept['name'] : null) as String?,
           isActive: m['is_active'] as bool? ?? true,
         );
       }).toList();
     } catch (e) {
-      debugPrint('Load positions failed: $e');
-      _positions = [];
+      debugPrint('Load departments failed: $e');
+      _departments = [];
     }
     if (mounted) setState(() => _loading = false);
   }
 
-  void _selectPosition(_PositionRecord p) {
+  void _selectDepartment(_DepartmentRecord d) {
     setState(() {
-      _selectedPosition = p;
-      _titleController.text = p.name;
-      _descriptionController.text = p.description ?? '';
-      _selectedDepartmentId = p.departmentId;
+      _selectedDepartment = d;
+      _nameController.text = d.name;
+      _descriptionController.text = d.description ?? '';
     });
   }
 
   void _clearForm() {
     setState(() {
-      _selectedPosition = null;
-      _titleController.clear();
+      _selectedDepartment = null;
+      _nameController.clear();
       _descriptionController.clear();
-      _selectedDepartmentId = null;
     });
   }
 
-  Future<void> _addPosition() async {
-    final title = _titleController.text.trim();
-    if (title.isEmpty) {
+  Future<void> _addDepartment() async {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a position title.')),
+        const SnackBar(content: Text('Please enter a department name.')),
       );
       return;
     }
     try {
-      await Supabase.instance.client.from('positions').insert({
-        'name': title,
+      await Supabase.instance.client.from('departments').insert({
+        'name': name,
         'description': _descriptionController.text.trim().isEmpty
             ? null
             : _descriptionController.text.trim(),
-        'department_id': _selectedDepartmentId,
         'is_active': true,
       });
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('Position added.')));
+        ).showSnackBar(const SnackBar(content: Text('Department added.')));
         _clearForm();
-        _loadPositions();
+        _loadDepartments();
       }
     } catch (e) {
       if (mounted) {
@@ -163,39 +126,38 @@ class _ManagePositionState extends State<ManagePosition> {
     }
   }
 
-  Future<void> _updatePosition() async {
-    final p = _selectedPosition;
-    if (p == null) {
+  Future<void> _updateDepartment() async {
+    final d = _selectedDepartment;
+    if (d == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select a position to update.')),
+        const SnackBar(content: Text('Select a department to update.')),
       );
       return;
     }
-    final title = _titleController.text.trim();
-    if (title.isEmpty) {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a position title.')),
+        const SnackBar(content: Text('Please enter a department name.')),
       );
       return;
     }
     try {
       await Supabase.instance.client
-          .from('positions')
+          .from('departments')
           .update({
-            'name': title,
+            'name': name,
             'description': _descriptionController.text.trim().isEmpty
                 ? null
                 : _descriptionController.text.trim(),
-            'department_id': _selectedDepartmentId,
             'updated_at': DateTime.now().toIso8601String(),
           })
-          .eq('id', p.id);
+          .eq('id', d.id);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('Position updated.')));
+        ).showSnackBar(const SnackBar(content: Text('Department updated.')));
         _clearForm();
-        _loadPositions();
+        _loadDepartments();
       }
     } catch (e) {
       if (mounted) {
@@ -206,20 +168,20 @@ class _ManagePositionState extends State<ManagePosition> {
     }
   }
 
-  Future<void> _deactivatePosition() async {
-    final p = _selectedPosition;
-    if (p == null) {
+  Future<void> _deactivateDepartment() async {
+    final d = _selectedDepartment;
+    if (d == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select a position to deactivate.')),
+        const SnackBar(content: Text('Select a department to deactivate.')),
       );
       return;
     }
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Deactivate position?'),
+        title: const Text('Deactivate department?'),
         content: Text(
-          'This will deactivate "${p.name}". It will no longer appear in active lists.',
+          'This will deactivate "${d.name}". It will no longer appear in active lists.',
         ),
         actions: [
           TextButton(
@@ -237,18 +199,18 @@ class _ManagePositionState extends State<ManagePosition> {
     if (ok != true || !mounted) return;
     try {
       await Supabase.instance.client
-          .from('positions')
+          .from('departments')
           .update({
             'is_active': false,
             'updated_at': DateTime.now().toIso8601String(),
           })
-          .eq('id', p.id);
+          .eq('id', d.id);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${p.name} has been deactivated.')),
+          SnackBar(content: Text('${d.name} has been deactivated.')),
         );
         _clearForm();
-        _loadPositions();
+        _loadDepartments();
       }
     } catch (e) {
       if (mounted) {
@@ -268,7 +230,7 @@ class _ManagePositionState extends State<ManagePosition> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Position',
+          'Department',
           style: TextStyle(
             color: AppTheme.textPrimary,
             fontSize: 24,
@@ -306,14 +268,11 @@ class _ManagePositionState extends State<ManagePosition> {
   Widget _buildLeftPanel() {
     final search = _searchController.text.toLowerCase();
     final filtered = search.isEmpty
-        ? _positions
-        : _positions.where((p) {
-            final n = p.name.toLowerCase();
-            final desc = (p.description ?? '').toLowerCase();
-            final dept = (p.departmentName ?? '').toLowerCase();
-            return n.contains(search) ||
-                desc.contains(search) ||
-                dept.contains(search);
+        ? _departments
+        : _departments.where((d) {
+            final n = d.name.toLowerCase();
+            final desc = (d.description ?? '').toLowerCase();
+            return n.contains(search) || desc.contains(search);
           }).toList();
 
     return Container(
@@ -337,8 +296,7 @@ class _ManagePositionState extends State<ManagePosition> {
             spacing: 12,
             runSpacing: 12,
             children: [
-              SizedBox(width: 180, child: _buildSearchField()),
-              _buildDepartmentFilterDropdown(),
+              SizedBox(width: 200, child: _buildSearchField()),
               _buildStatusDropdown(),
             ],
           ),
@@ -365,7 +323,7 @@ class _ManagePositionState extends State<ManagePosition> {
                 Expanded(
                   flex: 1,
                   child: Text(
-                    'Position',
+                    'Name',
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 13,
@@ -398,7 +356,7 @@ class _ManagePositionState extends State<ManagePosition> {
               constraints: const BoxConstraints(minHeight: 120),
               alignment: Alignment.center,
               child: Text(
-                'No positions',
+                'No departments',
                 style: TextStyle(
                   color: AppTheme.textSecondary.withOpacity(0.8),
                   fontSize: 14,
@@ -406,14 +364,14 @@ class _ManagePositionState extends State<ManagePosition> {
               ),
             )
           else
-            ...filtered.map((p) {
-              final isSelected = _selectedPosition?.id == p.id;
+            ...filtered.map((d) {
+              final isSelected = _selectedDepartment?.id == d.id;
               return Material(
                 color: isSelected
                     ? AppTheme.primaryNavy.withOpacity(0.08)
                     : Colors.transparent,
                 child: InkWell(
-                  onTap: () => _selectPosition(p),
+                  onTap: () => _selectDepartment(d),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
@@ -424,9 +382,9 @@ class _ManagePositionState extends State<ManagePosition> {
                         SizedBox(
                           width: 60,
                           child: Text(
-                            p.id.length > 8
-                                ? '${p.id.substring(0, 8)}...'
-                                : p.id,
+                            d.id.length > 8
+                                ? '${d.id.substring(0, 8)}...'
+                                : d.id,
                             style: TextStyle(
                               fontSize: 12,
                               color: AppTheme.textSecondary,
@@ -436,7 +394,7 @@ class _ManagePositionState extends State<ManagePosition> {
                         Expanded(
                           flex: 1,
                           child: Text(
-                            p.name,
+                            d.name,
                             style: TextStyle(
                               fontSize: 13,
                               color: AppTheme.textPrimary,
@@ -446,7 +404,7 @@ class _ManagePositionState extends State<ManagePosition> {
                         Expanded(
                           flex: 2,
                           child: Text(
-                            p.description ?? '—',
+                            d.description ?? '—',
                             style: TextStyle(
                               fontSize: 12,
                               color: AppTheme.textSecondary,
@@ -495,35 +453,6 @@ class _ManagePositionState extends State<ManagePosition> {
     );
   }
 
-  Widget _buildDepartmentFilterDropdown() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppTheme.lightGray.withOpacity(0.5),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.transparent),
-      ),
-      child: DropdownButton<String?>(
-        value: _departmentFilterId,
-        underline: const SizedBox.shrink(),
-        isDense: true,
-        items: [
-          const DropdownMenuItem(value: null, child: Text('All')),
-          ..._departments.map(
-            (d) => DropdownMenuItem(
-              value: d['id'] as String?,
-              child: Text(d['name'] as String? ?? ''),
-            ),
-          ),
-        ],
-        onChanged: (v) {
-          setState(() => _departmentFilterId = v);
-          _loadPositions();
-        },
-      ),
-    );
-  }
-
   Widget _buildStatusDropdown() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -543,7 +472,7 @@ class _ManagePositionState extends State<ManagePosition> {
         ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
         onChanged: (v) {
           setState(() => _statusFilter = v ?? 'Active');
-          _loadPositions();
+          _loadDepartments();
         },
       ),
     );
@@ -568,7 +497,7 @@ class _ManagePositionState extends State<ManagePosition> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Position Title',
+            'Department Name',
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
@@ -577,33 +506,8 @@ class _ManagePositionState extends State<ManagePosition> {
           ),
           const SizedBox(height: 6),
           TextFormField(
-            controller: _titleController,
-            decoration: _inputDecoration('Position Title'),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'Department',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 6),
-          DropdownButtonFormField<String>(
-            initialValue: _selectedDepartmentId,
-            decoration: _inputDecoration('Select'),
-            hint: const Text('Select'),
-            items: [
-              const DropdownMenuItem(value: null, child: Text('Select')),
-              ..._departments.map(
-                (d) => DropdownMenuItem(
-                  value: d['id'] as String?,
-                  child: Text(d['name'] as String? ?? ''),
-                ),
-              ),
-            ],
-            onChanged: (v) => setState(() => _selectedDepartmentId = v),
+            controller: _nameController,
+            decoration: _inputDecoration('Department Name'),
           ),
           const SizedBox(height: 20),
           Text(
@@ -626,9 +530,9 @@ class _ManagePositionState extends State<ManagePosition> {
             runSpacing: 12,
             children: [
               FilledButton.icon(
-                onPressed: _addPosition,
+                onPressed: _addDepartment,
                 icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Add Position'),
+                label: const Text('Add Department'),
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFF4CAF50),
                   foregroundColor: Colors.white,
@@ -643,7 +547,9 @@ class _ManagePositionState extends State<ManagePosition> {
                 ),
               ),
               OutlinedButton.icon(
-                onPressed: _selectedPosition != null ? _updatePosition : null,
+                onPressed: _selectedDepartment != null
+                    ? _updateDepartment
+                    : null,
                 icon: const Icon(Icons.edit_rounded, size: 18),
                 label: const Text('Update'),
                 style: OutlinedButton.styleFrom(
@@ -659,8 +565,8 @@ class _ManagePositionState extends State<ManagePosition> {
                 ),
               ),
               FilledButton.icon(
-                onPressed: _selectedPosition != null
-                    ? _deactivatePosition
+                onPressed: _selectedDepartment != null
+                    ? _deactivateDepartment
                     : null,
                 icon: const Icon(Icons.person_off_rounded, size: 18),
                 label: const Text('Deactivate'),

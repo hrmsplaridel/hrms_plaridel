@@ -43,6 +43,9 @@ dependencies:
   excel: ^4.0.6
   share_plus: ^10.0.0
   path_provider: ^2.1.5
+  shared_preferences: ^2.2.2
+  webview_flutter: ^4.10.0
+  webview_flutter_web: ^0.2.3
 
 dev_dependencies:
   flutter_test:
@@ -54,6 +57,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.1
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -75,6 +79,12 @@ flutter:
 
   # For details regarding adding assets from package dependencies, see
   # https://flutter.dev/to/asset-from-package
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/Plaridel Logo.jpg"
+  min_sdk_android: 21
 
   # To add custom fonts to your application, add a fonts section here,
   # in this "flutter" section. Each entry in this list should have a

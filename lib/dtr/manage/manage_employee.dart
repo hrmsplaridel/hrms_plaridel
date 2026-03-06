@@ -4,8 +4,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../dtr/dtr_provider.dart';
-import '../landingpage/constants/app_theme.dart';
+import '../dtr_provider.dart';
+import '../../landingpage/constants/app_theme.dart';
 
 /// Employee profile for Manage screen (full data from profiles).
 class _EmployeeProfile {

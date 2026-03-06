@@ -1,7 +1,34 @@
 import 'package:flutter/material.dart';
-import '../../landingpage/constants/app_theme.dart';
+import '../../../landingpage/constants/app_theme.dart';
 
-/// Shared Settings page for admin and employee dashboards.
+/// Reusable settings content (sections only, no scaffold). Used in [SettingsPage] and [ProfileAndSettingsPage].
+class SettingsContent extends StatelessWidget {
+  const SettingsContent({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SettingsSection(
+          title: 'Preferences',
+          children: [
+            ListTile(
+              leading: Icon(Icons.notifications_outlined, color: AppTheme.primaryNavy),
+              title: Text('Notifications', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w500)),
+              subtitle: Text('Email and in-app notifications', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+              trailing: const Icon(Icons.chevron_right_rounded, color: AppTheme.textSecondary),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              onTap: () {},
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Standalone Settings page for admin and employee dashboards.
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
 
@@ -22,24 +49,7 @@ class SettingsPage extends StatelessWidget {
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _SettingsSection(
-              title: 'Preferences',
-              children: [
-                ListTile(
-                  leading: Icon(Icons.notifications_outlined, color: AppTheme.primaryNavy),
-                  title: Text('Notifications', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w500)),
-                  subtitle: Text('Email and in-app notifications', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
-                  trailing: const Icon(Icons.chevron_right_rounded, color: AppTheme.textSecondary),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  onTap: () {},
-                ),
-              ],
-            ),
-          ],
-        ),
+        child: const SettingsContent(),
       ),
     );
   }

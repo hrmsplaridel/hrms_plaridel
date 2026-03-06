@@ -1,3 +1,6 @@
+import 'dart:typed_data';
+
+import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -18,6 +21,15 @@ import '../data/turn_around_time.dart';
 /// Paper sizes match sample files: Letter.pdf (8.5"×11"), Long Letter.pdf (8.5"×14"), A4 Letter.pdf.
 class FormPdf {
   FormPdf._();
+
+  static Uint8List? _logoBytes;
+
+  /// Call before building any PDF so the Plaridel logo is available in headers.
+  static Future<void> ensureLogoLoaded() async {
+    if (_logoBytes != null) return;
+    final data = await rootBundle.load('assets/images/Plaridel Logo.jpg');
+    _logoBytes = data.buffer.asUint8List();
+  }
 
   /// Letter size: 8.5" × 11" (e.g. Letter.pdf)
   static final PdfPageFormat pageLetter =
@@ -98,7 +110,8 @@ class FormPdf {
         ),
       );
 
-  static pw.Document buildBiFormPdf(BiFormEntry e) {
+  static Future<pw.Document> buildBiFormPdf(BiFormEntry e) async {
+    await ensureLogoLoaded();
     final doc = pw.Document();
     doc.addPage(
       pw.Page(
@@ -299,15 +312,34 @@ class FormPdf {
           mainAxisAlignment: pw.MainAxisAlignment.center,
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            pw.Container(
-              width: 52,
-              height: 52,
-              decoration: pw.BoxDecoration(
-                shape: pw.BoxShape.circle,
-                border: pw.Border.all(color: _letterheadNavy, width: 1.5),
-                color: PdfColors.white,
-              ),
-            ),
+            _logoBytes != null
+                ? pw.Container(
+                    width: 52,
+                    height: 52,
+                    decoration: pw.BoxDecoration(
+                      shape: pw.BoxShape.circle,
+                      border: pw.Border.all(color: _letterheadNavy, width: 1.5),
+                    ),
+                    child: pw.ClipOval(
+                      child: pw.SizedBox(
+                        width: 52,
+                        height: 52,
+                        child: pw.Image(
+                          pw.MemoryImage(_logoBytes!),
+                          fit: pw.BoxFit.cover,
+                        ),
+                      ),
+                    ),
+                  )
+                : pw.Container(
+                    width: 52,
+                    height: 52,
+                    decoration: pw.BoxDecoration(
+                      shape: pw.BoxShape.circle,
+                      border: pw.Border.all(color: _letterheadNavy, width: 1.5),
+                      color: PdfColors.white,
+                    ),
+                  ),
             pw.SizedBox(width: 12),
             pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -445,9 +477,10 @@ class FormPdf {
     );
   }
 
-  static pw.Document buildPerformanceEvaluationPdf(
+  static Future<pw.Document> buildPerformanceEvaluationPdf(
     PerformanceEvaluationEntry e,
-  ) {
+  ) async {
+    await ensureLogoLoaded();
     final doc = pw.Document();
     doc.addPage(
       pw.Page(
@@ -510,7 +543,8 @@ class FormPdf {
     return doc;
   }
 
-  static pw.Document buildIdpPdf(IdpEntry e) {
+  static Future<pw.Document> buildIdpPdf(IdpEntry e) async {
+    await ensureLogoLoaded();
     final doc = pw.Document();
     doc.addPage(
       pw.MultiPage(
@@ -571,7 +605,8 @@ class FormPdf {
     return doc;
   }
 
-  static pw.Document buildApplicantsProfilePdf(ApplicantsProfileEntry e) {
+  static Future<pw.Document> buildApplicantsProfilePdf(ApplicantsProfileEntry e) async {
+    await ensureLogoLoaded();
     final doc = pw.Document();
     doc.addPage(
       pw.Page(
@@ -664,8 +699,9 @@ class FormPdf {
   }
 
   static pw.Widget _pdfHeaderBoard(String formTitle, {String? officeName}) {
-    return pw.Column(
+    final textBlock = pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.center,
+      mainAxisSize: pw.MainAxisSize.min,
       children: [
         pw.Text(
           'Republic of the Philippines',
@@ -707,6 +743,48 @@ class FormPdf {
             officeName,
             style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
           ),
+      ],
+    );
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.center,
+      children: [
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.center,
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          mainAxisSize: pw.MainAxisSize.min,
+          children: [
+            _logoBytes != null
+                ? pw.Container(
+                    width: 52,
+                    height: 52,
+                    decoration: pw.BoxDecoration(
+                      shape: pw.BoxShape.circle,
+                      border: pw.Border.all(color: _letterheadNavy, width: 1.5),
+                    ),
+                    child: pw.ClipOval(
+                      child: pw.SizedBox(
+                        width: 52,
+                        height: 52,
+                        child: pw.Image(
+                          pw.MemoryImage(_logoBytes!),
+                          fit: pw.BoxFit.cover,
+                        ),
+                      ),
+                    ),
+                  )
+                : pw.Container(
+                    width: 52,
+                    height: 52,
+                    decoration: pw.BoxDecoration(
+                      shape: pw.BoxShape.circle,
+                      border: pw.Border.all(color: _letterheadNavy, width: 1.5),
+                      color: PdfColors.white,
+                    ),
+                  ),
+            pw.SizedBox(width: 12),
+            textBlock,
+          ],
+        ),
         pw.SizedBox(height: 8),
         pw.Text(
           formTitle,
@@ -721,9 +799,10 @@ class FormPdf {
     );
   }
 
-  static pw.Document buildComparativeAssessmentPdf(
+  static Future<pw.Document> buildComparativeAssessmentPdf(
     ComparativeAssessmentEntry e,
-  ) {
+  ) async {
+    await ensureLogoLoaded();
     final doc = pw.Document();
     doc.addPage(
       pw.Page(
@@ -839,9 +918,10 @@ class FormPdf {
     return doc;
   }
 
-  static pw.Document buildPromotionCertificationPdf(
+  static Future<pw.Document> buildPromotionCertificationPdf(
     PromotionCertificationEntry e,
-  ) {
+  ) async {
+    await ensureLogoLoaded();
     final doc = pw.Document();
     doc.addPage(
       pw.Page(
@@ -936,7 +1016,8 @@ class FormPdf {
     return doc;
   }
 
-  static pw.Document buildSelectionLineupPdf(SelectionLineupEntry e) {
+  static Future<pw.Document> buildSelectionLineupPdf(SelectionLineupEntry e) async {
+    await ensureLogoLoaded();
     final doc = pw.Document();
     doc.addPage(
       pw.Page(
@@ -1041,7 +1122,8 @@ class FormPdf {
     return doc;
   }
 
-  static pw.Document buildTurnAroundTimePdf(TurnAroundTimeEntry e) {
+  static Future<pw.Document> buildTurnAroundTimePdf(TurnAroundTimeEntry e) async {
+    await ensureLogoLoaded();
     final doc = pw.Document();
     doc.addPage(
       pw.Page(
@@ -1204,7 +1286,8 @@ class FormPdf {
   }
 
   /// Training Need Analysis and Consolidated Report (L&D) — header with CY and Department, then 6-column table.
-  static pw.Document buildTrainingNeedAnalysisPdf(TrainingNeedAnalysisEntry e) {
+  static Future<pw.Document> buildTrainingNeedAnalysisPdf(TrainingNeedAnalysisEntry e) async {
+    await ensureLogoLoaded();
     final doc = pw.Document();
     doc.addPage(
       pw.Page(
@@ -1290,7 +1373,8 @@ class FormPdf {
   }
 
   /// Action Brainstorming and Coaching Worksheet (L&D) — DEPARTMENT, DATE, instruction, 7-column table, Certified by / Date.
-  static pw.Document buildActionBrainstormingCoachingPdf(ActionBrainstormingEntry e) {
+  static Future<pw.Document> buildActionBrainstormingCoachingPdf(ActionBrainstormingEntry e) async {
+    await ensureLogoLoaded();
     final doc = pw.Document();
     doc.addPage(
       pw.Page(

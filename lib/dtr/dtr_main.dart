@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../landingpage/constants/app_theme.dart';
 import 'dtr_routes.dart';
-import 'screens/dtr_dashboard.dart';
 import 'screens/dtr_time_logs.dart';
 import 'screens/dtr_reports.dart';
 
@@ -19,7 +18,7 @@ class DtrMain extends StatefulWidget {
 }
 
 class _DtrMainState extends State<DtrMain> {
-  DtrSection _currentSection = DtrSection.dashboard;
+  DtrSection _currentSection = DtrSection.timeLogs;
 
   DtrSection get _activeSection => widget.section ?? _currentSection;
 
@@ -103,22 +102,15 @@ class _DtrMainState extends State<DtrMain> {
     );
   }
 
-  static IconData _iconForSection(DtrSection section) {
-    switch (section) {
-      case DtrSection.dashboard:
-        return Icons.dashboard_rounded;
-      case DtrSection.timeLogs:
-        return Icons.schedule_rounded;
-      case DtrSection.reports:
-        return Icons.summarize_rounded;
-    }
-  }
+  static IconData _iconForSection(DtrSection section) => switch (section) {
+        DtrSection.timeLogs => Icons.schedule_rounded,
+        DtrSection.reports => Icons.summarize_rounded,
+      };
 
   Widget _buildContent() {
     return ConstrainedBox(
       constraints: const BoxConstraints(minHeight: 200),
       child: switch (_activeSection) {
-        DtrSection.dashboard => const DtrDashboard(),
         DtrSection.timeLogs => const DtrTimeLogs(),
         DtrSection.reports => const DtrReports(),
       },

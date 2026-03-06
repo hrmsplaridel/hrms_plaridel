@@ -1,6 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Allow the app to access the internet (Supabase, maps, etc.) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
-        android:label="hrms_plaridel"
+        android:label="HRMS"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

@@ -1,22 +1,12 @@
 /// DTR section identifiers and metadata.
 /// Used by [DtrMain] to switch between sub-screens.
-enum DtrSection {
-  dashboard,
-  timeLogs,
-  reports,
-}
+enum DtrSection { timeLogs, reports }
 
 extension DtrSectionExtension on DtrSection {
-  String get title {
-    switch (this) {
-      case DtrSection.dashboard:
-        return 'Dashboard';
-      case DtrSection.timeLogs:
-        return 'Time Logs';
-      case DtrSection.reports:
-        return 'Reports';
-    }
-  }
+  String get title => switch (this) {
+        DtrSection.timeLogs => 'Time Logs',
+        DtrSection.reports => 'Reports',
+      };
 
   int get index => DtrSection.values.indexOf(this);
 }
@@ -28,7 +18,7 @@ class DtrRoutes {
   static const List<DtrSection> sections = DtrSection.values;
 
   static DtrSection sectionFromIndex(int index) {
-    if (index < 0 || index >= sections.length) return DtrSection.dashboard;
+    if (index < 0 || index >= sections.length) return DtrSection.timeLogs;
     return sections[index];
   }
 }

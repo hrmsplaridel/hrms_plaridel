@@ -164,7 +164,7 @@ class _ContactItem extends StatelessWidget {
   }
 }
 
-/// Location card with link to open the office in Google Maps.
+/// Location card with static preview and link to open in Google Maps.
 class _OfficeMap extends StatelessWidget {
   const _OfficeMap();
 

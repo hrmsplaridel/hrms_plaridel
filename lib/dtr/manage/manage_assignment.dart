@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../landingpage/constants/app_theme.dart';
+import '../../landingpage/constants/app_theme.dart';
 
 /// Employee summary for assignment list.
 class _EmployeeSummary {

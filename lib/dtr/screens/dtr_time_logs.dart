@@ -110,12 +110,15 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
   }
 
   Future<void> _load() async {
+    if (!mounted) return;
     final dtr = context.read<DtrProvider>();
     await dtr.loadEmployees();
+    if (!mounted) return;
     await _applyFilters();
   }
 
   Future<void> _applyFilters() async {
+    if (!mounted) return;
     final dtr = context.read<DtrProvider>();
     final start = DateTime(_selectedYear, _selectedMonth, 1);
     final end = DateTime(_selectedYear, _selectedMonth + 1, 0);
