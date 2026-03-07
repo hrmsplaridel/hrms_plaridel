@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -7,6 +8,8 @@ import '../../../data/recruitment_application.dart';
 import '../../../data/action_brainstorming_coaching.dart';
 import '../../../data/training_need_analysis.dart';
 import '../../../landingpage/constants/app_theme.dart';
+import '../../../landingpage/screens/landing_page.dart';
+import '../../../login/screens/login_page.dart';
 import '../../../utils/form_pdf.dart';
 import '../../../widgets/rsp_form_header_footer.dart';
 import '../../../widgets/user_avatar.dart';
@@ -22,6 +25,7 @@ import '../../../dtr/manage/manage_position.dart';
 import '../../../dtr/manage/manage_shift.dart';
 import '../../../docutracker/docutracker_main.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
+import '../../../leave/leave_main.dart';
 import '../../../recruitment/screens/rsp_admin_screen.dart';
 import '../../../widgets/feature_card.dart';
 
@@ -786,7 +790,13 @@ class _AdminDropdown extends StatelessWidget {
         if (value == 'signout') {
           await context.read<AuthProvider>().signOut();
           if (context.mounted) {
-            Navigator.of(context).popUntil((route) => route.isFirst);
+            final dest = kIsWeb
+                ? const LandingPage()
+                : const LoginPage();
+            Navigator.of(context).pushAndRemoveUntil(
+              MaterialPageRoute(builder: (_) => dest),
+              (route) => false,
+            );
           }
         }
         if (value == 'profile_settings') {
@@ -1903,7 +1913,8 @@ class _DtrContent extends StatefulWidget {
 }
 
 class _DtrContentState extends State<_DtrContent> {
-  /// 0 = menu, 1 = Time Logs, 2 = Reports, 3 = Employees, 4 = Assignment, 5 = Department, 6 = Position, 7 = Shift
+  /// 0 = menu, 1 = Time Logs, 2 = Reports, 3 = Employees, 4 = Assignment,
+  /// 5 = Department, 6 = Position, 7 = Shift, 8 = Leave Management
   int _dtrSectionIndex = 0;
 
   @override
@@ -1988,12 +1999,21 @@ class _DtrContentState extends State<_DtrContent> {
                 icon: Icons.access_time_rounded,
                 onTap: () => setState(() => _dtrSectionIndex = 7),
               ),
+              FeatureCard(
+                title: 'Leave Management',
+                subtitle:
+                    'Review employee leave requests, approvals, and leave-related records.',
+                icon: Icons.event_note_rounded,
+                onTap: () => setState(() => _dtrSectionIndex = 8),
+              ),
             ],
           ),
         ] else if (_dtrSectionIndex == 1)
           DtrMain(section: DtrSection.timeLogs)
         else if (_dtrSectionIndex == 2)
           DtrMain(section: DtrSection.reports)
+        else if (_dtrSectionIndex == 8)
+          const LeaveMain(isAdmin: true)
         else
           _ManageContent(subIndex: _dtrSectionIndex - 3),
       ],

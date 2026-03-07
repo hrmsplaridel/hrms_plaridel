@@ -1,10 +1,14 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../landingpage/constants/app_theme.dart';
+import '../../../landingpage/screens/landing_page.dart';
+import '../../../login/screens/login_page.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../dtr/dtr_provider.dart';
 import '../../../docutracker/docutracker_main.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
+import '../../../leave/leave_main.dart';
 import '../../../widgets/user_avatar.dart';
 import '../../shared/screens/profile_and_settings_page.dart';
 
@@ -88,6 +92,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                           )
                         : _selectedNavIndex == 1
                         ? const _EmployeeAttendanceContent()
+                        : _selectedNavIndex == 2
+                        ? const LeaveMain(isAdmin: false)
                         : _selectedNavIndex == 4
                         ? const DocuTrackerMain(isAdmin: false)
                         : _EmployeePlaceholderContent(
@@ -667,7 +673,13 @@ class _EmployeeUserMenu extends StatelessWidget {
         if (value == 'signout') {
           await context.read<AuthProvider>().signOut();
           if (context.mounted) {
-            Navigator.of(context).popUntil((route) => route.isFirst);
+            final dest = kIsWeb
+                ? const LandingPage()
+                : const LoginPage();
+            Navigator.of(context).pushAndRemoveUntil(
+              MaterialPageRoute(builder: (_) => dest),
+              (route) => false,
+            );
           }
         }
         if (value == 'profile_settings') {
