@@ -255,7 +255,8 @@ class _DtrReportsState extends State<DtrReports> {
       builder: (context, constraints) {
         final w = constraints.maxWidth;
         final h = constraints.maxHeight;
-        final isCompact = w < 900;
+        final isMobile = w < 600;
+        final isCompact = w < 1024;
         // Use bounded height when parent gives unbounded (e.g. inside scroll view)
         final boundedH = h.isFinite && h > 0 ? h : 1200.0;
         return ConstrainedBox(
@@ -268,79 +269,15 @@ class _DtrReportsState extends State<DtrReports> {
                 'Tardiness Report',
                 style: TextStyle(
                   color: AppTheme.textPrimary,
-                  fontSize: 24,
+                  fontSize: isMobile ? 20 : 24,
                   fontWeight: FontWeight.w800,
                 ),
               ),
               const SizedBox(height: 16),
-              Wrap(
-                spacing: 12,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(minWidth: 200, maxWidth: 300),
-                    child: TextField(
-                      controller: _searchController,
-                      onChanged: (_) => setState(() {}),
-                      decoration: InputDecoration(
-                        hintText: 'Search name...',
-                        prefixIcon: const Icon(Icons.search_rounded, size: 20),
-                        isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        filled: true,
-                        fillColor: AppTheme.white,
-                      ),
-                    ),
-                  ),
-                  DropdownButton<int>(
-                    value: _selectedMonth,
-                    items: List.generate(12, (i) => i + 1)
-                        .map(
-                          (m) => DropdownMenuItem(
-                            value: m,
-                            child: Text(_months[m - 1]),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (v) {
-                      if (v != null) setState(() => _selectedMonth = v);
-                      _loadEmployeeRecords();
-                    },
-                  ),
-                  DropdownButton<int>(
-                    value: _selectedYear,
-                    items: List.generate(11, (i) => DateTime.now().year - 5 + i)
-                        .map((y) => DropdownMenuItem(
-                              value: y,
-                              child: Text('$y'),
-                            ))
-                        .toList(),
-                    onChanged: (v) {
-                      if (v != null) setState(() => _selectedYear = v);
-                      _loadEmployeeRecords();
-                    },
-                  ),
-                  OutlinedButton(
-                    onPressed: _reset,
-                    style: OutlinedButton.styleFrom(
-                      backgroundColor: const Color(0xFFE8F5E9),
-                      foregroundColor: const Color(0xFF2E7D32),
-                      side: const BorderSide(color: Color(0xFF81C784)),
-                    ),
-                    child: const Text('RESET'),
-                  ),
-                ],
-              ),
+              _buildFilters(isMobile),
               const SizedBox(height: 24),
-              isCompact
-                  ? _buildCompactLayout(
+              isMobile
+                  ? _buildMobileLayout(
                       employees: employees,
                       end: end,
                       recordsByDate: recordsByDate,
@@ -352,7 +289,20 @@ class _DtrReportsState extends State<DtrReports> {
                       tardinessPct: tardinessPct,
                       dtr: dtr,
                     )
-                  : SizedBox(
+                  : isCompact
+                      ? _buildCompactLayout(
+                          employees: employees,
+                          end: end,
+                          recordsByDate: recordsByDate,
+                          selectedName: selectedName,
+                          workingDays: workingDays,
+                          lateCount: lateCount,
+                          absentCount: absentCount,
+                          tardyCount: tardyCount,
+                          tardinessPct: tardinessPct,
+                          dtr: dtr,
+                        )
+                      : SizedBox(
                       height: 520,
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -392,6 +342,217 @@ class _DtrReportsState extends State<DtrReports> {
         ),
         );
       },
+    );
+  }
+
+  Widget _buildFilters(bool isMobile) {
+    return Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        SizedBox(
+          width: isMobile ? double.infinity : 280,
+          child: TextField(
+            controller: _searchController,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              hintText: 'Search name...',
+              prefixIcon: const Icon(Icons.search_rounded, size: 20),
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              filled: true,
+              fillColor: AppTheme.white,
+            ),
+          ),
+        ),
+        if (!isMobile) ...[
+          DropdownButton<int>(
+            value: _selectedMonth,
+            items: List.generate(12, (i) => i + 1)
+                .map(
+                  (m) => DropdownMenuItem(
+                    value: m,
+                    child: Text(_months[m - 1]),
+                  ),
+                )
+                .toList(),
+            onChanged: (v) {
+              if (v != null) setState(() => _selectedMonth = v);
+              _loadEmployeeRecords();
+            },
+          ),
+          DropdownButton<int>(
+            value: _selectedYear,
+            items: List.generate(11, (i) => DateTime.now().year - 5 + i)
+                .map((y) => DropdownMenuItem(
+                      value: y,
+                      child: Text('$y'),
+                    ))
+                .toList(),
+            onChanged: (v) {
+              if (v != null) setState(() => _selectedYear = v);
+              _loadEmployeeRecords();
+            },
+          ),
+        ] else
+          ...[
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 130,
+                child: DropdownButtonFormField<int>(
+                  value: _selectedMonth,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    filled: true,
+                    fillColor: AppTheme.white,
+                  ),
+                  items: List.generate(12, (i) => i + 1)
+                      .map(
+                        (m) => DropdownMenuItem(
+                          value: m,
+                          child: Text(
+                            _months[m - 1],
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null) setState(() => _selectedMonth = v);
+                    _loadEmployeeRecords();
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 90,
+                child: DropdownButtonFormField<int>(
+                  value: _selectedYear,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    filled: true,
+                    fillColor: AppTheme.white,
+                  ),
+                  items: List.generate(11, (i) => DateTime.now().year - 5 + i)
+                      .map((y) => DropdownMenuItem(
+                            value: y,
+                            child: Text('$y'),
+                          ))
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null) setState(() => _selectedYear = v);
+                    _loadEmployeeRecords();
+                  },
+                ),
+              ),
+            ],
+          ),
+          ],
+        OutlinedButton(
+          onPressed: _reset,
+          style: OutlinedButton.styleFrom(
+            backgroundColor: const Color(0xFFE8F5E9),
+            foregroundColor: const Color(0xFF2E7D32),
+            side: const BorderSide(color: Color(0xFF81C784)),
+          ),
+          child: const Text('RESET'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileLayout({
+    required List<dynamic> employees,
+    required DateTime end,
+    required Map<DateTime, TimeRecord> recordsByDate,
+    required String selectedName,
+    required int workingDays,
+    required int lateCount,
+    required int absentCount,
+    required int tardyCount,
+    required int tardinessPct,
+    required DtrProvider dtr,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: AppTheme.white,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.black.withOpacity(0.08)),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: _selectedEmployeeId,
+              isExpanded: true,
+              hint: const Text('Select employee'),
+              items: employees
+                  .map((e) => DropdownMenuItem<String>(
+                        value: e.id.toString(),
+                        child: Text(
+                          e.fullName,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ))
+                  .toList(),
+              onChanged: (v) {
+                if (v != null) {
+                  setState(() => _selectedEmployeeId = v);
+                  _loadEmployeeRecords();
+                }
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        SizedBox(
+          height: 320,
+          child: _buildDtrTable(
+            end: end,
+            recordsByDate: recordsByDate,
+            dtr: dtr,
+            compactColumns: true,
+          ),
+        ),
+        const SizedBox(height: 16),
+        _buildSummaryCard(
+          selectedName: selectedName,
+          workingDays: workingDays,
+          lateCount: lateCount,
+          absentCount: absentCount,
+          tardyCount: tardyCount,
+          tardinessPct: tardinessPct,
+          fullWidth: true,
+          isResponsive: true,
+          recordsByDate: recordsByDate,
+          end: end,
+        ),
+      ],
     );
   }
 
@@ -502,8 +663,13 @@ class _DtrReportsState extends State<DtrReports> {
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
     required DtrProvider dtr,
+    bool compactColumns = false,
   }) {
-    const tableWidth = 550.0;
+    final colDate = compactColumns ? 80.0 : 90.0;
+    final colTime = compactColumns ? 58.0 : 70.0;
+    final tableWidth = compactColumns
+        ? (colDate + colTime * 4 + 70)
+        : 550.0;
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: SizedBox(
@@ -534,63 +700,63 @@ class _DtrReportsState extends State<DtrReports> {
                 child: Row(
                   children: [
                     SizedBox(
-                      width: 90,
+                      width: colDate,
                       child: Text(
                         'Date',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 12,
-                                        color: AppTheme.textPrimary,
-                                      ),
-                                    ),
-                                  ),
-                                  SizedBox(
-                                    width: 70,
-                                    child: Text(
-                                      'AM IN',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 12,
-                                        color: AppTheme.textPrimary,
-                                      ),
-                                    ),
-                                  ),
-                                  SizedBox(
-                                    width: 70,
-                                    child: Text(
-                                      'AM OUT',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 12,
-                                        color: AppTheme.textPrimary,
-                                      ),
-                                    ),
-                                  ),
-                                  SizedBox(
-                                    width: 70,
-                                    child: Text(
-                                      'PM IN',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 12,
-                                        color: AppTheme.textPrimary,
-                                      ),
-                                    ),
-                                  ),
-                                  SizedBox(
-                                    width: 70,
-                                    child: Text(
-                                      'PM OUT',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 12,
-                                        color: AppTheme.textPrimary,
-                                      ),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: Text(
-                                      'Remarks',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: compactColumns ? 11 : 12,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: colTime,
+                      child: Text(
+                        'AM IN',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: compactColumns ? 11 : 12,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: colTime,
+                      child: Text(
+                        'AM OUT',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: compactColumns ? 11 : 12,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: colTime,
+                      child: Text(
+                        'PM IN',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: compactColumns ? 11 : 12,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: colTime,
+                      child: Text(
+                        'PM OUT',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: compactColumns ? 11 : 12,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        'Remarks',
                                       style: TextStyle(
                                         fontWeight: FontWeight.w700,
                                         fontSize: 12,
@@ -633,7 +799,7 @@ class _DtrReportsState extends State<DtrReports> {
                                           child: Row(
                                             children: [
                                               SizedBox(
-                                                width: 90,
+                                                width: colDate,
                                                 child: Text(
                                                   _formatDate(dt),
                                                   style: TextStyle(
@@ -643,7 +809,7 @@ class _DtrReportsState extends State<DtrReports> {
                                                 ),
                                               ),
                                               SizedBox(
-                                                width: 70,
+                                                width: colTime,
                                                 child: Text(
                                                   rec?.timeIn != null
                                                       ? _formatTime(rec!.timeIn)
@@ -655,29 +821,29 @@ class _DtrReportsState extends State<DtrReports> {
                                                 ),
                                               ),
                                               SizedBox(
-                                                width: 70,
+                                                width: colTime,
                                                 child: Text(
                                                   '—',
                                                   style: TextStyle(
-                                                    fontSize: 12,
+                                                    fontSize: compactColumns ? 11 : 12,
                                                     color:
                                                         AppTheme.textSecondary,
                                                   ),
                                                 ),
                                               ),
                                               SizedBox(
-                                                width: 70,
+                                                width: colTime,
                                                 child: Text(
                                                   '—',
                                                   style: TextStyle(
-                                                    fontSize: 12,
+                                                    fontSize: compactColumns ? 11 : 12,
                                                     color:
                                                         AppTheme.textSecondary,
                                                   ),
                                                 ),
                                               ),
                                               SizedBox(
-                                                width: 70,
+                                                width: colTime,
                                                 child: Text(
                                                   rec?.timeOut != null
                                                       ? _formatTime(
@@ -726,14 +892,15 @@ class _DtrReportsState extends State<DtrReports> {
     required int tardyCount,
     required int tardinessPct,
     bool fullWidth = false,
+    bool isResponsive = false,
     required Map<DateTime, TimeRecord> recordsByDate,
     required DateTime end,
   }) {
     return Container(
       width: fullWidth ? null : 200,
       constraints: fullWidth
-          ? const BoxConstraints(maxHeight: 500)
-          : const BoxConstraints(maxWidth: 200, maxHeight: 500),
+          ? const BoxConstraints(maxHeight: 600)
+          : const BoxConstraints(maxWidth: 200, maxHeight: 600),
       decoration: BoxDecoration(
                         color: AppTheme.lightGray.withOpacity(0.5),
                         borderRadius: BorderRadius.circular(12),
@@ -778,31 +945,82 @@ class _DtrReportsState extends State<DtrReports> {
                               textAlign: TextAlign.center,
                             ),
                             const SizedBox(height: 20),
-                            _SummaryStat(
-                              label: 'Working Days',
-                              value: '$workingDays',
-                            ),
-                            const SizedBox(height: 12),
-                            _SummaryStat(
-                              label: 'Late',
-                              value: '$lateCount',
-                              hasBorder: true,
-                              borderColor: lateCount > 0 ? Colors.red : const Color(0xFF4CAF50),
-                            ),
-                            const SizedBox(height: 12),
-                            _SummaryStat(
-                              label: 'Absent',
-                              value: '$absentCount',
-                              hasBorder: absentCount > 0,
-                              borderColor: Colors.orange,
-                            ),
-                            const SizedBox(height: 12),
-                            _SummaryStat(
-                              label: 'Tardy',
-                              value: '$tardyCount',
-                              hasBorder: tardyCount > 0,
-                              borderColor: Colors.orange,
-                            ),
+                            isResponsive
+                                ? Wrap(
+                                    spacing: 12,
+                                    runSpacing: 12,
+                                    children: [
+                                      SizedBox(
+                                        width: 140,
+                                        child: _SummaryStat(
+                                          label: 'Working Days',
+                                          value: '$workingDays',
+                                        ),
+                                      ),
+                                      SizedBox(
+                                        width: 140,
+                                        child: _SummaryStat(
+                                          label: 'Late',
+                                          value: '$lateCount',
+                                          hasBorder: true,
+                                          borderColor: lateCount > 0
+                                              ? Colors.red
+                                              : const Color(0xFF4CAF50),
+                                        ),
+                                      ),
+                                      SizedBox(
+                                        width: 140,
+                                        child: _SummaryStat(
+                                          label: 'Absent',
+                                          value: '$absentCount',
+                                          hasBorder: absentCount > 0,
+                                          borderColor: Colors.orange,
+                                        ),
+                                      ),
+                                      SizedBox(
+                                        width: 140,
+                                        child: _SummaryStat(
+                                          label: 'Tardy',
+                                          value: '$tardyCount',
+                                          hasBorder: tardyCount > 0,
+                                          borderColor: Colors.orange,
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                : Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      _SummaryStat(
+                                        label: 'Working Days',
+                                        value: '$workingDays',
+                                      ),
+                                      const SizedBox(height: 12),
+                                      _SummaryStat(
+                                        label: 'Late',
+                                        value: '$lateCount',
+                                        hasBorder: true,
+                                        borderColor: lateCount > 0
+                                            ? Colors.red
+                                            : const Color(0xFF4CAF50),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      _SummaryStat(
+                                        label: 'Absent',
+                                        value: '$absentCount',
+                                        hasBorder: absentCount > 0,
+                                        borderColor: Colors.orange,
+                                      ),
+                                      const SizedBox(height: 12),
+                                      _SummaryStat(
+                                        label: 'Tardy',
+                                        value: '$tardyCount',
+                                        hasBorder: tardyCount > 0,
+                                        borderColor: Colors.orange,
+                                      ),
+                                    ],
+                                  ),
                             const SizedBox(height: 16),
                             Text(
                               '$tardinessPct% TARDINESS',
@@ -928,6 +1146,7 @@ class _DtrReportsState extends State<DtrReports> {
           tardyCount: tardyCount,
           tardinessPct: tardinessPct,
           fullWidth: true,
+          isResponsive: true,
           recordsByDate: recordsByDate,
           end: end,
         ),

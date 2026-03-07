@@ -321,9 +321,6 @@ class _BalancesPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final width = MediaQuery.of(context).size.width;
-    final crossAxisCount = width < 600 ? 1 : (width < 960 ? 2 : 3);
-
     return _SectionCard(
       title: 'Leave Balances',
       subtitle: 'Available and pending credits per leave type.',
@@ -332,18 +329,27 @@ class _BalancesPanel extends StatelessWidget {
           ? const _CenteredState(message: 'Loading leave balances...')
           : balances.isEmpty
               ? const _CenteredState(message: 'No leave balances available yet.')
-              : GridView.count(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  crossAxisCount: crossAxisCount,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: 2.2,
-                  children: balances
-                      .map(
-                        (balance) => LeaveBalanceCard(balance: balance),
-                      )
-                      .toList(),
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    final crossAxisCount = constraints.maxWidth < 600
+                        ? 1
+                        : (constraints.maxWidth < 960 ? 2 : 3);
+                    final cardWidth =
+                        (constraints.maxWidth - (crossAxisCount - 1) * 12) /
+                            crossAxisCount;
+                    return Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: balances
+                          .map(
+                            (balance) => SizedBox(
+                              width: cardWidth,
+                              child: LeaveBalanceCard(balance: balance),
+                            ),
+                          )
+                          .toList(),
+                    );
+                  },
                 ),
     );
   }
