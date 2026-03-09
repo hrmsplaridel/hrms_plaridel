@@ -2265,7 +2265,7 @@ class _AdminSignUpContentState extends State<_AdminSignUpContent> {
                 onChanged: (_) => setState(() {}),
                 decoration:
                     _inputDecoration(
-                      'â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢',
+                      '',
                       Icons.lock_outline_rounded,
                     ).copyWith(
                       suffixIcon: IconButton(
@@ -2295,7 +2295,7 @@ class _AdminSignUpContentState extends State<_AdminSignUpContent> {
           child: TextField(
             controller: _confirmController,
             obscureText: _obscureConfirm,
-            decoration: _inputDecoration('â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢', Icons.lock_outline_rounded)
+            decoration: _inputDecoration('', Icons.lock_outline_rounded)
                 .copyWith(
                   suffixIcon: IconButton(
                     icon: Icon(

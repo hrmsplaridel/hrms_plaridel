@@ -7488,6 +7488,8 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     }
   }
 
+  static const _kNa = 'N/A';
+
   Widget _tableCell(double width, Widget child) {
     return TableCell(
       verticalAlignment: TableCellVerticalAlignment.middle,
@@ -7585,6 +7587,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                     final scrollWidth = constraints.maxWidth.isFinite
                         ? constraints.maxWidth
                         : MediaQuery.sizeOf(context).width;
+                    const fixedTableWidth = 1498.0;
+                    final tableWidth = scrollWidth > fixedTableWidth
+                        ? scrollWidth
+                        : fixedTableWidth;
                     return SizedBox(
                       width: scrollWidth,
                       child: Scrollbar(
@@ -7599,17 +7605,17 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                           child: SingleChildScrollView(
                             scrollDirection: Axis.vertical,
                             child: ConstrainedBox(
-                              constraints: const BoxConstraints(minWidth: 1374),
+                              constraints: BoxConstraints(minWidth: tableWidth),
                               child: Table(
-                                columnWidths: const {
-                                  0: FixedColumnWidth(160),
-                                  1: FixedColumnWidth(260),
-                                  2: FixedColumnWidth(108),
-                                  3: FixedColumnWidth(170),
-                                  4: FixedColumnWidth(76),
-                                  5: FixedColumnWidth(64),
-                                  6: FixedColumnWidth(288),
-                                  7: FixedColumnWidth(248),
+                                columnWidths: {
+                                  0: const FixedColumnWidth(160),
+                                  1: const FixedColumnWidth(260),
+                                  2: const FixedColumnWidth(140),
+                                  3: const FixedColumnWidth(170),
+                                  4: const FixedColumnWidth(76),
+                                  5: const FixedColumnWidth(64),
+                                  6: const FixedColumnWidth(380),
+                                  7: const FixedColumnWidth(248),
                                 },
                                 defaultVerticalAlignment:
                                     TableCellVerticalAlignment.middle,
@@ -7647,7 +7653,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         ),
                                       ),
                                       _tableCell(
-                                        108,
+                                        140,
                                         const Text(
                                           'Phone',
                                           style: TextStyle(
@@ -7687,7 +7693,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         ),
                                       ),
                                       _tableCell(
-                                        288,
+                                        380,
                                         const Text(
                                           'Attachment',
                                           style: TextStyle(
@@ -7743,10 +7749,12 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                           ),
                                         ),
                                         _tableCell(
-                                          108,
+                                          140,
                                           Text(
-                                            app.phone ?? 'â€”',
+                                            app.phone ?? _kNa,
                                             style: textStyle,
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 1,
                                           ),
                                         ),
                                         _tableCell(
@@ -7765,7 +7773,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                           76,
                                           Text(
                                             exam == null
-                                                ? 'â€”'
+                                                ? _kNa
                                                 : (exam.passed
                                                       ? 'Passed'
                                                       : 'Failed'),
@@ -7776,7 +7784,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                           64,
                                           Text(
                                             exam == null
-                                                ? 'â€”'
+                                                ? _kNa
                                                 : '${exam.scorePercent.toStringAsFixed(0)}%',
                                             style: textStyle,
                                           ),
@@ -7891,7 +7899,7 @@ class _AttachmentCell extends StatelessWidget {
             .toList(),
       );
       return SizedBox(
-        width: 268,
+        width: 360,
         height: contentHeight,
         child: useScroll ? SingleChildScrollView(child: column) : column,
       );

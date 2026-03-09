@@ -28,7 +28,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     'Dashboard',
     'My Attendance',
     'My Leave',
-    'My Payroll',
     'DocuTracker',
     'Announcements',
   ];
@@ -94,7 +93,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                         ? const _EmployeeAttendanceContent()
                         : _selectedNavIndex == 2
                         ? const LeaveMain(isAdmin: false)
-                        : _selectedNavIndex == 4
+                        : _selectedNavIndex == 3
                         ? const DocuTrackerMain(isAdmin: false)
                         : _EmployeePlaceholderContent(
                             title: _navItems[_selectedNavIndex],
@@ -110,7 +109,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
   }
 }
 
-/// Dark blue sidebar: HR branding, nav (Dashboard, My Attendance, My Leave, My Payroll, Announcements), user block, footer.
+/// Dark blue sidebar: HR branding, nav (Dashboard, My Attendance, My Leave, DocuTracker, Announcements), user block, footer.
 class _EmployeeSidebar extends StatelessWidget {
   const _EmployeeSidebar({
     required this.displayName,
@@ -247,22 +246,16 @@ class _EmployeeSidebar extends StatelessWidget {
             onTap: () => onTap(2),
           ),
           _EmployeeNavTile(
-            icon: Icons.payments_rounded,
-            label: 'My Payroll',
+            icon: Icons.description_rounded,
+            label: 'DocuTracker',
             selected: selectedIndex == 3,
             onTap: () => onTap(3),
           ),
           _EmployeeNavTile(
-            icon: Icons.description_rounded,
-            label: 'DocuTracker',
-            selected: selectedIndex == 4,
-            onTap: () => onTap(4),
-          ),
-          _EmployeeNavTile(
             icon: Icons.campaign_rounded,
             label: 'Announcements',
-            selected: selectedIndex == 5,
-            onTap: () => onTap(5),
+            selected: selectedIndex == 4,
+            onTap: () => onTap(4),
           ),
           const Spacer(),
           const Divider(height: 1, color: Colors.white24),
@@ -382,8 +375,8 @@ class _EmployeeNavTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bgColor = selected
-        ? const Color(0xFF3B82F6)
-        : Colors.transparent; // light blue when active
+        ? Colors.white.withOpacity(0.22)
+        : Colors.transparent;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: Material(
