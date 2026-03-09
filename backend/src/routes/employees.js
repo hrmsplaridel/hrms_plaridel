@@ -1,0 +1,204 @@
+const express = require('express');
+const bcrypt = require('bcrypt');
+const { pool } = require('../config/db');
+const { authMiddleware } = require('../middleware/auth');
+const { requireAdmin } = require('../middleware/rbac');
+
+const router = express.Router();
+const protect = [authMiddleware];
+
+const SALT_ROUNDS = 10;
+
+// GET /api/employees - list all (?status=Active|Inactive|All, ?role=admin|employee|All)
+router.get('/', protect, async (req, res) => {
+  try {
+    const status = req.query.status || 'Active';
+    const roleFilter = req.query.role || 'All';
+
+    const conditions = [];
+    const params = [];
+    let i = 1;
+
+    if (status === 'Active') {
+      conditions.push('(is_active IS NULL OR is_active = true)');
+    } else if (status === 'Inactive') {
+      conditions.push('is_active = false');
+    }
+    if (roleFilter === 'Admin') {
+      conditions.push(`role = $${i++}`);
+      params.push('admin');
+    } else if (roleFilter === 'User' || roleFilter === 'Employee') {
+      conditions.push(`role = $${i++}`);
+      params.push('employee');
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const result = await pool.query(
+      `SELECT id, full_name, role, email, is_active, avatar_path, middle_name, suffix, sex, date_of_birth, contact_number, address
+       FROM users
+       ${where}
+       ORDER BY full_name`,
+      params
+    );
+
+    const rows = result.rows.map((r) => ({
+      id: r.id,
+      full_name: r.full_name ?? 'Unknown',
+      role: r.role ?? 'employee',
+      email: r.email,
+      is_active: r.is_active ?? true,
+      avatar_path: r.avatar_path,
+      middle_name: r.middle_name,
+      suffix: r.suffix,
+      sex: r.sex,
+      date_of_birth: r.date_of_birth,
+      contact_number: r.contact_number,
+      address: r.address,
+    }));
+    res.json(rows);
+  } catch (err) {
+    console.error('[employees GET]', err);
+    res.status(500).json({ error: 'Failed to fetch employees' });
+  }
+});
+
+// GET /api/employees/:id - get one employee (matches profiles)
+router.get('/:id', protect, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, full_name, role, email, is_active, avatar_path, middle_name, suffix, sex, date_of_birth, contact_number, address
+       FROM users WHERE id = $1`,
+      [req.params.id]
+    );
+    const r = result.rows[0];
+    if (!r) return res.status(404).json({ error: 'Employee not found' });
+
+    res.json({
+      id: r.id,
+      full_name: r.full_name ?? 'Unknown',
+      role: r.role ?? 'employee',
+      email: r.email,
+      is_active: r.is_active ?? true,
+      avatar_path: r.avatar_path,
+      middle_name: r.middle_name,
+      suffix: r.suffix,
+      sex: r.sex,
+      date_of_birth: r.date_of_birth,
+      contact_number: r.contact_number,
+      address: r.address,
+    });
+  } catch (err) {
+    console.error('[employees GET :id]', err);
+    res.status(500).json({ error: 'Failed to fetch employee' });
+  }
+});
+
+// POST /api/employees - create employee (admin only); same as auth/register but admin creates
+router.post('/', protect, requireAdmin, async (req, res) => {
+  try {
+    const { email, password, full_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+    if (!['admin', 'employee'].includes(role)) {
+      return res.status(400).json({ error: 'Role must be admin or employee' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+
+    const result = await pool.query(
+      `INSERT INTO users (email, password_hash, role, full_name, middle_name, suffix, sex, date_of_birth, contact_number, address, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, true)
+       RETURNING id, email, role, full_name, avatar_path, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address`,
+      [
+        email.trim().toLowerCase(),
+        passwordHash,
+        role,
+        full_name?.trim() || null,
+        middle_name?.trim() || null,
+        suffix?.trim() || null,
+        sex?.trim() || null,
+        date_of_birth || null,
+        contact_number?.trim() || null,
+        address?.trim() || null,
+      ]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Email already registered' });
+    console.error('[employees POST]', err);
+    res.status(500).json({ error: 'Failed to create employee' });
+  }
+});
+
+// PUT /api/employees/:id - update employee (admin only)
+router.put('/:id', protect, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { full_name, role, email, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address, avatar_path } = req.body;
+
+    const updates = [];
+    const values = [];
+    let i = 1;
+
+    const fields = [
+      ['full_name', full_name],
+      ['role', role],
+      ['email', email],
+      ['is_active', is_active],
+      ['middle_name', middle_name],
+      ['suffix', suffix],
+      ['sex', sex],
+      ['date_of_birth', date_of_birth],
+      ['contact_number', contact_number],
+      ['address', address],
+      ['avatar_path', avatar_path],
+    ];
+    for (const [col, val] of fields) {
+      if (val !== undefined) {
+        if (col === 'role' && !['admin', 'employee'].includes(val)) continue;
+        if (col === 'date_of_birth') {
+          updates.push(`${col} = $${i++}::date`);
+          values.push(val || null);
+        } else {
+          updates.push(`${col} = $${i++}`);
+          values.push(typeof val === 'string' ? val.trim() : val);
+        }
+      }
+    }
+
+    if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
+    updates.push('updated_at = now()');
+    values.push(id);
+
+    const result = await pool.query(
+      `UPDATE users SET ${updates.join(', ')} WHERE id = $${i}
+       RETURNING id, email, role, full_name, avatar_path, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address`,
+      values
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Employee not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Email already exists' });
+    console.error('[employees PUT]', err);
+    res.status(500).json({ error: 'Failed to update employee' });
+  }
+});
+
+// DELETE /api/employees/:id - deactivate (or soft-delete); optional hard delete
+router.delete('/:id', protect, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'UPDATE users SET is_active = false, updated_at = now() WHERE id = $1 RETURNING id',
+      [req.params.id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Employee not found' });
+    res.status(204).send();
+  } catch (err) {
+    console.error('[employees DELETE]', err);
+    res.status(500).json({ error: 'Failed to deactivate employee' });
+  }
+});
+
+module.exports = router;

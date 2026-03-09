@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../api/client.dart';
 import '../data/time_record.dart';
 
 /// Summary counts for DTR dashboard.
@@ -194,12 +196,12 @@ class DtrProvider extends ChangeNotifier {
   /// Load employee list for admin filter.
   Future<void> loadEmployees() async {
     try {
-      final res = await Supabase.instance.client
-          .from('profiles')
-          .select('id, full_name')
-          .eq('role', 'employee')
-          .order('full_name');
-      _employees = (res as List)
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/employees',
+        queryParameters: {'role': 'User', 'status': 'Active'},
+      );
+      final data = res.data ?? [];
+      _employees = data
           .map(
             (e) => EmployeeOption(
               id: (e as Map)['id'] as String,

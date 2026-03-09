@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../providers/auth_provider.dart';
 import '../constants/login_theme.dart';
 import '../../admin/screens/admin_dashboard.dart';
 import '../../employee/screens/employee_dashboard.dart';
@@ -21,7 +22,6 @@ class _LoginPageState extends State<LoginPage> {
   final _passwordController = TextEditingController();
   final _passwordFocusNode = FocusNode();
   bool _rememberMe = false;
-  String _loginAs = 'Admin';
   bool _isLoading = false;
 
   @override
@@ -47,9 +47,7 @@ class _LoginPageState extends State<LoginPage> {
               passwordController: _passwordController,
               passwordFocusNode: _passwordFocusNode,
               rememberMe: _rememberMe,
-              loginAs: _loginAs,
               isLoading: _isLoading,
-              onLoginAsChanged: (v) => setState(() => _loginAs = v),
               onRememberMeChanged: (v) =>
                   setState(() => _rememberMe = v ?? false),
               onLogin: _onLogin,
@@ -76,45 +74,33 @@ class _LoginPageState extends State<LoginPage> {
 
     setState(() => _isLoading = true);
     try {
-      await Supabase.instance.client.auth.signInWithPassword(
-        email: email,
-        password: password,
-      );
-      if (mounted) {
-        // Persist Admin vs Employee so we restore to correct dashboard on app restart
-        final prefs = await SharedPreferences.getInstance();
-        final roleToSave = _loginAs == 'Admin' ? 'Admin' : 'Employee';
-        await prefs.setString(kLoginAsKey, roleToSave);
+      final auth = context.read<AuthProvider>();
+      final ok = await auth.login(email, password);
+      if (!mounted) return;
+      if (ok) {
+        final auth = context.read<AuthProvider>();
+        final role = auth.user?.role ?? 'employee';
+        final isAdmin = role == 'admin';
 
-        final isAdmin = _loginAs == 'Admin';
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(kLoginAsKey, isAdmin ? 'Admin' : 'Employee');
+
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
             builder: (context) =>
                 isAdmin ? const AdminDashboard() : const EmployeeDashboard(),
           ),
         );
-      }
-    } on AuthException catch (e) {
-      if (mounted) {
-        final isEmailNotConfirmed =
-            e.message.toLowerCase().contains('email not confirmed') ||
-            e.message.toLowerCase().contains('confirm your email');
+      } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              isEmailNotConfirmed
-                  ? 'Please confirm your email first. Check your inbox and click the link from Supabase, then try logging in again.'
-                  : e.message,
-            ),
-            duration: const Duration(seconds: 5),
-          ),
+          const SnackBar(content: Text('Invalid email or password')),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Login failed: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Login failed: $e')),
+        );
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -232,16 +218,14 @@ class _BrandingSection extends StatelessWidget {
   }
 }
 
-/// Right panel: white form — Welcome Back, Login as (Admin + DocuTracker roles), fields, Remember Me, Forgot Password, Login to HRMS, footer.
+/// Right panel: white form — Welcome Back, Email/Employee ID, Password, Remember Me, Forgot Password, Login.
 class _LoginFormSection extends StatelessWidget {
   const _LoginFormSection({
     required this.emailController,
     required this.passwordController,
     required this.passwordFocusNode,
     required this.rememberMe,
-    required this.loginAs,
     required this.isLoading,
-    required this.onLoginAsChanged,
     required this.onRememberMeChanged,
     required this.onLogin,
     required this.onForgotPassword,
@@ -251,9 +235,7 @@ class _LoginFormSection extends StatelessWidget {
   final TextEditingController passwordController;
   final FocusNode passwordFocusNode;
   final bool rememberMe;
-  final String loginAs;
   final bool isLoading;
-  final ValueChanged<String> onLoginAsChanged;
   final ValueChanged<bool?> onRememberMeChanged;
   final VoidCallback onLogin;
   final VoidCallback onForgotPassword;
@@ -290,11 +272,6 @@ class _LoginFormSection extends StatelessWidget {
                           color: LoginTheme.textSecondary,
                           fontSize: 15,
                         ),
-                      ),
-                      const SizedBox(height: 24),
-                      _LoginAsSelector(
-                        selectedLoginAs: loginAs,
-                        onChanged: onLoginAsChanged,
                       ),
                       const SizedBox(height: 24),
                       _LoginTextField(
@@ -424,111 +401,6 @@ class _LoginFormSection extends StatelessWidget {
                 ),
               ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _LoginAsSelector extends StatelessWidget {
-  const _LoginAsSelector({
-    required this.selectedLoginAs,
-    required this.onChanged,
-  });
-
-  final String selectedLoginAs;
-  final ValueChanged<String> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Login as',
-          style: TextStyle(
-            color: LoginTheme.textDark,
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.2,
-          ),
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: _RoleChip(
-                label: 'Admin',
-                isSelected: selectedLoginAs == 'Admin',
-                onTap: () => onChanged('Admin'),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _RoleChip(
-                label: 'Employee',
-                isSelected: selectedLoginAs == 'Employee',
-                onTap: () => onChanged('Employee'),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-class _RoleChip extends StatelessWidget {
-  const _RoleChip({
-    required this.label,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
-          decoration: BoxDecoration(
-            color: isSelected ? LoginTheme.bluePrimary : Colors.white,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: isSelected
-                  ? LoginTheme.bluePrimary
-                  : LoginTheme.borderLight,
-              width: 1.5,
-            ),
-            boxShadow: isSelected
-                ? [
-                    BoxShadow(
-                      color: LoginTheme.bluePrimary.withOpacity(0.25),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ]
-                : null,
-          ),
-          child: Center(
-            child: Text(
-              label,
-              style: TextStyle(
-                color: isSelected ? Colors.white : LoginTheme.textDark,
-                fontSize: 14,
-                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ),
         ),
       ),
     );

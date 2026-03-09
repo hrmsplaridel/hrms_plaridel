@@ -1,5 +1,6 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
 
 /// Department record for display/CRUD.
@@ -51,18 +52,12 @@ class _ManageDepartmentState extends State<ManageDepartment> {
   Future<void> _loadDepartments() async {
     setState(() => _loading = true);
     try {
-      var query = Supabase.instance.client
-          .from('departments')
-          .select('id, name, description, is_active');
-
-      if (_statusFilter == 'Active') {
-        query = query.or('is_active.is.null,is_active.eq.true');
-      } else if (_statusFilter == 'Inactive') {
-        query = query.eq('is_active', false);
-      }
-
-      final res = await query.order('name');
-      _departments = (res as List).map((e) {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/departments',
+        queryParameters: {'status': _statusFilter},
+      );
+      final data = res.data ?? [];
+      _departments = (data).map((e) {
         final m = e as Map<String, dynamic>;
         return _DepartmentRecord(
           id: m['id'] as String,
@@ -71,6 +66,9 @@ class _ManageDepartmentState extends State<ManageDepartment> {
           isActive: m['is_active'] as bool? ?? true,
         );
       }).toList();
+    } on DioException catch (e) {
+      debugPrint('Load departments failed: ${e.response?.data ?? e.message}');
+      _departments = [];
     } catch (e) {
       debugPrint('Load departments failed: $e');
       _departments = [];
@@ -103,13 +101,16 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       return;
     }
     try {
-      await Supabase.instance.client.from('departments').insert({
-        'name': name,
-        'description': _descriptionController.text.trim().isEmpty
-            ? null
-            : _descriptionController.text.trim(),
-        'is_active': true,
-      });
+      await ApiClient.instance.post(
+        '/api/departments',
+        data: {
+          'name': name,
+          'description': _descriptionController.text.trim().isEmpty
+              ? null
+              : _descriptionController.text.trim(),
+          'is_active': true,
+        },
+      );
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -117,11 +118,14 @@ class _ManageDepartmentState extends State<ManageDepartment> {
         _clearForm();
         _loadDepartments();
       }
+    } on DioException catch (e) {
+      if (mounted) {
+        final msg = (e.response?.data as Map?)?['error'] ?? e.message ?? 'Failed to add';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to add: $msg')));
+      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to add: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to add: $e')));
       }
     }
   }
@@ -142,16 +146,15 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       return;
     }
     try {
-      await Supabase.instance.client
-          .from('departments')
-          .update({
-            'name': name,
-            'description': _descriptionController.text.trim().isEmpty
-                ? null
-                : _descriptionController.text.trim(),
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', d.id);
+      await ApiClient.instance.put(
+        '/api/departments/${d.id}',
+        data: {
+          'name': name,
+          'description': _descriptionController.text.trim().isEmpty
+              ? null
+              : _descriptionController.text.trim(),
+        },
+      );
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -159,11 +162,14 @@ class _ManageDepartmentState extends State<ManageDepartment> {
         _clearForm();
         _loadDepartments();
       }
+    } on DioException catch (e) {
+      if (mounted) {
+        final msg = (e.response?.data as Map?)?['error'] ?? e.message ?? 'Failed to update';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to update: $msg')));
+      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
       }
     }
   }
@@ -198,13 +204,10 @@ class _ManageDepartmentState extends State<ManageDepartment> {
     );
     if (ok != true || !mounted) return;
     try {
-      await Supabase.instance.client
-          .from('departments')
-          .update({
-            'is_active': false,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', d.id);
+      await ApiClient.instance.put(
+        '/api/departments/${d.id}',
+        data: {'is_active': false},
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('${d.name} has been deactivated.')),
@@ -212,11 +215,14 @@ class _ManageDepartmentState extends State<ManageDepartment> {
         _clearForm();
         _loadDepartments();
       }
+    } on DioException catch (e) {
+      if (mounted) {
+        final msg = (e.response?.data as Map?)?['error'] ?? e.message ?? 'Failed to deactivate';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to deactivate: $msg')));
+      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to deactivate: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to deactivate: $e')));
       }
     }
   }

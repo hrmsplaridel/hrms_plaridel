@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'api/client.dart';
 import 'landingpage/constants/app_theme.dart';
 import 'landingpage/screens/landing_page.dart';
 import 'login/screens/login_page.dart';
@@ -23,12 +24,13 @@ final RouteObserver<ModalRoute<void>> routeObserver =
     RouteObserver<ModalRoute<void>>();
 
 /// Chooses the initial screen based on platform and auth state.
-/// If user has a restored session, go to the appropriate dashboard.
+/// If user has a restored session (API), go to the appropriate dashboard
+/// based on the user's role from the API (not user choice).
 /// Otherwise: web → LandingPage, mobile → LoginPage.
-Widget _initialHome(String storedLoginAs) {
-  final user = Supabase.instance.client.auth.currentUser;
-  if (user != null) {
-    final isAdmin = storedLoginAs == 'Admin';
+Widget _initialHome(AuthProvider auth, String storedLoginAs) {
+  if (auth.user != null) {
+    final role = auth.user!.role ?? 'employee';
+    final isAdmin = role == 'admin';
     return isAdmin ? const AdminDashboard() : const EmployeeDashboard();
   }
 
@@ -46,6 +48,9 @@ Widget _initialHome(String storedLoginAs) {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  ApiClient.instance.init();
+
   try {
     await Supabase.initialize(
       url: SupabaseConfig.url,
@@ -53,23 +58,28 @@ Future<void> main() async {
     );
   } catch (e) {
     debugPrint('Supabase init failed: $e');
-    // Continue so the app still shows (e.g. landing page); auth features will fail until config is fixed.
   }
+
+  final auth = AuthProvider();
+  await auth.restoreSession();
+
   final prefs = await SharedPreferences.getInstance();
   final storedLoginAs = prefs.getString(kLoginAsKey) ?? 'Admin';
-  runApp(MyApp(storedLoginAs: storedLoginAs));
+
+  runApp(MyApp(auth: auth, storedLoginAs: storedLoginAs));
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key, required this.storedLoginAs});
+  const MyApp({super.key, required this.auth, required this.storedLoginAs});
 
+  final AuthProvider auth;
   final String storedLoginAs;
 
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider<AuthProvider>.value(value: auth),
         ChangeNotifierProvider(create: (_) => DtrProvider()),
         ChangeNotifierProvider(create: (_) => DocuTrackerProvider()),
         ChangeNotifierProvider(
@@ -81,7 +91,7 @@ class MyApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         theme: AppTheme.lightTheme,
         navigatorObservers: [routeObserver],
-        home: _initialHome(storedLoginAs),
+        home: _initialHome(auth, storedLoginAs),
       ),
     );
   }

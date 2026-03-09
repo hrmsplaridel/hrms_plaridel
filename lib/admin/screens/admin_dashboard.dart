@@ -1,7 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../data/job_vacancy_announcement.dart';
 import '../../../data/recruitment_application.dart';
@@ -13,7 +12,6 @@ import '../../../login/screens/login_page.dart';
 import '../../../utils/form_pdf.dart';
 import '../../../widgets/rsp_form_header_footer.dart';
 import '../../../widgets/user_avatar.dart';
-import '../../../login/models/login_role.dart';
 import '../../shared/screens/profile_and_settings_page.dart';
 import '../../../dtr/dtr_main.dart';
 import '../../../dtr/screens/dtr_dashboard.dart';
@@ -790,9 +788,7 @@ class _AdminDropdown extends StatelessWidget {
         if (value == 'signout') {
           await context.read<AuthProvider>().signOut();
           if (context.mounted) {
-            final dest = kIsWeb
-                ? const LandingPage()
-                : const LoginPage();
+            final dest = kIsWeb ? const LandingPage() : const LoginPage();
             Navigator.of(context).pushAndRemoveUntil(
               MaterialPageRoute(builder: (_) => dest),
               (route) => false,
@@ -1024,7 +1020,10 @@ class _DashboardContent extends StatelessWidget {
               ),
             ],
           ),
-          child: const DocuTrackerDashboardScreen(isAdmin: true, showTitle: false),
+          child: const DocuTrackerDashboardScreen(
+            isAdmin: true,
+            showTitle: false,
+          ),
         ),
         const SizedBox(height: 28),
         // DTR snapshot (same cards + recent activity as DTR dashboard),
@@ -2021,550 +2020,75 @@ class _DtrContentState extends State<_DtrContent> {
   }
 }
 
-/// Sign-up form inside admin dashboard: create new user accounts.
-class _AdminSignUpContent extends StatefulWidget {
+/// Create Account: full form displayed directly (single place for adding employees).
+class _AdminSignUpContent extends StatelessWidget {
   const _AdminSignUpContent();
 
   @override
-  State<_AdminSignUpContent> createState() => _AdminSignUpContentState();
-}
-
-class _AdminSignUpContentState extends State<_AdminSignUpContent> {
-  final _nameController = TextEditingController();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  final _confirmController = TextEditingController();
-  LoginRole _role = LoginRole.employee;
-
-  /// '' = normal employee; otherwise Originator, Records, Focal Person, Department Head, Mayor.
-  bool _obscurePassword = true;
-  bool _obscureConfirm = true;
-  bool _isLoading = false;
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _emailController.dispose();
-    _passwordController.dispose();
-    _confirmController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _onCreateAccount() async {
-    final name = _nameController.text.trim();
-    final email = _emailController.text.trim();
-    final password = _passwordController.text;
-    final confirm = _confirmController.text;
-
-    if (name.isEmpty) {
-      _showSnackBar('Please enter full name');
-      return;
-    }
-    if (email.isEmpty) {
-      _showSnackBar('Please enter email');
-      return;
-    }
-    if (password.isEmpty) {
-      _showSnackBar('Please enter a password');
-      return;
-    }
-    if (password.length < 6) {
-      _showSnackBar('Password must be at least 6 characters');
-      return;
-    }
-    if (password != confirm) {
-      _showSnackBar('Passwords do not match');
-      return;
-    }
-
-    setState(() => _isLoading = true);
-    try {
-      await Supabase.instance.client.auth.signUp(
-        email: email,
-        password: password,
-        data: {
-          'full_name': name,
-          'role': _role == LoginRole.admin ? 'admin' : 'employee',
-        },
-      );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Account created. User can sign in after email confirmation (if required).',
-            ),
-          ),
-        );
-        _nameController.clear();
-        _emailController.clear();
-        _passwordController.clear();
-        _confirmController.clear();
-      }
-    } on AuthException catch (e) {
-      if (mounted) _showSnackBar(e.message);
-    } catch (e) {
-      if (mounted) _showSnackBar('Failed: $e');
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  void _showSnackBar(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-  }
-
-  int _passwordStrength(String p) {
-    if (p.isEmpty) return 0;
-    if (p.length < 6) return 1;
-    final hasDigit = p.contains(RegExp(r'[0-9]'));
-    final hasLetter = p.contains(RegExp(r'[a-zA-Z]'));
-    final hasSpecial = p.contains(RegExp(r'[!@#$%^&*(),.?":{}|<>]'));
-    final score =
-        (hasDigit ? 1 : 0) +
-        (hasLetter ? 1 : 0) +
-        (hasSpecial ? 1 : 0) +
-        (p.length >= 10 ? 1 : 0);
-    return score.clamp(0, 4);
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final width = MediaQuery.sizeOf(context).width;
-    final useTwoColumns = width > 720;
-
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppTheme.primaryNavy.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  Icons.person_add_rounded,
-                  color: AppTheme.primaryNavy,
-                  size: 28,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Create Account',
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 24,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.3,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Register a new user. They can sign in after email confirmation if enabled.',
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 14,
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 28),
-          Container(
-            padding: const EdgeInsets.all(24),
-            constraints: BoxConstraints(maxWidth: useTwoColumns ? 720 : 480),
-            decoration: BoxDecoration(
-              color: AppTheme.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.black.withOpacity(0.06)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 20,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: useTwoColumns
-                ? Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(child: _buildAccountDetailsSection()),
-                      const SizedBox(width: 32),
-                      SizedBox(width: 280, child: _buildRoleSection()),
-                    ],
-                  )
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _buildAccountDetailsSection(),
-                      const SizedBox(height: 24),
-                      _buildRoleSection(),
-                    ],
-                  ),
-          ),
-          if (!useTwoColumns) const SizedBox(height: 24),
-          if (!useTwoColumns)
-            Container(
-              constraints: const BoxConstraints(maxWidth: 480),
-              child: _buildSubmitButton(),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAccountDetailsSection() {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _SectionLabel(icon: Icons.badge_outlined, title: 'Account details'),
-        const SizedBox(height: 16),
-        _LabeledField(
-          label: 'Full name',
-          child: TextField(
-            controller: _nameController,
-            decoration: _inputDecoration(
-              'e.g. Juan Dela Cruz',
-              Icons.person_outline_rounded,
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        _LabeledField(
-          label: 'Email',
-          child: TextField(
-            controller: _emailController,
-            keyboardType: TextInputType.emailAddress,
-            decoration: _inputDecoration(
-              'user@example.com',
-              Icons.mail_outline_rounded,
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        _LabeledField(
-          label: 'Password',
-          helper:
-              'At least 6 characters. Add numbers or symbols for a stronger password.',
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: _passwordController,
-                obscureText: _obscurePassword,
-                onChanged: (_) => setState(() {}),
-                decoration:
-                    _inputDecoration(
-                      '',
-                      Icons.lock_outline_rounded,
-                    ).copyWith(
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _obscurePassword
-                              ? Icons.visibility_off_outlined
-                              : Icons.visibility_outlined,
-                          color: AppTheme.textSecondary,
-                          size: 22,
-                        ),
-                        onPressed: () => setState(
-                          () => _obscurePassword = !_obscurePassword,
-                        ),
-                      ),
-                    ),
-              ),
-              const SizedBox(height: 6),
-              _PasswordStrengthBar(
-                strength: _passwordStrength(_passwordController.text),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        _LabeledField(
-          label: 'Confirm password',
-          child: TextField(
-            controller: _confirmController,
-            obscureText: _obscureConfirm,
-            decoration: _inputDecoration('', Icons.lock_outline_rounded)
-                .copyWith(
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscureConfirm
-                          ? Icons.visibility_off_outlined
-                          : Icons.visibility_outlined,
-                      color: AppTheme.textSecondary,
-                      size: 22,
-                    ),
-                    onPressed: () =>
-                        setState(() => _obscureConfirm = !_obscureConfirm),
-                  ),
-                ),
-          ),
-        ),
-        if (MediaQuery.sizeOf(context).width > 720) ...[
-          const SizedBox(height: 24),
-          _buildSubmitButton(),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildRoleSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _SectionLabel(
-          icon: Icons.admin_panel_settings_outlined,
-          title: 'Role & access',
-        ),
-        const SizedBox(height: 14),
-        Text(
-          'Account type',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 8),
         Row(
           children: [
-            Expanded(
-              child: _AdminRoleChip(
-                label: 'Admin',
-                selected: _role == LoginRole.admin,
-                onTap: () => setState(() => _role = LoginRole.admin),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryNavy.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                Icons.person_add_rounded,
+                color: AppTheme.primaryNavy,
+                size: 28,
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 16),
             Expanded(
-              child: _AdminRoleChip(
-                label: 'Employee',
-                selected: _role == LoginRole.employee,
-                onTap: () => setState(() => _role = LoginRole.employee),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Create Account',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.3,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Add a new employee or admin. Enter full profile details; they can sign in with email and password.',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 14,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
         ),
-      ],
-    );
-  }
-
-  Widget _buildSubmitButton() {
-    return SizedBox(
-      height: 48,
-      child: FilledButton.icon(
-        onPressed: _isLoading ? null : _onCreateAccount,
-        icon: _isLoading
-            ? const SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : const Icon(Icons.person_add_rounded, size: 22),
-        label: Text(_isLoading ? 'Creating...' : 'Create Account'),
-        style: FilledButton.styleFrom(
-          backgroundColor: AppTheme.primaryNavy,
-          foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      ),
-    );
-  }
-
-  InputDecoration _inputDecoration(String hint, IconData icon) {
-    return InputDecoration(
-      hintText: hint,
-      prefixIcon: Icon(icon, color: AppTheme.primaryNavy, size: 22),
-      filled: true,
-      fillColor: AppTheme.offWhite,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: Colors.black.withOpacity(0.08)),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AppTheme.primaryNavy, width: 1.5),
-      ),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-    );
-  }
-}
-
-class _SectionLabel extends StatelessWidget {
-  const _SectionLabel({required this.icon, required this.title});
-
-  final IconData icon;
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, size: 20, color: AppTheme.primaryNavy),
-        const SizedBox(width: 8),
-        Text(
-          title,
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _LabeledField extends StatelessWidget {
-  const _LabeledField({required this.label, required this.child, this.helper});
-
-  final String label;
-  final Widget child;
-  final String? helper;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        if (helper != null) ...[
-          const SizedBox(height: 4),
-          Text(
-            helper!,
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 12,
-              height: 1.3,
-            ),
-          ),
-        ],
-        const SizedBox(height: 8),
-        child,
-      ],
-    );
-  }
-}
-
-class _PasswordStrengthBar extends StatelessWidget {
-  const _PasswordStrengthBar({required this.strength});
-
-  /// 0 = none, 1 = weak, 2â€“3 = medium, 4 = strong
-  final int strength;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = [
-      Colors.grey.shade300,
-      const Color(0xFFE53935),
-      const Color(0xFFFFB74D),
-      const Color(0xFF81C784),
-      const Color(0xFF43A047),
-    ];
-    final labels = ['', 'Weak', 'Fair', 'Good', 'Strong'];
-    final color = strength < colors.length ? colors[strength] : colors.last;
-    return Row(
-      children: [
-        Expanded(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: strength / 4,
-              minHeight: 6,
-              backgroundColor: Colors.grey.shade200,
-              valueColor: AlwaysStoppedAnimation<Color>(color),
-            ),
-          ),
-        ),
-        if (strength > 0) ...[
-          const SizedBox(width: 10),
-          Text(
-            labels[strength],
-            style: TextStyle(
-              color: color,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _AdminRoleChip extends StatelessWidget {
-  const _AdminRoleChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(vertical: 12),
+        const SizedBox(height: 24),
+        Container(
+          constraints: const BoxConstraints(maxWidth: 900),
           decoration: BoxDecoration(
-            color: selected ? AppTheme.primaryNavy : AppTheme.white,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: selected
-                  ? AppTheme.primaryNavy
-                  : Colors.black.withOpacity(0.12),
-              width: 1.5,
-            ),
-            boxShadow: selected
-                ? [
-                    BoxShadow(
-                      color: AppTheme.primaryNavy.withOpacity(0.25),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ]
-                : null,
-          ),
-          child: Center(
-            child: Text(
-              label,
-              style: TextStyle(
-                color: selected ? Colors.white : AppTheme.textPrimary,
-                fontWeight: FontWeight.w600,
-                fontSize: 14,
+            color: const Color(0xFFF5F7F5),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 20,
+                offset: const Offset(0, 4),
               ),
-            ),
+            ],
           ),
+          child: const AddEmployeeForm(),
         ),
-      ),
+      ],
     );
   }
 }

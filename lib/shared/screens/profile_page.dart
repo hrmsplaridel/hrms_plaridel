@@ -1,13 +1,11 @@
-import 'dart:typed_data';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../../../api/client.dart';
+import '../../../api/config.dart';
 import '../../../landingpage/constants/app_theme.dart';
 import '../../../providers/auth_provider.dart';
-
-const String _avatarBucket = 'avatars';
 
 /// Breakpoint above which the profile uses a two-column web layout.
 const double _profileWebBreakpoint = 900;
@@ -50,7 +48,9 @@ class ProfilePage extends StatelessWidget {
         ),
         child: Center(
           child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: isWeb ? 1000 : double.infinity),
+            constraints: BoxConstraints(
+              maxWidth: isWeb ? 1000 : double.infinity,
+            ),
             child: const ProfileContent(),
           ),
         ),
@@ -95,12 +95,20 @@ class _ProfileContentState extends State<ProfileContent> {
       if (auth.user != null) {
         _nameController.text = auth.displayName;
         _avatarPath = auth.avatarPath;
-        final phone = auth.user!.userMetadata?['phone'] as String?;
-        _phoneController.text = phone ?? '';
+        _phoneController.text = auth.user!.contactNumber ?? '';
         _loadedFromAuth = true;
-        _loadAvatarUrl();
+        // Always try avatar URL when we have userId; Image.network errorBuilder handles 404
+        _avatarUrl = _avatarUrlFor(auth.user!.id);
       }
     }
+  }
+
+  /// Build avatar URL with optional cache-bust. Pass [cacheBust] after upload to force reload.
+  String _avatarUrlFor(String userId, {bool cacheBust = false}) {
+    final base = '${ApiConfig.baseUrl}/api/files/avatar/$userId';
+    return cacheBust
+        ? '$base?t=${DateTime.now().millisecondsSinceEpoch}'
+        : base;
   }
 
   /// Returns a simple strength label and color for the given password.
@@ -122,16 +130,6 @@ class _ProfileContentState extends State<ProfileContent> {
     return (label: 'Strong', color: Colors.green.shade700);
   }
 
-  Future<void> _loadAvatarUrl() async {
-    if (_avatarPath == null || _avatarPath!.isEmpty) return;
-    try {
-      final url = await Supabase.instance.client.storage.from(_avatarBucket).createSignedUrl(_avatarPath!, 3600);
-      if (mounted) setState(() => _avatarUrl = url);
-    } catch (_) {
-      if (mounted) setState(() => _avatarUrl = null);
-    }
-  }
-
   @override
   void dispose() {
     _nameController.dispose();
@@ -146,20 +144,32 @@ class _ProfileContentState extends State<ProfileContent> {
   Future<void> _sendPasswordReset() async {
     final email = context.read<AuthProvider>().email;
     if (email.isEmpty) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No email on file. Cannot send reset link.')));
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No email on file. Cannot send reset link.'),
+          ),
+        );
       return;
     }
     setState(() => _resettingPassword = true);
     try {
-      await Supabase.instance.client.auth.resetPasswordForEmail(email);
+      await ApiClient.instance.post(
+        '/auth/forgot-password',
+        data: {'email': email},
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Password reset link sent to $email. Check your inbox.')),
+          const SnackBar(
+            content: Text('If that email exists, a reset link will be sent.'),
+          ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to send reset link: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _resettingPassword = false);
@@ -169,26 +179,44 @@ class _ProfileContentState extends State<ProfileContent> {
   Future<void> _pickAndUploadAvatar() async {
     final user = context.read<AuthProvider>().user;
     if (user == null) return;
-    final result = await FilePicker.platform.pickFiles(type: FileType.image, allowMultiple: false);
-    if (result == null || result.files.isEmpty || result.files.single.bytes == null) return;
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      allowMultiple: false,
+      withData: true,
+    );
+    if (result == null ||
+        result.files.isEmpty ||
+        result.files.single.bytes == null)
+      return;
     final bytes = result.files.single.bytes!;
-    final ext = result.files.single.extension ?? 'jpg';
-    if (ext.isEmpty) return;
-    final path = '${user.id}/avatar.$ext';
-    setState(() { _imageLoading = true; _message = null; });
+    setState(() {
+      _imageLoading = true;
+      _message = null;
+    });
     try {
-      await Supabase.instance.client.storage.from(_avatarBucket).uploadBinary(path, Uint8List.fromList(bytes), fileOptions: const FileOptions(upsert: true));
-      await Supabase.instance.client.auth.updateUser(UserAttributes(data: {'avatar_path': path}));
+      await ApiClient.instance.uploadBytes(
+        '/api/upload/avatar',
+        bytes: bytes,
+        fileName: 'avatar.jpg',
+      );
       if (mounted) {
         await context.read<AuthProvider>().refreshUser();
-        setState(() { _avatarPath = path; _imageLoading = false; _message = null; });
-        await _loadAvatarUrl();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile photo updated.')));
-        }
+        _avatarPath = context.read<AuthProvider>().avatarPath;
+        _avatarUrl = _avatarUrlFor(user.id, cacheBust: true);
+        setState(() {
+          _imageLoading = false;
+          _message = null;
+        });
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Profile photo updated.')));
       }
     } catch (e) {
-      if (mounted) setState(() { _imageLoading = false; _message = 'Image upload failed: $e'; });
+      if (mounted)
+        setState(() {
+          _imageLoading = false;
+          _message = 'Image upload failed: $e';
+        });
     }
   }
 
@@ -199,47 +227,85 @@ class _ProfileContentState extends State<ProfileContent> {
       setState(() => _message = 'Name is required');
       return;
     }
-    setState(() { _loading = true; _message = null; });
+    setState(() {
+      _loading = true;
+      _message = null;
+    });
     try {
-      final data = <String, dynamic>{'full_name': name};
-      if (phone.isNotEmpty) data['phone'] = phone;
-      await Supabase.instance.client.auth.updateUser(UserAttributes(data: data));
+      await ApiClient.instance.patch(
+        '/auth/me',
+        data: {
+          'full_name': name,
+          'contact_number': phone.isNotEmpty ? phone : null,
+        },
+      );
       if (mounted) {
         await context.read<AuthProvider>().refreshUser();
-        setState(() { _loading = false; });
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile saved.')));
+        setState(() {
+          _loading = false;
+        });
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Profile saved.')));
       }
     } catch (e) {
       if (mounted) {
-        setState(() { _loading = false; _message = 'Failed: $e'; });
+        setState(() {
+          _loading = false;
+          _message = 'Failed: $e';
+        });
       }
     }
   }
 
   Future<void> _changePassword() async {
+    final currentPass = _currentPasswordController.text;
     final newPass = _newPasswordController.text.trim();
     final confirm = _confirmPasswordController.text.trim();
+    if (currentPass.isEmpty) {
+      setState(() => _passwordMessage = 'Enter current password');
+      return;
+    }
     if (newPass.length < 6) {
-      setState(() => _passwordMessage = 'Password must be at least 6 characters');
+      setState(
+        () => _passwordMessage = 'Password must be at least 6 characters',
+      );
       return;
     }
     if (newPass != confirm) {
       setState(() => _passwordMessage = 'New passwords do not match');
       return;
     }
-    setState(() { _passwordLoading = true; _passwordMessage = null; });
+    setState(() {
+      _passwordLoading = true;
+      _passwordMessage = null;
+    });
     try {
-      await Supabase.instance.client.auth.updateUser(UserAttributes(password: newPass));
+      await ApiClient.instance.post(
+        '/auth/change-password',
+        data: {'current_password': currentPass, 'new_password': newPass},
+      );
       if (mounted) {
-        await context.read<AuthProvider>().refreshUser();
         _currentPasswordController.clear();
         _newPasswordController.clear();
         _confirmPasswordController.clear();
-        setState(() { _passwordLoading = false; });
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Password updated.')));
+        setState(() {
+          _passwordLoading = false;
+        });
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Password updated.')));
       }
     } catch (e) {
-      if (mounted) setState(() { _passwordLoading = false; _passwordMessage = 'Failed: $e'; });
+      if (mounted) {
+        final err = e.toString();
+        setState(() {
+          _passwordLoading = false;
+          _passwordMessage = err.contains('401')
+              ? 'Current password is incorrect'
+              : 'Failed: $e';
+        });
+      }
     }
   }
 
@@ -261,14 +327,36 @@ class _ProfileContentState extends State<ProfileContent> {
                 child: Stack(
                   alignment: Alignment.bottomRight,
                   children: [
-                    CircleAvatar(
-                      radius: avatarRadius,
-                      backgroundColor: AppTheme.primaryNavy.withOpacity(0.1),
-                      backgroundImage: _avatarUrl != null ? NetworkImage(_avatarUrl!) : null,
-                      child: _avatarUrl == null
-                          ? Icon(Icons.person_rounded, size: avatarSize, color: AppTheme.primaryNavy.withOpacity(0.5))
-                          : null,
-                    ),
+                    _avatarUrl != null
+                        ? ClipOval(
+                            child: Image.network(
+                              _avatarUrl!,
+                              width: avatarRadius * 2,
+                              height: avatarRadius * 2,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => CircleAvatar(
+                                radius: avatarRadius,
+                                backgroundColor: AppTheme.primaryNavy
+                                    .withOpacity(0.1),
+                                child: Icon(
+                                  Icons.person_rounded,
+                                  size: avatarSize,
+                                  color: AppTheme.primaryNavy.withOpacity(0.5),
+                                ),
+                              ),
+                            ),
+                          )
+                        : CircleAvatar(
+                            radius: avatarRadius,
+                            backgroundColor: AppTheme.primaryNavy.withOpacity(
+                              0.1,
+                            ),
+                            child: Icon(
+                              Icons.person_rounded,
+                              size: avatarSize,
+                              color: AppTheme.primaryNavy.withOpacity(0.5),
+                            ),
+                          ),
                     if (_imageLoading)
                       Positioned(
                         right: 0,
@@ -287,7 +375,11 @@ class _ProfileContentState extends State<ProfileContent> {
                           shape: BoxShape.circle,
                           border: Border.all(color: Colors.white, width: 2),
                         ),
-                        child: Icon(Icons.camera_alt_rounded, color: Colors.white, size: isWeb ? 20 : 18),
+                        child: Icon(
+                          Icons.camera_alt_rounded,
+                          color: Colors.white,
+                          size: isWeb ? 20 : 18,
+                        ),
                       ),
                   ],
                 ),
@@ -295,7 +387,11 @@ class _ProfileContentState extends State<ProfileContent> {
               SizedBox(height: isWeb ? 10 : 8),
               Text(
                 _avatarPath == null ? 'Add profile image' : 'Change photo',
-                style: TextStyle(fontSize: isWeb ? 13 : 12, color: AppTheme.primaryNavy, fontWeight: FontWeight.w500),
+                style: TextStyle(
+                  fontSize: isWeb ? 13 : 12,
+                  color: AppTheme.primaryNavy,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ],
           ),
@@ -308,7 +404,9 @@ class _ProfileContentState extends State<ProfileContent> {
             hintText: 'Enter your full name',
             border: const OutlineInputBorder(),
             prefixIcon: const Icon(Icons.badge_outlined),
-            contentPadding: isWeb ? null : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            contentPadding: isWeb
+                ? null
+                : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           ),
           textCapitalization: TextCapitalization.words,
         ),
@@ -320,7 +418,9 @@ class _ProfileContentState extends State<ProfileContent> {
             hintText: 'e.g. 09XX XXX XXXX',
             border: const OutlineInputBorder(),
             prefixIcon: const Icon(Icons.phone_outlined),
-            contentPadding: isWeb ? null : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            contentPadding: isWeb
+                ? null
+                : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           ),
           keyboardType: TextInputType.phone,
         ),
@@ -334,21 +434,37 @@ class _ProfileContentState extends State<ProfileContent> {
             prefixIcon: const Icon(Icons.email_outlined),
             filled: true,
             fillColor: AppTheme.lightGray.withOpacity(0.5),
-            helperText: isWeb ? 'Used for login. Change via your account provider if needed.' : null,
+            helperText: isWeb
+                ? 'Used for login. Change via your account provider if needed.'
+                : null,
             helperStyle: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
-            contentPadding: isWeb ? null : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            contentPadding: isWeb
+                ? null
+                : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           ),
         ),
         if (_message != null) ...[
           SizedBox(height: isWeb ? 12 : 8),
-          Text(_message!, style: TextStyle(color: Colors.red.shade700, fontSize: 13)),
+          Text(
+            _message!,
+            style: TextStyle(color: Colors.red.shade700, fontSize: 13),
+          ),
         ],
         SizedBox(height: isWeb ? 20 : 16),
         SizedBox(
           width: double.infinity,
           child: FilledButton.icon(
             onPressed: _loading ? null : _saveProfile,
-            icon: _loading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.save_rounded, size: 20),
+            icon: _loading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.save_rounded, size: 20),
             label: Text(_loading ? 'Saving...' : 'Save profile'),
             style: FilledButton.styleFrom(
               backgroundColor: AppTheme.primaryNavy,
@@ -360,7 +476,11 @@ class _ProfileContentState extends State<ProfileContent> {
     );
   }
 
-  Widget _buildPasswordSection(BuildContext context, ({String label, Color color}) strength, bool isWeb) {
+  Widget _buildPasswordSection(
+    BuildContext context,
+    ({String label, Color color}) strength,
+    bool isWeb,
+  ) {
     final newPass = _newPasswordController.text;
 
     return _ProfileSection(
@@ -377,10 +497,17 @@ class _ProfileContentState extends State<ProfileContent> {
             border: const OutlineInputBorder(),
             prefixIcon: const Icon(Icons.lock_outline_rounded),
             suffixIcon: IconButton(
-              icon: Icon(_obscureCurrent ? Icons.visibility_off_rounded : Icons.visibility_rounded),
-              onPressed: () => setState(() => _obscureCurrent = !_obscureCurrent),
+              icon: Icon(
+                _obscureCurrent
+                    ? Icons.visibility_off_rounded
+                    : Icons.visibility_rounded,
+              ),
+              onPressed: () =>
+                  setState(() => _obscureCurrent = !_obscureCurrent),
             ),
-            contentPadding: isWeb ? null : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            contentPadding: isWeb
+                ? null
+                : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           ),
         ),
         SizedBox(height: isWeb ? 16 : 12),
@@ -394,18 +521,34 @@ class _ProfileContentState extends State<ProfileContent> {
             border: const OutlineInputBorder(),
             prefixIcon: const Icon(Icons.lock_rounded),
             suffixIcon: IconButton(
-              icon: Icon(_obscureNew ? Icons.visibility_off_rounded : Icons.visibility_rounded),
+              icon: Icon(
+                _obscureNew
+                    ? Icons.visibility_off_rounded
+                    : Icons.visibility_rounded,
+              ),
               onPressed: () => setState(() => _obscureNew = !_obscureNew),
             ),
-            contentPadding: isWeb ? null : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            contentPadding: isWeb
+                ? null
+                : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           ),
         ),
         if (newPass.isNotEmpty) ...[
           SizedBox(height: isWeb ? 6 : 4),
           Row(
             children: [
-              Text('Strength: ', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
-              Text(strength.label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: strength.color)),
+              Text(
+                'Strength: ',
+                style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+              ),
+              Text(
+                strength.label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: strength.color,
+                ),
+              ),
             ],
           ),
         ],
@@ -418,21 +561,41 @@ class _ProfileContentState extends State<ProfileContent> {
             border: const OutlineInputBorder(),
             prefixIcon: const Icon(Icons.lock_rounded),
             suffixIcon: IconButton(
-              icon: Icon(_obscureConfirm ? Icons.visibility_off_rounded : Icons.visibility_rounded),
-              onPressed: () => setState(() => _obscureConfirm = !_obscureConfirm),
+              icon: Icon(
+                _obscureConfirm
+                    ? Icons.visibility_off_rounded
+                    : Icons.visibility_rounded,
+              ),
+              onPressed: () =>
+                  setState(() => _obscureConfirm = !_obscureConfirm),
             ),
-            contentPadding: isWeb ? null : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            contentPadding: isWeb
+                ? null
+                : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           ),
         ),
         if (_passwordMessage != null) ...[
           SizedBox(height: isWeb ? 12 : 8),
-          Text(_passwordMessage!, style: TextStyle(color: Colors.red.shade700, fontSize: 13)),
+          Text(
+            _passwordMessage!,
+            style: TextStyle(color: Colors.red.shade700, fontSize: 13),
+          ),
         ],
         SizedBox(height: isWeb ? 12 : 10),
         TextButton.icon(
           onPressed: _resettingPassword ? null : _sendPasswordReset,
-          icon: _resettingPassword ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.mail_outline_rounded, size: 18),
-          label: Text(isWeb ? 'Forgot password? Send reset link to email' : 'Forgot password?'),
+          icon: _resettingPassword
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.mail_outline_rounded, size: 18),
+          label: Text(
+            isWeb
+                ? 'Forgot password? Send reset link to email'
+                : 'Forgot password?',
+          ),
           style: TextButton.styleFrom(
             padding: EdgeInsets.symmetric(vertical: isWeb ? 8 : 12),
           ),
@@ -442,7 +605,16 @@ class _ProfileContentState extends State<ProfileContent> {
           width: double.infinity,
           child: FilledButton.icon(
             onPressed: _passwordLoading ? null : _changePassword,
-            icon: _passwordLoading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.lock_reset_rounded, size: 20),
+            icon: _passwordLoading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.lock_reset_rounded, size: 20),
             label: Text(_passwordLoading ? 'Updating...' : 'Change password'),
             style: FilledButton.styleFrom(
               backgroundColor: AppTheme.primaryNavy,
@@ -515,7 +687,11 @@ class _ProfileSection extends StatelessWidget {
           child: Row(
             children: [
               if (icon != null) ...[
-                Icon(icon, size: isCompact ? 16 : 18, color: AppTheme.primaryNavy),
+                Icon(
+                  icon,
+                  size: isCompact ? 16 : 18,
+                  color: AppTheme.primaryNavy,
+                ),
                 SizedBox(width: isCompact ? 6 : 8),
               ],
               Text(
@@ -544,7 +720,10 @@ class _ProfileSection extends StatelessWidget {
               ),
             ],
           ),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: children,
+          ),
         ),
       ],
     );

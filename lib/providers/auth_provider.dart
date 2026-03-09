@@ -1,49 +1,97 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// Central auth state. Listen to Supabase auth changes and expose current user
-/// plus helpers (displayName, email, avatarPath). Call [refreshUser] after
-/// profile/avatar updates so UI using [AuthProvider] stays in sync.
+import '../api/app_user.dart';
+import '../api/client.dart';
+import '../api/token_storage.dart';
+
+/// Central auth state. Uses API (JWT) instead of Supabase.
+/// Exposes current user, displayName, email, avatarPath. Call [refreshUser] after
+/// profile/avatar updates so UI stays in sync.
 class AuthProvider extends ChangeNotifier {
-  AuthProvider() {
-    _user = Supabase.instance.client.auth.currentUser;
-    Supabase.instance.client.auth.onAuthStateChange.listen(_onAuthStateChange);
-  }
+  AppUser? _user;
 
-  User? _user;
+  AppUser? get user => _user;
 
-  User? get user => _user;
-
-  /// Display name from user_metadata['full_name'] or email prefix.
+  /// Display name from full_name or email prefix.
   String get displayName {
     if (_user == null) return '';
-    final name = _user!.userMetadata?['full_name'] as String?;
+    final name = _user!.fullName;
     if (name != null && name.isNotEmpty) return name;
-    return _user!.email?.split('@').first ?? '';
+    return _user!.email.split('@').first;
   }
 
   String get email => _user?.email ?? '';
 
-  /// Storage path for avatar from user_metadata['avatar_path'].
-  String? get avatarPath =>
-      _user?.userMetadata?['avatar_path'] as String?;
+  /// Storage path for avatar.
+  String? get avatarPath => _user?.avatarPath;
 
-  void _onAuthStateChange(AuthState data) {
-    final newUser = data.session?.user;
-    if (_user?.id != newUser?.id) {
-      _user = newUser;
-      notifyListeners();
+  /// Restore session from stored JWT. Call before runApp.
+  Future<void> restoreSession() async {
+    final token = await TokenStorage.instance.getToken();
+    if (token == null || token.isEmpty) return;
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>('/auth/me');
+      final data = res.data;
+      if (data != null) {
+        _user = AppUser.fromJson(data);
+        notifyListeners();
+      }
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401 || e.response?.statusCode == 403) {
+        await TokenStorage.instance.clearToken();
+      }
+    } catch (_) {
+      await TokenStorage.instance.clearToken();
     }
   }
 
-  /// Refetch current user from Supabase (e.g. after updating profile or avatar).
+  /// Login with email and password. Stores JWT and sets user.
+  /// Returns true on success, false on failure.
+  Future<bool> login(String email, String password) async {
+    try {
+      final res = await ApiClient.instance.post<Map<String, dynamic>>(
+        '/auth/login',
+        data: {'email': email.trim(), 'password': password},
+      );
+      final data = res.data;
+      if (data == null) return false;
+
+      final token = data['token'] as String?;
+      if (token == null || token.isEmpty) return false;
+
+      await TokenStorage.instance.setToken(token);
+
+      final userData = data['user'] as Map<String, dynamic>?;
+      if (userData != null) {
+        _user = AppUser.fromJson(userData);
+      } else {
+        await refreshUser();
+      }
+      notifyListeners();
+      return true;
+    } on DioException catch (e) {
+      debugPrint('AuthProvider.login error: ${e.response?.data}');
+      return false;
+    } catch (e) {
+      debugPrint('AuthProvider.login error: $e');
+      return false;
+    }
+  }
+
+  /// Refetch current user from API (e.g. after updating profile or avatar).
   Future<void> refreshUser() async {
     try {
-      final response = await Supabase.instance.client.auth.getUser();
-      final newUser = response.user;
-      if (_user?.id != newUser?.id || _user?.userMetadata != newUser?.userMetadata) {
-        _user = newUser;
-        notifyListeners();
+      final res = await ApiClient.instance.get<Map<String, dynamic>>('/auth/me');
+      final data = res.data;
+      if (data != null) {
+        final newUser = AppUser.fromJson(data);
+        if (_user?.id != newUser.id ||
+            _user?.fullName != newUser.fullName ||
+            _user?.avatarPath != newUser.avatarPath) {
+          _user = newUser;
+          notifyListeners();
+        }
       }
     } catch (_) {
       // Keep existing state on error
@@ -51,7 +99,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> signOut() async {
-    await Supabase.instance.client.auth.signOut();
+    await TokenStorage.instance.clearToken();
     _user = null;
     notifyListeners();
   }

@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../api/config.dart';
 import '../landingpage/constants/app_theme.dart';
 import '../providers/auth_provider.dart';
 
-const String _avatarBucket = 'avatars';
-
-/// Reusable avatar that shows the user's uploaded profile image (from Supabase Storage)
+/// Reusable avatar that shows the user's profile image (from API /api/files/avatar/:userId)
 /// when available, and falls back to the orange/person icon when not.
 class UserAvatar extends StatefulWidget {
   const UserAvatar({
@@ -58,50 +56,26 @@ class _UserAvatarState extends State<UserAvatar> {
   }
 
   Future<void> _init() async {
-    // Prefer the explicit avatarPath passed from callers.
     final passedPath = widget.avatarPath;
     if (passedPath != null && passedPath.isNotEmpty) {
       await _loadForPath(passedPath);
       return;
     }
-
-    // Fallback: use AuthProvider (e.g. when used without a parent passing path).
-    try {
-      final auth = Supabase.instance.client.auth;
-      final response = await auth.getUser();
-      final metaPath = response.user?.userMetadata?['avatar_path'] as String?;
-      if (metaPath != null && metaPath.isNotEmpty) {
-        await _loadForPath(metaPath);
-      } else {
-        if (mounted) {
-          setState(() {
-            _imageUrl = null;
-          });
-        }
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _imageUrl = null;
-        });
-      }
-    }
+    if (mounted) setState(() => _imageUrl = null);
   }
 
   Future<void> _loadForPath(String path) async {
     try {
-      final url = await Supabase.instance.client.storage.from(_avatarBucket).createSignedUrl(path, 3600);
-      if (mounted) {
-        setState(() {
-          _imageUrl = url;
-        });
+      final auth = context.read<AuthProvider>();
+      final userId = auth.user?.id;
+      if (userId != null) {
+        final url = '${ApiConfig.baseUrl}/api/files/avatar/$userId';
+        if (mounted) setState(() => _imageUrl = url);
+      } else {
+        if (mounted) setState(() => _imageUrl = null);
       }
     } catch (_) {
-      if (mounted) {
-        setState(() {
-          _imageUrl = null;
-        });
-      }
+      if (mounted) setState(() => _imageUrl = null);
     }
   }
 
