@@ -27,7 +27,7 @@ router.get('/', protect, async (req, res) => {
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const result = await pool.query(
-      `SELECT p.id, p.name, p.description, p.department_id, p.is_active,
+      `SELECT p.id, p.position_number, p.name, p.description, p.department_id, p.is_active,
               d.name AS department_name
        FROM positions p
        LEFT JOIN departments d ON p.department_id = d.id
@@ -38,6 +38,7 @@ router.get('/', protect, async (req, res) => {
 
     const rows = result.rows.map((r) => ({
       id: r.id,
+      position_number: r.position_number,
       name: r.name,
       description: r.description,
       department_id: r.department_id,
@@ -63,10 +64,18 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     const result = await pool.query(
       `INSERT INTO positions (name, description, department_id, is_active)
        VALUES ($1, $2, $3, $4)
-       RETURNING id, name, description, department_id, is_active`,
+       RETURNING id, position_number, name, description, department_id, is_active`,
       [name.trim(), description?.trim() || null, department_id || null, !!is_active]
     );
-    res.status(201).json(result.rows[0]);
+    const r = result.rows[0];
+    res.status(201).json({
+      id: r.id,
+      position_number: r.position_number,
+      name: r.name,
+      description: r.description,
+      department_id: r.department_id,
+      is_active: r.is_active ?? true,
+    });
   } catch (err) {
     console.error('[positions POST]', err);
     res.status(500).json({ error: 'Failed to create position' });
@@ -96,11 +105,19 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
     const result = await pool.query(
       `UPDATE positions SET ${updates.join(', ')} WHERE id = $${i}
-       RETURNING id, name, description, department_id, is_active`,
+       RETURNING id, position_number, name, description, department_id, is_active`,
       values
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Position not found' });
-    res.json(result.rows[0]);
+    const r = result.rows[0];
+    res.json({
+      id: r.id,
+      position_number: r.position_number,
+      name: r.name,
+      description: r.description,
+      department_id: r.department_id,
+      is_active: r.is_active ?? true,
+    });
   } catch (err) {
     console.error('[positions PUT]', err);
     res.status(500).json({ error: 'Failed to update position' });

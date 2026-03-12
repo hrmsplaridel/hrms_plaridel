@@ -11,6 +11,13 @@ const assignmentsRoutes = require('./routes/assignments');
 const employeesRoutes = require('./routes/employees');
 const uploadRoutes = require('./routes/upload');
 const filesRoutes = require('./routes/files');
+const holidaysRoutes = require('./routes/holidays');
+const attendancePoliciesRoutes = require('./routes/attendancePolicies');
+const dtrCorrectionsRoutes = require('./routes/dtrCorrections');
+const biometricDevicesRoutes = require('./routes/biometricDevices');
+const overtimeRoutes = require('./routes/overtime');
+const calendarRoutes = require('./routes/calendar');
+const dtrDailySummaryRoutes = require('./routes/dtrDailySummary');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -58,6 +65,13 @@ app.use('/api/assignments', assignmentsRoutes);
 app.use('/api/employees', employeesRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/files', filesRoutes);
+app.use('/api/holidays', holidaysRoutes);
+app.use('/api/attendance-policies', attendancePoliciesRoutes);
+app.use('/api/dtr-corrections', dtrCorrectionsRoutes);
+app.use('/api/biometric-devices', biometricDevicesRoutes);
+app.use('/api/overtime', overtimeRoutes);
+app.use('/api/calendar', calendarRoutes);
+app.use('/api/dtr-daily-summary', dtrDailySummaryRoutes);
 
 // --- Start server ---
 app.listen(PORT, HOST, () => {

@@ -35,7 +35,8 @@ router.get('/', protect, async (req, res) => {
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const result = await pool.query(
-      `SELECT id, employee_number, full_name, role, email, is_active, avatar_path, middle_name, suffix, sex, date_of_birth, contact_number, address
+      `SELECT id, employee_number, full_name, role, email, is_active, avatar_path, middle_name, suffix, sex, date_of_birth, contact_number, address,
+              employment_type, salary_grade, date_hired, employment_status
        FROM users
        ${where}
        ORDER BY full_name`,
@@ -56,6 +57,10 @@ router.get('/', protect, async (req, res) => {
       date_of_birth: r.date_of_birth,
       contact_number: r.contact_number,
       address: r.address,
+      employment_type: r.employment_type,
+      salary_grade: r.salary_grade,
+      date_hired: r.date_hired,
+      employment_status: r.employment_status ?? 'active',
     }));
     res.json(rows);
   } catch (err) {
@@ -68,7 +73,8 @@ router.get('/', protect, async (req, res) => {
 router.get('/:id', protect, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, employee_number, full_name, role, email, is_active, avatar_path, middle_name, suffix, sex, date_of_birth, contact_number, address
+      `SELECT id, employee_number, full_name, role, email, is_active, avatar_path, middle_name, suffix, sex, date_of_birth, contact_number, address,
+              employment_type, salary_grade, date_hired, employment_status
        FROM users WHERE id = $1`,
       [req.params.id]
     );
@@ -89,6 +95,10 @@ router.get('/:id', protect, async (req, res) => {
       date_of_birth: r.date_of_birth,
       contact_number: r.contact_number,
       address: r.address,
+      employment_type: r.employment_type,
+      salary_grade: r.salary_grade,
+      date_hired: r.date_hired,
+      employment_status: r.employment_status ?? 'active',
     });
   } catch (err) {
     console.error('[employees GET :id]', err);
@@ -99,7 +109,7 @@ router.get('/:id', protect, async (req, res) => {
 // POST /api/employees - create employee (admin only); same as auth/register but admin creates
 router.post('/', protect, requireAdmin, async (req, res) => {
   try {
-    const { email, password, full_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address } = req.body;
+    const { email, password, full_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address, employment_type, salary_grade, date_hired, employment_status } = req.body;
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
     }
@@ -110,9 +120,9 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
     const result = await pool.query(
-      `INSERT INTO users (email, password_hash, role, full_name, middle_name, suffix, sex, date_of_birth, contact_number, address, is_active, employee_number)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, true, nextval('users_employee_number_seq'))
-       RETURNING id, employee_number, email, role, full_name, avatar_path, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address`,
+      `INSERT INTO users (email, password_hash, role, full_name, middle_name, suffix, sex, date_of_birth, contact_number, address, is_active, employee_number, employment_type, salary_grade, date_hired, employment_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, true, nextval('users_employee_number_seq'), $11, $12, $13::date, $14)
+       RETURNING id, employee_number, email, role, full_name, avatar_path, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address, employment_type, salary_grade, date_hired, employment_status`,
       [
         email.trim().toLowerCase(),
         passwordHash,
@@ -124,6 +134,10 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         date_of_birth || null,
         contact_number?.trim() || null,
         address?.trim() || null,
+        (employment_type && ['regular', 'contractual', 'job_order', 'casual'].includes(employment_type)) ? employment_type : null,
+        salary_grade?.trim() || null,
+        date_hired || null,
+        (employment_status && ['active', 'inactive', 'resigned', 'retired', 'terminated'].includes(employment_status)) ? employment_status : 'active',
       ]
     );
     res.status(201).json(result.rows[0]);
@@ -138,7 +152,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 router.put('/:id', protect, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { full_name, role, email, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address, avatar_path } = req.body;
+    const { full_name, role, email, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address, avatar_path, employment_type, salary_grade, date_hired, employment_status } = req.body;
 
     const updates = [];
     const values = [];
@@ -156,11 +170,17 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       ['contact_number', contact_number],
       ['address', address],
       ['avatar_path', avatar_path],
+      ['employment_type', employment_type],
+      ['salary_grade', salary_grade],
+      ['date_hired', date_hired],
+      ['employment_status', employment_status],
     ];
     for (const [col, val] of fields) {
       if (val !== undefined) {
         if (col === 'role' && !['admin', 'employee'].includes(val)) continue;
-        if (col === 'date_of_birth') {
+        if (col === 'employment_type' && val && !['regular', 'contractual', 'job_order', 'casual'].includes(val)) continue;
+        if (col === 'employment_status' && val && !['active', 'inactive', 'resigned', 'retired', 'terminated'].includes(val)) continue;
+        if (col === 'date_of_birth' || col === 'date_hired') {
           updates.push(`${col} = $${i++}::date`);
           values.push(val || null);
         } else {

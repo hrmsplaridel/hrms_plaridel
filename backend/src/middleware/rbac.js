@@ -10,6 +10,15 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+/** Admin, HR, or supervisor (e.g. for approving overtime/leave). */
+function requireAdminOrSupervisor(req, res, next) {
+  const role = req.user?.role;
+  if (role !== 'admin' && role !== 'hr' && role !== 'supervisor') {
+    return res.status(403).json({ error: 'Admin, HR, or supervisor access required' });
+  }
+  next();
+}
+
 function requireRole(role) {
   return (req, res, next) => {
     if (req.user?.role !== role) {
@@ -19,4 +28,4 @@ function requireRole(role) {
   };
 }
 
-module.exports = { requireAdmin, requireRole };
+module.exports = { requireAdmin, requireAdminOrSupervisor, requireRole };

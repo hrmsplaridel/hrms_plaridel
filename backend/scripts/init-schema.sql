@@ -1,15 +1,32 @@
--- HRMS Plaridel initial schema
--- Core HR + DTR Module
+-- HRMS Plaridel Schema v2
+-- Core HR + DTR Module (Improved)
+-- PostgreSQL
 -- Run: psql -d hrms_plaridel -f scripts/init-schema.sql
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Sequence for human-friendly employee numbers (1, 2, 3, ...)
+-- =========================================
+-- SEQUENCES
+-- =========================================
 CREATE SEQUENCE IF NOT EXISTS users_employee_number_seq;
+CREATE SEQUENCE IF NOT EXISTS departments_department_number_seq;
+CREATE SEQUENCE IF NOT EXISTS positions_position_number_seq;
+CREATE SEQUENCE IF NOT EXISTS shifts_shift_number_seq;
 
--- =========================
--- USERS
--- =========================
+-- =========================================
+-- GENERIC updated_at TRIGGER
+-- =========================================
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- =========================================
+-- USERS / EMPLOYEES
+-- =========================================
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   employee_number INT UNIQUE DEFAULT nextval('users_employee_number_seq'),
@@ -18,9 +35,10 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'employee'
     CHECK (role IN ('admin', 'hr', 'employee', 'supervisor')),
+
   full_name TEXT NOT NULL,
   avatar_path TEXT,
-  is_active BOOLEAN DEFAULT true,
+  is_active BOOLEAN NOT NULL DEFAULT true,
 
   middle_name TEXT,
   suffix TEXT,
@@ -29,60 +47,130 @@ CREATE TABLE IF NOT EXISTS users (
   contact_number TEXT,
   address TEXT,
 
+  employment_type TEXT
+    CHECK (employment_type IN ('regular', 'contractual', 'job_order', 'casual')),
+  salary_grade TEXT,
+  date_hired DATE,
+  employment_status TEXT DEFAULT 'active'
+    CHECK (employment_status IN ('active', 'inactive', 'resigned', 'retired', 'terminated')),
+
   biometric_user_id TEXT UNIQUE,
 
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Sequence for human-friendly department numbers (1, 2, 3, ...)
-CREATE SEQUENCE IF NOT EXISTS departments_department_number_seq;
-
--- =========================
+-- =========================================
 -- DEPARTMENTS
--- =========================
+-- =========================================
 CREATE TABLE IF NOT EXISTS departments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   department_number INT UNIQUE DEFAULT nextval('departments_department_number_seq'),
   name TEXT NOT NULL UNIQUE,
   description TEXT,
-  is_active BOOLEAN DEFAULT true,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- =========================
+-- =========================================
 -- POSITIONS
--- =========================
+-- =========================================
 CREATE TABLE IF NOT EXISTS positions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  position_number INT UNIQUE DEFAULT nextval('positions_position_number_seq'),
   name TEXT NOT NULL,
   description TEXT,
   department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
-  is_active BOOLEAN DEFAULT true,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT uq_positions_name_department UNIQUE (name, department_id)
 );
 
--- =========================
+-- =========================================
 -- SHIFTS / SCHEDULES
--- =========================
+-- =========================================
 CREATE TABLE IF NOT EXISTS shifts (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  name TEXT NOT NULL,
+  shift_number INT UNIQUE DEFAULT nextval('shifts_shift_number_seq'),
+  name TEXT NOT NULL UNIQUE,
+  code TEXT UNIQUE,
+
   start_time TIME NOT NULL,
   end_time TIME NOT NULL,
-  grace_period_minutes INT DEFAULT 0,
+
+  grace_period_minutes INT NOT NULL DEFAULT 0 CHECK (grace_period_minutes >= 0),
+
   break_start TIME,
   break_end TIME,
-  is_active BOOLEAN DEFAULT true,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
+  break_minutes INT GENERATED ALWAYS AS (
+    CASE
+      WHEN break_start IS NOT NULL AND break_end IS NOT NULL
+      THEN GREATEST(0, EXTRACT(EPOCH FROM (break_end - break_start)) / 60)::INT
+      ELSE NULL
+    END
+  ) STORED,
+
+  crosses_midnight BOOLEAN NOT NULL DEFAULT false,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT chk_shift_break_pair
+    CHECK (
+      (break_start IS NULL AND break_end IS NULL)
+      OR
+      (break_start IS NOT NULL AND break_end IS NOT NULL)
+    )
 );
 
--- =========================
--- EMPLOYEE ASSIGNMENTS
--- =========================
+-- =========================================
+-- ATTENDANCE POLICIES
+-- =========================================
+CREATE TABLE IF NOT EXISTS attendance_policies (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name TEXT NOT NULL UNIQUE,
+  description TEXT,
+
+  grace_period_minutes INT NOT NULL DEFAULT 0 CHECK (grace_period_minutes >= 0),
+  max_late_per_month_minutes INT CHECK (max_late_per_month_minutes IS NULL OR max_late_per_month_minutes >= 0),
+
+  late_deduction_rule TEXT,
+  absent_deduction_rule TEXT,
+  undertime_rule TEXT,
+
+  is_default BOOLEAN NOT NULL DEFAULT false,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_attendance_policies_single_default
+ON attendance_policies (is_default)
+WHERE is_default = true;
+
+-- =========================================
+-- BIOMETRIC DEVICES
+-- =========================================
+CREATE TABLE IF NOT EXISTS biometric_devices (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name TEXT NOT NULL,
+  device_id TEXT UNIQUE,
+  location TEXT,
+  ip_address TEXT,
+  last_sync_at TIMESTAMPTZ,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- =========================================
+-- ASSIGNMENTS
+-- =========================================
 CREATE TABLE IF NOT EXISTS assignments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -90,112 +178,183 @@ CREATE TABLE IF NOT EXISTS assignments (
   position_id UUID REFERENCES positions(id) ON DELETE SET NULL,
   shift_id UUID REFERENCES shifts(id) ON DELETE SET NULL,
 
-  date_assigned DATE NOT NULL,
-  is_active BOOLEAN DEFAULT true,
+  override_start_time TIME,
+  override_end_time TIME,
 
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
+  effective_from DATE NOT NULL,
+  effective_to DATE,
+
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  remarks TEXT,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT chk_assignment_dates
+    CHECK (effective_to IS NULL OR effective_to >= effective_from)
 );
 
--- =========================
+CREATE UNIQUE INDEX IF NOT EXISTS uq_assignments_one_active_per_employee
+ON assignments (employee_id)
+WHERE is_active = true;
+
+-- =========================================
+-- POLICY ASSIGNMENTS
+-- =========================================
+CREATE TABLE IF NOT EXISTS policy_assignments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  attendance_policy_id UUID NOT NULL REFERENCES attendance_policies(id) ON DELETE CASCADE,
+
+  employee_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  department_id UUID REFERENCES departments(id) ON DELETE CASCADE,
+  shift_id UUID REFERENCES shifts(id) ON DELETE CASCADE,
+
+  effective_from DATE NOT NULL,
+  effective_to DATE,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT chk_policy_assignment_target
+    CHECK (
+      employee_id IS NOT NULL
+      OR department_id IS NOT NULL
+      OR shift_id IS NOT NULL
+    ),
+
+  CONSTRAINT chk_policy_assignment_dates
+    CHECK (effective_to IS NULL OR effective_to >= effective_from)
+);
+
+-- =========================================
 -- HOLIDAYS
--- =========================
+-- =========================================
 CREATE TABLE IF NOT EXISTS holidays (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  holiday_date DATE NOT NULL UNIQUE,
+  holiday_date DATE NOT NULL,
   name TEXT NOT NULL,
-  holiday_type TEXT DEFAULT 'regular'
+  holiday_type TEXT NOT NULL DEFAULT 'regular'
     CHECK (holiday_type IN ('regular', 'special', 'local')),
-  created_at TIMESTAMPTZ DEFAULT now()
+  description TEXT,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT uq_holiday_date_name UNIQUE (holiday_date, name)
 );
 
--- =========================
+-- =========================================
 -- LEAVE TYPES
--- =========================
+-- =========================================
 CREATE TABLE IF NOT EXISTS leave_types (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL UNIQUE,
   description TEXT,
-  is_active BOOLEAN DEFAULT true,
-  created_at TIMESTAMPTZ DEFAULT now()
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- =========================
+-- =========================================
 -- LEAVE REQUESTS
--- =========================
+-- =========================================
 CREATE TABLE IF NOT EXISTS leave_requests (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   leave_type_id UUID REFERENCES leave_types(id) ON DELETE SET NULL,
+
   start_date DATE NOT NULL,
   end_date DATE NOT NULL,
+  total_days NUMERIC(5,2),
+
   reason TEXT,
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
+
   approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
   approved_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now(),
-  CHECK (end_date >= start_date)
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT chk_leave_dates CHECK (end_date >= start_date),
+  CONSTRAINT chk_leave_total_days CHECK (total_days IS NULL OR total_days >= 0)
 );
 
--- =========================
+-- =========================================
 -- RAW DTR LOGS
--- =========================
+-- =========================================
 CREATE TABLE IF NOT EXISTS dtr_logs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  device_ref_id UUID REFERENCES biometric_devices(id) ON DELETE SET NULL,
 
   local_uuid TEXT UNIQUE,
-
   biometric_user_id TEXT,
+
   log_time TIMESTAMPTZ NOT NULL,
+
   log_type TEXT NOT NULL
     CHECK (log_type IN ('time_in', 'time_out', 'break_in', 'break_out')),
 
   source TEXT NOT NULL DEFAULT 'biometric'
     CHECK (source IN ('biometric', 'manual', 'mobile', 'import')),
 
-  sync_status TEXT DEFAULT 'synced'
+  sync_status TEXT NOT NULL DEFAULT 'synced'
     CHECK (sync_status IN ('pending', 'synced', 'failed')),
 
   remarks TEXT,
-  created_at TIMESTAMPTZ DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- =========================
+-- =========================================
 -- DAILY DTR SUMMARY
--- =========================
+-- =========================================
 CREATE TABLE IF NOT EXISTS dtr_daily_summary (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   attendance_date DATE NOT NULL,
 
+  assignment_id UUID REFERENCES assignments(id) ON DELETE SET NULL,
   shift_id UUID REFERENCES shifts(id) ON DELETE SET NULL,
+  attendance_policy_id UUID REFERENCES attendance_policies(id) ON DELETE SET NULL,
+  holiday_id UUID REFERENCES holidays(id) ON DELETE SET NULL,
+  leave_request_id UUID REFERENCES leave_requests(id) ON DELETE SET NULL,
 
   time_in TIMESTAMPTZ,
   time_out TIMESTAMPTZ,
   break_in TIMESTAMPTZ,
   break_out TIMESTAMPTZ,
 
-  late_minutes INT DEFAULT 0,
-  undertime_minutes INT DEFAULT 0,
-  total_hours NUMERIC(6,2) DEFAULT 0,
+  late_minutes INT NOT NULL DEFAULT 0 CHECK (late_minutes >= 0),
+  undertime_minutes INT NOT NULL DEFAULT 0 CHECK (undertime_minutes >= 0),
+  overtime_minutes INT NOT NULL DEFAULT 0 CHECK (overtime_minutes >= 0),
+  total_hours NUMERIC(6,2) NOT NULL DEFAULT 0 CHECK (total_hours >= 0),
 
   status TEXT NOT NULL DEFAULT 'incomplete'
-    CHECK (status IN ('present', 'late', 'absent', 'on_leave', 'holiday', 'incomplete')),
+    CHECK (status IN (
+      'present',
+      'late',
+      'absent',
+      'on_leave',
+      'holiday',
+      'rest_day',
+      'incomplete'
+    )),
+
+  source TEXT NOT NULL DEFAULT 'system'
+    CHECK (source IN ('system', 'manual', 'adjusted')),
 
   remarks TEXT,
 
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-  UNIQUE(employee_id, attendance_date)
+  CONSTRAINT uq_dtr_daily_summary_employee_date UNIQUE (employee_id, attendance_date)
 );
 
--- =========================
+-- =========================================
 -- DTR CORRECTION REQUESTS
--- =========================
+-- =========================================
 CREATE TABLE IF NOT EXISTS dtr_corrections (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -203,6 +362,9 @@ CREATE TABLE IF NOT EXISTS dtr_corrections (
 
   requested_time_in TIMESTAMPTZ,
   requested_time_out TIMESTAMPTZ,
+  requested_break_in TIMESTAMPTZ,
+  requested_break_out TIMESTAMPTZ,
+
   reason TEXT NOT NULL,
 
   status TEXT NOT NULL DEFAULT 'pending'
@@ -212,13 +374,39 @@ CREATE TABLE IF NOT EXISTS dtr_corrections (
   reviewed_at TIMESTAMPTZ,
   review_notes TEXT,
 
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- =========================
+-- =========================================
+-- OVERTIME REQUESTS
+-- =========================================
+CREATE TABLE IF NOT EXISTS overtime_requests (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+
+  ot_date DATE NOT NULL,
+  time_start TIME NOT NULL,
+  time_end TIME NOT NULL,
+  total_hours NUMERIC(5,2) NOT NULL CHECK (total_hours > 0),
+
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'approved', 'rejected')),
+
+  approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  approved_at TIMESTAMPTZ,
+  review_notes TEXT,
+
+  added_to_payroll BOOLEAN NOT NULL DEFAULT false,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- =========================================
 -- AUDIT LOGS
--- =========================
+-- =========================================
 CREATE TABLE IF NOT EXISTS audit_logs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -226,23 +414,40 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   entity_type TEXT NOT NULL,
   entity_id UUID,
   details TEXT,
-  created_at TIMESTAMPTZ DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- =========================
+-- =========================================
 -- INDEXES
--- =========================
+-- =========================================
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 CREATE INDEX IF NOT EXISTS idx_users_employee_number ON users(employee_number);
 CREATE INDEX IF NOT EXISTS idx_users_biometric_user_id ON users(biometric_user_id);
+CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
 
 CREATE INDEX IF NOT EXISTS idx_departments_is_active ON departments(is_active);
 CREATE INDEX IF NOT EXISTS idx_departments_department_number ON departments(department_number);
+
 CREATE INDEX IF NOT EXISTS idx_positions_department_id ON positions(department_id);
+CREATE INDEX IF NOT EXISTS idx_positions_is_active ON positions(is_active);
+
+CREATE INDEX IF NOT EXISTS idx_shifts_is_active ON shifts(is_active);
 
 CREATE INDEX IF NOT EXISTS idx_assignments_employee_id ON assignments(employee_id);
+CREATE INDEX IF NOT EXISTS idx_assignments_department_id ON assignments(department_id);
+CREATE INDEX IF NOT EXISTS idx_assignments_position_id ON assignments(position_id);
 CREATE INDEX IF NOT EXISTS idx_assignments_shift_id ON assignments(shift_id);
+CREATE INDEX IF NOT EXISTS idx_assignments_effective_from ON assignments(effective_from);
+CREATE INDEX IF NOT EXISTS idx_assignments_effective_to ON assignments(effective_to);
+
+CREATE INDEX IF NOT EXISTS idx_policy_assignments_employee_id ON policy_assignments(employee_id);
+CREATE INDEX IF NOT EXISTS idx_policy_assignments_department_id ON policy_assignments(department_id);
+CREATE INDEX IF NOT EXISTS idx_policy_assignments_shift_id ON policy_assignments(shift_id);
+CREATE INDEX IF NOT EXISTS idx_policy_assignments_policy_id ON policy_assignments(attendance_policy_id);
+
+CREATE INDEX IF NOT EXISTS idx_holidays_holiday_date ON holidays(holiday_date);
+CREATE INDEX IF NOT EXISTS idx_holidays_type ON holidays(holiday_type);
 
 CREATE INDEX IF NOT EXISTS idx_leave_requests_employee_id ON leave_requests(employee_id);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_status ON leave_requests(status);
@@ -251,9 +456,102 @@ CREATE INDEX IF NOT EXISTS idx_leave_requests_dates ON leave_requests(start_date
 CREATE INDEX IF NOT EXISTS idx_dtr_logs_employee_id ON dtr_logs(employee_id);
 CREATE INDEX IF NOT EXISTS idx_dtr_logs_log_time ON dtr_logs(log_time);
 CREATE INDEX IF NOT EXISTS idx_dtr_logs_biometric_user_id ON dtr_logs(biometric_user_id);
+CREATE INDEX IF NOT EXISTS idx_dtr_logs_device_ref_id ON dtr_logs(device_ref_id);
+CREATE INDEX IF NOT EXISTS idx_dtr_logs_source ON dtr_logs(source);
 
 CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_employee_id ON dtr_daily_summary(employee_id);
 CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_date ON dtr_daily_summary(attendance_date);
+CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_status ON dtr_daily_summary(status);
+CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_assignment_id ON dtr_daily_summary(assignment_id);
 
 CREATE INDEX IF NOT EXISTS idx_dtr_corrections_employee_id ON dtr_corrections(employee_id);
 CREATE INDEX IF NOT EXISTS idx_dtr_corrections_status ON dtr_corrections(status);
+CREATE INDEX IF NOT EXISTS idx_dtr_corrections_attendance_date ON dtr_corrections(attendance_date);
+
+CREATE INDEX IF NOT EXISTS idx_attendance_policies_is_active ON attendance_policies(is_active);
+
+CREATE INDEX IF NOT EXISTS idx_biometric_devices_device_id ON biometric_devices(device_id);
+CREATE INDEX IF NOT EXISTS idx_biometric_devices_is_active ON biometric_devices(is_active);
+
+CREATE INDEX IF NOT EXISTS idx_overtime_requests_employee_id ON overtime_requests(employee_id);
+CREATE INDEX IF NOT EXISTS idx_overtime_requests_status ON overtime_requests(status);
+CREATE INDEX IF NOT EXISTS idx_overtime_requests_ot_date ON overtime_requests(ot_date);
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_entity_type ON audit_logs(entity_type);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
+
+-- =========================================
+-- updated_at TRIGGERS
+-- =========================================
+DROP TRIGGER IF EXISTS trg_users_updated_at ON users;
+CREATE TRIGGER trg_users_updated_at
+BEFORE UPDATE ON users
+FOR EACH ROW
+EXECUTE PROCEDURE set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_departments_updated_at ON departments;
+CREATE TRIGGER trg_departments_updated_at
+BEFORE UPDATE ON departments
+FOR EACH ROW
+EXECUTE PROCEDURE set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_positions_updated_at ON positions;
+CREATE TRIGGER trg_positions_updated_at
+BEFORE UPDATE ON positions
+FOR EACH ROW
+EXECUTE PROCEDURE set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_shifts_updated_at ON shifts;
+CREATE TRIGGER trg_shifts_updated_at
+BEFORE UPDATE ON shifts
+FOR EACH ROW
+EXECUTE PROCEDURE set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_attendance_policies_updated_at ON attendance_policies;
+CREATE TRIGGER trg_attendance_policies_updated_at
+BEFORE UPDATE ON attendance_policies
+FOR EACH ROW
+EXECUTE PROCEDURE set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_biometric_devices_updated_at ON biometric_devices;
+CREATE TRIGGER trg_biometric_devices_updated_at
+BEFORE UPDATE ON biometric_devices
+FOR EACH ROW
+EXECUTE PROCEDURE set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_assignments_updated_at ON assignments;
+CREATE TRIGGER trg_assignments_updated_at
+BEFORE UPDATE ON assignments
+FOR EACH ROW
+EXECUTE PROCEDURE set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_policy_assignments_updated_at ON policy_assignments;
+CREATE TRIGGER trg_policy_assignments_updated_at
+BEFORE UPDATE ON policy_assignments
+FOR EACH ROW
+EXECUTE PROCEDURE set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_leave_requests_updated_at ON leave_requests;
+CREATE TRIGGER trg_leave_requests_updated_at
+BEFORE UPDATE ON leave_requests
+FOR EACH ROW
+EXECUTE PROCEDURE set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_dtr_daily_summary_updated_at ON dtr_daily_summary;
+CREATE TRIGGER trg_dtr_daily_summary_updated_at
+BEFORE UPDATE ON dtr_daily_summary
+FOR EACH ROW
+EXECUTE PROCEDURE set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_dtr_corrections_updated_at ON dtr_corrections;
+CREATE TRIGGER trg_dtr_corrections_updated_at
+BEFORE UPDATE ON dtr_corrections
+FOR EACH ROW
+EXECUTE PROCEDURE set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_overtime_requests_updated_at ON overtime_requests;
+CREATE TRIGGER trg_overtime_requests_updated_at
+BEFORE UPDATE ON overtime_requests
+FOR EACH ROW
+EXECUTE PROCEDURE set_updated_at();
