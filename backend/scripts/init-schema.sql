@@ -4,11 +4,16 @@
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- Sequence for human-friendly employee numbers (1, 2, 3, ...)
+CREATE SEQUENCE IF NOT EXISTS users_employee_number_seq;
+
 -- =========================
 -- USERS
 -- =========================
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  employee_number INT UNIQUE DEFAULT nextval('users_employee_number_seq'),
+
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'employee'
@@ -30,11 +35,15 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Sequence for human-friendly department numbers (1, 2, 3, ...)
+CREATE SEQUENCE IF NOT EXISTS departments_department_number_seq;
+
 -- =========================
 -- DEPARTMENTS
 -- =========================
 CREATE TABLE IF NOT EXISTS departments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  department_number INT UNIQUE DEFAULT nextval('departments_department_number_seq'),
   name TEXT NOT NULL UNIQUE,
   description TEXT,
   is_active BOOLEAN DEFAULT true,
@@ -225,9 +234,11 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 -- =========================
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+CREATE INDEX IF NOT EXISTS idx_users_employee_number ON users(employee_number);
 CREATE INDEX IF NOT EXISTS idx_users_biometric_user_id ON users(biometric_user_id);
 
 CREATE INDEX IF NOT EXISTS idx_departments_is_active ON departments(is_active);
+CREATE INDEX IF NOT EXISTS idx_departments_department_number ON departments(department_number);
 CREATE INDEX IF NOT EXISTS idx_positions_department_id ON positions(department_id);
 
 CREATE INDEX IF NOT EXISTS idx_assignments_employee_id ON assignments(employee_id);

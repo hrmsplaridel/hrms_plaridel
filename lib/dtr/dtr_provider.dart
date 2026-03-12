@@ -21,9 +21,21 @@ class DtrSummary {
 
 /// Simple employee profile for admin filters.
 class EmployeeOption {
-  const EmployeeOption({required this.id, required this.fullName});
+  const EmployeeOption({
+    required this.id,
+    required this.fullName,
+    this.employeeNumber,
+  });
   final String id;
   final String fullName;
+  /// Human-friendly number (1, 2, 3...) for display.
+  final int? employeeNumber;
+
+  /// Display as EMP-001, EMP-002, etc., or "—" if null.
+  String get displayEmployeeNo =>
+      employeeNumber != null
+          ? 'EMP-${employeeNumber!.toString().padLeft(3, '0')}'
+          : '—';
 }
 
 /// DTR state and operations. Used by admin DTR module and employee clock in/attendance.
@@ -203,10 +215,17 @@ class DtrProvider extends ChangeNotifier {
       final data = res.data ?? [];
       _employees = data
           .map(
-            (e) => EmployeeOption(
-              id: (e as Map)['id'] as String,
-              fullName: (e['full_name'] as String? ?? 'Unknown'),
-            ),
+            (e) {
+              final m = e as Map;
+              final empNum = m['employee_number'];
+              return EmployeeOption(
+                id: m['id'] as String,
+                fullName: (m['full_name'] as String? ?? 'Unknown'),
+                employeeNumber: empNum is int
+                    ? empNum
+                    : (empNum != null ? int.tryParse(empNum.toString()) : null),
+              );
+            },
           )
           .toList();
       notifyListeners();

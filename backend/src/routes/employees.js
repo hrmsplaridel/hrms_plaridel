@@ -35,7 +35,7 @@ router.get('/', protect, async (req, res) => {
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const result = await pool.query(
-      `SELECT id, full_name, role, email, is_active, avatar_path, middle_name, suffix, sex, date_of_birth, contact_number, address
+      `SELECT id, employee_number, full_name, role, email, is_active, avatar_path, middle_name, suffix, sex, date_of_birth, contact_number, address
        FROM users
        ${where}
        ORDER BY full_name`,
@@ -44,6 +44,7 @@ router.get('/', protect, async (req, res) => {
 
     const rows = result.rows.map((r) => ({
       id: r.id,
+      employee_number: r.employee_number,
       full_name: r.full_name ?? 'Unknown',
       role: r.role ?? 'employee',
       email: r.email,
@@ -67,7 +68,7 @@ router.get('/', protect, async (req, res) => {
 router.get('/:id', protect, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, full_name, role, email, is_active, avatar_path, middle_name, suffix, sex, date_of_birth, contact_number, address
+      `SELECT id, employee_number, full_name, role, email, is_active, avatar_path, middle_name, suffix, sex, date_of_birth, contact_number, address
        FROM users WHERE id = $1`,
       [req.params.id]
     );
@@ -76,6 +77,7 @@ router.get('/:id', protect, async (req, res) => {
 
     res.json({
       id: r.id,
+      employee_number: r.employee_number,
       full_name: r.full_name ?? 'Unknown',
       role: r.role ?? 'employee',
       email: r.email,
@@ -108,9 +110,9 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
     const result = await pool.query(
-      `INSERT INTO users (email, password_hash, role, full_name, middle_name, suffix, sex, date_of_birth, contact_number, address, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, true)
-       RETURNING id, email, role, full_name, avatar_path, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address`,
+      `INSERT INTO users (email, password_hash, role, full_name, middle_name, suffix, sex, date_of_birth, contact_number, address, is_active, employee_number)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, true, nextval('users_employee_number_seq'))
+       RETURNING id, employee_number, email, role, full_name, avatar_path, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address`,
       [
         email.trim().toLowerCase(),
         passwordHash,
@@ -174,7 +176,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
     const result = await pool.query(
       `UPDATE users SET ${updates.join(', ')} WHERE id = $${i}
-       RETURNING id, email, role, full_name, avatar_path, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address`,
+       RETURNING id, employee_number, email, role, full_name, avatar_path, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address`,
       values
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Employee not found' });

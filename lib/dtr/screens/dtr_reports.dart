@@ -571,7 +571,7 @@ class _DtrReportsState extends State<DtrReports> {
     );
   }
 
-  Widget _buildEmployeeList(List<dynamic> employees) {
+  Widget _buildEmployeeList(List<EmployeeOption> employees) {
     return Container(
       width: 220,
       constraints: const BoxConstraints(maxWidth: 220),
@@ -594,9 +594,9 @@ class _DtrReportsState extends State<DtrReports> {
             child: Row(
               children: [
                 SizedBox(
-                  width: 40,
+                  width: 68,
                   child: Text(
-                    'ID',
+                    'No.',
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 12,
@@ -641,13 +641,14 @@ class _DtrReportsState extends State<DtrReports> {
                     child: Row(
                       children: [
                         SizedBox(
-                          width: 40,
+                          width: 68,
                           child: Text(
-                            '${i + 1}',
+                            e.displayEmployeeNo,
                             style: TextStyle(
-                              fontSize: 13,
+                              fontSize: 12,
                               color: AppTheme.textPrimary,
                             ),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         Expanded(
@@ -657,6 +658,7 @@ class _DtrReportsState extends State<DtrReports> {
                               fontSize: 13,
                               color: AppTheme.textPrimary,
                             ),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
@@ -1125,7 +1127,7 @@ class _DtrReportsState extends State<DtrReports> {
   }
 
   Widget _buildCompactLayout({
-    required List<dynamic> employees,
+    required List<EmployeeOption> employees,
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
     required String selectedName,
@@ -1174,7 +1176,7 @@ class _DtrReportsState extends State<DtrReports> {
     );
   }
 
-  Widget _buildEmployeeListCompact(List<dynamic> employees) {
+  Widget _buildEmployeeListCompact(List<EmployeeOption> employees) {
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.white,
@@ -1196,9 +1198,9 @@ class _DtrReportsState extends State<DtrReports> {
             child: Row(
               children: [
                 SizedBox(
-                  width: 40,
+                  width: 68,
                   child: Text(
-                    'ID',
+                    'No.',
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 12,
@@ -1241,13 +1243,14 @@ class _DtrReportsState extends State<DtrReports> {
                     child: Row(
                       children: [
                         SizedBox(
-                          width: 40,
+                          width: 68,
                           child: Text(
-                            '${i + 1}',
+                            e.displayEmployeeNo,
                             style: TextStyle(
-                              fontSize: 13,
+                              fontSize: 12,
                               color: AppTheme.textPrimary,
                             ),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         Expanded(
@@ -1257,6 +1260,7 @@ class _DtrReportsState extends State<DtrReports> {
                               fontSize: 13,
                               color: AppTheme.textPrimary,
                             ),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],

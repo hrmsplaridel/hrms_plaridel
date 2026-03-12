@@ -16,6 +16,7 @@ class _EmployeeProfile {
     required this.id,
     required this.fullName,
     required this.role,
+    this.employeeNumber,
     this.email,
     this.isActive = true,
     this.avatarPath,
@@ -29,6 +30,8 @@ class _EmployeeProfile {
   final String id;
   final String fullName;
   final String role;
+  /// Human-friendly number (1, 2, 3...) for display and ad-hoc queries.
+  final int? employeeNumber;
   final String? email;
   final bool isActive;
   final String? avatarPath;
@@ -609,10 +612,12 @@ class _ManageEmployeeState extends State<ManageEmployee> {
         _employees = data.map((e) {
           final m = e as Map<String, dynamic>;
           final dob = m['date_of_birth'];
+          final empNum = m['employee_number'];
           return _EmployeeProfile(
             id: m['id'] as String,
             fullName: m['full_name'] as String? ?? 'Unknown',
             role: m['role'] as String? ?? 'employee',
+            employeeNumber: empNum is int ? empNum : (empNum != null ? int.tryParse(empNum.toString()) : null),
             email: m['email'] as String?,
             isActive: m['is_active'] as bool? ?? true,
             avatarPath: m['avatar_path'] as String?,
@@ -733,122 +738,170 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             ],
           ),
           const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            decoration: BoxDecoration(
-              color: AppTheme.lightGray.withOpacity(0.4),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 60,
-                  child: Text(
-                    'ID',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
+          Table(
+            columnWidths: const {
+              0: FixedColumnWidth(88),
+              1: FlexColumnWidth(),
+              2: FixedColumnWidth(100),
+            },
+            children: [
+              TableRow(
+                decoration: BoxDecoration(
+                  color: AppTheme.lightGray.withOpacity(0.4),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                Expanded(
-                  child: Text(
-                    'Name',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: 100,
-                  child: Text(
-                    'Privilege',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          if (_loading)
-            const Padding(
-              padding: EdgeInsets.all(32),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (filtered.isEmpty)
-            Container(
-              constraints: const BoxConstraints(minHeight: 120),
-              alignment: Alignment.center,
-              child: Text(
-                'No employees yet',
-                style: TextStyle(
-                  color: AppTheme.textSecondary.withOpacity(0.8),
-                  fontSize: 14,
-                ),
+                children: [
+                  _tableCell('No.', bold: true),
+                  _tableCell('Name', bold: true),
+                  _tableCell('Privilege', bold: true),
+                ],
               ),
-            )
-          else
-            ...filtered.asMap().entries.map((entry) {
-              final e = entry.value;
-              final isSelected = _selectedEmployeeId == e.id;
-              return Material(
-                color: isSelected
-                    ? AppTheme.primaryNavy.withOpacity(0.08)
-                    : Colors.transparent,
-                child: InkWell(
-                  onTap: () => setState(() => _selectedEmployeeId = e.id),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                    child: Row(
-                      children: [
-                        SizedBox(
-                          width: 60,
-                          child: Text(
-                            e.id.length > 8
-                                ? '${e.id.substring(0, 8)}...'
-                                : e.id,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.textSecondary,
+              ...(_loading
+                  ? [
+                      TableRow(
+                        children: [
+                          TableCell(
+                            verticalAlignment:
+                                TableCellVerticalAlignment.middle,
+                            child: Container(
+                              constraints: const BoxConstraints(minHeight: 120),
+                              alignment: Alignment.center,
+                              child: const CircularProgressIndicator(),
                             ),
                           ),
-                        ),
-                        Expanded(
-                          child: Text(
-                            e.fullName,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: AppTheme.textPrimary,
+                          const TableCell(child: SizedBox.shrink()),
+                          const TableCell(child: SizedBox.shrink()),
+                        ],
+                      ),
+                    ]
+                  : filtered.isEmpty
+                  ? [
+                      TableRow(
+                        children: [
+                          TableCell(
+                            verticalAlignment:
+                                TableCellVerticalAlignment.middle,
+                            child: Container(
+                              constraints: const BoxConstraints(minHeight: 120),
+                              alignment: Alignment.center,
+                              child: Text(
+                                'No employees yet',
+                                style: TextStyle(
+                                  color: AppTheme.textSecondary.withOpacity(
+                                    0.8,
+                                  ),
+                                  fontSize: 14,
+                                ),
+                              ),
                             ),
                           ),
+                          const TableCell(child: SizedBox.shrink()),
+                          const TableCell(child: SizedBox.shrink()),
+                        ],
+                      ),
+                    ]
+                  : filtered.map((e) {
+                      final isSelected = _selectedEmployeeId == e.id;
+                      return TableRow(
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? AppTheme.primaryNavy.withOpacity(0.08)
+                              : null,
                         ),
-                        SizedBox(
-                          width: 100,
-                          child: Text(
-                            e.roleDisplay,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.textSecondary,
+                        children: [
+                          TableCell(
+                            verticalAlignment:
+                                TableCellVerticalAlignment.middle,
+                            child: InkWell(
+                              onTap: () =>
+                                  setState(() => _selectedEmployeeId = e.id),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                                child: Text(
+                                  e.employeeNumber != null
+                                      ? 'EMP-${e.employeeNumber!.toString().padLeft(3, '0')}'
+                                      : '—',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppTheme.textSecondary,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            }),
+                          TableCell(
+                            verticalAlignment:
+                                TableCellVerticalAlignment.middle,
+                            child: InkWell(
+                              onTap: () =>
+                                  setState(() => _selectedEmployeeId = e.id),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                                child: Text(
+                                  e.fullName,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: AppTheme.textPrimary,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
+                                ),
+                              ),
+                            ),
+                          ),
+                          TableCell(
+                            verticalAlignment:
+                                TableCellVerticalAlignment.middle,
+                            child: InkWell(
+                              onTap: () =>
+                                  setState(() => _selectedEmployeeId = e.id),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                                child: Text(
+                                  e.roleDisplay,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppTheme.textSecondary,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    }).toList()),
+            ],
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _tableCell(String text, {bool bold = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontWeight: bold ? FontWeight.w700 : FontWeight.normal,
+          fontSize: 13,
+          color: AppTheme.textPrimary,
+        ),
+        overflow: TextOverflow.ellipsis,
+        maxLines: 1,
       ),
     );
   }

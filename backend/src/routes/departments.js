@@ -11,7 +11,7 @@ router.get('/', protect, async (req, res) => {
   try {
     const status = req.query.status || 'Active';
     let query =
-      'SELECT id, name, description, is_active, created_at FROM departments';
+      'SELECT id, department_number, name, description, is_active, created_at FROM departments';
     const params = [];
 
     if (status === 'Active') {
@@ -25,6 +25,7 @@ router.get('/', protect, async (req, res) => {
     const result = await pool.query(query, params);
     const rows = result.rows.map((r) => ({
       id: r.id,
+      department_number: r.department_number,
       name: r.name,
       description: r.description,
       is_active: r.is_active ?? true,
@@ -44,14 +45,22 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Name is required' });
     }
 
+    // Assign next available number (fills gaps: 1,2,3... no skips)
     const result = await pool.query(
-      `INSERT INTO departments (name, description, is_active)
-       VALUES ($1, $2, $3)
-       RETURNING id, name, description, is_active`,
+      `INSERT INTO departments (name, description, is_active, department_number)
+       SELECT $1, $2, $3, COALESCE(
+         (SELECT MIN(g.n) FROM generate_series(1, (SELECT COALESCE(MAX(department_number), 0) + 1 FROM departments)) AS g(n)
+          WHERE NOT EXISTS (SELECT 1 FROM departments d2 WHERE d2.department_number = g.n)),
+         1
+       )
+       RETURNING id, department_number, name, description, is_active`,
       [name.trim(), description?.trim() || null, !!is_active]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'A department with this name already exists.' });
+    }
     console.error('[departments POST]', err);
     res.status(500).json({ error: 'Failed to create department' });
   }
@@ -89,7 +98,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
     const result = await pool.query(
       `UPDATE departments SET ${updates.join(', ')} WHERE id = $${i}
-       RETURNING id, name, description, is_active`,
+       RETURNING id, department_number, name, description, is_active`,
       values
     );
 

@@ -1,12 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
 
 /// Employee summary for assignment list.
 class _EmployeeSummary {
-  const _EmployeeSummary({required this.id, required this.fullName});
+  const _EmployeeSummary({
+    required this.id,
+    required this.fullName,
+    this.employeeNumber,
+  });
   final String id;
   final String fullName;
+  final int? employeeNumber;
+
+  String get displayEmployeeNo => employeeNumber != null
+      ? 'EMP-${employeeNumber!.toString().padLeft(3, '0')}'
+      : '—';
 }
 
 /// Assignment record for display/CRUD.
@@ -87,22 +98,25 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   Future<void> _loadEmployees() async {
     setState(() => _loadingEmployees = true);
     try {
-      var query = Supabase.instance.client
-          .from('profiles')
-          .select('id, full_name, is_active');
-
-      if (_employeeStatusFilter == 'Active') {
-        query = query.or('is_active.is.null,is_active.eq.true');
-      } else if (_employeeStatusFilter == 'Inactive') {
-        query = query.eq('is_active', false);
-      }
-
-      final res = await query.order('full_name');
-      _employees = (res as List).map((e) {
+      final status = _employeeStatusFilter == 'Active'
+          ? 'Active'
+          : _employeeStatusFilter == 'Inactive'
+          ? 'Inactive'
+          : 'All';
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/employees',
+        queryParameters: {'status': status, 'role': 'All'},
+      );
+      final data = res.data ?? [];
+      _employees = data.map((e) {
         final m = e as Map<String, dynamic>;
+        final empNum = m['employee_number'];
         return _EmployeeSummary(
           id: m['id'] as String,
           fullName: m['full_name'] as String? ?? 'Unknown',
+          employeeNumber: empNum is int
+              ? empNum
+              : (empNum != null ? int.tryParse(empNum.toString()) : null),
         );
       }).toList();
     } catch (e) {
@@ -488,9 +502,9 @@ class _ManageAssignmentState extends State<ManageAssignment> {
             child: Row(
               children: [
                 SizedBox(
-                  width: 60,
+                  width: 88,
                   child: Text(
-                    'ID',
+                    'No.',
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 13,
@@ -552,15 +566,15 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                     child: Row(
                       children: [
                         SizedBox(
-                          width: 60,
+                          width: 88,
                           child: Text(
-                            e.id.length > 8
-                                ? '${e.id.substring(0, 8)}...'
-                                : e.id,
+                            e.displayEmployeeNo,
                             style: TextStyle(
                               fontSize: 12,
                               color: AppTheme.textSecondary,
                             ),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
                           ),
                         ),
                         Expanded(
@@ -570,6 +584,8 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                               fontSize: 13,
                               color: AppTheme.textPrimary,
                             ),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
                           ),
                         ),
                       ],
@@ -865,16 +881,16 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                 (v) => setState(() => _selectedDeptId = v),
               ),
               _buildFormDropdown(
-                'Shift',
-                _selectedShiftId,
-                _shifts,
-                (v) => setState(() => _selectedShiftId = v),
-              ),
-              _buildFormDropdown(
                 'Position',
                 _selectedPositionId,
                 _positions,
                 (v) => setState(() => _selectedPositionId = v),
+              ),
+              _buildFormDropdown(
+                'Shift',
+                _selectedShiftId,
+                _shifts,
+                (v) => setState(() => _selectedShiftId = v),
               ),
             ],
           ),

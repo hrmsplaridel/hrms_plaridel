@@ -8,13 +8,19 @@ class _DepartmentRecord {
   const _DepartmentRecord({
     required this.id,
     required this.name,
+    this.departmentNumber,
     this.description,
     required this.isActive,
   });
   final String id;
   final String name;
+  final int? departmentNumber;
   final String? description;
   final bool isActive;
+
+  String get displayDepartmentNo => departmentNumber != null
+      ? 'DEPT-${departmentNumber!.toString().padLeft(3, '0')}'
+      : '—';
 }
 
 /// Department management screen: list with search/status filter + form for Add/Update/Deactivate.
@@ -59,9 +65,13 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       final data = res.data ?? [];
       _departments = (data).map((e) {
         final m = e as Map<String, dynamic>;
+        final numVal = m['department_number'];
         return _DepartmentRecord(
           id: m['id'] as String,
           name: m['name'] as String? ?? '',
+          departmentNumber: numVal is int
+              ? numVal
+              : (numVal != null ? int.tryParse(numVal.toString()) : null),
           description: m['description'] as String?,
           isActive: m['is_active'] as bool? ?? true,
         );
@@ -120,12 +130,19 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       }
     } on DioException catch (e) {
       if (mounted) {
-        final msg = (e.response?.data as Map?)?['error'] ?? e.message ?? 'Failed to add';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to add: $msg')));
+        final msg =
+            (e.response?.data as Map?)?['error'] ??
+            e.message ??
+            'Failed to add';
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to add: $msg')));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to add: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to add: $e')));
       }
     }
   }
@@ -164,12 +181,19 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       }
     } on DioException catch (e) {
       if (mounted) {
-        final msg = (e.response?.data as Map?)?['error'] ?? e.message ?? 'Failed to update';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to update: $msg')));
+        final msg =
+            (e.response?.data as Map?)?['error'] ??
+            e.message ??
+            'Failed to update';
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to update: $msg')));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
       }
     }
   }
@@ -217,12 +241,19 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       }
     } on DioException catch (e) {
       if (mounted) {
-        final msg = (e.response?.data as Map?)?['error'] ?? e.message ?? 'Failed to deactivate';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to deactivate: $msg')));
+        final msg =
+            (e.response?.data as Map?)?['error'] ??
+            e.message ??
+            'Failed to deactivate';
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to deactivate: $msg')));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to deactivate: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to deactivate: $e')));
       }
     }
   }
@@ -315,52 +346,26 @@ class _ManageDepartmentState extends State<ManageDepartment> {
             ),
             child: Row(
               children: [
-                SizedBox(
-                  width: 60,
-                  child: Text(
-                    'ID',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  flex: 1,
-                  child: Text(
-                    'Name',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Text(
-                    'Description',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                ),
+                SizedBox(width: 88, child: _tableHeaderText('No.')),
+                Expanded(child: _tableHeaderText('Name')),
+                Expanded(flex: 2, child: _tableHeaderText('Description')),
               ],
             ),
           ),
-          const SizedBox(height: 8),
           if (_loading)
-            const Padding(
-              padding: EdgeInsets.all(32),
-              child: Center(child: CircularProgressIndicator()),
+            Container(
+              width: double.infinity,
+              constraints: const BoxConstraints(minHeight: 160),
+              alignment: Alignment.center,
+              padding: const EdgeInsets.symmetric(vertical: 48),
+              child: const CircularProgressIndicator(),
             )
           else if (filtered.isEmpty)
             Container(
+              width: double.infinity,
               constraints: const BoxConstraints(minHeight: 120),
               alignment: Alignment.center,
+              padding: const EdgeInsets.symmetric(vertical: 48),
               child: Text(
                 'No departments',
                 style: TextStyle(
@@ -370,61 +375,74 @@ class _ManageDepartmentState extends State<ManageDepartment> {
               ),
             )
           else
-            ...filtered.map((d) {
-              final isSelected = _selectedDepartment?.id == d.id;
-              return Material(
-                color: isSelected
-                    ? AppTheme.primaryNavy.withOpacity(0.08)
-                    : Colors.transparent,
-                child: InkWell(
-                  onTap: () => _selectDepartment(d),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                    child: Row(
-                      children: [
-                        SizedBox(
-                          width: 60,
-                          child: Text(
-                            d.id.length > 8
-                                ? '${d.id.substring(0, 8)}...'
-                                : d.id,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.textSecondary,
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          flex: 1,
-                          child: Text(
-                            d.name,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: AppTheme.textPrimary,
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          flex: 2,
-                          child: Text(
-                            d.description ?? '—',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.textSecondary,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+            Table(
+              columnWidths: const {
+                0: FixedColumnWidth(88),
+                1: FlexColumnWidth(),
+                2: FlexColumnWidth(2),
+              },
+              children: filtered.map((d) {
+                final isSelected = _selectedDepartment?.id == d.id;
+                return TableRow(
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? AppTheme.primaryNavy.withOpacity(0.08)
+                        : null,
                   ),
-                ),
-              );
-            }),
+                  children: [
+                    _tableCell(
+                      d.displayDepartmentNo,
+                      onTap: () => _selectDepartment(d),
+                    ),
+                    _tableCell(d.name, onTap: () => _selectDepartment(d)),
+                    _tableCell(
+                      d.description ?? '—',
+                      onTap: () => _selectDepartment(d),
+                      secondary: true,
+                    ),
+                  ],
+                );
+              }).toList(),
+            ),
         ],
+      ),
+    );
+  }
+
+  Widget _tableHeaderText(String text) {
+    return Text(
+      text,
+      style: TextStyle(
+        fontWeight: FontWeight.w700,
+        fontSize: 13,
+        color: AppTheme.textPrimary,
+      ),
+      overflow: TextOverflow.ellipsis,
+      maxLines: 1,
+    );
+  }
+
+  Widget _tableCell(
+    String text, {
+    VoidCallback? onTap,
+    bool secondary = false,
+  }) {
+    return TableCell(
+      verticalAlignment: TableCellVerticalAlignment.middle,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Text(
+            text,
+            style: TextStyle(
+              fontSize: secondary ? 12 : 13,
+              color: secondary ? AppTheme.textSecondary : AppTheme.textPrimary,
+            ),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
+          ),
+        ),
       ),
     );
   }
