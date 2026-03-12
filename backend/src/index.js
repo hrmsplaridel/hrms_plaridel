@@ -11,6 +11,7 @@ const assignmentsRoutes = require('./routes/assignments');
 const employeesRoutes = require('./routes/employees');
 const uploadRoutes = require('./routes/upload');
 const filesRoutes = require('./routes/files');
+const docutrackerRoutes = require('./routes/docutracker');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -58,6 +59,7 @@ app.use('/api/assignments', assignmentsRoutes);
 app.use('/api/employees', employeesRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/files', filesRoutes);
+app.use('/api/docutracker', docutrackerRoutes);
 
 // --- Start server ---
 app.listen(PORT, HOST, () => {

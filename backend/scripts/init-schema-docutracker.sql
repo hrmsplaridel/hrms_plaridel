@@ -11,6 +11,11 @@ CREATE TABLE IF NOT EXISTS docutracker_documents (
   document_type TEXT NOT NULL DEFAULT 'memo',
   title TEXT NOT NULL,
   description TEXT,
+  -- Link back to a specific form entry from another module (LD, RSP, DTR, etc.)
+  source_module TEXT,          -- e.g. 'ld', 'rsp', 'dtr'
+  source_table TEXT,           -- e.g. 'bi_form_entries', 'recruitment_applications'
+  source_record_id UUID,       -- id of the row in that table
+  source_title TEXT,           -- optional display title from the linked form
   file_path TEXT,
   file_name TEXT,
   created_by UUID REFERENCES users(id) ON DELETE SET NULL,
