@@ -1,8 +1,9 @@
 import 'package:flutter/foundation.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../api/client.dart';
 import '../data/time_record.dart';
+
+// Previously used Supabase for auth; now use setUserFromApi(userId) from AuthProvider.
 
 /// Summary counts for DTR dashboard.
 class DtrSummary {
@@ -28,29 +29,26 @@ class EmployeeOption {
   });
   final String id;
   final String fullName;
+
   /// Human-friendly number (1, 2, 3...) for display.
   final int? employeeNumber;
 
   /// Display as EMP-001, EMP-002, etc., or "—" if null.
-  String get displayEmployeeNo =>
-      employeeNumber != null
-          ? 'EMP-${employeeNumber!.toString().padLeft(3, '0')}'
-          : '—';
+  String get displayEmployeeNo => employeeNumber != null
+      ? 'EMP-${employeeNumber!.toString().padLeft(3, '0')}'
+      : '—';
 }
 
 /// DTR state and operations. Used by admin DTR module and employee clock in/attendance.
+/// Current user id is set via [setUserFromApi] (e.g. from AuthProvider after API login).
 class DtrProvider extends ChangeNotifier {
-  DtrProvider() {
-    _user = Supabase.instance.client.auth.currentUser;
-    Supabase.instance.client.auth.onAuthStateChange.listen((data) {
-      _user = data.session?.user;
-      _todayRecord = null;
-      notifyListeners();
-    });
-  }
+  DtrProvider();
 
-  User? _user;
-  User? get user => _user;
+  /// Current user id (from API auth). Set via setUserFromApi(auth.user?.id) when using API login.
+  String? _userId;
+  String? get userId => _userId;
+  /// For compatibility: code that checked user != null can use userId != null.
+  bool get hasUser => _userId != null;
 
   List<TimeRecord> _timeRecords = [];
   List<TimeRecord> get timeRecords => List.unmodifiable(_timeRecords);
@@ -93,9 +91,10 @@ class DtrProvider extends ChangeNotifier {
   TimeRecord? _todayRecord;
   TimeRecord? get todayRecord => _todayRecord;
 
-  /// Set current user (e.g. after auth change).
-  void setUser(User? u) {
-    _user = u;
+  /// Set current user id from API auth (e.g. AuthProvider.user?.id). Call after login or when restoring session.
+  void setUserFromApi(String? id) {
+    if (_userId == id) return;
+    _userId = id;
     _todayRecord = null;
     notifyListeners();
   }
@@ -170,7 +169,7 @@ class DtrProvider extends ChangeNotifier {
     DateTime? startDate,
     DateTime? endDate,
   }) async {
-    final uid = _user?.id;
+    final uid = _userId;
     if (uid == null) return;
     _loading = true;
     _error = null;
@@ -193,7 +192,7 @@ class DtrProvider extends ChangeNotifier {
 
   /// Load today's record for current user (clock in/out).
   Future<void> loadTodayRecord() async {
-    final uid = _user?.id;
+    final uid = _userId;
     if (uid == null) return;
     try {
       final rec = await TimeRecordRepo.instance.getTodayForUser(uid);
@@ -213,21 +212,17 @@ class DtrProvider extends ChangeNotifier {
         queryParameters: {'role': 'User', 'status': 'Active'},
       );
       final data = res.data ?? [];
-      _employees = data
-          .map(
-            (e) {
-              final m = e as Map;
-              final empNum = m['employee_number'];
-              return EmployeeOption(
-                id: m['id'] as String,
-                fullName: (m['full_name'] as String? ?? 'Unknown'),
-                employeeNumber: empNum is int
-                    ? empNum
-                    : (empNum != null ? int.tryParse(empNum.toString()) : null),
-              );
-            },
-          )
-          .toList();
+      _employees = data.map((e) {
+        final m = e as Map;
+        final empNum = m['employee_number'];
+        return EmployeeOption(
+          id: m['id'] as String,
+          fullName: (m['full_name'] as String? ?? 'Unknown'),
+          employeeNumber: empNum is int
+              ? empNum
+              : (empNum != null ? int.tryParse(empNum.toString()) : null),
+        );
+      }).toList();
       notifyListeners();
     } catch (_) {
       _employees = [];
@@ -237,7 +232,7 @@ class DtrProvider extends ChangeNotifier {
 
   /// Clock in for current user.
   Future<bool> clockIn() async {
-    final uid = _user?.id;
+    final uid = _userId;
     if (uid == null) return false;
     _loading = true;
     _error = null;
@@ -278,7 +273,7 @@ class DtrProvider extends ChangeNotifier {
 
   /// Clock out for current user.
   Future<bool> clockOut() async {
-    final uid = _user?.id;
+    final uid = _userId;
     if (uid == null) return false;
     final existing =
         _todayRecord ?? await TimeRecordRepo.instance.getTodayForUser(uid);

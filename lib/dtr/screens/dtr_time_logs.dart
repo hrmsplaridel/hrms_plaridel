@@ -158,109 +158,95 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
         dtr.timeRecords.isEmpty && displayRecords.isNotEmpty;
 
     return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'Time Logs',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 24,
-              fontWeight: FontWeight.w800,
-            ),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          'Time Logs',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: 24,
+            fontWeight: FontWeight.w800,
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Manage and correct daily time-in/out records. Add, edit, or delete entries.',
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-          ),
-          const SizedBox(height: 20),
-          if (dtr.tableMissing && !_bannerDismissed) ...[
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(
-                color: Colors.blue.shade50,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blue.shade200),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.info_outline,
-                    color: Colors.blue.shade700,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Showing sample data. Create time_records in Supabase (Query 8, docs/SUPABASE_AUTH_SETUP.md) to enable live data.',
-                      style: TextStyle(
-                        color: Colors.blue.shade900,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    icon: Icon(
-                      Icons.close,
-                      size: 18,
-                      color: Colors.blue.shade700,
-                    ),
-                    onPressed: () => setState(() => _bannerDismissed = true),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(
-                      minWidth: 32,
-                      minHeight: 32,
-                    ),
-                  ),
-                ],
-              ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Manage and correct daily time-in/out records. Add, edit, or delete entries.',
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+        ),
+        const SizedBox(height: 20),
+        if (dtr.tableMissing && !_bannerDismissed) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(
+              color: Colors.blue.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.blue.shade200),
             ),
-          ],
-          if (dtr.error != null) ...[
-            Container(
-              padding: const EdgeInsets.all(12),
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(
-                color: Colors.red.shade50,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.red.shade200),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.error_outline,
-                    color: Colors.red.shade700,
-                    size: 20,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.info_outline, color: Colors.blue.shade700, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Showing sample data. DTR data comes from the backend (dtr_daily_summary). Add records via Clock In or admin Time Logs to see live data.',
+                    style: TextStyle(color: Colors.blue.shade900, fontSize: 13),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      dtr.error!,
-                      style: TextStyle(
-                        color: Colors.red.shade900,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final isNarrow = constraints.maxWidth < 700;
-              final boundedHeight = constraints.maxHeight.isFinite
-                  ? constraints.maxHeight
-                  : 300.0;
-              return ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: constraints.maxWidth,
-                  maxHeight: boundedHeight,
                 ),
-                child: Wrap(
+                IconButton(
+                  icon: Icon(
+                    Icons.close,
+                    size: 18,
+                    color: Colors.blue.shade700,
+                  ),
+                  onPressed: () => setState(() => _bannerDismissed = true),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 32,
+                    minHeight: 32,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        if (dtr.error != null) ...[
+          Container(
+            padding: const EdgeInsets.all(12),
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(
+              color: Colors.red.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.red.shade200),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.error_outline, color: Colors.red.shade700, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    dtr.error!,
+                    style: TextStyle(color: Colors.red.shade900, fontSize: 14),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final isNarrow = constraints.maxWidth < 700;
+            final boundedHeight = constraints.maxHeight.isFinite
+                ? constraints.maxHeight
+                : 300.0;
+            return ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: constraints.maxWidth,
+                maxHeight: boundedHeight,
+              ),
+              child: Wrap(
                 spacing: 12,
                 runSpacing: 8,
                 children: [
@@ -349,158 +335,260 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                     child: const Text('RESET'),
                   ),
                 ],
-                ),
-              );
-            },
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 16),
+        FilledButton.icon(
+          onPressed: () => _showAddDialog(context, dtr),
+          icon: const Icon(Icons.add_rounded, size: 18),
+          label: const Text('Add manual entry'),
+          style: FilledButton.styleFrom(
+            backgroundColor: AppTheme.primaryNavy,
+            foregroundColor: AppTheme.white,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           ),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: () => _showAddDialog(context, dtr),
-            icon: const Icon(Icons.add_rounded, size: 18),
-            label: const Text('Add manual entry'),
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.primaryNavy,
-              foregroundColor: AppTheme.white,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        ),
+        if (isHardcodedPreview && !dtr.tableMissing) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryNavy.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppTheme.primaryNavy.withOpacity(0.2)),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.info_outline_rounded,
+                  size: 18,
+                  color: AppTheme.primaryNavy,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Showing sample data for UI overview. Add real records or adjust filters to see live data.',
+                    style: TextStyle(fontSize: 12, color: AppTheme.textPrimary),
+                  ),
+                ),
+              ],
             ),
           ),
-          if (isHardcodedPreview && !dtr.tableMissing) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: AppTheme.primaryNavy.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: AppTheme.primaryNavy.withOpacity(0.2),
+        ],
+        const SizedBox(height: 20),
+        if (dtr.loading)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: CircularProgressIndicator(),
+            ),
+          ),
+        if (!dtr.loading && displayRecords.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(40),
+            decoration: BoxDecoration(
+              color: AppTheme.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.black.withOpacity(0.08)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.04),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
                 ),
-              ),
-              child: Row(
+              ],
+            ),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
-                    Icons.info_outline_rounded,
-                    size: 18,
-                    color: AppTheme.primaryNavy,
+                    Icons.schedule_rounded,
+                    size: 56,
+                    color: AppTheme.textSecondary.withOpacity(0.5),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Showing sample data for UI overview. Add real records or adjust filters to see live data.',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: AppTheme.textPrimary,
-                      ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No time records match your filters.',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Add a manual entry or try a different date range.',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 14,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 20),
+                  FilledButton.icon(
+                    onPressed: () => _showAddDialog(context, dtr),
+                    icon: const Icon(Icons.add_rounded, size: 18),
+                    label: const Text('Add manual entry'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.primaryNavy,
+                      foregroundColor: AppTheme.white,
                     ),
                   ),
                 ],
               ),
             ),
-          ],
-          const SizedBox(height: 20),
-          if (dtr.loading)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: CircularProgressIndicator(),
-              ),
-            ),
-          if (!dtr.loading && displayRecords.isEmpty)
-            Container(
-              padding: const EdgeInsets.all(40),
-              decoration: BoxDecoration(
-                color: AppTheme.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.black.withOpacity(0.08)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.04),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.schedule_rounded,
-                      size: 56,
-                      color: AppTheme.textSecondary.withOpacity(0.5),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'No time records match your filters.',
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Add a manual entry or try a different date range.',
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 14,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 20),
-                    FilledButton.icon(
-                      onPressed: () => _showAddDialog(context, dtr),
-                      icon: const Icon(Icons.add_rounded, size: 18),
-                      label: const Text('Add manual entry'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.primaryNavy,
-                        foregroundColor: AppTheme.white,
-                      ),
-                    ),
-                  ],
+          ),
+        if (!dtr.loading && displayRecords.isNotEmpty)
+          Container(
+            decoration: BoxDecoration(
+              color: AppTheme.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.black.withOpacity(0.08)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.04),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
                 ),
-              ),
+              ],
             ),
-          if (!dtr.loading && displayRecords.isNotEmpty)
-            Container(
-              decoration: BoxDecoration(
-                color: AppTheme.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.black.withOpacity(0.08)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.04),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: SizedBox(
-                height: (displayRecords.length + 1) * 52.0 + 8,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
+            child: SizedBox(
+              height: (displayRecords.length + 1) * 52.0 + 8,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppTheme.lightGray.withOpacity(0.5),
+                        borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(12),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 120,
+                            child: Text(
+                              'Employee',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 100,
+                            child: Text(
+                              'Date',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 75,
+                            child: Text(
+                              'Time In',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 75,
+                            child: Text(
+                              'Time Out',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 60,
+                            child: Text(
+                              'Hours',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 80,
+                            child: Text(
+                              'Status',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                          ),
+                          if (!isHardcodedPreview)
+                            SizedBox(
+                              width: 80,
+                              child: Text(
+                                'Actions',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13,
+                                  color: AppTheme.textPrimary,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    ...displayRecords.asMap().entries.map((entry) {
+                      final i = entry.key;
+                      final r = entry.value;
+                      final timeIn = r.timeIn?.toLocal();
+                      final timeOut = r.timeOut?.toLocal();
+                      final hours = r.totalHours != null
+                          ? '${r.totalHours!.toStringAsFixed(1)} h'
+                          : '—';
+                      final statusText = r.status == 'late'
+                          ? 'Late'
+                          : r.status == 'absent'
+                          ? 'Absent'
+                          : r.status == 'on_leave'
+                          ? 'On Leave'
+                          : 'On Time';
+                      return Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 16,
                           vertical: 12,
                         ),
                         decoration: BoxDecoration(
-                          color: AppTheme.lightGray.withOpacity(0.5),
-                          borderRadius: const BorderRadius.vertical(
-                            top: Radius.circular(12),
-                          ),
+                          color: i % 2 == 0
+                              ? AppTheme.white
+                              : AppTheme.lightGray.withOpacity(0.25),
                         ),
                         child: Row(
                           children: [
                             SizedBox(
                               width: 120,
                               child: Text(
-                                'Employee',
+                                r.employeeName ?? r.userId,
                                 style: TextStyle(
-                                  fontWeight: FontWeight.w700,
                                   fontSize: 13,
                                   color: AppTheme.textPrimary,
                                 ),
@@ -509,9 +597,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                             SizedBox(
                               width: 100,
                               child: Text(
-                                'Date',
+                                _formatDate(r.recordDate),
                                 style: TextStyle(
-                                  fontWeight: FontWeight.w700,
                                   fontSize: 13,
                                   color: AppTheme.textPrimary,
                                 ),
@@ -520,9 +607,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                             SizedBox(
                               width: 75,
                               child: Text(
-                                'Time In',
+                                _formatTime(timeIn),
                                 style: TextStyle(
-                                  fontWeight: FontWeight.w700,
                                   fontSize: 13,
                                   color: AppTheme.textPrimary,
                                 ),
@@ -531,9 +617,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                             SizedBox(
                               width: 75,
                               child: Text(
-                                'Time Out',
+                                _formatTime(timeOut),
                                 style: TextStyle(
-                                  fontWeight: FontWeight.w700,
                                   fontSize: 13,
                                   color: AppTheme.textPrimary,
                                 ),
@@ -542,9 +627,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                             SizedBox(
                               width: 60,
                               child: Text(
-                                'Hours',
+                                hours,
                                 style: TextStyle(
-                                  fontWeight: FontWeight.w700,
                                   fontSize: 13,
                                   color: AppTheme.textPrimary,
                                 ),
@@ -553,160 +637,56 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                             SizedBox(
                               width: 80,
                               child: Text(
-                                'Status',
+                                statusText,
                                 style: TextStyle(
-                                  fontWeight: FontWeight.w700,
                                   fontSize: 13,
-                                  color: AppTheme.textPrimary,
+                                  color: r.status == 'late'
+                                      ? Colors.red.shade700
+                                      : (r.status == 'absent'
+                                            ? Colors.orange.shade700
+                                            : AppTheme.textPrimary),
+                                  fontWeight:
+                                      r.status == 'late' || r.status == 'absent'
+                                      ? FontWeight.w600
+                                      : FontWeight.normal,
                                 ),
                               ),
                             ),
                             if (!isHardcodedPreview)
-                              SizedBox(
-                                width: 80,
-                                child: Text(
-                                  'Actions',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 13,
-                                    color: AppTheme.textPrimary,
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.edit_rounded,
+                                      size: 20,
+                                    ),
+                                    onPressed: () =>
+                                        _showEditDialog(context, dtr, r),
+                                    tooltip: 'Edit',
                                   ),
-                                ),
+                                  IconButton(
+                                    icon: Icon(
+                                      Icons.delete_rounded,
+                                      size: 20,
+                                      color: Colors.red.shade700,
+                                    ),
+                                    onPressed: () =>
+                                        _confirmDelete(context, dtr, r),
+                                    tooltip: 'Delete',
+                                  ),
+                                ],
                               ),
                           ],
                         ),
-                      ),
-                      ...displayRecords.asMap().entries.map((entry) {
-                        final i = entry.key;
-                        final r = entry.value;
-                        final timeIn = r.timeIn?.toLocal();
-                        final timeOut = r.timeOut?.toLocal();
-                        final hours = r.totalHours != null
-                            ? '${r.totalHours!.toStringAsFixed(1)} h'
-                            : '—';
-                        final statusText = r.status == 'late'
-                            ? 'Late'
-                            : r.status == 'absent'
-                            ? 'Absent'
-                            : r.status == 'on_leave'
-                            ? 'On Leave'
-                            : 'On Time';
-                        return Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
-                          ),
-                          decoration: BoxDecoration(
-                            color: i % 2 == 0
-                                ? AppTheme.white
-                                : AppTheme.lightGray.withOpacity(0.25),
-                          ),
-                          child: Row(
-                            children: [
-                              SizedBox(
-                                width: 120,
-                                child: Text(
-                                  r.employeeName ?? r.userId,
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: AppTheme.textPrimary,
-                                  ),
-                                ),
-                              ),
-                              SizedBox(
-                                width: 100,
-                                child: Text(
-                                  _formatDate(r.recordDate),
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: AppTheme.textPrimary,
-                                  ),
-                                ),
-                              ),
-                              SizedBox(
-                                width: 75,
-                                child: Text(
-                                  _formatTime(timeIn),
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: AppTheme.textPrimary,
-                                  ),
-                                ),
-                              ),
-                              SizedBox(
-                                width: 75,
-                                child: Text(
-                                  _formatTime(timeOut),
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: AppTheme.textPrimary,
-                                  ),
-                                ),
-                              ),
-                              SizedBox(
-                                width: 60,
-                                child: Text(
-                                  hours,
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: AppTheme.textPrimary,
-                                  ),
-                                ),
-                              ),
-                              SizedBox(
-                                width: 80,
-                                child: Text(
-                                  statusText,
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: r.status == 'late'
-                                        ? Colors.red.shade700
-                                        : (r.status == 'absent'
-                                              ? Colors.orange.shade700
-                                              : AppTheme.textPrimary),
-                                    fontWeight:
-                                        r.status == 'late' ||
-                                            r.status == 'absent'
-                                        ? FontWeight.w600
-                                        : FontWeight.normal,
-                                  ),
-                                ),
-                              ),
-                              if (!isHardcodedPreview)
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      icon: const Icon(
-                                        Icons.edit_rounded,
-                                        size: 20,
-                                      ),
-                                      onPressed: () =>
-                                          _showEditDialog(context, dtr, r),
-                                      tooltip: 'Edit',
-                                    ),
-                                    IconButton(
-                                      icon: Icon(
-                                        Icons.delete_rounded,
-                                        size: 20,
-                                        color: Colors.red.shade700,
-                                      ),
-                                      onPressed: () =>
-                                          _confirmDelete(context, dtr, r),
-                                      tooltip: 'Delete',
-                                    ),
-                                  ],
-                                ),
-                            ],
-                          ),
-                        );
-                      }),
-                    ],
-                  ),
+                      );
+                    }),
+                  ],
                 ),
               ),
             ),
-        ],
+          ),
+      ],
     );
   }
 

@@ -18,6 +18,7 @@ const biometricDevicesRoutes = require('./routes/biometricDevices');
 const overtimeRoutes = require('./routes/overtime');
 const calendarRoutes = require('./routes/calendar');
 const dtrDailySummaryRoutes = require('./routes/dtrDailySummary');
+const docutrackerRoutes = require('./routes/docutracker');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -72,6 +73,7 @@ app.use('/api/biometric-devices', biometricDevicesRoutes);
 app.use('/api/overtime', overtimeRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/dtr-daily-summary', dtrDailySummaryRoutes);
+app.use('/api/docutracker', docutrackerRoutes);
 
 // --- Start server ---
 app.listen(PORT, HOST, () => {

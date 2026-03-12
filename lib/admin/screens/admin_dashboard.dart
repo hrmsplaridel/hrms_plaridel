@@ -14,6 +14,7 @@ import '../../../widgets/rsp_form_header_footer.dart';
 import '../../../widgets/user_avatar.dart';
 import '../../shared/screens/profile_and_settings_page.dart';
 import '../../../dtr/dtr_main.dart';
+import '../../../dtr/dtr_provider.dart';
 import '../../../dtr/screens/dtr_dashboard.dart';
 import '../../../dtr/dtr_routes.dart';
 import '../../../dtr/manage/manage_employee.dart';
@@ -21,6 +22,12 @@ import '../../../dtr/manage/manage_assignment.dart';
 import '../../../dtr/manage/manage_department.dart';
 import '../../../dtr/manage/manage_position.dart';
 import '../../../dtr/manage/manage_shift.dart';
+import '../../../dtr/manage/manage_holiday.dart';
+import '../../../dtr/manage/manage_attendance_policy.dart';
+import '../../../dtr/manage/manage_attendance_adjustment.dart';
+import '../../../dtr/manage/manage_biometric_devices.dart';
+import '../../../dtr/manage/manage_overtime.dart';
+import '../../../dtr/screens/schedule_calendar.dart';
 import '../../../docutracker/docutracker_main.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
@@ -60,6 +67,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
+    // Sync DTR current user from API auth (so clock in/out and time records use correct user).
+    if (auth.user != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!context.mounted) return;
+        final dtr = context.read<DtrProvider>();
+        if (dtr.userId != auth.user?.id) dtr.setUserFromApi(auth.user?.id);
+      });
+    }
     final email = auth.email.isNotEmpty ? auth.email : 'Admin';
     final displayName = auth.displayName.isNotEmpty
         ? auth.displayName
@@ -2005,6 +2020,42 @@ class _DtrContentState extends State<_DtrContent> {
                 icon: Icons.event_note_rounded,
                 onTap: () => setState(() => _dtrSectionIndex = 8),
               ),
+              FeatureCard(
+                title: 'Holiday Management',
+                subtitle: 'Define regular, special, and local holidays for DTR and payroll.',
+                icon: Icons.calendar_today_rounded,
+                onTap: () => setState(() => _dtrSectionIndex = 9),
+              ),
+              FeatureCard(
+                title: 'Attendance Policy',
+                subtitle: 'Set grace period, late/absent/undertime rules, and default policy.',
+                icon: Icons.policy_rounded,
+                onTap: () => setState(() => _dtrSectionIndex = 10),
+              ),
+              FeatureCard(
+                title: 'Attendance Adjustment',
+                subtitle: 'Review and approve or reject DTR correction requests.',
+                icon: Icons.edit_calendar_rounded,
+                onTap: () => setState(() => _dtrSectionIndex = 11),
+              ),
+              FeatureCard(
+                title: 'Biometric Devices',
+                subtitle: 'Register and manage biometric devices for time logging. (Optional)',
+                icon: Icons.fingerprint_rounded,
+                onTap: () => setState(() => _dtrSectionIndex = 12),
+              ),
+              FeatureCard(
+                title: 'Overtime Management',
+                subtitle: 'Submit OT requests, supervisor approval, and add to payroll.',
+                icon: Icons.schedule_rounded,
+                onTap: () => setState(() => _dtrSectionIndex = 13),
+              ),
+              FeatureCard(
+                title: 'Schedule Calendar',
+                subtitle: 'Calendar view of employee shifts, rest days, and holidays.',
+                icon: Icons.calendar_month_rounded,
+                onTap: () => setState(() => _dtrSectionIndex = 14),
+              ),
             ],
           ),
         ] else if (_dtrSectionIndex == 1)
@@ -2013,6 +2064,8 @@ class _DtrContentState extends State<_DtrContent> {
           DtrMain(section: DtrSection.reports)
         else if (_dtrSectionIndex == 8)
           const LeaveMain(isAdmin: true)
+        else if (_dtrSectionIndex == 14)
+          const ScheduleCalendar()
         else
           _ManageContent(subIndex: _dtrSectionIndex - 3),
       ],
@@ -3475,6 +3528,11 @@ class _ManageContent extends StatelessWidget {
     'Department',
     'Position',
     'Shift',
+    'Holiday',
+    'Attendance Policy',
+    'Attendance Adjustment',
+    'Biometric Devices',
+    'Overtime',
   ];
 
   @override
@@ -3493,6 +3551,21 @@ class _ManageContent extends StatelessWidget {
     }
     if (subIndex == 4) {
       return const ManageShift();
+    }
+    if (subIndex == 6) {
+      return const ManageHoliday();
+    }
+    if (subIndex == 7) {
+      return const ManageAttendancePolicy();
+    }
+    if (subIndex == 8) {
+      return const ManageAttendanceAdjustment();
+    }
+    if (subIndex == 9) {
+      return const ManageBiometricDevices();
+    }
+    if (subIndex == 10) {
+      return const ManageOvertime();
     }
     final title = subIndex >= 0 && subIndex < _titles.length
         ? _titles[subIndex]

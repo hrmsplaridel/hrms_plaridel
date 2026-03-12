@@ -26,10 +26,15 @@ class _EmployeeProfile {
     this.dateOfBirth,
     this.contactNumber,
     this.address,
+    this.employmentType,
+    this.salaryGrade,
+    this.dateHired,
+    this.employmentStatus,
   });
   final String id;
   final String fullName;
   final String role;
+
   /// Human-friendly number (1, 2, 3...) for display and ad-hoc queries.
   final int? employeeNumber;
   final String? email;
@@ -41,6 +46,10 @@ class _EmployeeProfile {
   final DateTime? dateOfBirth;
   final String? contactNumber;
   final String? address;
+  final String? employmentType;
+  final String? salaryGrade;
+  final DateTime? dateHired;
+  final String? employmentStatus;
 
   String get roleDisplay => role == 'admin' ? 'Admin' : 'Employee';
 }
@@ -613,11 +622,14 @@ class _ManageEmployeeState extends State<ManageEmployee> {
           final m = e as Map<String, dynamic>;
           final dob = m['date_of_birth'];
           final empNum = m['employee_number'];
+          final dateHiredRaw = m['date_hired'];
           return _EmployeeProfile(
             id: m['id'] as String,
             fullName: m['full_name'] as String? ?? 'Unknown',
             role: m['role'] as String? ?? 'employee',
-            employeeNumber: empNum is int ? empNum : (empNum != null ? int.tryParse(empNum.toString()) : null),
+            employeeNumber: empNum is int
+                ? empNum
+                : (empNum != null ? int.tryParse(empNum.toString()) : null),
             email: m['email'] as String?,
             isActive: m['is_active'] as bool? ?? true,
             avatarPath: m['avatar_path'] as String?,
@@ -627,6 +639,12 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             dateOfBirth: dob != null ? DateTime.tryParse(dob.toString()) : null,
             contactNumber: m['contact_number'] as String?,
             address: m['address'] as String?,
+            employmentType: m['employment_type'] as String?,
+            salaryGrade: m['salary_grade'] as String?,
+            dateHired: dateHiredRaw != null
+                ? DateTime.tryParse(dateHiredRaw.toString())
+                : null,
+            employmentStatus: m['employment_status'] as String?,
           );
         }).toList();
       }
@@ -1257,11 +1275,15 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
   final _lastNameController = TextEditingController();
   final _contactController = TextEditingController();
   final _addressController = TextEditingController();
+  final _salaryGradeController = TextEditingController();
 
   String? _privilege;
   String? _suffix;
   String? _sex;
   DateTime? _dateOfBirth;
+  String? _employmentType;
+  DateTime? _dateHired;
+  String? _employmentStatus;
   Uint8List? _selectedImageBytes;
   bool _saving = false;
 
@@ -1280,10 +1302,14 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
     }
     _contactController.text = _profile.contactNumber ?? '';
     _addressController.text = _profile.address ?? '';
+    _salaryGradeController.text = _profile.salaryGrade ?? '';
     _privilege = _profile.role == 'admin' ? 'Admin' : 'Employee';
     _suffix = _profile.suffix;
     _sex = _profile.sex;
     _dateOfBirth = _profile.dateOfBirth;
+    _employmentType = _profile.employmentType;
+    _dateHired = _profile.dateHired;
+    _employmentStatus = _profile.employmentStatus ?? 'active';
   }
 
   @override
@@ -1293,6 +1319,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
     _lastNameController.dispose();
     _contactController.dispose();
     _addressController.dispose();
+    _salaryGradeController.dispose();
     super.dispose();
   }
 
@@ -1363,6 +1390,12 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
           'contact_number': _contactController.text.trim(),
         if (_addressController.text.trim().isNotEmpty)
           'address': _addressController.text.trim(),
+        if (_employmentType != null) 'employment_type': _employmentType,
+        if (_salaryGradeController.text.trim().isNotEmpty)
+          'salary_grade': _salaryGradeController.text.trim(),
+        if (_dateHired != null)
+          'date_hired': _dateHired!.toIso8601String().split('T')[0],
+        if (_employmentStatus != null) 'employment_status': _employmentStatus,
       };
 
       if (_selectedImageBytes != null && _selectedImageBytes!.isNotEmpty) {
@@ -1726,6 +1759,79 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
             controller: _addressController,
             decoration: _inputDecoration('Address'),
             maxLines: 3,
+          ),
+          const SizedBox(height: 24),
+          Text(
+            'Employment',
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 16),
+          DropdownButtonFormField<String>(
+            value: _employmentType,
+            decoration: _inputDecoration('Employment Type'),
+            hint: const Text('Employment Type'),
+            items: [
+              'regular',
+              'contractual',
+              'job_order',
+              'casual',
+            ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+            onChanged: (v) => setState(() => _employmentType = v),
+          ),
+          const SizedBox(height: 16),
+          TextFormField(
+            controller: _salaryGradeController,
+            decoration: _inputDecoration('Salary Grade'),
+          ),
+          const SizedBox(height: 16),
+          InkWell(
+            onTap: () async {
+              final date = await showDatePicker(
+                context: context,
+                initialDate: _dateHired ?? DateTime.now(),
+                firstDate: DateTime(1900),
+                lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
+              );
+              if (date != null) setState(() => _dateHired = date);
+            },
+            borderRadius: BorderRadius.circular(8),
+            child: InputDecorator(
+              decoration: _inputDecoration('').copyWith(
+                suffixIcon: Icon(
+                  Icons.calendar_today_rounded,
+                  size: 20,
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+              child: Text(
+                _dateHired != null
+                    ? '${_dateHired!.year}-${_dateHired!.month.toString().padLeft(2, '0')}-${_dateHired!.day.toString().padLeft(2, '0')}'
+                    : 'Date Hired (tap to select)',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: _dateHired != null
+                      ? AppTheme.textPrimary
+                      : AppTheme.textSecondary,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          DropdownButtonFormField<String>(
+            value: _employmentStatus,
+            decoration: _inputDecoration('Employment Status'),
+            items: [
+              'active',
+              'inactive',
+              'resigned',
+              'retired',
+              'terminated',
+            ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+            onChanged: (v) => setState(() => _employmentStatus = v ?? 'active'),
           ),
         ],
       ),

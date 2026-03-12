@@ -1,4 +1,6 @@
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:dio/dio.dart';
+
+import '../api/client.dart';
 
 /// One DTR (Daily Time Record) entry: time-in/out for a user on a date.
 class TimeRecord {
@@ -115,39 +117,33 @@ class TimeRecord {
   }
 }
 
+/// Repository for DTR time records. Uses backend API (dtr_daily_summary); Supabase logic commented out.
 class TimeRecordRepo {
   TimeRecordRepo._();
   static final TimeRecordRepo instance = TimeRecordRepo._();
 
-  SupabaseClient get _client => Supabase.instance.client;
-
-  /// List time records for admin (all users, with profile join).
-  /// [startDate] and [endDate] filter by record_date. [limit] caps results.
+  /// List time records for admin (all users). Uses GET /api/dtr-daily-summary.
   Future<List<TimeRecord>> listForAdmin({
     DateTime? startDate,
     DateTime? endDate,
     String? userId,
     int? limit,
   }) async {
-    dynamic query = _client.from(TimeRecord.tableName).select('*, profiles!inner(full_name)');
-    if (startDate != null) {
-      query = query.gte('record_date', startDate.toIso8601String().split('T').first);
+    try {
+      final params = <String, dynamic>{};
+      if (startDate != null) params['start_date'] = startDate.toIso8601String().split('T').first;
+      if (endDate != null) params['end_date'] = endDate.toIso8601String().split('T').first;
+      if (userId != null && userId.isNotEmpty) params['employee_id'] = userId;
+      if (limit != null) params['limit'] = limit;
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/dtr-daily-summary',
+        queryParameters: params,
+      );
+      final data = res.data ?? [];
+      return data.map((e) => TimeRecord.fromJson(Map<String, dynamic>.from(e as Map))).toList();
+    } on DioException catch (_) {
+      rethrow;
     }
-    if (endDate != null) {
-      query = query.lte('record_date', endDate.toIso8601String().split('T').first);
-    }
-    if (userId != null && userId.isNotEmpty) {
-      query = query.eq('user_id', userId);
-    }
-    query = query.order('record_date', ascending: false).order('time_in', ascending: false);
-    if (limit != null) {
-      query = query.limit(limit);
-    }
-
-    final res = await query;
-    return (res as List)
-        .map((e) => _fromRow(e))
-        .toList();
   }
 
   /// List time records for current user (employee).
@@ -156,119 +152,97 @@ class TimeRecordRepo {
     DateTime? startDate,
     DateTime? endDate,
   }) async {
-    dynamic query = _client.from(TimeRecord.tableName).select().eq('user_id', userId);
-    if (startDate != null) {
-      query = query.gte('record_date', startDate.toIso8601String().split('T').first);
-    }
-    if (endDate != null) {
-      query = query.lte('record_date', endDate.toIso8601String().split('T').first);
-    }
-    query = query.order('record_date', ascending: false);
-
-    final res = await query;
-    return (res as List).map((e) => TimeRecord.fromJson(Map<String, dynamic>.from(e as Map))).toList();
-  }
-
-  TimeRecord _fromRow(dynamic row) {
-    final m = Map<String, dynamic>.from(row as Map);
-    final profiles = m['profiles'];
-    if (profiles != null && profiles is Map) {
-      m['employee_name'] = (profiles as Map<String, dynamic>)['full_name'];
-    }
-    m.remove('profiles');
-    return TimeRecord.fromJson(m);
+    return listForAdmin(
+      userId: userId,
+      startDate: startDate,
+      endDate: endDate,
+      limit: 500,
+    );
   }
 
   /// Get today's record for a user (for clock in/out).
   Future<TimeRecord?> getTodayForUser(String userId) async {
     final today = DateTime.now().toIso8601String().split('T').first;
-    final res = await _client
-        .from(TimeRecord.tableName)
-        .select()
-        .eq('user_id', userId)
-        .eq('record_date', today)
-        .maybeSingle();
-    return res == null ? null : TimeRecord.fromJson(Map<String, dynamic>.from(res));
+    final list = await listForAdmin(
+      userId: userId,
+      startDate: DateTime.parse(today),
+      endDate: DateTime.parse(today),
+      limit: 1,
+    );
+    return list.isEmpty ? null : list.first;
   }
 
-  /// Insert or upsert time record (for clock in).
+  /// Insert time record (clock in). Uses POST /api/dtr-daily-summary.
   Future<TimeRecord> insert(TimeRecord record) async {
-    final payload = Map<String, dynamic>.from(record.toJson())..remove('id');
-    final res = await _client
-        .from(TimeRecord.tableName)
-        .insert(payload)
-        .select()
-        .single();
-    return TimeRecord.fromJson(Map<String, dynamic>.from(res));
+    final res = await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/dtr-daily-summary',
+      data: {
+        'attendance_date': record.recordDate.toIso8601String().split('T').first,
+        'time_in': record.timeIn?.toIso8601String(),
+        'time_out': record.timeOut?.toIso8601String(),
+        'total_hours': record.totalHours ?? 0,
+        if (record.userId.isNotEmpty) 'employee_id': record.userId,
+      },
+    );
+    final data = res.data;
+    if (data == null) throw Exception('No data returned');
+    return TimeRecord.fromJson(data);
   }
 
-  /// Update existing record (for clock out or admin edit).
+  /// Update existing record (clock out or admin edit). Uses PUT /api/dtr-daily-summary/:id.
   Future<void> update(TimeRecord record) async {
     if (record.id == null) return;
-    await _client
-        .from(TimeRecord.tableName)
-        .update(record.toJson())
-        .eq('id', record.id!);
+    await ApiClient.instance.put(
+      '/api/dtr-daily-summary/${record.id}',
+      data: {
+        'time_in': record.timeIn?.toIso8601String(),
+        'time_out': record.timeOut?.toIso8601String(),
+        'total_hours': record.totalHours,
+        'status': record.status,
+        'remarks': record.remarks,
+      },
+    );
   }
 
-  /// Upsert: insert or update if exists for (user_id, record_date).
+  /// Upsert: get today for user, then update if exists else insert.
   Future<void> upsert(TimeRecord record) async {
-    final payload = Map<String, dynamic>.from(record.toJson())..remove('id');
-    await _client.from(TimeRecord.tableName).upsert(
-          payload,
-          onConflict: 'user_id,record_date',
-        );
-  }
-
-  /// Delete record (admin only).
-  Future<void> delete(String id) async {
-    await _client.from(TimeRecord.tableName).delete().eq('id', id);
-  }
-
-  /// Count present today (employees with time_in today).
-  Future<int> countPresentToday() async {
-    final today = DateTime.now().toIso8601String().split('T').first;
-    final res = await _client
-        .from(TimeRecord.tableName)
-        .select()
-        .eq('record_date', today)
-        .not('time_in', 'is', null);
-    return (res as List).length;
-  }
-
-  /// Count late today (time_in after 8:00 AM local - configurable later).
-  /// Uses 8:00 as default office start.
-  Future<int> countLateToday() async {
-    final today = DateTime.now();
-    final res = await _client
-        .from(TimeRecord.tableName)
-        .select()
-        .eq('record_date', today.toIso8601String().split('T').first)
-        .not('time_in', 'is', null);
-
-    int count = 0;
-    for (final row in res as List) {
-      final timeInStr = (row as Map)['time_in']?.toString();
-      if (timeInStr != null) {
-        final timeIn = DateTime.tryParse(timeInStr)?.toLocal();
-        if (timeIn != null) {
-          final officeStart = DateTime(today.year, today.month, today.day, 8, 0);
-          if (timeIn.isAfter(officeStart)) count++;
-        }
-      }
+    final existing = await getTodayForUser(record.userId);
+    if (existing != null && existing.id != null) {
+      await update(record.copyWith(id: existing.id));
+    } else {
+      await insert(record);
     }
-    return count;
   }
 
-  /// List recent time records (last N) for admin dashboard.
-  Future<List<TimeRecord>> listRecent({int limit = 20}) async {
-    final res = await _client
-        .from(TimeRecord.tableName)
-        .select('*, profiles!inner(full_name)')
-        .order('record_date', ascending: false)
-        .order('time_in', ascending: false)
-        .limit(limit);
+  /// Delete record (admin). Uses DELETE /api/dtr-daily-summary/:id.
+  Future<void> delete(String id) async {
+    await ApiClient.instance.delete('/api/dtr-daily-summary/$id');
+  }
 
-    return (res as List).map((e) => _fromRow(e)).toList();
+  /// Count present today. Uses GET /api/dtr-daily-summary/summary.
+  Future<int> countPresentToday() async {
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>('/api/dtr-daily-summary/summary');
+      final data = res.data;
+      return (data?['present_today'] as int?) ?? 0;
+    } on DioException catch (_) {
+      return 0;
+    }
+  }
+
+  /// Count late today. Uses GET /api/dtr-daily-summary/summary.
+  Future<int> countLateToday() async {
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>('/api/dtr-daily-summary/summary');
+      final data = res.data;
+      return (data?['late_today'] as int?) ?? 0;
+    } on DioException catch (_) {
+      return 0;
+    }
+  }
+
+  /// List recent time records for admin dashboard.
+  Future<List<TimeRecord>> listRecent({int limit = 20}) async {
+    return listForAdmin(limit: limit);
   }
 }

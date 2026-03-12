@@ -35,6 +35,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
+    // Sync DTR current user from API auth (so clock in/out and time records use correct user).
+    if (auth.user != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!context.mounted) return;
+        final dtr = context.read<DtrProvider>();
+        if (dtr.userId != auth.user?.id) dtr.setUserFromApi(auth.user?.id);
+      });
+    }
     final displayName = auth.displayName.isNotEmpty ? auth.displayName : 'Employee';
     final email = auth.email;
     final avatarPath = auth.avatarPath;

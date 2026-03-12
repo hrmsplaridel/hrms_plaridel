@@ -1,5 +1,6 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
 
 /// Position record for display/CRUD.
@@ -11,6 +12,7 @@ class _PositionRecord {
     this.departmentId,
     this.departmentName,
     required this.isActive,
+    this.positionNumber,
   });
   final String id;
   final String name;
@@ -18,6 +20,12 @@ class _PositionRecord {
   final String? departmentId;
   final String? departmentName;
   final bool isActive;
+  final int? positionNumber;
+
+  /// Display as POS-001, POS-002, etc., or "—" if null.
+  String get displayPositionNo => positionNumber != null
+      ? 'POS-${positionNumber!.toString().padLeft(3, '0')}'
+      : '—';
 }
 
 /// Position management screen: list with search/department/status filter + form.
@@ -60,12 +68,18 @@ class _ManagePositionState extends State<ManagePosition> {
 
   Future<void> _loadDepartments() async {
     try {
-      final res = await Supabase.instance.client
-          .from('departments')
-          .select('id, name')
-          .or('is_active.is.null,is_active.eq.true')
-          .order('name');
-      _departments = List<Map<String, dynamic>>.from(res);
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/departments',
+        queryParameters: {'status': 'All'},
+      );
+      final data = res.data ?? [];
+      _departments = data.map((e) {
+        final m = e as Map<String, dynamic>;
+        return {'id': m['id'], 'name': m['name'] as String? ?? ''};
+      }).toList();
+    } on DioException catch (e) {
+      debugPrint('Load departments failed: ${e.response?.data ?? e.message}');
+      _departments = [];
     } catch (e) {
       debugPrint('Load departments failed: $e');
       _departments = [];
@@ -76,37 +90,33 @@ class _ManagePositionState extends State<ManagePosition> {
   Future<void> _loadPositions() async {
     setState(() => _loading = true);
     try {
-      var query = Supabase.instance.client
-          .from('positions')
-          .select(
-            'id, name, description, department_id, is_active, departments(name)',
-          );
-
-      if (_statusFilter == 'Active') {
-        query = query.or('is_active.is.null,is_active.eq.true');
-      } else if (_statusFilter == 'Inactive') {
-        query = query.eq('is_active', false);
-      }
-
+      final params = <String, String>{'status': _statusFilter};
       if (_departmentFilterId != null) {
-        query = query.eq('department_id', _departmentFilterId!);
+        params['department_id'] = _departmentFilterId!;
       }
-
-      final res = await query.order('name');
-      _positions = (res as List).map((e) {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/positions',
+        queryParameters: params,
+      );
+      final data = res.data ?? [];
+      _positions = (data).map((e) {
         final m = e as Map<String, dynamic>;
         final dept = m['departments'];
+        final deptName = m['department_name'] as String? ??
+            (dept is Map ? dept['name'] as String? : null);
+        final posNum = m['position_number'];
         return _PositionRecord(
           id: m['id'] as String,
           name: m['name'] as String? ?? '',
           description: m['description'] as String?,
           departmentId: m['department_id'] as String?,
-          departmentName: (dept is Map ? dept['name'] : null) as String?,
+          departmentName: deptName,
           isActive: m['is_active'] as bool? ?? true,
+          positionNumber: posNum is int ? posNum : (posNum != null ? int.tryParse(posNum.toString()) : null),
         );
       }).toList();
-    } catch (e) {
-      debugPrint('Load positions failed: $e');
+    } on DioException catch (e) {
+      debugPrint('Load positions failed: ${e.response?.data ?? e.message}');
       _positions = [];
     }
     if (mounted) setState(() => _loading = false);
@@ -139,7 +149,7 @@ class _ManagePositionState extends State<ManagePosition> {
       return;
     }
     try {
-      await Supabase.instance.client.from('positions').insert({
+      await ApiClient.instance.post('/api/positions', data: {
         'name': title,
         'description': _descriptionController.text.trim().isEmpty
             ? null
@@ -154,11 +164,12 @@ class _ManagePositionState extends State<ManagePosition> {
         _clearForm();
         _loadPositions();
       }
-    } catch (e) {
+    } on DioException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to add: $e')));
+        ).showSnackBar(SnackBar(
+            content: Text('Failed to add: ${e.response?.data ?? e.message}')));
       }
     }
   }
@@ -179,17 +190,13 @@ class _ManagePositionState extends State<ManagePosition> {
       return;
     }
     try {
-      await Supabase.instance.client
-          .from('positions')
-          .update({
-            'name': title,
-            'description': _descriptionController.text.trim().isEmpty
-                ? null
-                : _descriptionController.text.trim(),
-            'department_id': _selectedDepartmentId,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', p.id);
+      await ApiClient.instance.put('/api/positions/${p.id}', data: {
+        'name': title,
+        'description': _descriptionController.text.trim().isEmpty
+            ? null
+            : _descriptionController.text.trim(),
+        'department_id': _selectedDepartmentId,
+      });
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -197,11 +204,12 @@ class _ManagePositionState extends State<ManagePosition> {
         _clearForm();
         _loadPositions();
       }
-    } catch (e) {
+    } on DioException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
+        ).showSnackBar(SnackBar(
+            content: Text('Failed to update: ${e.response?.data ?? e.message}')));
       }
     }
   }
@@ -236,13 +244,7 @@ class _ManagePositionState extends State<ManagePosition> {
     );
     if (ok != true || !mounted) return;
     try {
-      await Supabase.instance.client
-          .from('positions')
-          .update({
-            'is_active': false,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', p.id);
+      await ApiClient.instance.put('/api/positions/${p.id}', data: {'is_active': false});
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('${p.name} has been deactivated.')),
@@ -250,11 +252,12 @@ class _ManagePositionState extends State<ManagePosition> {
         _clearForm();
         _loadPositions();
       }
-    } catch (e) {
+    } on DioException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to deactivate: $e')));
+        ).showSnackBar(SnackBar(
+            content: Text('Failed to deactivate: ${e.response?.data ?? e.message}')));
       }
     }
   }
@@ -424,9 +427,7 @@ class _ManagePositionState extends State<ManagePosition> {
                         SizedBox(
                           width: 60,
                           child: Text(
-                            p.id.length > 8
-                                ? '${p.id.substring(0, 8)}...'
-                                : p.id,
+                            p.displayPositionNo,
                             style: TextStyle(
                               fontSize: 12,
                               color: AppTheme.textSecondary,
@@ -590,14 +591,24 @@ class _ManagePositionState extends State<ManagePosition> {
             ),
           ),
           const SizedBox(height: 6),
-          DropdownButtonFormField<String>(
-            initialValue: _selectedDepartmentId,
-            decoration: _inputDecoration('Select'),
-            hint: const Text('Select'),
+          DropdownButtonFormField<String?>(
+            value: _departments.any((d) => d['id'] == _selectedDepartmentId)
+                ? _selectedDepartmentId
+                : null,
+            decoration: _inputDecoration('Select department'),
+            hint: const Text('Select department'),
+            isExpanded: true,
+            icon: Icon(
+              Icons.arrow_drop_down_rounded,
+              color: AppTheme.textSecondary.withOpacity(0.8),
+            ),
             items: [
-              const DropdownMenuItem(value: null, child: Text('Select')),
+              const DropdownMenuItem(
+                value: null,
+                child: Text('Select department'),
+              ),
               ..._departments.map(
-                (d) => DropdownMenuItem(
+                (d) => DropdownMenuItem<String?>(
                   value: d['id'] as String?,
                   child: Text(d['name'] as String? ?? ''),
                 ),

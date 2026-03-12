@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
@@ -20,7 +19,7 @@ class _EmployeeSummary {
       : '—';
 }
 
-/// Assignment record for display/CRUD.
+/// Assignment record for display/CRUD (Schema v2: effective_from/to, override times).
 class _AssignmentRecord {
   const _AssignmentRecord({
     required this.id,
@@ -32,8 +31,10 @@ class _AssignmentRecord {
     required this.shiftName,
     required this.startTime,
     required this.endTime,
-    required this.dateAssigned,
+    required this.effectiveFrom,
+    this.effectiveTo,
     required this.isActive,
+    this.remarks,
   });
   final String id;
   final String? departmentId;
@@ -44,8 +45,10 @@ class _AssignmentRecord {
   final String shiftName;
   final TimeOfDay startTime;
   final TimeOfDay endTime;
-  final DateTime dateAssigned;
+  final DateTime effectiveFrom;
+  final DateTime? effectiveTo;
   final bool isActive;
+  final String? remarks;
 }
 
 /// Assignment management screen: employee list + assignment CRUD.
@@ -77,7 +80,9 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   String? _selectedShiftId;
   TimeOfDay? _startTime;
   TimeOfDay? _endTime;
-  DateTime? _dateAssigned;
+  DateTime? _effectiveFrom;
+  DateTime? _effectiveTo;
+  final _remarksController = TextEditingController();
   _AssignmentRecord? _selectedAssignment;
 
   @override
@@ -92,6 +97,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   @override
   void dispose() {
     _searchController.dispose();
+    _remarksController.dispose();
     super.dispose();
   }
 
@@ -129,25 +135,31 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   Future<void> _loadLookups() async {
     setState(() => _loadingLookups = true);
     try {
-      final deptRes = await Supabase.instance.client
-          .from('departments')
-          .select('id, name')
-          .eq('is_active', true)
-          .order('name');
-      final posRes = await Supabase.instance.client
-          .from('positions')
-          .select('id, name')
-          .eq('is_active', true)
-          .order('name');
-      final shiftRes = await Supabase.instance.client
-          .from('shifts')
-          .select('id, name')
-          .eq('is_active', true)
-          .order('name');
+      final deptRes = await ApiClient.instance.get<List<dynamic>>(
+        '/api/departments',
+        queryParameters: {'status': 'Active'},
+      );
+      final posRes = await ApiClient.instance.get<List<dynamic>>(
+        '/api/positions',
+        queryParameters: {'status': 'Active'},
+      );
+      final shiftRes = await ApiClient.instance.get<List<dynamic>>(
+        '/api/shifts',
+        queryParameters: {'status': 'Active'},
+      );
 
-      _departments = List<Map<String, dynamic>>.from(deptRes);
-      _positions = List<Map<String, dynamic>>.from(posRes);
-      _shifts = List<Map<String, dynamic>>.from(shiftRes);
+      _departments = (deptRes.data ?? []).map((e) {
+        final m = e as Map<String, dynamic>;
+        return {'id': m['id'], 'name': m['name'] as String? ?? ''};
+      }).toList();
+      _positions = (posRes.data ?? []).map((e) {
+        final m = e as Map<String, dynamic>;
+        return {'id': m['id'], 'name': m['name'] as String? ?? ''};
+      }).toList();
+      _shifts = (shiftRes.data ?? []).map((e) {
+        final m = e as Map<String, dynamic>;
+        return {'id': m['id'], 'name': m['name'] as String? ?? ''};
+      }).toList();
     } catch (e) {
       debugPrint('Load lookups failed: $e');
       _departments = [];
@@ -165,46 +177,34 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     }
     setState(() => _loadingAssignments = true);
     try {
-      var query = Supabase.instance.client
-          .from('assignments')
-          .select('''
-            id, department_id, position_id, shift_id,
-            start_time, end_time, date_assigned, is_active,
-            departments(name),
-            positions(name),
-            shifts(name)
-          ''')
-          .eq('employee_id', _selectedEmployeeId!);
-
-      if (_assignmentStatusFilter == 'Active') {
-        query = query.or('is_active.is.null,is_active.eq.true');
-      } else if (_assignmentStatusFilter == 'Inactive') {
-        query = query.eq('is_active', false);
-      }
-
-      final res = await query.order('date_assigned', ascending: false);
-      _assignments = (res as List).map((e) {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/assignments',
+        queryParameters: {
+          'employee_id': _selectedEmployeeId!,
+          'status': _assignmentStatusFilter,
+        },
+      );
+      final data = res.data ?? [];
+      _assignments = data.map((e) {
         final m = e as Map<String, dynamic>;
-        final dept = m['departments'];
-        final pos = m['positions'];
-        final shift = m['shifts'];
-        final st = m['start_time'];
-        final et = m['end_time'];
-        final da = m['date_assigned'];
+        final st = m['start_time'] ?? m['override_start_time'];
+        final et = m['end_time'] ?? m['override_end_time'];
+        final fromDate = m['effective_from'] ?? m['date_assigned'];
+        final toDate = m['effective_to'];
         return _AssignmentRecord(
           id: m['id'] as String,
           departmentId: m['department_id'] as String?,
           positionId: m['position_id'] as String?,
           shiftId: m['shift_id'] as String?,
-          departmentName: (dept is Map ? dept['name'] : null) as String? ?? '—',
-          positionName: (pos is Map ? pos['name'] : null) as String? ?? '—',
-          shiftName: (shift is Map ? shift['name'] : null) as String? ?? '—',
+          departmentName: m['department_name'] as String? ?? '—',
+          positionName: m['position_name'] as String? ?? '—',
+          shiftName: m['shift_name'] as String? ?? '—',
           startTime: _parseTime(st) ?? const TimeOfDay(hour: 0, minute: 0),
           endTime: _parseTime(et) ?? const TimeOfDay(hour: 0, minute: 0),
-          dateAssigned: da != null
-              ? DateTime.parse(da.toString())
-              : DateTime.now(),
+          effectiveFrom: fromDate != null ? DateTime.parse(fromDate.toString()) : DateTime.now(),
+          effectiveTo: toDate != null && toDate.toString().isNotEmpty ? DateTime.tryParse(toDate.toString()) : null,
           isActive: m['is_active'] as bool? ?? true,
+          remarks: m['remarks'] as String?,
         );
       }).toList();
     } catch (e) {
@@ -244,7 +244,9 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       _selectedShiftId = a.shiftId;
       _startTime = a.startTime;
       _endTime = a.endTime;
-      _dateAssigned = a.dateAssigned;
+      _effectiveFrom = a.effectiveFrom;
+      _effectiveTo = a.effectiveTo;
+      _remarksController.text = a.remarks ?? '';
     });
   }
 
@@ -256,7 +258,9 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       _selectedShiftId = null;
       _startTime = null;
       _endTime = null;
-      _dateAssigned = null;
+      _effectiveFrom = null;
+      _effectiveTo = null;
+      _remarksController.clear();
     });
   }
 
@@ -272,25 +276,29 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       );
       return;
     }
-    if (_startTime == null || _endTime == null || _dateAssigned == null) {
+    if (_startTime == null || _endTime == null || _effectiveFrom == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please set Start Time, End Time, and Date Assigned.'),
+          content: Text('Please set Override Start/End Time and Effective From.'),
         ),
       );
       return;
     }
     try {
-      await Supabase.instance.client.from('assignments').insert({
-        'employee_id': _selectedEmployeeId,
-        'department_id': _selectedDeptId,
-        'position_id': _selectedPositionId,
-        'shift_id': _selectedShiftId,
-        'start_time': _timeStr(_startTime!),
-        'end_time': _timeStr(_endTime!),
-        'date_assigned': _dateAssigned!.toIso8601String().split('T')[0],
-        'is_active': true,
-      });
+      await ApiClient.instance.post(
+        '/api/assignments',
+        data: {
+          'employee_id': _selectedEmployeeId,
+          'department_id': _selectedDeptId,
+          'position_id': _selectedPositionId,
+          'shift_id': _selectedShiftId,
+          'override_start_time': '${_timeStr(_startTime!)}:00',
+          'override_end_time': '${_timeStr(_endTime!)}:00',
+          'effective_from': _effectiveFrom!.toIso8601String().split('T')[0],
+          if (_effectiveTo != null) 'effective_to': _effectiveTo!.toIso8601String().split('T')[0],
+          'is_active': true,
+        },
+      );
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -325,27 +333,28 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       );
       return;
     }
-    if (_startTime == null || _endTime == null || _dateAssigned == null) {
+    if (_startTime == null || _endTime == null || _effectiveFrom == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please set Start Time, End Time, and Date Assigned.'),
+          content: Text('Please set Override Start/End Time and Effective From.'),
         ),
       );
       return;
     }
     try {
-      await Supabase.instance.client
-          .from('assignments')
-          .update({
-            'department_id': _selectedDeptId,
-            'position_id': _selectedPositionId,
-            'shift_id': _selectedShiftId,
-            'start_time': _timeStr(_startTime!),
-            'end_time': _timeStr(_endTime!),
-            'date_assigned': _dateAssigned!.toIso8601String().split('T')[0],
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', a.id);
+      await ApiClient.instance.put(
+        '/api/assignments/${a.id}',
+        data: {
+          'department_id': _selectedDeptId,
+          'position_id': _selectedPositionId,
+          'shift_id': _selectedShiftId,
+          'override_start_time': '${_timeStr(_startTime!)}:00',
+          'override_end_time': '${_timeStr(_endTime!)}:00',
+          'effective_from': _effectiveFrom!.toIso8601String().split('T')[0],
+          'effective_to': _effectiveTo != null ? _effectiveTo!.toIso8601String().split('T')[0] : null,
+          'remarks': _remarksController.text.trim().isEmpty ? null : _remarksController.text.trim(),
+        },
+      );
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -392,13 +401,10 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     );
     if (ok != true || !mounted) return;
     try {
-      await Supabase.instance.client
-          .from('assignments')
-          .update({
-            'is_active': false,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', a.id);
+      await ApiClient.instance.put(
+        '/api/assignments/${a.id}',
+        data: {'is_active': false},
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Assignment deactivated.')),
@@ -782,7 +788,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                 ),
                 Expanded(
                   flex: 1,
-                  child: Text('Date Assigned', style: _tableHeaderStyle),
+                  child: Text('Effective period', style: _tableHeaderStyle),
                 ),
               ],
             ),
@@ -835,7 +841,8 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                         Expanded(
                           flex: 1,
                           child: Text(
-                            '${a.dateAssigned.year}-${a.dateAssigned.month.toString().padLeft(2, '0')}-${a.dateAssigned.day.toString().padLeft(2, '0')}',
+                            '${a.effectiveFrom.year}-${a.effectiveFrom.month.toString().padLeft(2, '0')}-${a.effectiveFrom.day.toString().padLeft(2, '0')}'
+                            + (a.effectiveTo != null ? ' → ${a.effectiveTo!.year}-${a.effectiveTo!.month.toString().padLeft(2, '0')}-${a.effectiveTo!.day.toString().padLeft(2, '0')}' : ''),
                             style: _tableCellStyle,
                           ),
                         ),
@@ -870,51 +877,150 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Wrap(
-            spacing: 16,
-            runSpacing: 16,
-            children: [
-              _buildFormDropdown(
-                'Department',
-                _selectedDeptId,
-                _departments,
-                (v) => setState(() => _selectedDeptId = v),
-              ),
-              _buildFormDropdown(
-                'Position',
-                _selectedPositionId,
-                _positions,
-                (v) => setState(() => _selectedPositionId = v),
-              ),
-              _buildFormDropdown(
-                'Shift',
-                _selectedShiftId,
-                _shifts,
-                (v) => setState(() => _selectedShiftId = v),
-              ),
-            ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final useRow = constraints.maxWidth >= 520;
+              if (useRow) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: _buildFormDropdown(
+                        'Department',
+                        _selectedDeptId,
+                        _departments,
+                        (v) => setState(() => _selectedDeptId = v),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: _buildFormDropdown(
+                        'Position',
+                        _selectedPositionId,
+                        _positions,
+                        (v) => setState(() => _selectedPositionId = v),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: _buildFormDropdown(
+                        'Shift',
+                        _selectedShiftId,
+                        _shifts,
+                        (v) => setState(() => _selectedShiftId = v),
+                      ),
+                    ),
+                  ],
+                );
+              }
+              return Wrap(
+                spacing: 16,
+                runSpacing: 16,
+                children: [
+                  _buildFormDropdown(
+                    'Department',
+                    _selectedDeptId,
+                    _departments,
+                    (v) => setState(() => _selectedDeptId = v),
+                  ),
+                  _buildFormDropdown(
+                    'Position',
+                    _selectedPositionId,
+                    _positions,
+                    (v) => setState(() => _selectedPositionId = v),
+                  ),
+                  _buildFormDropdown(
+                    'Shift',
+                    _selectedShiftId,
+                    _shifts,
+                    (v) => setState(() => _selectedShiftId = v),
+                  ),
+                ],
+              );
+            },
           ),
           const SizedBox(height: 16),
-          Wrap(
-            spacing: 16,
-            runSpacing: 16,
-            children: [
-              _buildTimePicker(
-                'Start Time',
-                _startTime,
-                (t) => setState(() => _startTime = t),
-              ),
-              _buildTimePicker(
-                'End Time',
-                _endTime,
-                (t) => setState(() => _endTime = t),
-              ),
-              _buildDatePicker(
-                'Date Assigned',
-                _dateAssigned,
-                (d) => setState(() => _dateAssigned = d),
-              ),
-            ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final useRow = constraints.maxWidth >= 520;
+              if (useRow) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: _buildTimePicker(
+                        'Override start',
+                        _startTime,
+                        (t) => setState(() => _startTime = t),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: _buildTimePicker(
+                        'Override end',
+                        _endTime,
+                        (t) => setState(() => _endTime = t),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: _buildDatePicker(
+                        'Effective from',
+                        _effectiveFrom,
+                        (d) => setState(() => _effectiveFrom = d),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: _buildDatePicker(
+                        'Effective to (opt)',
+                        _effectiveTo,
+                        (d) => setState(() => _effectiveTo = d),
+                      ),
+                    ),
+                  ],
+                );
+              }
+              return Wrap(
+                spacing: 16,
+                runSpacing: 16,
+                children: [
+                  _buildTimePicker(
+                    'Override start',
+                    _startTime,
+                    (t) => setState(() => _startTime = t),
+                  ),
+                  _buildTimePicker(
+                    'Override end',
+                    _endTime,
+                    (t) => setState(() => _endTime = t),
+                  ),
+                  _buildDatePicker(
+                    'Effective from',
+                    _effectiveFrom,
+                    (d) => setState(() => _effectiveFrom = d),
+                  ),
+                  _buildDatePicker(
+                    'Effective to (opt)',
+                    _effectiveTo,
+                    (d) => setState(() => _effectiveTo = d),
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 16),
+          Text('Remarks (optional)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textSecondary)),
+          const SizedBox(height: 6),
+          TextFormField(
+            controller: _remarksController,
+            decoration: InputDecoration(
+              hintText: 'Notes about this assignment',
+              filled: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            maxLines: 2,
           ),
           const SizedBox(height: 24),
           Row(
@@ -988,21 +1094,20 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     List<Map<String, dynamic>> items,
     ValueChanged<String?> onChanged,
   ) {
-    return SizedBox(
-      width: 180,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
-            ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: AppTheme.textSecondary,
           ),
-          const SizedBox(height: 6),
-          DropdownButtonFormField<String>(
+        ),
+        const SizedBox(height: 6),
+        DropdownButtonFormField<String>(
             initialValue: value,
             decoration: _inputDecoration('Select'),
             hint: const Text('Select'),
@@ -1017,8 +1122,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
             ],
             onChanged: onChanged,
           ),
-        ],
-      ),
+      ],
     );
   }
 
