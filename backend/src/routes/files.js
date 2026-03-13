@@ -34,4 +34,32 @@ router.get('/avatar/:userId', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/files/training-report/:attachmentId
+ * Serve a training report attachment by its ID.
+ */
+router.get('/training-report/:attachmentId', async (req, res) => {
+  try {
+    const { attachmentId } = req.params;
+    const result = await pool.query(
+      'SELECT file_path FROM training_report_attachments WHERE id = $1',
+      [attachmentId]
+    );
+    const row = result.rows[0];
+    if (!row?.file_path) {
+      return res.status(404).json({ error: 'Attachment not found' });
+    }
+
+    const filePath = path.join(UPLOAD_DIR, row.file_path);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Attachment file not found' });
+    }
+
+    res.sendFile(path.resolve(filePath));
+  } catch (err) {
+    console.error('[files training-report]', err);
+    res.status(500).json({ error: 'Failed to serve attachment' });
+  }
+});
+
 module.exports = router;

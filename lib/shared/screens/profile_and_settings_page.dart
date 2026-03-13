@@ -35,10 +35,15 @@ class ProfileAndSettingsPage extends StatelessWidget {
         ),
       ),
       body: SingleChildScrollView(
-        padding: EdgeInsets.symmetric(horizontal: padding, vertical: isWeb ? 32 : 20),
+        padding: EdgeInsets.symmetric(
+          horizontal: padding,
+          vertical: isWeb ? 32 : 20,
+        ),
         child: Center(
           child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: isWeb ? 1000 : double.infinity),
+            constraints: BoxConstraints(
+              maxWidth: isWeb ? 1000 : double.infinity,
+            ),
             child: const Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [

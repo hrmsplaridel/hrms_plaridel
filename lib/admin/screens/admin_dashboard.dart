@@ -1,11 +1,13 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../data/job_vacancy_announcement.dart';
 import '../../../data/recruitment_application.dart';
 import '../../../data/action_brainstorming_coaching.dart';
 import '../../../data/training_need_analysis.dart';
+import '../../../data/training_daily_report.dart';
 import '../../../landingpage/constants/app_theme.dart';
 import '../../../landingpage/screens/landing_page.dart';
 import '../../../login/screens/login_page.dart';
@@ -82,7 +84,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final contentPadding = width > 900 ? 24.0 : (width > 600 ? 20.0 : 16.0);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF0F2F5),
+      // Light orange background for the main admin dashboard.
+      backgroundColor: const Color(0xFFFFF3E0),
       drawer: isWide
           ? null
           : Drawer(
@@ -2189,12 +2192,21 @@ class _LdContentState extends State<_LdContent> {
                 icon: Icons.lightbulb_outline_rounded,
                 onTap: () => setState(() => _ldSectionIndex = 2),
               ),
+              FeatureCard(
+                title: 'Training Daily Reports (Monitoring)',
+                subtitle:
+                    'Monitor daily reports submitted by employees under training, with attachments and status.',
+                icon: Icons.assignment_turned_in_outlined,
+                onTap: () => setState(() => _ldSectionIndex = 3),
+              ),
             ],
           ),
         ] else if (_ldSectionIndex == 1)
           const _TrainingNeedAnalysisSection()
+        else if (_ldSectionIndex == 2)
+          const _ActionBrainstormingSection()
         else
-          const _ActionBrainstormingSection(),
+          const _LdTrainingReportsSection(),
       ],
     );
   }
@@ -2390,6 +2402,419 @@ class _TrainingNeedAnalysisSectionState
             onDownloadPdf: _downloadTna,
           ),
       ],
+    );
+  }
+}
+
+/// L&D: Training Daily Reports monitoring content (embedded in L&D page, not a separate screen).
+class _LdTrainingReportsSection extends StatefulWidget {
+  const _LdTrainingReportsSection();
+
+  @override
+  State<_LdTrainingReportsSection> createState() =>
+      _LdTrainingReportsSectionState();
+}
+
+class _LdTrainingReportsSectionState extends State<_LdTrainingReportsSection> {
+  final _searchController = TextEditingController();
+  bool _loading = false;
+  List<TrainingDailyReport> _reports = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final list = await TrainingDailyReportRepo.instance.listAllReports(
+        search: _searchController.text.trim().isEmpty
+            ? null
+            : _searchController.text.trim(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _reports = list;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _markSeen(TrainingDailyReport report) async {
+    try {
+      final updated =
+          await TrainingDailyReportRepo.instance.markAsSeen(report.id);
+      if (!mounted) return;
+      setState(() {
+        final idx = _reports.indexWhere((r) => r.id == report.id);
+        if (idx != -1) _reports[idx] = updated;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Marked report as seen.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to mark as seen: $e')),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isWide = MediaQuery.of(context).size.width >= 900;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Training Daily Reports',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Monitor daily reports from employees under training, review attachments, and mark them as seen.',
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 14,
+          ),
+        ),
+        const SizedBox(height: 20),
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: AppTheme.white,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.06),
+                blurRadius: 18,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        labelText: 'Search',
+                        hintText: 'Employee name or report title',
+                        prefixIcon: const Icon(Icons.search_rounded),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                      ),
+                      onSubmitted: (_) => _load(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    tooltip: 'Refresh',
+                    onPressed: _load,
+                    icon: const Icon(Icons.refresh_rounded),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              if (_loading)
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (_reports.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline_rounded,
+                        color: AppTheme.textSecondary.withOpacity(0.9),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'No training daily reports found.',
+                          style: TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                Column(
+                  children: _reports
+                      .map(
+                        (r) => Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: Colors.black.withOpacity(0.05),
+                            ),
+                            color: Colors.grey.shade50,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      r.employeeName ?? 'Unknown employee',
+                                      style: TextStyle(
+                                        color: AppTheme.textPrimary,
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ),
+                                  _LdStatusChip(status: r.status),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                r.title,
+                                style: TextStyle(
+                                  color: AppTheme.textSecondary,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                r.description ?? 'No description provided.',
+                                maxLines: isWide ? 3 : 4,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: AppTheme.textSecondary,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Submitted ${r.submittedAt.toLocal()}',
+                                style: TextStyle(
+                                  color: AppTheme.textSecondary,
+                                  fontSize: 11,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  if (r.attachmentUrl != null)
+                                    TextButton.icon(
+                                      onPressed: () async {
+                                        final url = r.attachmentUrl;
+                                        if (url == null) return;
+
+                                        await showDialog<void>(
+                                          context: context,
+                                          builder: (ctx) {
+                                            return Dialog(
+                                              insetPadding:
+                                                  const EdgeInsets.all(24),
+                                              child: ConstrainedBox(
+                                                constraints:
+                                                    const BoxConstraints(
+                                                  maxWidth: 900,
+                                                  maxHeight: 700,
+                                                ),
+                                                child: Padding(
+                                                  padding:
+                                                      const EdgeInsets.all(16),
+                                                  child: Column(
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .stretch,
+                                                    children: [
+                                                      Row(
+                                                        mainAxisAlignment:
+                                                            MainAxisAlignment
+                                                                .spaceBetween,
+                                                        children: [
+                                                          const Text(
+                                                            'Attachment preview',
+                                                            style: TextStyle(
+                                                              fontSize: 16,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w600,
+                                                            ),
+                                                          ),
+                                                          IconButton(
+                                                            tooltip: 'Close',
+                                                            onPressed: () =>
+                                                                Navigator.of(
+                                                                        ctx)
+                                                                    .pop(),
+                                                            icon: const Icon(
+                                                                Icons.close),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                      const SizedBox(
+                                                          height: 12),
+                                                      Expanded(
+                                                        child: ClipRRect(
+                                                          borderRadius:
+                                                              BorderRadius
+                                                                  .circular(8),
+                                                          child:
+                                                              InteractiveViewer(
+                                                            minScale: 0.5,
+                                                            maxScale: 4,
+                                                            child: Image
+                                                                .network(
+                                                              url,
+                                                              fit: BoxFit
+                                                                  .contain,
+                                                              errorBuilder: (_,
+                                                                  __, ___) {
+                                                                return Center(
+                                                                  child:
+                                                                      Column(
+                                                                    mainAxisSize:
+                                                                        MainAxisSize
+                                                                            .min,
+                                                                    children: [
+                                                                      const Text(
+                                                                        'Preview for this file type is not supported.',
+                                                                        style: TextStyle(
+                                                                            fontSize:
+                                                                                13),
+                                                                      ),
+                                                                      const SizedBox(
+                                                                          height:
+                                                                              8),
+                                                                      TextButton
+                                                                          .icon(
+                                                                        onPressed:
+                                                                            () async {
+                                                                          final uri =
+                                                                              Uri.parse(url);
+                                                                          await launchUrl(
+                                                                            uri,
+                                                                            mode:
+                                                                                LaunchMode.externalApplication,
+                                                                          );
+                                                                        },
+                                                                        icon: const Icon(
+                                                                            Icons.open_in_new_rounded),
+                                                                        label: const Text(
+                                                                            'Open in new tab'),
+                                                                      ),
+                                                                    ],
+                                                                  ),
+                                                                );
+                                                              },
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        );
+                                      },
+                                      icon: const Icon(
+                                        Icons.visibility_outlined,
+                                        size: 18,
+                                      ),
+                                      label: const Text('View file'),
+                                    ),
+                                  const Spacer(),
+                                  TextButton(
+                                    onPressed: () => _markSeen(r),
+                                    child: const Text('Mark as seen'),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                      .toList(),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _LdStatusChip extends StatelessWidget {
+  const _LdStatusChip({required this.status});
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    Color color;
+    switch (status.toLowerCase()) {
+      case 'seen':
+        color = Colors.blueGrey;
+        break;
+      case 'reviewed':
+        color = Colors.indigo;
+        break;
+      case 'approved':
+        color = Colors.green;
+        break;
+      case 'needs_revision':
+      case 'needs-revision':
+        color = Colors.orange;
+        break;
+      default:
+        color = Colors.grey;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: color.withOpacity(0.12),
+      ),
+      child: Text(
+        status[0].toUpperCase() + status.substring(1),
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 }

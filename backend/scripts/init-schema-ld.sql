@@ -108,6 +108,38 @@ CREATE TABLE IF NOT EXISTS idp_entries (
 );
 
 -- =========================
+-- TRAINING DAILY REPORTS
+-- =========================
+
+CREATE TABLE IF NOT EXISTS training_daily_reports (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  description TEXT,
+  attachment_path TEXT,
+  attachment_name TEXT,
+  attachment_type TEXT,
+  submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  status TEXT NOT NULL DEFAULT 'submitted'
+    CHECK (status IN ('submitted', 'seen', 'reviewed', 'approved', 'needs_revision')),
+  seen_by_admin UUID REFERENCES users(id) ON DELETE SET NULL,
+  seen_at TIMESTAMPTZ,
+  reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS training_report_attachments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  report_id UUID NOT NULL REFERENCES training_daily_reports(id) ON DELETE CASCADE,
+  file_path TEXT NOT NULL,
+  file_name TEXT,
+  mime_type TEXT,
+  uploaded_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- =========================
 -- INDEXES FOR L&D / RSP FORMS
 -- =========================
 
@@ -128,3 +160,19 @@ CREATE INDEX IF NOT EXISTS idx_turn_around_time_entries_created
 
 CREATE INDEX IF NOT EXISTS idx_idp_entries_created
   ON idp_entries(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_training_daily_reports_employee_submitted
+  ON training_daily_reports(employee_id, submitted_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_training_daily_reports_status
+  ON training_daily_reports(status);
+
+CREATE INDEX IF NOT EXISTS idx_training_report_attachments_report
+  ON training_report_attachments(report_id, created_at DESC);
+
+-- updated_at trigger for training_daily_reports
+DROP TRIGGER IF EXISTS trg_training_daily_reports_updated_at ON training_daily_reports;
+CREATE TRIGGER trg_training_daily_reports_updated_at
+BEFORE UPDATE ON training_daily_reports
+FOR EACH ROW
+EXECUTE PROCEDURE set_updated_at();

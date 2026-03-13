@@ -25,23 +25,15 @@ class _LoginPageState extends State<LoginPage> {
   bool _isLoading = false;
 
   @override
-  void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
-    _passwordFocusNode.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final isWide = MediaQuery.of(context).size.width > 800;
 
     return Scaffold(
       body: Row(
         children: [
-          if (isWide) Expanded(flex: 4, child: _BrandingSection()),
+          if (isWide) Expanded(flex: 6, child: _BrandingSection()),
           Expanded(
-            flex: isWide ? 6 : 1,
+            flex: isWide ? 4 : 1,
             child: _LoginFormSection(
               emailController: _emailController,
               passwordController: _passwordController,
@@ -75,9 +67,9 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _isLoading = true);
     try {
       final auth = context.read<AuthProvider>();
-      final ok = await auth.login(email, password);
+      final errorMessage = await auth.login(email, password);
       if (!mounted) return;
-      if (ok) {
+      if (errorMessage == null) {
         final auth = context.read<AuthProvider>();
         final role = auth.user?.role ?? 'employee';
         final isAdmin = role == 'admin';
@@ -93,7 +85,7 @@ class _LoginPageState extends State<LoginPage> {
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Invalid email or password')),
+          SnackBar(content: Text(errorMessage)),
         );
       }
     } catch (e) {
@@ -117,8 +109,12 @@ class _BrandingSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
+      decoration: BoxDecoration(
+        image: const DecorationImage(
+          image: AssetImage('assets/images/Building.jpg'),
+          fit: BoxFit.cover,
+        ),
+        gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
@@ -131,15 +127,18 @@ class _BrandingSection extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 32),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
+              const SizedBox(height: 56),
               Row(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: Container(
-                      width: 56,
-                      height: 56,
+                      width: 120,
+                      height: 120,
                       color: Colors.white.withOpacity(0.2),
                       child: Image.asset(
                         'assets/images/Plaridel Logo.jpg',
@@ -160,7 +159,7 @@ class _BrandingSection extends StatelessWidget {
                         'Municipality of Plaridel',
                         style: TextStyle(
                           color: Colors.white,
-                          fontSize: 22,
+                          fontSize: 40,
                           fontWeight: FontWeight.w800,
                           letterSpacing: 0.3,
                           height: 1.2,
@@ -171,7 +170,7 @@ class _BrandingSection extends StatelessWidget {
                         'HUMAN RESOURCE MANAGEMENT SYSTEM',
                         style: TextStyle(
                           color: Colors.white.withOpacity(0.95),
-                          fontSize: 11,
+                          fontSize: 20,
                           fontWeight: FontWeight.w600,
                           letterSpacing: 0.8,
                           height: 1.2,
@@ -181,35 +180,16 @@ class _BrandingSection extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 48),
               Text(
                 'Modernizing Human Resource Services',
                 style: TextStyle(
                   color: Colors.white.withOpacity(0.95),
-                  fontSize: 18,
+                  fontSize: 30,
                   fontWeight: FontWeight.w500,
                   height: 1.3,
                 ),
               ),
-              const Spacer(),
-              Center(
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.groups_rounded,
-                      size: 100,
-                      color: Colors.white.withOpacity(0.5),
-                    ),
-                    const SizedBox(height: 16),
-                    Icon(
-                      Icons.business_center_rounded,
-                      size: 64,
-                      color: Colors.white.withOpacity(0.4),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 24),
             ],
           ),
         ),
@@ -243,40 +223,50 @@ class _LoginFormSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: LoginTheme.formBackground,
+      color: const Color(0xFFD65A00),
       child: SafeArea(
         child: Stack(
           children: [
+            if (kIsWeb)
+              Positioned(
+                top: 0,
+                left: 0,
+                child: IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.arrow_back),
+                  color: Colors.white,
+                ),
+              ),
             Center(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 40),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 420),
+                  constraints: const BoxConstraints(maxWidth: 440),
                   child: Column(
-                    mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const SizedBox(height: 24),
-                      Text(
-                        'Welcome Back!',
-                        style: TextStyle(
-                          color: LoginTheme.textDark,
-                          fontSize: 28,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 40),
+                      const Text(
+                    'Welcome Back!',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                      const SizedBox(height: 4),
                       Text(
                         'Please login to your account',
                         style: TextStyle(
-                          color: LoginTheme.textSecondary,
-                          fontSize: 15,
+                          color: Colors.white.withOpacity(0.9),
+                          fontSize: 14,
                         ),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 32),
                       _LoginTextField(
                         controller: emailController,
-                        hint: 'Email or Employee ID',
+                        hint: 'Email',
                         icon: Icons.mail_outline,
                         nextFocusNode: passwordFocusNode,
                       ),
@@ -295,17 +285,15 @@ class _LoginFormSection extends StatelessWidget {
                             child: Checkbox(
                               value: rememberMe,
                               onChanged: onRememberMeChanged,
-                              activeColor: LoginTheme.bluePrimary,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(4),
-                              ),
+                              activeColor: Colors.white,
+                              checkColor: const Color(0xFFD65A00),
                             ),
                           ),
                           const SizedBox(width: 8),
-                          Text(
+                          const Text(
                             'Remember Me',
                             style: TextStyle(
-                              color: LoginTheme.textDark,
+                              color: Colors.white,
                               fontSize: 14,
                             ),
                           ),
@@ -313,74 +301,60 @@ class _LoginFormSection extends StatelessWidget {
                           TextButton(
                             onPressed: onForgotPassword,
                             style: TextButton.styleFrom(
-                              foregroundColor: LoginTheme.bluePrimary,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                              ),
+                              foregroundColor: Colors.white,
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 8),
                             ),
                             child: const Text('Forgot Password?'),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 28),
+                      const SizedBox(height: 24),
                       _LoginToHrmsButton(
                         onPressed: isLoading ? null : onLogin,
                         isLoading: isLoading,
                       ),
-                      const SizedBox(height: 48),
+                      const SizedBox(height: 24),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
+                        children: const [
                           Text(
                             '© 2026 HRMS',
                             style: TextStyle(
-                              color: LoginTheme.textSecondary,
+                              color: Colors.white70,
                               fontSize: 12,
                             ),
                           ),
-                          const SizedBox(width: 8),
+                          SizedBox(width: 8),
                           Text(
                             '|',
                             style: TextStyle(
-                              color: LoginTheme.textSecondary,
+                              color: Colors.white70,
                               fontSize: 12,
                             ),
                           ),
-                          TextButton(
-                            onPressed: () {},
-                            style: TextButton.styleFrom(
-                              foregroundColor: LoginTheme.bluePrimary,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                              ),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            child: const Text(
-                              'Privacy Policy',
-                              style: TextStyle(fontSize: 12),
+                          SizedBox(width: 8),
+                          Text(
+                            'Privacy Policy',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
                             ),
                           ),
+                          SizedBox(width: 8),
                           Text(
                             '|',
                             style: TextStyle(
-                              color: LoginTheme.textSecondary,
+                              color: Colors.white70,
                               fontSize: 12,
                             ),
                           ),
-                          TextButton(
-                            onPressed: () {},
-                            style: TextButton.styleFrom(
-                              foregroundColor: LoginTheme.bluePrimary,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                              ),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            child: const Text(
-                              'Terms of Use',
-                              style: TextStyle(fontSize: 12),
+                          SizedBox(width: 8),
+                          Text(
+                            'Terms of Use',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
                             ),
                           ),
                         ],
@@ -390,16 +364,6 @@ class _LoginFormSection extends StatelessWidget {
                 ),
               ),
             ),
-            if (kIsWeb)
-              Positioned(
-                top: 0,
-                left: 16,
-                child: IconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.arrow_back),
-                  color: LoginTheme.textDark,
-                ),
-              ),
           ],
         ),
       ),
@@ -428,21 +392,25 @@ class _LoginTextField extends StatelessWidget {
       onSubmitted: (_) => nextFocusNode?.requestFocus(),
       decoration: InputDecoration(
         hintText: hint,
-        prefixIcon: Icon(icon, color: LoginTheme.bluePrimary, size: 22),
+        prefixIcon: Icon(
+          icon,
+          color: const Color(0xFFD65A00),
+          size: 22,
+        ),
         filled: true,
         fillColor: Colors.white,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: LoginTheme.borderLight),
+          borderSide: BorderSide(color: Colors.white.withOpacity(0.8)),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: LoginTheme.borderLight),
+          borderSide: BorderSide(color: Colors.white.withOpacity(0.8)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(
-            color: LoginTheme.bluePrimary,
+            color: Colors.white,
             width: 1.5,
           ),
         ),
@@ -483,9 +451,9 @@ class _PasswordTextFieldState extends State<_PasswordTextField> {
       onSubmitted: (_) => widget.onSubmitted?.call(),
       decoration: InputDecoration(
         hintText: 'Password',
-        prefixIcon: Icon(
+        prefixIcon: const Icon(
           Icons.lock_outline,
-          color: LoginTheme.bluePrimary,
+          color: Color(0xFFD65A00),
           size: 22,
         ),
         suffixIcon: IconButton(
@@ -494,7 +462,7 @@ class _PasswordTextFieldState extends State<_PasswordTextField> {
             _obscure
                 ? Icons.visibility_off_outlined
                 : Icons.visibility_outlined,
-            color: LoginTheme.bluePrimary,
+            color: const Color(0xFFD65A00),
             size: 22,
           ),
           tooltip: _obscure ? 'Show password' : 'Hide password',
@@ -503,16 +471,16 @@ class _PasswordTextFieldState extends State<_PasswordTextField> {
         fillColor: Colors.white,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: LoginTheme.borderLight),
+          borderSide: BorderSide(color: Colors.white.withOpacity(0.8)),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: LoginTheme.borderLight),
+          borderSide: BorderSide(color: Colors.white.withOpacity(0.8)),
         ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(
-            color: LoginTheme.bluePrimary,
+        focusedBorder: const OutlineInputBorder(
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+          borderSide: BorderSide(
+            color: Colors.white,
             width: 1.5,
           ),
         ),
@@ -539,16 +507,9 @@ class _LoginToHrmsButton extends StatelessWidget {
       child: DecoratedBox(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
-          gradient: LinearGradient(
-            colors: onPressed != null && !isLoading
-                ? [LoginTheme.blueLight, LoginTheme.blueDark]
-                : [
-                    LoginTheme.blueLight.withOpacity(0.7),
-                    LoginTheme.blueDark.withOpacity(0.7),
-                  ],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
+          color: onPressed != null && !isLoading
+              ? Colors.white
+              : Colors.white70,
           boxShadow: [
             BoxShadow(
               color: LoginTheme.bluePrimary.withOpacity(0.35),
@@ -572,10 +533,10 @@ class _LoginToHrmsButton extends StatelessWidget {
                         valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                       ),
                     )
-                  : const Text(
+                  : Text(
                       'Login to HRMS',
                       style: TextStyle(
-                        color: Colors.white,
+                        color: const Color(0xFFD65A00),
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
                       ),
