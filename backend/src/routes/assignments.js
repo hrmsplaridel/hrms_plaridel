@@ -52,8 +52,6 @@ router.get('/', protect, async (req, res) => {
       department_id: r.department_id,
       position_id: r.position_id,
       shift_id: r.shift_id,
-      override_start_time: r.override_start_time,
-      override_end_time: r.override_end_time,
       effective_from: r.effective_from,
       effective_to: r.effective_to,
       is_active: r.is_active ?? true,
@@ -71,10 +69,10 @@ router.get('/', protect, async (req, res) => {
   }
 });
 
-// POST /api/assignments - create (admin only). Schema v2: effective_from, effective_to, override times.
+// POST /api/assignments - create (admin only)
 router.post('/', protect, requireAdmin, async (req, res) => {
   try {
-    const { employee_id, department_id, position_id, shift_id, override_start_time, override_end_time, effective_from, effective_to, is_active = true, remarks } = req.body;
+    const { employee_id, department_id, position_id, shift_id, effective_from, effective_to, is_active = true, remarks } = req.body;
     if (!employee_id || !effective_from) {
       return res.status(400).json({ error: 'employee_id and effective_from are required' });
     }
@@ -82,9 +80,6 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     if (!ef) return res.status(400).json({ error: 'Invalid effective_from' });
     const et = effective_to != null && effective_to !== '' ? parseDate(effective_to) : null;
     if (effective_to != null && effective_to !== '' && !et) return res.status(400).json({ error: 'Invalid effective_to' });
-
-    const ost = parseTime(override_start_time) || null;
-    const oet = parseTime(override_end_time) || null;
 
     await pool.query('BEGIN');
     try {
@@ -96,10 +91,10 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         );
       }
       const result = await pool.query(
-        `INSERT INTO assignments (employee_id, department_id, position_id, shift_id, override_start_time, override_end_time, effective_from, effective_to, is_active, remarks)
-         VALUES ($1, $2, $3, $4, $5::time, $6::time, $7::date, $8::date, $9, $10)
-         RETURNING id, employee_id, department_id, position_id, shift_id, override_start_time, override_end_time, effective_from, effective_to, is_active, remarks`,
-        [employee_id, department_id || null, position_id || null, shift_id || null, ost, oet, ef, et, !!is_active, remarks?.trim() || null]
+        `INSERT INTO assignments (employee_id, department_id, position_id, shift_id, effective_from, effective_to, is_active, remarks)
+         VALUES ($1, $2, $3, $4, $5::date, $6::date, $7, $8)
+         RETURNING id, employee_id, department_id, position_id, shift_id, effective_from, effective_to, is_active, remarks`,
+        [employee_id, department_id || null, position_id || null, shift_id || null, ef, et, !!is_active, remarks?.trim() || null]
       );
       await pool.query('COMMIT');
       res.status(201).json(result.rows[0]);
@@ -117,7 +112,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 router.put('/:id', protect, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { department_id, position_id, shift_id, override_start_time, override_end_time, effective_from, effective_to, is_active, remarks } = req.body;
+    const { department_id, position_id, shift_id, effective_from, effective_to, is_active, remarks } = req.body;
 
     const updates = [];
     const values = [];
@@ -126,8 +121,6 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     if (department_id !== undefined) { updates.push(`department_id = $${i++}`); values.push(department_id || null); }
     if (position_id !== undefined) { updates.push(`position_id = $${i++}`); values.push(position_id || null); }
     if (shift_id !== undefined) { updates.push(`shift_id = $${i++}`); values.push(shift_id || null); }
-    if (override_start_time !== undefined) { updates.push(`override_start_time = $${i++}::time`); values.push(parseTime(override_start_time)); }
-    if (override_end_time !== undefined) { updates.push(`override_end_time = $${i++}::time`); values.push(parseTime(override_end_time)); }
     if (effective_from !== undefined) {
       const ef = parseDate(effective_from);
       if (!ef) return res.status(400).json({ error: 'Invalid effective_from' });
@@ -147,7 +140,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
     const result = await pool.query(
       `UPDATE assignments SET ${updates.join(', ')} WHERE id = $${i}
-       RETURNING id, employee_id, department_id, position_id, shift_id, override_start_time, override_end_time, effective_from, effective_to, is_active, remarks`,
+       RETURNING id, employee_id, department_id, position_id, shift_id, effective_from, effective_to, is_active, remarks`,
       values
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Assignment not found' });

@@ -6,6 +6,24 @@ const { requireAdmin } = require('../middleware/rbac');
 const router = express.Router();
 const protect = [authMiddleware];
 
+/** Get active holiday for a date, if any. Exact date match first, then recurring (same month/day). Returns { id, name, holiday_type } or null. */
+async function getHolidayByDate(dateStr) {
+  const exact = await pool.query(
+    `SELECT id, name, holiday_type FROM holidays WHERE holiday_date = $1::date AND (is_active IS NULL OR is_active = true) LIMIT 1`,
+    [dateStr]
+  );
+  if (exact.rows[0]) return exact.rows[0];
+  const recurring = await pool.query(
+    `SELECT id, name, holiday_type FROM holidays
+     WHERE recurring = true AND (is_active IS NULL OR is_active = true)
+       AND EXTRACT(MONTH FROM holiday_date) = EXTRACT(MONTH FROM $1::date)
+       AND EXTRACT(DAY FROM holiday_date) = EXTRACT(DAY FROM $1::date)
+     LIMIT 1`,
+    [dateStr]
+  );
+  return recurring.rows[0] || null;
+}
+
 // GET /api/dtr-daily-summary - list for admin (filters: start_date, end_date, employee_id, limit)
 router.get('/', protect, async (req, res) => {
   try {
@@ -30,10 +48,12 @@ router.get('/', protect, async (req, res) => {
     params.push(limitNum);
 
     const result = await pool.query(
-      `SELECT d.id, d.employee_id, d.attendance_date, d.time_in, d.time_out, d.total_hours, d.status, d.remarks, d.created_at, d.updated_at,
-              u.full_name AS employee_name
+      `SELECT d.id, d.employee_id, d.attendance_date, d.time_in, d.time_out, d.total_hours, d.status, d.remarks, d.holiday_id, d.created_at, d.updated_at,
+              u.full_name AS employee_name,
+              h.name AS holiday_name, h.holiday_type AS holiday_type
        FROM dtr_daily_summary d
        LEFT JOIN users u ON u.id = d.employee_id
+       LEFT JOIN holidays h ON h.id = d.holiday_id
        ${where}
        ORDER BY d.attendance_date DESC, d.time_in DESC NULLS LAST
        LIMIT $${i}`,
@@ -49,6 +69,9 @@ router.get('/', protect, async (req, res) => {
       total_hours: r.total_hours != null ? parseFloat(r.total_hours) : null,
       status: r.status,
       remarks: r.remarks,
+      holiday_id: r.holiday_id,
+      holiday_name: r.holiday_name,
+      holiday_type: r.holiday_type,
       created_at: r.created_at,
       updated_at: r.updated_at,
       employee_name: r.employee_name,
@@ -88,10 +111,12 @@ router.get('/today', protect, async (req, res) => {
     if (!userId) return res.status(401).json({ error: 'Not authenticated' });
     const today = new Date().toISOString().slice(0, 10);
     const result = await pool.query(
-      `SELECT d.id, d.employee_id, d.attendance_date, d.time_in, d.time_out, d.total_hours, d.status, d.remarks, d.created_at, d.updated_at,
-              u.full_name AS employee_name
+      `SELECT d.id, d.employee_id, d.attendance_date, d.time_in, d.time_out, d.total_hours, d.status, d.remarks, d.holiday_id, d.created_at, d.updated_at,
+              u.full_name AS employee_name,
+              h.name AS holiday_name, h.holiday_type AS holiday_type
        FROM dtr_daily_summary d
        LEFT JOIN users u ON u.id = d.employee_id
+       LEFT JOIN holidays h ON h.id = d.holiday_id
        WHERE d.employee_id = $1 AND d.attendance_date = $2::date`,
       [userId, today]
     );
@@ -106,6 +131,9 @@ router.get('/today', protect, async (req, res) => {
       total_hours: r.total_hours != null ? parseFloat(r.total_hours) : null,
       status: r.status,
       remarks: r.remarks,
+      holiday_id: r.holiday_id,
+      holiday_name: r.holiday_name,
+      holiday_type: r.holiday_type,
       created_at: r.created_at,
       updated_at: r.updated_at,
       employee_name: r.employee_name,
@@ -128,13 +156,15 @@ router.post('/', protect, async (req, res) => {
 
     const date = attendance_date || new Date().toISOString().slice(0, 10);
     const timeIn = time_in || new Date().toISOString();
-    const status = 'present';
+    const holiday = await getHolidayByDate(date);
+    const status = holiday ? 'holiday' : 'present';
+    const holidayId = holiday ? holiday.id : null;
 
     const result = await pool.query(
-      `INSERT INTO dtr_daily_summary (employee_id, attendance_date, time_in, time_out, total_hours, status, source)
-       VALUES ($1, $2::date, $3::timestamptz, $4::timestamptz, $5::numeric, $6, 'manual')
+      `INSERT INTO dtr_daily_summary (employee_id, attendance_date, time_in, time_out, total_hours, status, source, holiday_id)
+       VALUES ($1, $2::date, $3::timestamptz, $4::timestamptz, $5::numeric, $6, 'manual', $7)
        RETURNING id, employee_id, attendance_date, time_in, time_out, total_hours, status, created_at`,
-      [targetId, date, timeIn, time_out || null, total_hours != null ? parseFloat(total_hours) : 0, status]
+      [targetId, date, timeIn, time_out || null, total_hours != null ? parseFloat(total_hours) : 0, status, holidayId]
     );
     const r = result.rows[0];
     res.status(201).json({
@@ -208,6 +238,41 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
   } catch (err) {
     console.error('[dtr-daily-summary DELETE]', err);
     res.status(500).json({ error: 'Failed to delete DTR record' });
+  }
+});
+
+// POST /api/dtr-daily-summary/sync-holidays - admin only; set holiday_id and status='holiday' for existing rows whose attendance_date is a holiday (exact or recurring)
+router.post('/sync-holidays', protect, requireAdmin, async (req, res) => {
+  try {
+    const { start_date, end_date } = req.body;
+    const start = start_date || new Date().toISOString().slice(0, 10);
+    const end = end_date || start;
+    const exact = await pool.query(
+      `UPDATE dtr_daily_summary d
+       SET holiday_id = h.id, status = 'holiday', updated_at = now()
+       FROM holidays h
+       WHERE d.attendance_date = h.holiday_date
+         AND (h.is_active IS NULL OR h.is_active = true)
+         AND d.attendance_date >= $1::date AND d.attendance_date <= $2::date
+       RETURNING d.id`,
+      [start, end]
+    );
+    const recurring = await pool.query(
+      `UPDATE dtr_daily_summary d
+       SET holiday_id = h.id, status = 'holiday', updated_at = now()
+       FROM holidays h
+       WHERE h.recurring = true AND (h.is_active IS NULL OR h.is_active = true)
+         AND EXTRACT(MONTH FROM d.attendance_date) = EXTRACT(MONTH FROM h.holiday_date)
+         AND EXTRACT(DAY FROM d.attendance_date) = EXTRACT(DAY FROM h.holiday_date)
+         AND d.attendance_date >= $1::date AND d.attendance_date <= $2::date
+         AND d.holiday_id IS NULL
+       RETURNING d.id`,
+      [start, end]
+    );
+    res.json({ updated: exact.rowCount + recurring.rowCount });
+  } catch (err) {
+    console.error('[dtr-daily-summary sync-holidays POST]', err);
+    res.status(500).json({ error: 'Failed to sync holidays to DTR summary' });
   }
 });
 

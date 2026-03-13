@@ -16,6 +16,7 @@ class TimeRecord {
     this.createdAt,
     this.updatedAt,
     this.employeeName,
+    this.holidayName,
   });
 
   final String? id;
@@ -24,13 +25,15 @@ class TimeRecord {
   final DateTime? timeIn;
   final DateTime? timeOut;
   final double? totalHours;
-  /// present | late | absent | on_leave
+  /// present | late | absent | on_leave | holiday
   final String? status;
   final String? remarks;
   final DateTime? createdAt;
   final DateTime? updatedAt;
   /// Joined from profiles.full_name when listing for admin
   final String? employeeName;
+  /// When status is holiday, name of the holiday from holidays table
+  final String? holidayName;
 
   static const String tableName = 'time_records';
 
@@ -57,6 +60,7 @@ class TimeRecord {
           ? DateTime.tryParse(json['updated_at'] as String)
           : null,
       employeeName: _extractEmployeeName(json),
+      holidayName: json['holiday_name']?.toString(),
     );
   }
 
@@ -100,6 +104,7 @@ class TimeRecord {
     DateTime? createdAt,
     DateTime? updatedAt,
     String? employeeName,
+    String? holidayName,
   }) {
     return TimeRecord(
       id: id ?? this.id,
@@ -113,6 +118,7 @@ class TimeRecord {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       employeeName: employeeName ?? this.employeeName,
+      holidayName: holidayName ?? this.holidayName,
     );
   }
 }

@@ -78,8 +78,6 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   String? _selectedDeptId;
   String? _selectedPositionId;
   String? _selectedShiftId;
-  TimeOfDay? _startTime;
-  TimeOfDay? _endTime;
   DateTime? _effectiveFrom;
   DateTime? _effectiveTo;
   final _remarksController = TextEditingController();
@@ -201,8 +199,12 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           shiftName: m['shift_name'] as String? ?? '—',
           startTime: _parseTime(st) ?? const TimeOfDay(hour: 0, minute: 0),
           endTime: _parseTime(et) ?? const TimeOfDay(hour: 0, minute: 0),
-          effectiveFrom: fromDate != null ? DateTime.parse(fromDate.toString()) : DateTime.now(),
-          effectiveTo: toDate != null && toDate.toString().isNotEmpty ? DateTime.tryParse(toDate.toString()) : null,
+          effectiveFrom: fromDate != null
+              ? DateTime.parse(fromDate.toString())
+              : DateTime.now(),
+          effectiveTo: toDate != null && toDate.toString().isNotEmpty
+              ? DateTime.tryParse(toDate.toString())
+              : null,
           isActive: m['is_active'] as bool? ?? true,
           remarks: m['remarks'] as String?,
         );
@@ -242,8 +244,6 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       _selectedDeptId = a.departmentId;
       _selectedPositionId = a.positionId;
       _selectedShiftId = a.shiftId;
-      _startTime = a.startTime;
-      _endTime = a.endTime;
       _effectiveFrom = a.effectiveFrom;
       _effectiveTo = a.effectiveTo;
       _remarksController.text = a.remarks ?? '';
@@ -256,8 +256,6 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       _selectedDeptId = null;
       _selectedPositionId = null;
       _selectedShiftId = null;
-      _startTime = null;
-      _endTime = null;
       _effectiveFrom = null;
       _effectiveTo = null;
       _remarksController.clear();
@@ -276,29 +274,24 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       );
       return;
     }
-    if (_startTime == null || _endTime == null || _effectiveFrom == null) {
+    if (_effectiveFrom == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please set Override Start/End Time and Effective From.'),
-        ),
+        const SnackBar(content: Text('Please set Effective From date.')),
       );
       return;
     }
     try {
-      await ApiClient.instance.post(
-        '/api/assignments',
-        data: {
-          'employee_id': _selectedEmployeeId,
-          'department_id': _selectedDeptId,
-          'position_id': _selectedPositionId,
-          'shift_id': _selectedShiftId,
-          'override_start_time': '${_timeStr(_startTime!)}:00',
-          'override_end_time': '${_timeStr(_endTime!)}:00',
-          'effective_from': _effectiveFrom!.toIso8601String().split('T')[0],
-          if (_effectiveTo != null) 'effective_to': _effectiveTo!.toIso8601String().split('T')[0],
-          'is_active': true,
-        },
-      );
+      final data = <String, dynamic>{
+        'employee_id': _selectedEmployeeId,
+        'department_id': _selectedDeptId,
+        'position_id': _selectedPositionId,
+        'shift_id': _selectedShiftId,
+        'effective_from': _effectiveFrom!.toIso8601String().split('T')[0],
+        if (_effectiveTo != null)
+          'effective_to': _effectiveTo!.toIso8601String().split('T')[0],
+        'is_active': true,
+      };
+      await ApiClient.instance.post('/api/assignments', data: data);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -333,28 +326,26 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       );
       return;
     }
-    if (_startTime == null || _endTime == null || _effectiveFrom == null) {
+    if (_effectiveFrom == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please set Override Start/End Time and Effective From.'),
-        ),
+        const SnackBar(content: Text('Please set Effective From date.')),
       );
       return;
     }
     try {
-      await ApiClient.instance.put(
-        '/api/assignments/${a.id}',
-        data: {
-          'department_id': _selectedDeptId,
-          'position_id': _selectedPositionId,
-          'shift_id': _selectedShiftId,
-          'override_start_time': '${_timeStr(_startTime!)}:00',
-          'override_end_time': '${_timeStr(_endTime!)}:00',
-          'effective_from': _effectiveFrom!.toIso8601String().split('T')[0],
-          'effective_to': _effectiveTo != null ? _effectiveTo!.toIso8601String().split('T')[0] : null,
-          'remarks': _remarksController.text.trim().isEmpty ? null : _remarksController.text.trim(),
-        },
-      );
+      final data = <String, dynamic>{
+        'department_id': _selectedDeptId,
+        'position_id': _selectedPositionId,
+        'shift_id': _selectedShiftId,
+        'effective_from': _effectiveFrom!.toIso8601String().split('T')[0],
+        'effective_to': _effectiveTo != null
+            ? _effectiveTo!.toIso8601String().split('T')[0]
+            : null,
+        'remarks': _remarksController.text.trim().isEmpty
+            ? null
+            : _remarksController.text.trim(),
+      };
+      await ApiClient.instance.put('/api/assignments/${a.id}', data: data);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -841,8 +832,10 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                         Expanded(
                           flex: 1,
                           child: Text(
-                            '${a.effectiveFrom.year}-${a.effectiveFrom.month.toString().padLeft(2, '0')}-${a.effectiveFrom.day.toString().padLeft(2, '0')}'
-                            + (a.effectiveTo != null ? ' → ${a.effectiveTo!.year}-${a.effectiveTo!.month.toString().padLeft(2, '0')}-${a.effectiveTo!.day.toString().padLeft(2, '0')}' : ''),
+                            '${a.effectiveFrom.year}-${a.effectiveFrom.month.toString().padLeft(2, '0')}-${a.effectiveFrom.day.toString().padLeft(2, '0')}' +
+                                (a.effectiveTo != null
+                                    ? ' → ${a.effectiveTo!.year}-${a.effectiveTo!.month.toString().padLeft(2, '0')}-${a.effectiveTo!.day.toString().padLeft(2, '0')}'
+                                    : ''),
                             style: _tableCellStyle,
                           ),
                         ),
@@ -948,22 +941,6 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
-                      child: _buildTimePicker(
-                        'Override start',
-                        _startTime,
-                        (t) => setState(() => _startTime = t),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: _buildTimePicker(
-                        'Override end',
-                        _endTime,
-                        (t) => setState(() => _endTime = t),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
                       child: _buildDatePicker(
                         'Effective from',
                         _effectiveFrom,
@@ -985,16 +962,6 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                 spacing: 16,
                 runSpacing: 16,
                 children: [
-                  _buildTimePicker(
-                    'Override start',
-                    _startTime,
-                    (t) => setState(() => _startTime = t),
-                  ),
-                  _buildTimePicker(
-                    'Override end',
-                    _endTime,
-                    (t) => setState(() => _endTime = t),
-                  ),
                   _buildDatePicker(
                     'Effective from',
                     _effectiveFrom,
@@ -1010,15 +977,27 @@ class _ManageAssignmentState extends State<ManageAssignment> {
             },
           ),
           const SizedBox(height: 16),
-          Text('Remarks (optional)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textSecondary)),
+          Text(
+            'Remarks (optional)',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.textSecondary,
+            ),
+          ),
           const SizedBox(height: 6),
           TextFormField(
             controller: _remarksController,
             decoration: InputDecoration(
               hintText: 'Notes about this assignment',
               filled: true,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 12,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
             maxLines: 2,
           ),
@@ -1108,73 +1087,21 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         ),
         const SizedBox(height: 6),
         DropdownButtonFormField<String>(
-            initialValue: value,
-            decoration: _inputDecoration('Select'),
-            hint: const Text('Select'),
-            items: [
-              const DropdownMenuItem(value: null, child: Text('Select')),
-              ...items.map(
-                (e) => DropdownMenuItem(
-                  value: e['id'] as String?,
-                  child: Text(e['name'] as String? ?? ''),
-                ),
+          initialValue: value,
+          decoration: _inputDecoration('Select'),
+          hint: const Text('Select'),
+          items: [
+            const DropdownMenuItem(value: null, child: Text('Select')),
+            ...items.map(
+              (e) => DropdownMenuItem(
+                value: e['id'] as String?,
+                child: Text(e['name'] as String? ?? ''),
               ),
-            ],
-            onChanged: onChanged,
-          ),
+            ),
+          ],
+          onChanged: onChanged,
+        ),
       ],
-    );
-  }
-
-  Widget _buildTimePicker(
-    String label,
-    TimeOfDay? value,
-    ValueChanged<TimeOfDay> onChanged,
-  ) {
-    return SizedBox(
-      width: 160,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 6),
-          InkWell(
-            onTap: () async {
-              final t = await showTimePicker(
-                context: context,
-                initialTime: value ?? const TimeOfDay(hour: 8, minute: 0),
-              );
-              if (t != null) onChanged(t);
-            },
-            borderRadius: BorderRadius.circular(8),
-            child: InputDecorator(
-              decoration: _inputDecoration(' --:-- ').copyWith(
-                suffixIcon: Icon(
-                  Icons.access_time_rounded,
-                  size: 20,
-                  color: AppTheme.textSecondary,
-                ),
-              ),
-              child: Text(
-                value != null ? _timeStr(value) : '',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: value != null
-                      ? AppTheme.textPrimary
-                      : AppTheme.textSecondary,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 

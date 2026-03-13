@@ -96,36 +96,20 @@ CREATE TABLE IF NOT EXISTS shifts (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   shift_number INT UNIQUE DEFAULT nextval('shifts_shift_number_seq'),
   name TEXT NOT NULL UNIQUE,
-  code TEXT UNIQUE,
 
   start_time TIME NOT NULL,
   end_time TIME NOT NULL,
 
   grace_period_minutes INT NOT NULL DEFAULT 0 CHECK (grace_period_minutes >= 0),
 
-  break_start TIME,
-  break_end TIME,
-  break_minutes INT GENERATED ALWAYS AS (
-    CASE
-      WHEN break_start IS NOT NULL AND break_end IS NOT NULL
-      THEN GREATEST(0, EXTRACT(EPOCH FROM (break_end - break_start)) / 60)::INT
-      ELSE NULL
-    END
-  ) STORED,
-
-  crosses_midnight BOOLEAN NOT NULL DEFAULT false,
+  working_days INT[] NOT NULL DEFAULT ARRAY[1,2,3,4,5],
   is_active BOOLEAN NOT NULL DEFAULT true,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-
-  CONSTRAINT chk_shift_break_pair
-    CHECK (
-      (break_start IS NULL AND break_end IS NULL)
-      OR
-      (break_start IS NOT NULL AND break_end IS NOT NULL)
-    )
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+COMMENT ON COLUMN shifts.working_days IS 'ISO weekday: 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 7=Sun';
 
 -- =========================================
 -- ATTENDANCE POLICIES
@@ -238,6 +222,7 @@ CREATE TABLE IF NOT EXISTS holidays (
     CHECK (holiday_type IN ('regular', 'special', 'local')),
   description TEXT,
   is_active BOOLEAN NOT NULL DEFAULT true,
+  recurring BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
   CONSTRAINT uq_holiday_date_name UNIQUE (holiday_date, name)

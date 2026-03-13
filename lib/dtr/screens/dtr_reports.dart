@@ -107,6 +107,8 @@ class _DtrReportsState extends State<DtrReports> {
           return 'Absent';
         case 'on_leave':
           return 'On Leave';
+        case 'holiday':
+          return 'Holiday';
         default:
           return 'On Time';
       }

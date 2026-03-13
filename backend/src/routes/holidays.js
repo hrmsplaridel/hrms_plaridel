@@ -6,28 +6,45 @@ const { requireAdmin } = require('../middleware/rbac');
 const router = express.Router();
 const protect = [authMiddleware];
 
+/** Return date as YYYY-MM-DD to avoid timezone shift when pg returns Date (serializes to ISO UTC). */
+function toDateString(v) {
+  if (v == null) return null;
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) return v.split('T')[0];
+  if (v instanceof Date) {
+    const y = v.getFullYear();
+    const m = String(v.getMonth() + 1).padStart(2, '0');
+    const d = String(v.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return String(v).split('T')[0];
+}
+
 // GET /api/holidays - list (?year=YYYY optional, ?is_active=true)
 router.get('/', protect, async (req, res) => {
   try {
     const year = req.query.year;
     const isActive = req.query.is_active;
-    let query = 'SELECT id, holiday_date, name, holiday_type, description, is_active, created_at FROM holidays';
+    let query = 'SELECT id, holiday_date, name, holiday_type, description, is_active, recurring, created_at FROM holidays';
     const params = [];
     const conditions = [];
-    if (year) { conditions.push(`EXTRACT(YEAR FROM holiday_date) = $${params.length + 1}`); params.push(year); }
+    if (year) {
+      conditions.push(`(EXTRACT(YEAR FROM holiday_date) = $${params.length + 1} OR recurring = true)`);
+      params.push(year);
+    }
     if (isActive === 'true' || isActive === true) { conditions.push(`(is_active IS NULL OR is_active = true)`); }
     else if (isActive === 'false' || isActive === false) { conditions.push(`is_active = false`); }
     if (conditions.length) query += ' WHERE ' + conditions.join(' AND ');
-    query += ' ORDER BY holiday_date';
+    query += ' ORDER BY EXTRACT(MONTH FROM holiday_date), EXTRACT(DAY FROM holiday_date)';
 
     const result = await pool.query(query, params);
     res.json(result.rows.map((r) => ({
       id: r.id,
-      holiday_date: r.holiday_date,
+      holiday_date: toDateString(r.holiday_date),
       name: r.name,
       holiday_type: r.holiday_type || 'regular',
       description: r.description,
       is_active: r.is_active ?? true,
+      recurring: r.recurring ?? false,
       created_at: r.created_at,
     })));
   } catch (err) {
@@ -39,19 +56,20 @@ router.get('/', protect, async (req, res) => {
 // POST /api/holidays - create (admin only)
 router.post('/', protect, requireAdmin, async (req, res) => {
   try {
-    const { holiday_date, name, holiday_type = 'regular', description, is_active = true } = req.body;
+    const { holiday_date, name, holiday_type = 'regular', description, is_active = true, recurring = false } = req.body;
     if (!holiday_date || !name || !name.trim()) {
       return res.status(400).json({ error: 'Holiday date and name are required' });
     }
     const type = ['regular', 'special', 'local'].includes(holiday_type) ? holiday_type : 'regular';
 
     const result = await pool.query(
-      `INSERT INTO holidays (holiday_date, name, holiday_type, description, is_active)
-       VALUES ($1::date, $2, $3, $4, $5)
-       RETURNING id, holiday_date, name, holiday_type, description, is_active, created_at`,
-      [holiday_date, name.trim(), type, description?.trim() || null, !!is_active]
+      `INSERT INTO holidays (holiday_date, name, holiday_type, description, is_active, recurring)
+       VALUES ($1::date, $2, $3, $4, $5, $6)
+       RETURNING id, holiday_date, name, holiday_type, description, is_active, recurring, created_at`,
+      [holiday_date, name.trim(), type, description?.trim() || null, !!is_active, !!recurring]
     );
-    res.status(201).json(result.rows[0]);
+    const row = result.rows[0];
+    res.status(201).json({ ...row, holiday_date: toDateString(row.holiday_date) });
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'A holiday with this date and name already exists.' });
     console.error('[holidays POST]', err);
@@ -63,7 +81,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 router.put('/:id', protect, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { holiday_date, name, holiday_type, description, is_active } = req.body;
+    const { holiday_date, name, holiday_type, description, is_active, recurring } = req.body;
 
     const updates = [];
     const values = [];
@@ -77,16 +95,18 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     }
     if (description !== undefined) { updates.push(`description = $${i++}`); values.push(description?.trim() || null); }
     if (is_active !== undefined) { updates.push(`is_active = $${i++}`); values.push(!!is_active); }
+    if (recurring !== undefined) { updates.push(`recurring = $${i++}`); values.push(!!recurring); }
     if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
     values.push(id);
 
     const result = await pool.query(
       `UPDATE holidays SET ${updates.join(', ')} WHERE id = $${i}
-       RETURNING id, holiday_date, name, holiday_type, description, is_active, created_at`,
+       RETURNING id, holiday_date, name, holiday_type, description, is_active, recurring, created_at`,
       values
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Holiday not found' });
-    res.json(result.rows[0]);
+    const row = result.rows[0];
+    res.json({ ...row, holiday_date: toDateString(row.holiday_date) });
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'A holiday with this date and name already exists.' });
     console.error('[holidays PUT]', err);

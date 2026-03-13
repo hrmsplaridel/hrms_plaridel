@@ -571,6 +571,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                           ? 'Absent'
                           : r.status == 'on_leave'
                           ? 'On Leave'
+                          : r.status == 'holiday'
+                          ? 'Holiday'
                           : 'On Time';
                       return Container(
                         padding: const EdgeInsets.symmetric(
@@ -640,15 +642,17 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                                 statusText,
                                 style: TextStyle(
                                   fontSize: 13,
-                                  color: r.status == 'late'
+                                color: r.status == 'late'
                                       ? Colors.red.shade700
                                       : (r.status == 'absent'
                                             ? Colors.orange.shade700
-                                            : AppTheme.textPrimary),
+                                            : r.status == 'holiday'
+                                                  ? Colors.purple.shade700
+                                                  : AppTheme.textPrimary),
                                   fontWeight:
-                                      r.status == 'late' || r.status == 'absent'
-                                      ? FontWeight.w600
-                                      : FontWeight.normal,
+                                      r.status == 'late' || r.status == 'absent' || r.status == 'holiday'
+                                          ? FontWeight.w600
+                                          : FontWeight.normal,
                                 ),
                               ),
                             ),

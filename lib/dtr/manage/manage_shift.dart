@@ -3,6 +3,10 @@ import 'package:flutter/material.dart';
 import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
 
+/// ISO weekday: 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 7=Sun
+const List<int> _allDays = [1, 2, 3, 4, 5, 6, 7];
+const List<String> _dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
 /// Shift record for display/CRUD.
 class _ShiftRecord {
   const _ShiftRecord({
@@ -11,11 +15,8 @@ class _ShiftRecord {
     required this.startTime,
     required this.endTime,
     required this.isActive,
-    this.code,
     this.gracePeriodMinutes = 0,
-    this.breakStart,
-    this.breakEnd,
-    this.crossesMidnight = false,
+    this.workingDays = const [1, 2, 3, 4, 5],
     this.shiftNumber,
   });
   final String id;
@@ -23,17 +24,19 @@ class _ShiftRecord {
   final TimeOfDay startTime;
   final TimeOfDay endTime;
   final bool isActive;
-  final String? code;
   final int gracePeriodMinutes;
-  final TimeOfDay? breakStart;
-  final TimeOfDay? breakEnd;
-  final bool crossesMidnight;
+  final List<int> workingDays;
   final int? shiftNumber;
 
   /// Display as SHF-001, SHF-002, etc., or "—" if null.
   String get displayShiftNo => shiftNumber != null
       ? 'SHF-${shiftNumber!.toString().padLeft(3, '0')}'
       : '—';
+
+  String get workingDaysDisplay {
+    if (workingDays.isEmpty) return '—';
+    return workingDays.map((d) => _dayLabels[d - 1]).join(', ');
+  }
 }
 
 /// Shift management screen: list with search/status filter + form.
@@ -47,7 +50,6 @@ class ManageShift extends StatefulWidget {
 class _ManageShiftState extends State<ManageShift> {
   final _searchController = TextEditingController();
   final _nameController = TextEditingController();
-  final _codeController = TextEditingController();
   final _graceController = TextEditingController();
 
   String _statusFilter = 'Active';
@@ -56,9 +58,7 @@ class _ManageShiftState extends State<ManageShift> {
   _ShiftRecord? _selectedShift;
   TimeOfDay? _startTime;
   TimeOfDay? _endTime;
-  TimeOfDay? _breakStart;
-  TimeOfDay? _breakEnd;
-  bool _crossesMidnight = false;
+  Set<int> _workingDays = {1, 2, 3, 4, 5}; // Mon–Fri default
 
   @override
   void initState() {
@@ -70,7 +70,6 @@ class _ManageShiftState extends State<ManageShift> {
   void dispose() {
     _searchController.dispose();
     _nameController.dispose();
-    _codeController.dispose();
     _graceController.dispose();
     super.dispose();
   }
@@ -108,23 +107,33 @@ class _ManageShiftState extends State<ManageShift> {
         final m = e as Map<String, dynamic>;
         final st = m['start_time'];
         final et = m['end_time'];
-        final bs = m['break_start'];
-        final be = m['break_end'];
         final grace = m['grace_period_minutes'];
+        final wd = m['working_days'];
         final shiftNum = m['shift_number'];
+        List<int> days = [1, 2, 3, 4, 5];
+        if (wd is List) {
+          final parsed = wd
+              .map((d) {
+                if (d is int) return d;
+                final n = int.tryParse(d?.toString() ?? '');
+                return (n != null && n >= 1 && n <= 7) ? n : null;
+              })
+              .whereType<int>()
+              .toList();
+          if (parsed.isNotEmpty) {
+            days = parsed..sort();
+          }
+        }
         return _ShiftRecord(
           id: m['id'] as String,
           name: m['name'] as String? ?? '',
           startTime: _parseTime(st) ?? const TimeOfDay(hour: 0, minute: 0),
           endTime: _parseTime(et) ?? const TimeOfDay(hour: 0, minute: 0),
           isActive: m['is_active'] as bool? ?? true,
-          code: m['code'] as String?,
           gracePeriodMinutes: grace is int
               ? grace
               : (grace != null ? int.tryParse(grace.toString()) ?? 0 : 0),
-          breakStart: _parseTime(bs),
-          breakEnd: _parseTime(be),
-          crossesMidnight: m['crosses_midnight'] as bool? ?? false,
+          workingDays: days,
           shiftNumber: shiftNum is int
               ? shiftNum
               : (shiftNum != null ? int.tryParse(shiftNum.toString()) : null),
@@ -141,15 +150,12 @@ class _ManageShiftState extends State<ManageShift> {
     setState(() {
       _selectedShift = s;
       _nameController.text = s.name;
-      _codeController.text = s.code ?? '';
       _graceController.text = s.gracePeriodMinutes > 0
           ? s.gracePeriodMinutes.toString()
           : '';
       _startTime = s.startTime;
       _endTime = s.endTime;
-      _breakStart = s.breakStart;
-      _breakEnd = s.breakEnd;
-      _crossesMidnight = s.crossesMidnight;
+      _workingDays = s.workingDays.toSet();
     });
   }
 
@@ -157,13 +163,20 @@ class _ManageShiftState extends State<ManageShift> {
     setState(() {
       _selectedShift = null;
       _nameController.clear();
-      _codeController.clear();
       _graceController.clear();
       _startTime = null;
       _endTime = null;
-      _breakStart = null;
-      _breakEnd = null;
-      _crossesMidnight = false;
+      _workingDays = {1, 2, 3, 4, 5};
+    });
+  }
+
+  void _toggleWorkingDay(int day) {
+    setState(() {
+      if (_workingDays.contains(day)) {
+        _workingDays = {..._workingDays}..remove(day);
+      } else {
+        _workingDays = {..._workingDays, day};
+      }
     });
   }
 
@@ -181,6 +194,12 @@ class _ManageShiftState extends State<ManageShift> {
       );
       return;
     }
+    if (_workingDays.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select at least one working day.')),
+      );
+      return;
+    }
     try {
       final body = <String, dynamic>{
         'name': name,
@@ -188,26 +207,18 @@ class _ManageShiftState extends State<ManageShift> {
         'end_time': _timeStr(_endTime!),
         'is_active': true,
         'grace_period_minutes': int.tryParse(_graceController.text.trim()) ?? 0,
-        'crosses_midnight': _crossesMidnight,
+        'working_days': _workingDays.toList()..sort(),
       };
-      final code = _codeController.text.trim();
-      if (code.isNotEmpty) body['code'] = code;
-      if (_breakStart != null) body['break_start'] = _timeStr(_breakStart!);
-      if (_breakEnd != null) body['break_end'] = _timeStr(_breakEnd!);
       await ApiClient.instance.post('/api/shifts', data: body);
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Shift added.')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Shift added.')));
         _clearForm();
         _loadShifts();
       }
     } on DioException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to add: ${e.response?.data ?? e.message}'),
-          ),
+          SnackBar(content: Text('Failed to add: ${e.response?.data ?? e.message}')),
         );
       }
     }
@@ -234,32 +245,30 @@ class _ManageShiftState extends State<ManageShift> {
       );
       return;
     }
+    if (_workingDays.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select at least one working day.')),
+      );
+      return;
+    }
     try {
       final body = <String, dynamic>{
         'name': name,
         'start_time': _timeStr(_startTime!),
         'end_time': _timeStr(_endTime!),
         'grace_period_minutes': int.tryParse(_graceController.text.trim()) ?? 0,
-        'crosses_midnight': _crossesMidnight,
+        'working_days': _workingDays.toList()..sort(),
       };
-      final code = _codeController.text.trim();
-      body['code'] = code.isEmpty ? null : code;
-      body['break_start'] = _breakStart != null ? _timeStr(_breakStart!) : null;
-      body['break_end'] = _breakEnd != null ? _timeStr(_breakEnd!) : null;
       await ApiClient.instance.put('/api/shifts/${s.id}', data: body);
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Shift updated.')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Shift updated.')));
         _clearForm();
         _loadShifts();
       }
     } on DioException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to update: ${e.response?.data ?? e.message}'),
-          ),
+          SnackBar(content: Text('Failed to update: ${e.response?.data ?? e.message}')),
         );
       }
     }
@@ -295,10 +304,7 @@ class _ManageShiftState extends State<ManageShift> {
     );
     if (ok != true || !mounted) return;
     try {
-      await ApiClient.instance.put(
-        '/api/shifts/${s.id}',
-        data: {'is_active': false},
-      );
+      await ApiClient.instance.put('/api/shifts/${s.id}', data: {'is_active': false});
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('${s.name} has been deactivated.')),
@@ -309,11 +315,7 @@ class _ManageShiftState extends State<ManageShift> {
     } on DioException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Failed to deactivate: ${e.response?.data ?? e.message}',
-            ),
-          ),
+          SnackBar(content: Text('Failed to deactivate: ${e.response?.data ?? e.message}')),
         );
       }
     }
@@ -407,55 +409,35 @@ class _ManageShiftState extends State<ManageShift> {
                   width: 50,
                   child: Text(
                     'ID',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: AppTheme.textPrimary,
-                    ),
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppTheme.textPrimary),
                   ),
                 ),
                 Expanded(
                   flex: 1,
                   child: Text(
                     'Shift',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  flex: 1,
-                  child: Text(
-                    'Code',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: AppTheme.textPrimary,
-                    ),
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppTheme.textPrimary),
                   ),
                 ),
                 Expanded(
                   flex: 1,
                   child: Text(
                     'Start',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: AppTheme.textPrimary,
-                    ),
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppTheme.textPrimary),
                   ),
                 ),
                 Expanded(
                   flex: 1,
                   child: Text(
                     'End',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: AppTheme.textPrimary,
-                    ),
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppTheme.textPrimary),
+                  ),
+                ),
+                Expanded(
+                  flex: 1,
+                  child: Text(
+                    'Working Days',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppTheme.textPrimary),
                   ),
                 ),
               ],
@@ -473,76 +455,53 @@ class _ManageShiftState extends State<ManageShift> {
               alignment: Alignment.center,
               child: Text(
                 'No shifts',
-                style: TextStyle(
-                  color: AppTheme.textSecondary.withOpacity(0.8),
-                  fontSize: 14,
-                ),
+                style: TextStyle(color: AppTheme.textSecondary.withOpacity(0.8), fontSize: 14),
               ),
             )
           else
             ...filtered.map((s) {
               final isSelected = _selectedShift?.id == s.id;
               return Material(
-                color: isSelected
-                    ? AppTheme.primaryNavy.withOpacity(0.08)
-                    : Colors.transparent,
+                color: isSelected ? AppTheme.primaryNavy.withOpacity(0.08) : Colors.transparent,
                 child: InkWell(
                   onTap: () => _selectShift(s),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     child: Row(
                       children: [
                         SizedBox(
                           width: 50,
                           child: Text(
                             s.displayShiftNo,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.textSecondary,
-                            ),
+                            style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
                           ),
                         ),
                         Expanded(
                           flex: 1,
                           child: Text(
                             s.name,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: AppTheme.textPrimary,
-                            ),
+                            style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
                           ),
                         ),
                         Expanded(
                           flex: 1,
                           child: Text(
-                            s.code ?? '—',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: AppTheme.textPrimary,
-                            ),
+                            _timeStr(s.startTime, includeSeconds: false),
+                            style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
                           ),
                         ),
                         Expanded(
                           flex: 1,
                           child: Text(
-                            _timeStr(s.startTime),
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: AppTheme.textPrimary,
-                            ),
+                            _timeStr(s.endTime, includeSeconds: false),
+                            style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
                           ),
                         ),
                         Expanded(
                           flex: 1,
                           child: Text(
-                            _timeStr(s.endTime),
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: AppTheme.textPrimary,
-                            ),
+                            s.workingDaysDisplay,
+                            style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
                           ),
                         ),
                       ],
@@ -562,20 +521,10 @@ class _ManageShiftState extends State<ManageShift> {
       onChanged: (_) => setState(() {}),
       decoration: InputDecoration(
         hintText: 'Search',
-        hintStyle: TextStyle(
-          color: AppTheme.textSecondary.withOpacity(0.8),
-          fontSize: 14,
-        ),
-        prefixIcon: Icon(
-          Icons.search_rounded,
-          size: 20,
-          color: AppTheme.textSecondary.withOpacity(0.7),
-        ),
+        hintStyle: TextStyle(color: AppTheme.textSecondary.withOpacity(0.8), fontSize: 14),
+        prefixIcon: Icon(Icons.search_rounded, size: 20, color: AppTheme.textSecondary.withOpacity(0.7)),
         isDense: true,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: 12,
-        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         filled: true,
         fillColor: AppTheme.lightGray.withOpacity(0.5),
         border: OutlineInputBorder(
@@ -598,11 +547,9 @@ class _ManageShiftState extends State<ManageShift> {
         value: _statusFilter,
         underline: const SizedBox.shrink(),
         isDense: true,
-        items: [
-          'Active',
-          'Inactive',
-          'All',
-        ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+        items: ['Active', 'Inactive', 'All']
+            .map((o) => DropdownMenuItem(value: o, child: Text(o)))
+            .toList(),
         onChanged: (v) {
           setState(() => _statusFilter = v ?? 'Active');
           _loadShifts();
@@ -618,11 +565,7 @@ class _ManageShiftState extends State<ManageShift> {
         color: AppTheme.white,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
+          BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 16, offset: const Offset(0, 4)),
         ],
         border: Border.all(color: Colors.black.withOpacity(0.06)),
       ),
@@ -631,11 +574,7 @@ class _ManageShiftState extends State<ManageShift> {
         children: [
           Text(
             'Shift Name',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
-            ),
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textSecondary),
           ),
           const SizedBox(height: 6),
           TextFormField(
@@ -645,47 +584,21 @@ class _ManageShiftState extends State<ManageShift> {
           const SizedBox(height: 20),
           Text(
             'Start Time',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
-            ),
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textSecondary),
           ),
           const SizedBox(height: 6),
           _buildTimePicker(_startTime, (t) => setState(() => _startTime = t)),
           const SizedBox(height: 20),
           Text(
             'End Time',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
-            ),
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textSecondary),
           ),
           const SizedBox(height: 6),
           _buildTimePicker(_endTime, (t) => setState(() => _endTime = t)),
           const SizedBox(height: 20),
           Text(
-            'Code (optional)',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 6),
-          TextFormField(
-            controller: _codeController,
-            decoration: _inputDecoration('e.g. MORNING'),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'Grace period (minutes)',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
-            ),
+            'Grace Period (minutes)',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textSecondary),
           ),
           const SizedBox(height: 6),
           TextFormField(
@@ -695,40 +608,23 @@ class _ManageShiftState extends State<ManageShift> {
           ),
           const SizedBox(height: 20),
           Text(
-            'Break Start (optional)',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
-            ),
+            'Working Days',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textSecondary),
           ),
           const SizedBox(height: 6),
-          _buildTimePicker(_breakStart, (t) => setState(() => _breakStart = t)),
-          const SizedBox(height: 20),
-          Text(
-            'Break End (optional)',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 6),
-          _buildTimePicker(_breakEnd, (t) => setState(() => _breakEnd = t)),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Checkbox(
-                value: _crossesMidnight,
-                onChanged: (v) => setState(() => _crossesMidnight = v ?? false),
-                activeColor: const Color(0xFF4CAF50),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Crosses midnight',
-                style: TextStyle(fontSize: 14, color: AppTheme.textPrimary),
-              ),
-            ],
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _allDays.map((day) {
+              final isOn = _workingDays.contains(day);
+              return FilterChip(
+                selected: isOn,
+                label: Text(_dayLabels[day - 1]),
+                onSelected: (_) => _toggleWorkingDay(day),
+                selectedColor: AppTheme.primaryNavy.withOpacity(0.2),
+                checkmarkColor: AppTheme.primaryNavy,
+              );
+            }).toList(),
           ),
           const SizedBox(height: 28),
           Wrap(
@@ -742,13 +638,8 @@ class _ManageShiftState extends State<ManageShift> {
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFF4CAF50),
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   elevation: 0,
                 ),
               ),
@@ -759,13 +650,8 @@ class _ManageShiftState extends State<ManageShift> {
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFF4CAF50),
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   elevation: 0,
                 ),
               ),
@@ -776,13 +662,8 @@ class _ManageShiftState extends State<ManageShift> {
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFFE53935),
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   elevation: 0,
                 ),
               ),
@@ -804,20 +685,14 @@ class _ManageShiftState extends State<ManageShift> {
       },
       borderRadius: BorderRadius.circular(8),
       child: InputDecorator(
-        decoration: _inputDecoration('HH:MM:SS').copyWith(
-          suffixIcon: Icon(
-            Icons.access_time_rounded,
-            size: 20,
-            color: AppTheme.textSecondary,
-          ),
+        decoration: _inputDecoration('HH:MM').copyWith(
+          suffixIcon: Icon(Icons.access_time_rounded, size: 20, color: AppTheme.textSecondary),
         ),
         child: Text(
-          value != null ? _timeStr(value) : '',
+          value != null ? _timeStr(value, includeSeconds: false) : '',
           style: TextStyle(
             fontSize: 14,
-            color: value != null
-                ? AppTheme.textPrimary
-                : AppTheme.textSecondary,
+            color: value != null ? AppTheme.textPrimary : AppTheme.textSecondary,
           ),
         ),
       ),
@@ -825,25 +700,13 @@ class _ManageShiftState extends State<ManageShift> {
   }
 
   InputDecoration _inputDecoration(String hint) => InputDecoration(
-    hintText: hint,
-    hintStyle: TextStyle(
-      color: AppTheme.textSecondary.withOpacity(0.7),
-      fontSize: 14,
-    ),
-    filled: true,
-    fillColor: AppTheme.white,
-    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: AppTheme.lightGray),
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: AppTheme.lightGray),
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: const BorderSide(color: Color(0xFF4CAF50), width: 1.5),
-    ),
-  );
+        hintText: hint,
+        hintStyle: TextStyle(color: AppTheme.textSecondary.withOpacity(0.7), fontSize: 14),
+        filled: true,
+        fillColor: AppTheme.white,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: AppTheme.lightGray)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: AppTheme.lightGray)),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF4CAF50), width: 1.5)),
+      );
 }
