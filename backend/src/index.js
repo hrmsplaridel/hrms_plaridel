@@ -41,10 +41,20 @@ app.get('/health', (_req, res) => {
 
 app.get('/health/db', async (_req, res) => {
   try {
-    const result = await pool.query('SELECT 1 AS ok, current_database() AS db');
+    const result = await pool.query(
+      `SELECT
+        1 AS ok,
+        current_database() AS db,
+        inet_server_addr()::text AS server_addr,
+        inet_server_port() AS server_port,
+        current_user AS db_user`
+    );
     res.json({
       ok: true,
       database: result.rows[0].db,
+      server_addr: result.rows[0].server_addr,
+      server_port: result.rows[0].server_port,
+      db_user: result.rows[0].db_user,
       message: 'PostgreSQL connection OK',
     });
   } catch (err) {

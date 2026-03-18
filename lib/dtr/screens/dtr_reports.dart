@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:pdf/pdf.dart';
+import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../data/time_record.dart';
@@ -40,6 +42,7 @@ class _DtrReportsState extends State<DtrReports> {
   int _selectedMonth = DateTime.now().month;
   int _selectedYear = DateTime.now().year;
   String? _selectedEmployeeId;
+  String? _selectedDepartmentId;
   List<TimeRecord> _employeeRecords = [];
 
   @override
@@ -56,13 +59,22 @@ class _DtrReportsState extends State<DtrReports> {
 
   Future<void> _load() async {
     final dtr = context.read<DtrProvider>();
-    await dtr.loadEmployees();
+    await Future.wait([
+      dtr.loadEmployees(departmentId: _selectedDepartmentId),
+      dtr.loadDepartments(),
+    ]);
+    if (!mounted) return;
     if (dtr.employees.isNotEmpty) {
       if (_selectedEmployeeId == null ||
           !dtr.employees.any((e) => e.id == _selectedEmployeeId)) {
         setState(() => _selectedEmployeeId = dtr.employees.first.id);
       }
       _loadEmployeeRecords();
+    } else {
+      setState(() {
+        _selectedEmployeeId = null;
+        _employeeRecords = [];
+      });
     }
   }
 
@@ -75,8 +87,10 @@ class _DtrReportsState extends State<DtrReports> {
       startDate: start,
       endDate: end,
       userId: _selectedEmployeeId,
+      limit: 100,
     );
-    setState(() => _employeeRecords = dtr.timeRecords);
+    if (!mounted) return;
+    setState(() => _employeeRecords = List.from(dtr.timeRecords));
   }
 
   void _reset() {
@@ -84,18 +98,39 @@ class _DtrReportsState extends State<DtrReports> {
       _searchController.clear();
       _selectedMonth = DateTime.now().month;
       _selectedYear = DateTime.now().year;
+      _selectedDepartmentId = null;
     });
-    _loadEmployeeRecords();
+    _load();
   }
 
   static String _formatTime(DateTime? dt) {
     if (dt == null) return '—';
     final local = dt.toLocal();
-    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}:${local.second.toString().padLeft(2, '0')}';
+    final h = local.hour;
+    final m = local.minute;
+    final ampm = h >= 12 ? 'PM' : 'AM';
+    final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+    return '$h12:${m.toString().padLeft(2, '0')} $ampm';
   }
 
+  static const List<String> _shortWeekdays = [
+    'Mon',
+    'Tue',
+    'Wed',
+    'Thu',
+    'Fri',
+    'Sat',
+    'Sun',
+  ];
+
   static String _formatDate(DateTime d) {
-    return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+    final weekday = _shortWeekdays[d.weekday - 1];
+    return '${d.day} $weekday';
+  }
+
+  static String _formatMinutes(int? mins) {
+    if (mins == null || mins <= 0) return '—';
+    return '$mins min';
   }
 
   static String _getRemarks(TimeRecord r) {
@@ -108,7 +143,7 @@ class _DtrReportsState extends State<DtrReports> {
         case 'on_leave':
           return 'On Leave';
         case 'holiday':
-          return 'Holiday';
+          return r.holidayName ?? 'Holiday';
         default:
           return 'On Time';
       }
@@ -168,7 +203,7 @@ class _DtrReportsState extends State<DtrReports> {
           );
           break;
         case _DtrExportFormat.word:
-          final html = DtrExport.generateWordHtml(
+          final html = await DtrExport.generateWordHtml(
             employeeName: selectedName,
             year: _selectedYear,
             month: _selectedMonth,
@@ -197,6 +232,74 @@ class _DtrReportsState extends State<DtrReports> {
         ),
       );
       debugPrint('DTR export error: $e\n$st');
+    }
+  }
+
+  /// Print DTR report: open system print dialog when supported; otherwise share PDF.
+  Future<void> _printDtrReport(
+    BuildContext context, {
+    required String selectedName,
+    required DateTime end,
+    required Map<DateTime, TimeRecord> recordsByDate,
+    String? department,
+    String? position,
+  }) async {
+    final baseName =
+        'DTR_${selectedName.replaceAll(' ', '_')}_${_months[_selectedMonth - 1]}_$_selectedYear';
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Preparing print...')));
+    try {
+      final bytes = await DtrExport.generatePdf(
+        employeeName: selectedName,
+        year: _selectedYear,
+        month: _selectedMonth,
+        end: end,
+        recordsByDate: recordsByDate,
+        department: department,
+        position: position,
+      );
+      if (!context.mounted) return;
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => bytes,
+        name: baseName,
+      );
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('DTR sent to print')));
+    } catch (e) {
+      if (!context.mounted) return;
+      try {
+        final bytes = await DtrExport.generatePdf(
+          employeeName: selectedName,
+          year: _selectedYear,
+          month: _selectedMonth,
+          end: end,
+          recordsByDate: recordsByDate,
+          reportTitle: 'Daily Time Record Report',
+          department: department,
+          position: position,
+        );
+        await shareOrDownloadPdf(bytes, '$baseName.pdf');
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Print dialog not available. PDF shared — open it to print.',
+            ),
+          ),
+        );
+      } catch (e2) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Print failed: $e2'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -243,27 +346,54 @@ class _DtrReportsState extends State<DtrReports> {
       );
       recordsByDate[key] = r;
     }
+    // Show all dates that have DTR records (real or synthetic) for the selected employee/month
+    final sortedDates = recordsByDate.keys.toList()
+      ..sort((a, b) => a.compareTo(b)); // ordered by date ascending
 
-    final workingDays = _countWorkingDays(_selectedYear, _selectedMonth);
+    // Compute summary from real API records (recordsByDate from _employeeRecords).
+    // When there are no weekday punches at all, show 0 (no inferred absent).
+    final totalWeekdays = _countWorkingDays(_selectedYear, _selectedMonth);
     var lateCount = 0;
     var absentCount = 0;
+    var holidaysCount = 0;
+    var hasAnyWeekdayPunch = false;
     for (var d = 1; d <= end.day; d++) {
       final dt = DateTime(_selectedYear, _selectedMonth, d);
       if (dt.weekday >= DateTime.monday && dt.weekday <= DateTime.friday) {
         final rec = recordsByDate[dt];
-        if (rec == null || rec.timeIn == null) {
+        if (rec?.status == 'holiday') {
+          holidaysCount++;
+        } else if (rec?.status == 'on_leave') {
+          // On leave: not absent for tardiness
+        } else if (rec == null || rec.timeIn == null) {
           absentCount++;
         } else {
-          final local = rec.timeIn!.toLocal();
-          final officeStart = DateTime(dt.year, dt.month, dt.day, 8, 0);
-          if (local.isAfter(officeStart)) lateCount++;
+          hasAnyWeekdayPunch = true;
+          if (rec.status == 'late' || (rec.lateMinutes ?? 0) > 0) {
+            lateCount++;
+          }
         }
       }
     }
-    final tardyCount = lateCount + absentCount;
+    // No punches on any weekday = show zeros (don't infer 22 absent)
+    final hasRecords = hasAnyWeekdayPunch;
+    final workingDays = hasRecords ? totalWeekdays - holidaysCount : 0;
+    final displayLateCount = hasRecords ? lateCount : 0;
+    final displayAbsentCount = hasRecords ? absentCount : 0;
+    final tardyCount = hasRecords ? (lateCount + absentCount) : 0;
     final tardinessPct = workingDays > 0
         ? ((tardyCount / workingDays) * 100).round()
         : 0;
+
+    // Total late and undertime minutes for the month (from all records)
+    var totalLateMinutes = 0;
+    var totalUndertimeMinutes = 0;
+    for (final rec in recordsByDate.values) {
+      totalLateMinutes += rec.lateMinutes ?? 0;
+      totalUndertimeMinutes += rec.undertimeMinutes ?? 0;
+    }
+    final displayTotalLateMinutes = hasRecords ? totalLateMinutes : 0;
+    final displayTotalUndertimeMinutes = hasRecords ? totalUndertimeMinutes : 0;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -300,12 +430,16 @@ class _DtrReportsState extends State<DtrReports> {
                         employees: employees,
                         end: end,
                         recordsByDate: recordsByDate,
+                        sortedDates: sortedDates,
                         selectedName: selectedName,
                         workingDays: workingDays,
-                        lateCount: lateCount,
-                        absentCount: absentCount,
+                        lateCount: displayLateCount,
+                        absentCount: displayAbsentCount,
                         tardyCount: tardyCount,
                         tardinessPct: tardinessPct,
+                        totalLateMinutes: displayTotalLateMinutes,
+                        totalUndertimeMinutes: displayTotalUndertimeMinutes,
+                        hasRecords: hasRecords,
                         dtr: dtr,
                       )
                     : isCompact
@@ -313,12 +447,16 @@ class _DtrReportsState extends State<DtrReports> {
                         employees: employees,
                         end: end,
                         recordsByDate: recordsByDate,
+                        sortedDates: sortedDates,
                         selectedName: selectedName,
                         workingDays: workingDays,
-                        lateCount: lateCount,
-                        absentCount: absentCount,
+                        lateCount: displayLateCount,
+                        absentCount: displayAbsentCount,
                         tardyCount: tardyCount,
                         tardinessPct: tardinessPct,
+                        totalLateMinutes: displayTotalLateMinutes,
+                        totalUndertimeMinutes: displayTotalUndertimeMinutes,
+                        hasRecords: hasRecords,
                         dtr: dtr,
                       )
                     : SizedBox(
@@ -341,6 +479,7 @@ class _DtrReportsState extends State<DtrReports> {
                                         child: _buildDtrTable(
                                           end: end,
                                           recordsByDate: recordsByDate,
+                                          sortedDates: sortedDates,
                                           dtr: dtr,
                                           availableWidth: tableAvailableWidth,
                                         ),
@@ -349,10 +488,15 @@ class _DtrReportsState extends State<DtrReports> {
                                       _buildSummaryCard(
                                         selectedName: selectedName,
                                         workingDays: workingDays,
-                                        lateCount: lateCount,
-                                        absentCount: absentCount,
+                                        lateCount: displayLateCount,
+                                        absentCount: displayAbsentCount,
                                         tardyCount: tardyCount,
                                         tardinessPct: tardinessPct,
+                                        totalLateMinutes:
+                                            displayTotalLateMinutes,
+                                        totalUndertimeMinutes:
+                                            displayTotalUndertimeMinutes,
+                                        hasRecords: hasRecords,
                                         recordsByDate: recordsByDate,
                                         end: end,
                                       ),
@@ -400,6 +544,24 @@ class _DtrReportsState extends State<DtrReports> {
           ),
         ),
         if (!isMobile) ...[
+          DropdownButton<String?>(
+            value: _selectedDepartmentId,
+            hint: const Text('All departments'),
+            items: [
+              const DropdownMenuItem<String?>(
+                value: null,
+                child: Text('All departments'),
+              ),
+              ...context.read<DtrProvider>().departments.map(
+                (d) =>
+                    DropdownMenuItem<String?>(value: d.id, child: Text(d.name)),
+              ),
+            ],
+            onChanged: (v) {
+              setState(() => _selectedDepartmentId = v);
+              _load();
+            },
+          ),
           DropdownButton<int>(
             value: _selectedMonth,
             items: List.generate(12, (i) => i + 1)
@@ -424,6 +586,42 @@ class _DtrReportsState extends State<DtrReports> {
             },
           ),
         ] else ...[
+          SizedBox(
+            width: 140,
+            child: DropdownButtonFormField<String?>(
+              value: _selectedDepartmentId,
+              decoration: InputDecoration(
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                filled: true,
+                fillColor: AppTheme.white,
+              ),
+              hint: const Text('All departments'),
+              items: [
+                const DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text('All departments'),
+                ),
+                ...context.read<DtrProvider>().departments.map(
+                  (d) => DropdownMenuItem<String?>(
+                    value: d.id,
+                    child: Text(d.name, overflow: TextOverflow.ellipsis),
+                  ),
+                ),
+              ],
+              onChanged: (v) {
+                setState(() => _selectedDepartmentId = v);
+                _load();
+              },
+            ),
+          ),
+          const SizedBox(width: 8),
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -506,12 +704,16 @@ class _DtrReportsState extends State<DtrReports> {
     required List<dynamic> employees,
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
+    required List<DateTime> sortedDates,
     required String selectedName,
     required int workingDays,
     required int lateCount,
     required int absentCount,
     required int tardyCount,
     required int tardinessPct,
+    required int totalLateMinutes,
+    required int totalUndertimeMinutes,
+    required bool hasRecords,
     required DtrProvider dtr,
   }) {
     return Column(
@@ -552,6 +754,7 @@ class _DtrReportsState extends State<DtrReports> {
           child: _buildDtrTable(
             end: end,
             recordsByDate: recordsByDate,
+            sortedDates: sortedDates,
             dtr: dtr,
             compactColumns: true,
           ),
@@ -564,6 +767,9 @@ class _DtrReportsState extends State<DtrReports> {
           absentCount: absentCount,
           tardyCount: tardyCount,
           tardinessPct: tardinessPct,
+          totalLateMinutes: totalLateMinutes,
+          totalUndertimeMinutes: totalUndertimeMinutes,
+          hasRecords: hasRecords,
           fullWidth: true,
           isResponsive: true,
           recordsByDate: recordsByDate,
@@ -678,13 +884,18 @@ class _DtrReportsState extends State<DtrReports> {
   Widget _buildDtrTable({
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
+    required List<DateTime> sortedDates,
     required DtrProvider dtr,
     bool compactColumns = false,
     double? availableWidth,
   }) {
     final colDate = compactColumns ? 80.0 : 90.0;
     final colTime = compactColumns ? 58.0 : 70.0;
-    final minTableWidth = compactColumns ? (colDate + colTime * 4 + 70) : 550.0;
+    final colLate = compactColumns ? 48.0 : 58.0;
+    final colUndertime = compactColumns ? 55.0 : 65.0;
+    final minTableWidth = compactColumns
+        ? (colDate + colTime * 4 + colLate + colUndertime + 70)
+        : 550.0 + colLate + colUndertime;
     final tableWidth = availableWidth != null
         ? availableWidth.clamp(minTableWidth, double.infinity)
         : minTableWidth;
@@ -770,6 +981,28 @@ class _DtrReportsState extends State<DtrReports> {
                         ),
                       ),
                     ),
+                    SizedBox(
+                      width: colLate,
+                      child: Text(
+                        'Late',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: compactColumns ? 11 : 12,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: colUndertime,
+                      child: Text(
+                        'Undertime',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: compactColumns ? 11 : 12,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ),
                     Expanded(
                       child: Text(
                         'Remarks',
@@ -786,15 +1019,24 @@ class _DtrReportsState extends State<DtrReports> {
               Expanded(
                 child: dtr.loading
                     ? const Center(child: CircularProgressIndicator())
+                    : sortedDates.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Text(
+                            'No DTR records for this period',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ),
+                      )
                     : ListView.builder(
-                        itemCount: end.day,
+                        itemCount: sortedDates.length,
                         itemBuilder: (context, i) {
-                          final d = end.day - i;
-                          final dt = DateTime(_selectedYear, _selectedMonth, d);
-                          final rec = recordsByDate[dt];
-                          final isWeekend =
-                              dt.weekday == DateTime.saturday ||
-                              dt.weekday == DateTime.sunday;
+                          final dt = sortedDates[i];
+                          final rec = recordsByDate[dt]!;
                           return Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 12,
@@ -820,8 +1062,8 @@ class _DtrReportsState extends State<DtrReports> {
                                 SizedBox(
                                   width: colTime,
                                   child: Text(
-                                    rec?.timeIn != null
-                                        ? _formatTime(rec!.timeIn)
+                                    rec.timeIn != null
+                                        ? _formatTime(rec.timeIn)
                                         : '—',
                                     style: TextStyle(
                                       fontSize: 12,
@@ -832,46 +1074,91 @@ class _DtrReportsState extends State<DtrReports> {
                                 SizedBox(
                                   width: colTime,
                                   child: Text(
-                                    '—',
+                                    rec.breakOut != null
+                                        ? _formatTime(rec.breakOut)
+                                        : '—',
                                     style: TextStyle(
                                       fontSize: compactColumns ? 11 : 12,
-                                      color: AppTheme.textSecondary,
+                                      color: AppTheme.textPrimary,
                                     ),
                                   ),
                                 ),
                                 SizedBox(
                                   width: colTime,
                                   child: Text(
-                                    '—',
+                                    rec.breakIn != null
+                                        ? _formatTime(rec.breakIn)
+                                        : '—',
                                     style: TextStyle(
                                       fontSize: compactColumns ? 11 : 12,
-                                      color: AppTheme.textSecondary,
+                                      color: AppTheme.textPrimary,
                                     ),
                                   ),
                                 ),
                                 SizedBox(
                                   width: colTime,
                                   child: Text(
-                                    rec?.timeOut != null
-                                        ? _formatTime(rec!.timeOut)
+                                    rec.timeOut != null
+                                        ? _formatTime(rec.timeOut)
                                         : '—',
                                     style: TextStyle(
                                       fontSize: 12,
                                       color: AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(
+                                  width: colLate,
+                                  child: Text(
+                                    _formatMinutes(rec.lateMinutes),
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: (rec.lateMinutes ?? 0) > 0
+                                          ? Colors.red.shade700
+                                          : AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(
+                                  width: colUndertime,
+                                  child: Text(
+                                    _formatMinutes(rec.undertimeMinutes),
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: (rec.undertimeMinutes ?? 0) > 0
+                                          ? Colors.orange.shade700
+                                          : AppTheme.textPrimary,
                                     ),
                                   ),
                                 ),
                                 Expanded(
-                                  child: Text(
-                                    rec != null
-                                        ? _getRemarks(rec)
-                                        : (isWeekend ? '—' : 'Absent'),
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: rec?.status == 'late'
-                                          ? Colors.red.shade700
-                                          : AppTheme.textPrimary,
-                                    ),
+                                  child: Builder(
+                                    builder: (context) {
+                                      final remark =
+                                          rec.attendanceRemark != null &&
+                                              rec.attendanceRemark!.isNotEmpty
+                                          ? rec.attendanceRemark!
+                                          : _getRemarks(rec);
+                                      final isLateRemark =
+                                          rec.status == 'late' ||
+                                          rec.attendanceRemark == 'Late' ||
+                                          rec.attendanceRemark ==
+                                              'Late + Undertime';
+                                      final isHolidayRemark =
+                                          rec.status == 'holiday' ||
+                                          rec.holidayId != null;
+                                      return Text(
+                                        remark,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: isLateRemark
+                                              ? Colors.red.shade700
+                                              : isHolidayRemark
+                                              ? Colors.purple.shade700
+                                              : AppTheme.textPrimary,
+                                        ),
+                                      );
+                                    },
                                   ),
                                 ),
                               ],
@@ -887,6 +1174,11 @@ class _DtrReportsState extends State<DtrReports> {
     );
   }
 
+  static String _formatTotalMinutes(int minutes) {
+    if (minutes <= 0) return '0 min';
+    return '$minutes min';
+  }
+
   Widget _buildSummaryCard({
     required String selectedName,
     required int workingDays,
@@ -894,6 +1186,9 @@ class _DtrReportsState extends State<DtrReports> {
     required int absentCount,
     required int tardyCount,
     required int tardinessPct,
+    required int totalLateMinutes,
+    required int totalUndertimeMinutes,
+    bool hasRecords = true,
     bool fullWidth = false,
     bool isResponsive = false,
     required Map<DateTime, TimeRecord> recordsByDate,
@@ -957,11 +1252,20 @@ class _DtrReportsState extends State<DtrReports> {
                         width: 140,
                         child: _SummaryStat(
                           label: 'Late',
-                          value: '$lateCount',
+                          value: _formatTotalMinutes(totalLateMinutes),
                           hasBorder: true,
-                          borderColor: lateCount > 0
+                          borderColor: totalLateMinutes > 0
                               ? Colors.red
                               : const Color(0xFF4CAF50),
+                        ),
+                      ),
+                      SizedBox(
+                        width: 140,
+                        child: _SummaryStat(
+                          label: 'Undertime',
+                          value: _formatTotalMinutes(totalUndertimeMinutes),
+                          hasBorder: totalUndertimeMinutes > 0,
+                          borderColor: Colors.orange,
                         ),
                       ),
                       SizedBox(
@@ -994,11 +1298,18 @@ class _DtrReportsState extends State<DtrReports> {
                       const SizedBox(height: 12),
                       _SummaryStat(
                         label: 'Late',
-                        value: '$lateCount',
+                        value: _formatTotalMinutes(totalLateMinutes),
                         hasBorder: true,
-                        borderColor: lateCount > 0
+                        borderColor: totalLateMinutes > 0
                             ? Colors.red
                             : const Color(0xFF4CAF50),
+                      ),
+                      const SizedBox(height: 12),
+                      _SummaryStat(
+                        label: 'Undertime',
+                        value: _formatTotalMinutes(totalUndertimeMinutes),
+                        hasBorder: totalUndertimeMinutes > 0,
+                        borderColor: Colors.orange,
                       ),
                       const SizedBox(height: 12),
                       _SummaryStat(
@@ -1027,6 +1338,24 @@ class _DtrReportsState extends State<DtrReports> {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () => _printDtrReport(
+                  context,
+                  selectedName: selectedName,
+                  end: end,
+                  recordsByDate: recordsByDate,
+                ),
+                icon: const Icon(Icons.print_rounded, size: 18),
+                label: const Text('PRINT'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.primaryNavy,
+                  foregroundColor: AppTheme.white,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
             const Text(
               'Generate DTR',
               style: TextStyle(
@@ -1132,12 +1461,16 @@ class _DtrReportsState extends State<DtrReports> {
     required List<EmployeeOption> employees,
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
+    required List<DateTime> sortedDates,
     required String selectedName,
     required int workingDays,
     required int lateCount,
     required int absentCount,
     required int tardyCount,
     required int tardinessPct,
+    required int totalLateMinutes,
+    required int totalUndertimeMinutes,
+    required bool hasRecords,
     required DtrProvider dtr,
   }) {
     return LayoutBuilder(
@@ -1155,6 +1488,7 @@ class _DtrReportsState extends State<DtrReports> {
               child: _buildDtrTable(
                 end: end,
                 recordsByDate: recordsByDate,
+                sortedDates: sortedDates,
                 dtr: dtr,
                 availableWidth: availableWidth,
               ),
@@ -1167,6 +1501,9 @@ class _DtrReportsState extends State<DtrReports> {
               absentCount: absentCount,
               tardyCount: tardyCount,
               tardinessPct: tardinessPct,
+              totalLateMinutes: totalLateMinutes,
+              totalUndertimeMinutes: totalUndertimeMinutes,
+              hasRecords: hasRecords,
               fullWidth: true,
               isResponsive: true,
               recordsByDate: recordsByDate,

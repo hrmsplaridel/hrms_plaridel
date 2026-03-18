@@ -18,11 +18,13 @@ class _ShiftRecord {
     this.gracePeriodMinutes = 0,
     this.workingDays = const [1, 2, 3, 4, 5],
     this.shiftNumber,
+    this.breakEndTime,
   });
   final String id;
   final String name;
   final TimeOfDay startTime;
   final TimeOfDay endTime;
+  final TimeOfDay? breakEndTime;
   final bool isActive;
   final int gracePeriodMinutes;
   final List<int> workingDays;
@@ -58,6 +60,7 @@ class _ManageShiftState extends State<ManageShift> {
   _ShiftRecord? _selectedShift;
   TimeOfDay? _startTime;
   TimeOfDay? _endTime;
+  TimeOfDay? _breakEndTime; // PM resume time (e.g. 13:00 for 1PM) – used for PM late check
   Set<int> _workingDays = {1, 2, 3, 4, 5}; // Mon–Fri default
 
   @override
@@ -107,6 +110,7 @@ class _ManageShiftState extends State<ManageShift> {
         final m = e as Map<String, dynamic>;
         final st = m['start_time'];
         final et = m['end_time'];
+        final be = m['break_end'];
         final grace = m['grace_period_minutes'];
         final wd = m['working_days'];
         final shiftNum = m['shift_number'];
@@ -129,6 +133,7 @@ class _ManageShiftState extends State<ManageShift> {
           name: m['name'] as String? ?? '',
           startTime: _parseTime(st) ?? const TimeOfDay(hour: 0, minute: 0),
           endTime: _parseTime(et) ?? const TimeOfDay(hour: 0, minute: 0),
+          breakEndTime: _parseTime(be),
           isActive: m['is_active'] as bool? ?? true,
           gracePeriodMinutes: grace is int
               ? grace
@@ -155,6 +160,7 @@ class _ManageShiftState extends State<ManageShift> {
           : '';
       _startTime = s.startTime;
       _endTime = s.endTime;
+      _breakEndTime = s.breakEndTime;
       _workingDays = s.workingDays.toSet();
     });
   }
@@ -205,6 +211,7 @@ class _ManageShiftState extends State<ManageShift> {
         'name': name,
         'start_time': _timeStr(_startTime!),
         'end_time': _timeStr(_endTime!),
+        if (_breakEndTime != null) 'break_end': _timeStr(_breakEndTime!),
         'is_active': true,
         'grace_period_minutes': int.tryParse(_graceController.text.trim()) ?? 0,
         'working_days': _workingDays.toList()..sort(),
@@ -256,6 +263,7 @@ class _ManageShiftState extends State<ManageShift> {
         'name': name,
         'start_time': _timeStr(_startTime!),
         'end_time': _timeStr(_endTime!),
+        'break_end': _breakEndTime != null ? _timeStr(_breakEndTime!) : null,
         'grace_period_minutes': int.tryParse(_graceController.text.trim()) ?? 0,
         'working_days': _workingDays.toList()..sort(),
       };
@@ -597,6 +605,18 @@ class _ManageShiftState extends State<ManageShift> {
           _buildTimePicker(_endTime, (t) => setState(() => _endTime = t)),
           const SizedBox(height: 20),
           Text(
+            'PM Start (Break End)',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textSecondary),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'When PM shift starts; used for PM late check. Leave empty if not needed.',
+            style: TextStyle(fontSize: 11, color: AppTheme.textSecondary.withOpacity(0.8)),
+          ),
+          const SizedBox(height: 6),
+          _buildTimePicker(_breakEndTime, (t) => setState(() => _breakEndTime = t), allowClear: true),
+          const SizedBox(height: 20),
+          Text(
             'Grace Period (minutes)',
             style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textSecondary),
           ),
@@ -674,28 +694,40 @@ class _ManageShiftState extends State<ManageShift> {
     );
   }
 
-  Widget _buildTimePicker(TimeOfDay? value, ValueChanged<TimeOfDay> onChanged) {
-    return InkWell(
-      onTap: () async {
-        final t = await showTimePicker(
-          context: context,
-          initialTime: value ?? const TimeOfDay(hour: 8, minute: 0),
-        );
-        if (t != null) onChanged(t);
-      },
-      borderRadius: BorderRadius.circular(8),
-      child: InputDecorator(
-        decoration: _inputDecoration('HH:MM').copyWith(
-          suffixIcon: Icon(Icons.access_time_rounded, size: 20, color: AppTheme.textSecondary),
-        ),
-        child: Text(
-          value != null ? _timeStr(value, includeSeconds: false) : '',
-          style: TextStyle(
-            fontSize: 14,
-            color: value != null ? AppTheme.textPrimary : AppTheme.textSecondary,
+  Widget _buildTimePicker(TimeOfDay? value, ValueChanged<TimeOfDay?> onChanged, {bool allowClear = false}) {
+    return Row(
+      children: [
+        Expanded(
+          child: InkWell(
+            onTap: () async {
+              final t = await showTimePicker(
+                context: context,
+                initialTime: value ?? const TimeOfDay(hour: 13, minute: 0),
+              );
+              if (t != null) onChanged(t);
+            },
+            borderRadius: BorderRadius.circular(8),
+            child: InputDecorator(
+              decoration: _inputDecoration('HH:MM').copyWith(
+                suffixIcon: Icon(Icons.access_time_rounded, size: 20, color: AppTheme.textSecondary),
+              ),
+              child: Text(
+                value != null ? _timeStr(value, includeSeconds: false) : '',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: value != null ? AppTheme.textPrimary : AppTheme.textSecondary,
+                ),
+              ),
+            ),
           ),
         ),
-      ),
+        if (allowClear && value != null)
+          IconButton(
+            icon: Icon(Icons.clear_rounded, size: 20, color: AppTheme.textSecondary),
+            onPressed: () => onChanged(null),
+            tooltip: 'Clear',
+          ),
+      ],
     );
   }
 

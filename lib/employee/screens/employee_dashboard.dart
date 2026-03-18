@@ -6,6 +6,7 @@ import '../../../landingpage/screens/landing_page.dart';
 import '../../../login/screens/login_page.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../dtr/dtr_provider.dart';
+import '../../../dtr/widgets/attendance_display.dart';
 import '../../../docutracker/docutracker_main.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
@@ -43,7 +44,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
         if (dtr.userId != auth.user?.id) dtr.setUserFromApi(auth.user?.id);
       });
     }
-    final displayName = auth.displayName.isNotEmpty ? auth.displayName : 'Employee';
+    final displayName = auth.displayName.isNotEmpty
+        ? auth.displayName
+        : 'Employee';
     final email = auth.email;
     final avatarPath = auth.avatarPath;
     final width = MediaQuery.of(context).size.width;
@@ -85,7 +88,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                   avatarPath: avatarPath,
                   onProfileTap: () {
                     Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const ProfileAndSettingsPage()),
+                      MaterialPageRoute(
+                        builder: (_) => const ProfileAndSettingsPage(),
+                      ),
                     );
                   },
                 ),
@@ -95,7 +100,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                     child: _selectedNavIndex == 0
                         ? _EmployeeDashboardContent(
                             displayName: displayName,
-                            onViewAttendance: () => setState(() => _selectedNavIndex = 1),
+                            onViewAttendance: () =>
+                                setState(() => _selectedNavIndex = 1),
                           )
                         : _selectedNavIndex == 1
                         ? const _EmployeeAttendanceContent()
@@ -555,10 +561,7 @@ class _EmployeeUserMenu extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            UserAvatar(
-              avatarPath: avatarPath,
-              radius: isCompact ? 16 : 18,
-            ),
+            UserAvatar(avatarPath: avatarPath, radius: isCompact ? 16 : 18),
             if (!isCompact) ...[
               const SizedBox(width: 10),
               Text(
@@ -646,7 +649,11 @@ class _EmployeeUserMenu extends StatelessWidget {
                 style: TextStyle(fontSize: 14, color: AppTheme.textPrimary),
               ),
               const SizedBox(width: 8),
-              Icon(Icons.settings_outlined, size: 18, color: AppTheme.textSecondary),
+              Icon(
+                Icons.settings_outlined,
+                size: 18,
+                color: AppTheme.textSecondary,
+              ),
             ],
           ),
         ),
@@ -674,9 +681,7 @@ class _EmployeeUserMenu extends StatelessWidget {
         if (value == 'signout') {
           await context.read<AuthProvider>().signOut();
           if (context.mounted) {
-            final dest = kIsWeb
-                ? const LandingPage()
-                : const LoginPage();
+            final dest = kIsWeb ? const LandingPage() : const LoginPage();
             Navigator.of(context).pushAndRemoveUntil(
               MaterialPageRoute(builder: (_) => dest),
               (route) => false,
@@ -704,7 +709,8 @@ class _EmployeeDashboardContent extends StatefulWidget {
   final VoidCallback? onViewAttendance;
 
   @override
-  State<_EmployeeDashboardContent> createState() => _EmployeeDashboardContentState();
+  State<_EmployeeDashboardContent> createState() =>
+      _EmployeeDashboardContentState();
 }
 
 class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
@@ -712,11 +718,16 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<DtrProvider>().loadTodayRecord();
+      final dtr = context.read<DtrProvider>();
+      dtr.loadTodayRecord();
+      dtr.loadMyShiftToday();
       final now = DateTime.now();
       final start = DateTime(now.year, now.month, 1);
       final end = DateTime(now.year, now.month + 1, 0);
-      context.read<DtrProvider>().loadTimeRecordsForUser(startDate: start, endDate: end);
+      context.read<DtrProvider>().loadTimeRecordsForUser(
+        startDate: start,
+        endDate: end,
+      );
     });
   }
 
@@ -777,7 +788,10 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
               ),
             ],
           ),
-          child: const DocuTrackerDashboardScreen(isAdmin: false, showTitle: false),
+          child: const DocuTrackerDashboardScreen(
+            isAdmin: false,
+            showTitle: false,
+          ),
         ),
         const SizedBox(height: 24),
         _EmployeeAnnouncementsCard(),
@@ -792,10 +806,7 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
 }
 
 class _EmployeeSummaryCards extends StatelessWidget {
-  const _EmployeeSummaryCards({
-    required this.isNarrow,
-    this.onViewAttendance,
-  });
+  const _EmployeeSummaryCards({required this.isNarrow, this.onViewAttendance});
 
   final bool isNarrow;
   final VoidCallback? onViewAttendance;
@@ -859,19 +870,89 @@ class _EmployeeSummaryCards extends StatelessWidget {
   }
 }
 
+String _formatTime(DateTime? dt) {
+  if (dt == null) return '—';
+  final local = dt.toLocal();
+  final h = local.hour;
+  final m = local.minute;
+  final ampm = h >= 12 ? 'PM' : 'AM';
+  final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+  return '$h12:${m.toString().padLeft(2, '0')} $ampm';
+}
+
 class _ClockInCard extends StatelessWidget {
+  static const int _noonHour = 12;
+
   @override
   Widget build(BuildContext context) {
     return Consumer<DtrProvider>(
       builder: (context, dtr, _) {
         final record = dtr.todayRecord;
-        final hasClockedIn = record != null && record.timeIn != null;
-        final hasClockedOut = record != null && record.timeOut != null;
-        String timeText = '—';
-        if (record?.timeIn != null) {
-          final local = record!.timeIn!.toLocal();
-          timeText = '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+        final isHoliday =
+            record != null &&
+            (record.status == 'holiday' || record.holidayId != null);
+        final now = DateTime.now();
+        final isMorning = now.hour < _noonHour;
+        final hasAmIn = record != null && record.timeIn != null;
+        final hasAmOut = record != null && record.breakOut != null;
+        final hasPmIn = record != null && record.breakIn != null;
+        final hasPmOut = record != null && record.timeOut != null;
+        final isAfternoonOnly = hasPmIn && !hasAmIn;
+        final isComplete =
+            (hasAmIn && hasAmOut && hasPmIn && hasPmOut) ||
+            (isAfternoonOnly && hasPmOut);
+
+        String label = 'Clock In';
+        String? nextAction;
+        Future<bool> Function()? onTap;
+        if (isHoliday) {
+          label = 'Holiday';
+          nextAction = null;
+          onTap = null;
+        } else if (record == null) {
+          if (isMorning) {
+            label = 'AM In';
+            nextAction = 'AM In';
+            onTap = () => dtr.clockIn();
+          } else {
+            label = 'PM In';
+            nextAction = 'PM In';
+            onTap = () => dtr.clockPmInAsFirst();
+          }
+        } else if (!hasAmIn) {
+          if (!hasPmIn) {
+            label = 'PM In';
+            nextAction = 'PM In';
+            onTap = () => dtr.clockPmInAsFirst();
+          } else if (!hasPmOut) {
+            label = 'PM Out';
+            nextAction = 'PM Out';
+            onTap = () => dtr.clockOut();
+          } else {
+            label = 'Clocked Out';
+            nextAction = null;
+            onTap = null;
+          }
+        } else if (!hasAmOut) {
+          label = 'AM Out';
+          nextAction = 'AM Out';
+          onTap = () => dtr.clockAmOut();
+        } else if (!hasPmIn) {
+          label = 'PM In';
+          nextAction = 'PM In';
+          onTap = () => dtr.clockPmIn();
+        } else if (!hasPmOut) {
+          label = 'PM Out';
+          nextAction = 'PM Out';
+          onTap = () => dtr.clockOut();
+        } else {
+          label = 'Clocked Out';
+          nextAction = null;
+          onTap = null;
         }
+
+        final isPmInDisabled =
+            (nextAction == 'PM In') && dtr.isPmInPastShiftEnd;
 
         return Container(
           padding: const EdgeInsets.all(20),
@@ -891,51 +972,105 @@ class _ClockInCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                hasClockedIn ? (hasClockedOut ? 'Clocked Out' : 'Clocked In') : 'Clock In',
+                label,
                 style: TextStyle(
                   color: AppTheme.textSecondary,
                   fontSize: 13,
                   fontWeight: FontWeight.w500,
                 ),
               ),
+              if (isHoliday)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    'No clock in/out required',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
               const SizedBox(height: 12),
               Text(
-                timeText,
+                _formatTime(
+                  record?.timeOut ??
+                      record?.breakIn ??
+                      record?.breakOut ??
+                      record?.timeIn,
+                ),
                 style: TextStyle(
                   color: AppTheme.textPrimary,
                   fontSize: 26,
                   fontWeight: FontWeight.w800,
                 ),
               ),
+              if (record != null &&
+                  (record.timeIn != null || record.breakIn != null)) ...[
+                const SizedBox(height: 6),
+                Text(
+                  record.timeIn != null
+                      ? 'AM In: ${_formatTime(record.timeIn)}  AM Out: ${_formatTime(record.breakOut)}  PM In: ${_formatTime(record.breakIn)}  PM Out: ${_formatTime(record.timeOut)}'
+                      : 'AM: Absent  PM In: ${_formatTime(record.breakIn)}  PM Out: ${_formatTime(record.timeOut)}',
+                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                ),
+              ],
               const SizedBox(height: 6),
               Text(
                 'Location: —',
                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
               ),
               const SizedBox(height: 16),
+              if (isPmInDisabled && dtr.myShiftEndFormatted != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    'Shift has ended (${dtr.myShiftEndFormatted})',
+                    style: TextStyle(
+                      color: Colors.orange.shade700,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
-                  onPressed: dtr.loading
+                  onPressed: dtr.loading || onTap == null || isPmInDisabled
                       ? null
                       : () async {
-                          bool ok = false;
-                          if (hasClockedIn && !hasClockedOut) {
-                            ok = await dtr.clockOut();
-                          } else if (!hasClockedIn) {
-                            ok = await dtr.clockIn();
-                          }
+                          final ok = await onTap!();
                           if (context.mounted) {
                             if (dtr.error != null) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text(dtr.error!)),
-                              );
+                              final err = dtr.error!;
+                              final isShiftEndError =
+                                  err.toLowerCase().contains('shift') &&
+                                  (err.toLowerCase().contains('end') ||
+                                      err.toLowerCase().contains('ended'));
+                              if (isShiftEndError) {
+                                showDialog(
+                                  context: context,
+                                  builder: (ctx) => AlertDialog(
+                                    title: const Text('Shift has ended'),
+                                    content: Text(err),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(ctx),
+                                        child: const Text('OK'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              } else {
+                                ScaffoldMessenger.of(
+                                  context,
+                                ).showSnackBar(SnackBar(content: Text(err)));
+                              }
                             } else if (ok) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  content: Text(hasClockedIn && !hasClockedOut
-                                      ? 'Clocked out successfully.'
-                                      : 'Clocked in successfully.'),
+                                  content: Text(
+                                    '$nextAction recorded successfully.',
+                                  ),
                                 ),
                               );
                             }
@@ -953,9 +1088,18 @@ class _ClockInCard extends StatelessWidget {
                       ? const SizedBox(
                           height: 20,
                           width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
                         )
-                      : Text(hasClockedIn && !hasClockedOut ? 'Clock Out' : 'Clock In'),
+                      : Text(
+                          isHoliday
+                              ? 'Holiday'
+                              : isComplete
+                              ? 'Clocked Out'
+                              : (nextAction ?? '—'),
+                        ),
                 ),
               ),
             ],
@@ -975,9 +1119,12 @@ class _AttendanceCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Consumer<DtrProvider>(
       builder: (context, dtr, _) {
-        final presentCount = dtr.timeRecords.where((r) => r.timeIn != null).length;
+        final presentCount = dtr.timeRecords
+            .where((r) => r.timeIn != null)
+            .length;
         final now = DateTime.now();
-        final monthLabel = '${now.year}-${now.month.toString().padLeft(2, '0')}';
+        final monthLabel =
+            '${now.year}-${now.month.toString().padLeft(2, '0')}';
 
         return Container(
           padding: const EdgeInsets.all(20),
@@ -1020,7 +1167,10 @@ class _AttendanceCard extends StatelessWidget {
                   const SizedBox(width: 8),
                   Text(
                     'Present Days',
-                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 13,
+                    ),
                   ),
                 ],
               ),
@@ -1502,17 +1652,40 @@ class _ChartLegend extends StatelessWidget {
   }
 }
 
+const List<String> _attendanceMonths = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
 /// My Attendance: employee's own time records.
 class _EmployeeAttendanceContent extends StatefulWidget {
   const _EmployeeAttendanceContent();
 
   @override
-  State<_EmployeeAttendanceContent> createState() => _EmployeeAttendanceContentState();
+  State<_EmployeeAttendanceContent> createState() =>
+      _EmployeeAttendanceContentState();
 }
 
-class _EmployeeAttendanceContentState extends State<_EmployeeAttendanceContent> {
-  DateTime? _startDate;
-  DateTime? _endDate;
+class _EmployeeAttendanceContentState
+    extends State<_EmployeeAttendanceContent> {
+  int _selectedMonth = DateTime.now().month;
+  int _selectedYear = DateTime.now().year;
+  int? _selectedDay;
+
+  int get _lastDayOfSelectedMonth {
+    final end = DateTime(_selectedYear, _selectedMonth + 1, 0);
+    return end.day;
+  }
 
   @override
   void initState() {
@@ -1522,16 +1695,31 @@ class _EmployeeAttendanceContentState extends State<_EmployeeAttendanceContent> 
 
   Future<void> _load() async {
     final dtr = context.read<DtrProvider>();
-    final now = DateTime.now();
-    final start = _startDate ?? DateTime(now.year, now.month, 1);
-    final end = _endDate ?? DateTime(now.year, now.month + 1, 0);
+    final lastDay = _lastDayOfSelectedMonth;
+    final day =
+        (_selectedDay != null && _selectedDay! >= 1 && _selectedDay! <= lastDay)
+        ? _selectedDay!
+        : 0;
+    final DateTime start;
+    final DateTime end;
+    if (day >= 1) {
+      start = DateTime(_selectedYear, _selectedMonth, day);
+      end = start;
+    } else {
+      start = DateTime(_selectedYear, _selectedMonth, 1);
+      end = DateTime(_selectedYear, _selectedMonth + 1, 0);
+    }
     await dtr.loadTimeRecordsForUser(startDate: start, endDate: end);
   }
 
   static String _formatTime(DateTime? dt) {
     if (dt == null) return '—';
     final local = dt.toLocal();
-    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+    final h = local.hour;
+    final m = local.minute;
+    final ampm = h >= 12 ? 'PM' : 'AM';
+    final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+    return '$h12:${m.toString().padLeft(2, '0')} $ampm';
   }
 
   static String _formatDate(DateTime d) {
@@ -1559,54 +1747,190 @@ class _EmployeeAttendanceContentState extends State<_EmployeeAttendanceContent> 
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
         ),
         const SizedBox(height: 24),
-        Wrap(
-          spacing: 12,
-          runSpacing: 8,
-          children: [
-            OutlinedButton.icon(
-              onPressed: () async {
-                final date = await showDatePicker(
-                  context: context,
-                  initialDate: _startDate ?? DateTime.now(),
-                  firstDate: DateTime(2020),
-                  lastDate: DateTime(2030),
-                );
-                if (date != null) {
-                  setState(() => _startDate = date);
-                  _load();
-                }
-              },
-              icon: const Icon(Icons.calendar_today_rounded, size: 18),
-              label: Text(_startDate != null ? _formatDate(_startDate!) : 'Start date'),
-            ),
-            OutlinedButton.icon(
-              onPressed: () async {
-                final date = await showDatePicker(
-                  context: context,
-                  initialDate: _endDate ?? DateTime.now(),
-                  firstDate: DateTime(2020),
-                  lastDate: DateTime(2030),
-                );
-                if (date != null) {
-                  setState(() => _endDate = date);
-                  _load();
-                }
-              },
-              icon: const Icon(Icons.calendar_today_rounded, size: 18),
-              label: Text(_endDate != null ? _formatDate(_endDate!) : 'End date'),
-            ),
-            TextButton.icon(
-              onPressed: () {
-                setState(() {
-                  _startDate = null;
-                  _endDate = null;
-                });
-                _load();
-              },
-              icon: const Icon(Icons.clear_rounded, size: 18),
-              label: const Text('Reset'),
-            ),
-          ],
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final isNarrow = constraints.maxWidth < 520;
+            return Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              alignment: WrapAlignment.start,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                SizedBox(
+                  width: isNarrow ? 150 : 130,
+                  child: DropdownButtonFormField<int>(
+                    value: _selectedMonth,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      filled: true,
+                      fillColor: AppTheme.white,
+                    ),
+                    selectedItemBuilder: (context) => List.generate(
+                      12,
+                      (i) => Text(
+                        _attendanceMonths[i],
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                    ),
+                    items: List.generate(12, (i) => i + 1)
+                        .map(
+                          (m) => DropdownMenuItem(
+                            value: m,
+                            child: Text(
+                              _attendanceMonths[m - 1],
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (v) {
+                      if (v != null) {
+                        setState(() {
+                          _selectedMonth = v;
+                          if (_selectedDay != null &&
+                              _selectedDay! > _lastDayOfSelectedMonth) {
+                            _selectedDay = null;
+                          }
+                        });
+                        _load();
+                      }
+                    },
+                  ),
+                ),
+                SizedBox(
+                  width: isNarrow ? 95 : 85,
+                  child: DropdownButtonFormField<int>(
+                    value: _selectedYear,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      filled: true,
+                      fillColor: AppTheme.white,
+                    ),
+                    selectedItemBuilder: (context) => List.generate(
+                      11,
+                      (i) => Text(
+                        '${DateTime.now().year - 5 + i}',
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                    ),
+                    items: List.generate(11, (i) => DateTime.now().year - 5 + i)
+                        .map(
+                          (y) => DropdownMenuItem(value: y, child: Text('$y')),
+                        )
+                        .toList(),
+                    onChanged: (v) {
+                      if (v != null) {
+                        setState(() {
+                          _selectedYear = v;
+                          if (_selectedDay != null &&
+                              _selectedDay! > _lastDayOfSelectedMonth) {
+                            _selectedDay = null;
+                          }
+                        });
+                        _load();
+                      }
+                    },
+                  ),
+                ),
+                SizedBox(
+                  width: isNarrow ? 115 : 105,
+                  child: DropdownButtonFormField<int?>(
+                    value: _selectedDay,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      filled: true,
+                      fillColor: AppTheme.white,
+                    ),
+                    hint: Text(
+                      'All days',
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                    selectedItemBuilder: (context) => [
+                      const Text(
+                        'All days',
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 14),
+                      ),
+                      ...List.generate(
+                        _lastDayOfSelectedMonth,
+                        (i) => Text(
+                          'Day ${i + 1}',
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                      ),
+                    ],
+                    items: [
+                      const DropdownMenuItem<int?>(
+                        value: null,
+                        child: Text('All days'),
+                      ),
+                      ...List.generate(
+                        _lastDayOfSelectedMonth,
+                        (i) => i + 1,
+                      ).map(
+                        (d) => DropdownMenuItem<int?>(
+                          value: d,
+                          child: Text('Day $d'),
+                        ),
+                      ),
+                    ],
+                    onChanged: (v) {
+                      setState(() => _selectedDay = v);
+                      _load();
+                    },
+                  ),
+                ),
+                FilterChip(
+                  label: const Text('Today'),
+                  selected:
+                      _selectedDay != null &&
+                      _selectedMonth == DateTime.now().month &&
+                      _selectedYear == DateTime.now().year &&
+                      _selectedDay == DateTime.now().day,
+                  onSelected: (selected) {
+                    if (!selected) return;
+                    final now = DateTime.now();
+                    setState(() {
+                      _selectedMonth = now.month;
+                      _selectedYear = now.year;
+                      _selectedDay = now.day;
+                    });
+                    _load();
+                  },
+                  selectedColor: AppTheme.primaryNavy.withOpacity(0.2),
+                  checkmarkColor: AppTheme.primaryNavy,
+                ),
+              ],
+            );
+          },
         ),
         const SizedBox(height: 24),
         if (dtr.loading)
@@ -1632,47 +1956,283 @@ class _EmployeeAttendanceContentState extends State<_EmployeeAttendanceContent> 
             ),
           ),
         if (!dtr.loading && dtr.timeRecords.isNotEmpty)
-          Container(
-            decoration: BoxDecoration(
-              color: AppTheme.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.black.withOpacity(0.06)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              const minTableWidth = 760.0;
+              final tableWidth = constraints.maxWidth < minTableWidth
+                  ? minTableWidth
+                  : constraints.maxWidth;
+              return Container(
+                decoration: BoxDecoration(
+                  color: AppTheme.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.black.withOpacity(0.06)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
-                headingRowColor:
-                    WidgetStateProperty.all(AppTheme.lightGray.withOpacity(0.5)),
-                columns: const [
-                  DataColumn(label: Text('Date')),
-                  DataColumn(label: Text('Time In')),
-                  DataColumn(label: Text('Time Out')),
-                  DataColumn(label: Text('Hours')),
-                ],
-                rows: dtr.timeRecords.map((r) {
-                  final timeIn = r.timeIn?.toLocal();
-                  final timeOut = r.timeOut?.toLocal();
-                  final hours = r.totalHours != null
-                      ? '${r.totalHours!.toStringAsFixed(1)} h'
-                      : '—';
-                  return DataRow(
-                    cells: [
-                      DataCell(Text(_formatDate(r.recordDate))),
-                      DataCell(Text(_formatTime(timeIn))),
-                      DataCell(Text(_formatTime(timeOut))),
-                      DataCell(Text(hours)),
-                    ],
-                  );
-                }).toList(),
-              ),
-            ),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  physics: const BouncingScrollPhysics(),
+                  child: SizedBox(
+                    width: tableWidth,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppTheme.lightGray.withOpacity(0.5),
+                            borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(12),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                flex: 2,
+                                child: Text(
+                                  'Date',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13,
+                                    color: AppTheme.textPrimary,
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                flex: 1,
+                                child: Center(
+                                  child: Text(
+                                    'AM In',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 13,
+                                      color: AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                flex: 1,
+                                child: Center(
+                                  child: Text(
+                                    'AM Out',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 13,
+                                      color: AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                flex: 1,
+                                child: Center(
+                                  child: Text(
+                                    'PM In',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 13,
+                                      color: AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                flex: 1,
+                                child: Center(
+                                  child: Text(
+                                    'PM Out',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 13,
+                                      color: AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                flex: 1,
+                                child: Center(
+                                  child: Text(
+                                    'Late',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 13,
+                                      color: AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                flex: 1,
+                                child: Center(
+                                  child: Text(
+                                    'Undertime',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 13,
+                                      color: AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                flex: 2,
+                                child: Center(
+                                  child: Text(
+                                    'Remarks',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 13,
+                                      color: AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        ...dtr.timeRecords.asMap().entries.map((entry) {
+                          final i = entry.key;
+                          final r = entry.value;
+                          final timeIn = r.timeIn?.toLocal();
+                          final breakOut = r.breakOut?.toLocal();
+                          final breakIn = r.breakIn?.toLocal();
+                          final timeOut = r.timeOut?.toLocal();
+                          final remark = getAttendanceRemark(r);
+                          final lateStr = formatLateMinutes(r);
+                          final underStr = formatUndertimeMinutes(r);
+                          return Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                            decoration: BoxDecoration(
+                              color: i % 2 == 0
+                                  ? AppTheme.white
+                                  : AppTheme.lightGray.withOpacity(0.25),
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  flex: 2,
+                                  child: Text(
+                                    _formatDate(r.recordDate),
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: AppTheme.textPrimary,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                Expanded(
+                                  flex: 1,
+                                  child: Center(
+                                    child: Text(
+                                      _formatTime(timeIn),
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: AppTheme.textPrimary,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  flex: 1,
+                                  child: Center(
+                                    child: Text(
+                                      _formatTime(breakOut),
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: AppTheme.textPrimary,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  flex: 1,
+                                  child: Center(
+                                    child: Text(
+                                      _formatTime(breakIn),
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: AppTheme.textPrimary,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  flex: 1,
+                                  child: Center(
+                                    child: Text(
+                                      _formatTime(timeOut),
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: AppTheme.textPrimary,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  flex: 1,
+                                  child: Center(
+                                    child: Text(
+                                      lateStr,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: AppTheme.textPrimary,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  flex: 1,
+                                  child: Center(
+                                    child: Text(
+                                      underStr,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: AppTheme.textPrimary,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  flex: 2,
+                                  child: Center(
+                                    child: AttendanceRemarksChip(
+                                      remark: remark,
+                                      isHoliday:
+                                          r.status == 'holiday' ||
+                                          r.holidayId != null,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
           ),
       ],
     );

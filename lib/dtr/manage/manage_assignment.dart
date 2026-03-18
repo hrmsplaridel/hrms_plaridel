@@ -872,12 +872,13 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         children: [
           LayoutBuilder(
             builder: (context, constraints) {
-              final useRow = constraints.maxWidth >= 520;
+              final useRow = constraints.maxWidth >= 600;
               if (useRow) {
                 return Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
+                      flex: 1,
                       child: _buildFormDropdown(
                         'Department',
                         _selectedDeptId,
@@ -885,8 +886,9 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                         (v) => setState(() => _selectedDeptId = v),
                       ),
                     ),
-                    const SizedBox(width: 16),
+                    const SizedBox(width: 12),
                     Expanded(
+                      flex: 1,
                       child: _buildFormDropdown(
                         'Position',
                         _selectedPositionId,
@@ -894,8 +896,9 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                         (v) => setState(() => _selectedPositionId = v),
                       ),
                     ),
-                    const SizedBox(width: 16),
+                    const SizedBox(width: 12),
                     Expanded(
+                      flex: 1,
                       child: _buildFormDropdown(
                         'Shift',
                         _selectedShiftId,
@@ -1087,15 +1090,19 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         ),
         const SizedBox(height: 6),
         DropdownButtonFormField<String>(
-          initialValue: value,
+          value: value,
           decoration: _inputDecoration('Select'),
           hint: const Text('Select'),
+          isExpanded: true,
           items: [
             const DropdownMenuItem(value: null, child: Text('Select')),
             ...items.map(
               (e) => DropdownMenuItem(
                 value: e['id'] as String?,
-                child: Text(e['name'] as String? ?? ''),
+                child: Text(
+                  e['name'] as String? ?? '',
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ),
           ],

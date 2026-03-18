@@ -9,37 +9,51 @@ const protect = [authMiddleware];
 
 const SALT_ROUNDS = 10;
 
-// GET /api/employees - list all (?status=Active|Inactive|All, ?role=admin|employee|All)
+// GET /api/employees - list all (?status=Active|Inactive|All, ?role=admin|employee|All, ?department_id=uuid)
 router.get('/', protect, async (req, res) => {
   try {
     const status = req.query.status || 'Active';
     const roleFilter = req.query.role || 'All';
+    const departmentId = req.query.department_id || null;
 
     const conditions = [];
     const params = [];
     let i = 1;
 
+    const tbl = departmentId ? 'u' : 'users';
     if (status === 'Active') {
-      conditions.push('(is_active IS NULL OR is_active = true)');
+      conditions.push(`(${tbl}.is_active IS NULL OR ${tbl}.is_active = true)`);
     } else if (status === 'Inactive') {
-      conditions.push('is_active = false');
+      conditions.push(`${tbl}.is_active = false`);
     }
     if (roleFilter === 'Admin') {
-      conditions.push(`role = $${i++}`);
+      conditions.push(`${tbl}.role = $${i++}`);
       params.push('admin');
     } else if (roleFilter === 'User' || roleFilter === 'Employee') {
-      conditions.push(`role = $${i++}`);
+      conditions.push(`${tbl}.role = $${i++}`);
       params.push('employee');
     }
+    if (departmentId) {
+      conditions.push(`${tbl}.id IN (
+        SELECT DISTINCT a.employee_id FROM assignments a
+        WHERE a.department_id = $${i}
+          AND (a.is_active IS NULL OR a.is_active = true)
+          AND a.effective_from <= CURRENT_DATE
+          AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
+      )`);
+      params.push(departmentId);
+      i++;
+    }
 
+    const fromClause = departmentId ? 'FROM users u' : 'FROM users';
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const result = await pool.query(
-      `SELECT id, employee_number, full_name, role, email, is_active, avatar_path, middle_name, suffix, sex, date_of_birth, contact_number, address,
-              employment_type, salary_grade, date_hired, employment_status
-       FROM users
+      `SELECT ${tbl}.id, ${tbl}.employee_number, ${tbl}.full_name, ${tbl}.role, ${tbl}.email, ${tbl}.is_active, ${tbl}.avatar_path, ${tbl}.middle_name, ${tbl}.suffix, ${tbl}.sex, ${tbl}.date_of_birth, ${tbl}.contact_number, ${tbl}.address,
+              ${tbl}.employment_type, ${tbl}.salary_grade, ${tbl}.date_hired, ${tbl}.employment_status
+       ${fromClause}
        ${where}
-       ORDER BY full_name`,
+       ORDER BY ${tbl}.full_name`,
       params
     );
 

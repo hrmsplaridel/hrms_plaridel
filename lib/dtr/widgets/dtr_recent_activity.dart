@@ -15,7 +15,12 @@ class DtrRecentActivity extends StatelessWidget {
 
   static String _formatTime(DateTime? dt) {
     if (dt == null) return '—';
-    return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    final local = dt.toLocal();
+    final h = local.hour;
+    final m = local.minute;
+    final ampm = h >= 12 ? 'PM' : 'AM';
+    final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+    return '$h12:${m.toString().padLeft(2, '0')} $ampm';
   }
 
   static String _formatDate(DateTime d) {

@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../api/client.dart';
@@ -39,6 +40,13 @@ class EmployeeOption {
       : '—';
 }
 
+/// Simple department for admin filters.
+class DepartmentOption {
+  const DepartmentOption({required this.id, required this.name});
+  final String id;
+  final String name;
+}
+
 /// DTR state and operations. Used by admin DTR module and employee clock in/attendance.
 /// Current user id is set via [setUserFromApi] (e.g. from AuthProvider after API login).
 class DtrProvider extends ChangeNotifier {
@@ -47,6 +55,7 @@ class DtrProvider extends ChangeNotifier {
   /// Current user id (from API auth). Set via setUserFromApi(auth.user?.id) when using API login.
   String? _userId;
   String? get userId => _userId;
+
   /// For compatibility: code that checked user != null can use userId != null.
   bool get hasUser => _userId != null;
 
@@ -58,6 +67,9 @@ class DtrProvider extends ChangeNotifier {
 
   List<EmployeeOption> _employees = [];
   List<EmployeeOption> get employees => List.unmodifiable(_employees);
+
+  List<DepartmentOption> _departments = [];
+  List<DepartmentOption> get departments => List.unmodifiable(_departments);
 
   bool _loading = false;
   bool get loading => _loading;
@@ -87,9 +99,33 @@ class DtrProvider extends ChangeNotifier {
   String? _filterUserId;
   String? get filterUserId => _filterUserId;
 
+  String? _filterDepartmentId;
+  String? get filterDepartmentId => _filterDepartmentId;
+
   /// Today's record for current user (for clock in/out UI).
   TimeRecord? _todayRecord;
   TimeRecord? get todayRecord => _todayRecord;
+
+  /// Shift end time in minutes from midnight (from /my-shift-today). Null = no shift or no restriction.
+  int? _myShiftEndMinutes;
+  int? get myShiftEndMinutes => _myShiftEndMinutes;
+
+  /// True if current time is past shift end (PM In would be blocked).
+  bool get isPmInPastShiftEnd {
+    if (_myShiftEndMinutes == null) return false;
+    final now = DateTime.now();
+    return now.hour * 60 + now.minute > _myShiftEndMinutes!;
+  }
+
+  /// Format shift end as "H:MM AM/PM" for display.
+  String? get myShiftEndFormatted {
+    if (_myShiftEndMinutes == null) return null;
+    final h = _myShiftEndMinutes! ~/ 60;
+    final m = _myShiftEndMinutes! % 60;
+    final isPm = h >= 12;
+    final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+    return '${h12}:${m.toString().padLeft(2, '0')} ${isPm ? 'PM' : 'AM'}';
+  }
 
   /// Set current user id from API auth (e.g. AuthProvider.user?.id). Call after login or when restoring session.
   void setUserFromApi(String? id) {
@@ -130,6 +166,7 @@ class DtrProvider extends ChangeNotifier {
     DateTime? startDate,
     DateTime? endDate,
     String? userId,
+    String? departmentId,
     int? limit,
   }) async {
     _loading = true;
@@ -140,10 +177,12 @@ class DtrProvider extends ChangeNotifier {
       _filterStart = startDate;
       _filterEnd = endDate;
       _filterUserId = userId;
+      _filterDepartmentId = departmentId;
       final list = await TimeRecordRepo.instance.listForAdmin(
         startDate: startDate,
         endDate: endDate,
         userId: userId,
+        departmentId: departmentId,
         limit: limit,
       );
       _timeRecords = list;
@@ -204,12 +243,31 @@ class DtrProvider extends ChangeNotifier {
     }
   }
 
-  /// Load employee list for admin filter.
-  Future<void> loadEmployees() async {
+  /// Load current user's shift end time for today (for PM In validation).
+  Future<void> loadMyShiftToday() async {
     try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/dtr-daily-summary/my-shift-today',
+      );
+      final data = res.data;
+      _myShiftEndMinutes = data?['end_minutes'] as int?;
+      notifyListeners();
+    } catch (_) {
+      _myShiftEndMinutes = null;
+      notifyListeners();
+    }
+  }
+
+  /// Load employee list for admin filter. Optional [departmentId] filters to employees in that department.
+  Future<void> loadEmployees({String? departmentId}) async {
+    try {
+      final params = <String, dynamic>{'role': 'User', 'status': 'Active'};
+      if (departmentId != null && departmentId.isNotEmpty) {
+        params['department_id'] = departmentId;
+      }
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/employees',
-        queryParameters: {'role': 'User', 'status': 'Active'},
+        queryParameters: params,
       );
       final data = res.data ?? [];
       _employees = data.map((e) {
@@ -230,7 +288,30 @@ class DtrProvider extends ChangeNotifier {
     }
   }
 
-  /// Clock in for current user.
+  /// Load department list for admin filter.
+  Future<void> loadDepartments() async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/departments',
+      );
+      final data = res.data ?? [];
+      _departments = data
+          .map((e) {
+            final m = e as Map;
+            final id = m['id']?.toString();
+            final name = m['name']?.toString() ?? '—';
+            return id != null ? DepartmentOption(id: id, name: name) : null;
+          })
+          .whereType<DepartmentOption>()
+          .toList();
+      notifyListeners();
+    } catch (_) {
+      _departments = [];
+      notifyListeners();
+    }
+  }
+
+  /// Clock in (AM In) for current user.
   Future<bool> clockIn() async {
     final uid = _userId;
     if (uid == null) return false;
@@ -251,9 +332,93 @@ class DtrProvider extends ChangeNotifier {
         userId: uid,
         recordDate: today,
         timeIn: now,
+        breakOut: null,
+        breakIn: null,
         timeOut: null,
         totalHours: null,
         status: 'present',
+      );
+      await TimeRecordRepo.instance.insert(record);
+      await loadTodayRecord();
+      if (_filterUserId == null && _filterStart == null) {
+        await loadTimeRecordsForAdmin();
+      }
+      _loading = false;
+      notifyListeners();
+      return true;
+    } on DioException catch (e) {
+      _error = (e.response?.data is Map && e.response?.data['error'] != null)
+          ? e.response!.data['error'] as String
+          : e.message ?? 'Clock-in failed.';
+      _loading = false;
+      notifyListeners();
+      return false;
+    } catch (e) {
+      _error = e.toString();
+      _loading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Clock AM Out (lunch out).
+  Future<bool> clockAmOut() async {
+    final uid = _userId;
+    if (uid == null) return false;
+    final existing =
+        _todayRecord ?? await TimeRecordRepo.instance.getTodayForUser(uid);
+    if (existing == null || existing.breakOut != null) {
+      _error = existing == null
+          ? 'No clock-in found for today.'
+          : 'Already clocked out (AM Out).';
+      notifyListeners();
+      return false;
+    }
+    _loading = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final now = DateTime.now();
+      final updated = existing.copyWith(breakOut: now);
+      await TimeRecordRepo.instance.update(updated);
+      await loadTodayRecord();
+      await loadTimeRecordsForUser();
+      _loading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      _loading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// PM In as first punch (afternoon arrival) - no AM punch, AM is absent.
+  Future<bool> clockPmInAsFirst() async {
+    final uid = _userId;
+    if (uid == null) return false;
+    final existing = await TimeRecordRepo.instance.getTodayForUser(uid);
+    if (existing != null) {
+      _error = 'Already have a record for today. Use PM In or PM Out.';
+      notifyListeners();
+      return false;
+    }
+    _loading = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final record = TimeRecord(
+        userId: uid,
+        recordDate: today,
+        timeIn: null,
+        breakOut: null,
+        breakIn: now,
+        timeOut: null,
+        totalHours: null,
+        status: 'absent',
       );
       await TimeRecordRepo.instance.insert(record);
       await loadTodayRecord();
@@ -271,7 +436,51 @@ class DtrProvider extends ChangeNotifier {
     }
   }
 
-  /// Clock out for current user.
+  /// Clock PM In (return from lunch).
+  Future<bool> clockPmIn() async {
+    final uid = _userId;
+    if (uid == null) return false;
+    final existing =
+        _todayRecord ?? await TimeRecordRepo.instance.getTodayForUser(uid);
+    if (existing == null ||
+        existing.breakOut == null ||
+        existing.breakIn != null) {
+      _error = existing == null
+          ? 'No clock-in found for today.'
+          : existing.breakOut == null
+          ? 'Please clock AM Out first.'
+          : 'Already clocked in (PM In).';
+      notifyListeners();
+      return false;
+    }
+    _loading = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final now = DateTime.now();
+      final updated = existing.copyWith(breakIn: now);
+      await TimeRecordRepo.instance.update(updated);
+      await loadTodayRecord();
+      await loadTimeRecordsForUser();
+      _loading = false;
+      notifyListeners();
+      return true;
+    } on DioException catch (e) {
+      _error = (e.response?.data is Map && e.response?.data['error'] != null)
+          ? e.response!.data['error'] as String
+          : e.message ?? 'PM clock-in failed.';
+      _loading = false;
+      notifyListeners();
+      return false;
+    } catch (e) {
+      _error = e.toString();
+      _loading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Clock out (PM Out) for current user.
   Future<bool> clockOut() async {
     final uid = _userId;
     if (uid == null) return false;
@@ -284,6 +493,11 @@ class DtrProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+    if (existing.breakOut != null && existing.breakIn == null) {
+      _error = 'Please clock PM In first.';
+      notifyListeners();
+      return false;
+    }
     _loading = true;
     _error = null;
     notifyListeners();
@@ -291,7 +505,16 @@ class DtrProvider extends ChangeNotifier {
       final now = DateTime.now();
       double? hours;
       if (existing.timeIn != null) {
-        hours = now.difference(existing.timeIn!).inMinutes / 60.0;
+        if (existing.breakOut != null && existing.breakIn != null) {
+          hours =
+              (existing.breakOut!.difference(existing.timeIn!).inMinutes +
+                  now.difference(existing.breakIn!).inMinutes) /
+              60.0;
+        } else {
+          hours = now.difference(existing.timeIn!).inMinutes / 60.0;
+        }
+      } else if (existing.breakIn != null) {
+        hours = now.difference(existing.breakIn!).inMinutes / 60.0;
       }
       final updated = existing.copyWith(timeOut: now, totalHours: hours);
       await TimeRecordRepo.instance.update(updated);

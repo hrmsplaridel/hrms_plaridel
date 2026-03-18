@@ -12,6 +12,7 @@ class _HolidayRecord {
     this.description,
     this.isActive = true,
     this.isRecurring = false,
+    this.coverage = 'whole_day',
   });
   final String id;
   final DateTime holidayDate;
@@ -20,6 +21,7 @@ class _HolidayRecord {
   final String? description;
   final bool isActive;
   final bool isRecurring;
+  final String coverage;
 }
 
 class ManageHoliday extends StatefulWidget {
@@ -35,6 +37,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
   final _descriptionController = TextEditingController();
   DateTime? _selectedDate;
   String _holidayType = 'regular';
+  String _coverage = 'whole_day';
   bool _isActive = true;
   bool _isRecurring = false;
 
@@ -72,6 +75,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
           description: m['description'] as String?,
           isActive: m['is_active'] as bool? ?? true,
           isRecurring: m['recurring'] as bool? ?? false,
+          coverage: m['coverage'] as String? ?? 'whole_day',
         );
       }).toList();
     } on DioException catch (e) {
@@ -88,6 +92,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
       _descriptionController.text = h.description ?? '';
       _selectedDate = h.holidayDate;
       _holidayType = h.holidayType;
+      _coverage = h.coverage;
       _isActive = h.isActive;
       _isRecurring = h.isRecurring;
     });
@@ -100,6 +105,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
       _descriptionController.clear();
       _selectedDate = null;
       _holidayType = 'regular';
+      _coverage = 'whole_day';
       _isActive = true;
       _isRecurring = false;
     });
@@ -201,6 +207,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
           'holiday_date': _dateToYyyyMmDd(_selectedDate!),
           'name': name,
           'holiday_type': _holidayType,
+          'coverage': _holidayType == 'work_suspension' ? _coverage : 'whole_day',
           'description': _descriptionController.text.trim().isEmpty
               ? null
               : _descriptionController.text.trim(),
@@ -400,7 +407,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
                     ),
                   ),
                   subtitle: Text(
-                    '${h.holidayDate.month.toString().padLeft(2, '0')}-${h.holidayDate.day.toString().padLeft(2, '0')}${h.isRecurring ? ' (every year)' : ' · ${h.holidayDate.year}'} · ${h.holidayType}',
+                    '${h.holidayDate.month.toString().padLeft(2, '0')}-${h.holidayDate.day.toString().padLeft(2, '0')}${h.isRecurring ? ' (every year)' : ' · ${h.holidayDate.year}'} · ${h.holidayType}${h.holidayType == 'work_suspension' && h.coverage != 'whole_day' ? ' · ${h.coverage}' : ''}',
                     style: TextStyle(
                       fontSize: 12,
                       color: AppTheme.textSecondary,
@@ -540,13 +547,50 @@ class _ManageHolidayState extends State<ManageHoliday> {
                 borderRadius: BorderRadius.circular(8),
               ),
             ),
-            items: [
-              'regular',
-              'special',
-              'local',
-            ].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
-            onChanged: (v) => setState(() => _holidayType = v ?? 'regular'),
+            items: const [
+              DropdownMenuItem(value: 'regular', child: Text('Regular')),
+              DropdownMenuItem(value: 'special', child: Text('Special')),
+              DropdownMenuItem(value: 'local', child: Text('Local')),
+              DropdownMenuItem(value: 'work_suspension', child: Text('Work suspension')),
+            ],
+            onChanged: (v) {
+              setState(() {
+                _holidayType = v ?? 'regular';
+                if (_holidayType != 'work_suspension') _coverage = 'whole_day';
+              });
+            },
           ),
+          if (_holidayType == 'work_suspension') ...[
+            const SizedBox(height: 16),
+            Text(
+              'Coverage',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 6),
+            DropdownButtonFormField<String>(
+              value: _coverage,
+              decoration: InputDecoration(
+                filled: true,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              items: const [
+                DropdownMenuItem(value: 'whole_day', child: Text('Whole day')),
+                DropdownMenuItem(value: 'am_only', child: Text('AM only')),
+                DropdownMenuItem(value: 'pm_only', child: Text('PM only')),
+              ],
+              onChanged: (v) => setState(() => _coverage = v ?? 'whole_day'),
+            ),
+          ],
           const SizedBox(height: 16),
           Text(
             'Description (optional)',

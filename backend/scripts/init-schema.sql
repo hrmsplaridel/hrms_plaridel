@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS shifts (
 
   start_time TIME NOT NULL,
   end_time TIME NOT NULL,
+  break_end TIME,
 
   grace_period_minutes INT NOT NULL DEFAULT 0 CHECK (grace_period_minutes >= 0),
 
@@ -119,12 +120,25 @@ CREATE TABLE IF NOT EXISTS attendance_policies (
   name TEXT NOT NULL UNIQUE,
   description TEXT,
 
-  grace_period_minutes INT NOT NULL DEFAULT 0 CHECK (grace_period_minutes >= 0),
-  max_late_per_month_minutes INT CHECK (max_late_per_month_minutes IS NULL OR max_late_per_month_minutes >= 0),
+  -- Structured computation settings (Shift holds grace period; keep it out of policy)
+  work_hours_per_day NUMERIC(4,2) NOT NULL DEFAULT 8 CHECK (work_hours_per_day > 0),
+  use_equivalent_day_conversion BOOLEAN NOT NULL DEFAULT true,
 
-  late_deduction_rule TEXT,
-  absent_deduction_rule TEXT,
-  undertime_rule TEXT,
+  -- Late settings
+  deduct_late BOOLEAN NOT NULL DEFAULT false,
+  max_late_minutes_per_month INT CHECK (max_late_minutes_per_month IS NULL OR max_late_minutes_per_month >= 0),
+  convert_late_to_equivalent_day BOOLEAN NOT NULL DEFAULT true,
+
+  -- Undertime settings
+  deduct_undertime BOOLEAN NOT NULL DEFAULT true,
+  convert_undertime_to_equivalent_day BOOLEAN NOT NULL DEFAULT true,
+
+  -- Absence settings
+  absent_equals_full_day_deduction BOOLEAN NOT NULL DEFAULT true,
+
+  -- Advanced
+  combine_late_and_undertime BOOLEAN NOT NULL DEFAULT false,
+  deduction_multiplier NUMERIC(6,3) NOT NULL DEFAULT 1.0 CHECK (deduction_multiplier > 0),
 
   is_default BOOLEAN NOT NULL DEFAULT false,
   is_active BOOLEAN NOT NULL DEFAULT true,
@@ -164,6 +178,7 @@ CREATE TABLE IF NOT EXISTS assignments (
 
   override_start_time TIME,
   override_end_time TIME,
+  override_break_end TIME,
 
   effective_from DATE NOT NULL,
   effective_to DATE,
@@ -219,10 +234,12 @@ CREATE TABLE IF NOT EXISTS holidays (
   holiday_date DATE NOT NULL,
   name TEXT NOT NULL,
   holiday_type TEXT NOT NULL DEFAULT 'regular'
-    CHECK (holiday_type IN ('regular', 'special', 'local')),
+    CHECK (holiday_type IN ('regular', 'special', 'local', 'work_suspension')),
   description TEXT,
   is_active BOOLEAN NOT NULL DEFAULT true,
   recurring BOOLEAN NOT NULL DEFAULT false,
+  coverage TEXT NOT NULL DEFAULT 'whole_day'
+    CHECK (coverage IN ('whole_day', 'am_only', 'pm_only')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
   CONSTRAINT uq_holiday_date_name UNIQUE (holiday_date, name)
@@ -325,6 +342,7 @@ CREATE TABLE IF NOT EXISTS dtr_daily_summary (
       'rest_day',
       'incomplete'
     )),
+  pm_status TEXT CHECK (pm_status IS NULL OR pm_status IN ('present', 'late')),
 
   source TEXT NOT NULL DEFAULT 'system'
     CHECK (source IN ('system', 'manual', 'adjusted')),
