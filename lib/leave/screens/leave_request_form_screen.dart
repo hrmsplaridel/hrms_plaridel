@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../providers/auth_provider.dart';
+import '../leave_provider.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
 
@@ -104,6 +106,36 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _otherPurposeDetailsController = TextEditingController(
       text: initial?.otherPurposeDetails ?? '',
     );
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _loadEmployeeAssignmentPrefill(),
+    );
+  }
+
+  Future<void> _loadEmployeeAssignmentPrefill() async {
+    final userId = context.read<AuthProvider>().user?.id;
+    if (userId == null) return;
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/assignments?employee_id=$userId&status=Active',
+      );
+      final data = res.data;
+      if (data == null || data.isEmpty) return;
+      final first = data.first as Map<String, dynamic>;
+      final departmentName = first['department_name'] as String?;
+      final positionName = first['position_name'] as String?;
+      if (!mounted) return;
+      if ((departmentName ?? '').trim().isNotEmpty &&
+          _officeDepartmentController.text.trim().isEmpty) {
+        _officeDepartmentController.text = departmentName!.trim();
+      }
+      if ((positionName ?? '').trim().isNotEmpty &&
+          _positionTitleController.text.trim().isEmpty) {
+        _positionTitleController.text = positionName!.trim();
+      }
+      setState(() {});
+    } catch (_) {
+      // Pre-fill is best-effort; leave fields editable
+    }
   }
 
   @override
@@ -686,6 +718,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
             controller: _locationDetailsController,
             label: 'Location details',
             validator: _usesLocationDetails ? _requiredValidator : null,
+            enabled: _usesLocationDetails,
           ),
           const SizedBox(height: 16),
           _paperSubheading('In case of Sick Leave:'),
@@ -716,6 +749,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
             validator: _leaveType == LeaveType.sickLeave
                 ? _requiredValidator
                 : null,
+            enabled: _leaveType == LeaveType.sickLeave,
           ),
           const SizedBox(height: 16),
           _paperSubheading('In case of Special Leave Benefits for Women:'),
@@ -725,6 +759,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
             validator: _leaveType == LeaveType.specialLeaveBenefitsForWomen
                 ? _requiredValidator
                 : null,
+            enabled: _leaveType == LeaveType.specialLeaveBenefitsForWomen,
           ),
           const SizedBox(height: 16),
           _paperSubheading('In case of Study Leave:'),
@@ -771,6 +806,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                     _studyPurpose == StudyLeavePurpose.otherPurpose
                 ? _requiredValidator
                 : null,
+            enabled: _leaveType == LeaveType.studyLeave,
           ),
           const SizedBox(height: 16),
           _paperSubheading('Other purpose:'),
@@ -801,6 +837,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
             controller: _otherPurposeDetailsController,
             label: 'Additional details / reason',
             maxLines: 2,
+            enabled: _leaveType == LeaveType.others,
           ),
         ],
       ),
@@ -1448,7 +1485,12 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         _showMessage(successMessage);
         Navigator.of(context).pop(true);
       } else {
-        _showMessage('Action could not be completed.');
+        final providerError = context.read<LeaveProvider>().error;
+        _showMessage(
+          providerError != null && providerError.trim().isNotEmpty
+              ? providerError
+              : 'Action could not be completed.',
+        );
       }
     } catch (e) {
       if (!mounted) return;
@@ -1644,13 +1686,15 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     String? Function(String?)? validator,
     int maxLines = 1,
     TextInputType? keyboardType,
+    bool enabled = true,
   }) {
     return TextFormField(
       controller: controller,
       validator: validator,
       maxLines: maxLines,
       keyboardType: keyboardType,
-      decoration: _inputDecoration(label),
+      readOnly: !enabled,
+      decoration: _inputDecoration(label).copyWith(enabled: enabled),
     );
   }
 

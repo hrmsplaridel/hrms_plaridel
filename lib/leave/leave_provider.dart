@@ -92,6 +92,15 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
+  /// Fetches leave balances for a user (e.g. for admin approval dialog).
+  Future<List<LeaveBalance>> fetchBalancesForUser(String userId) async {
+    try {
+      return await _repository.getBalancesForUser(userId);
+    } catch (_) {
+      return [];
+    }
+  }
+
   Future<void> loadMyRequests(
     String userId, {
     LeaveRequestStatus? status,
@@ -226,7 +235,9 @@ class LeaveProvider extends ChangeNotifier {
       _upsertRequest(saved);
       return saved;
     } catch (e) {
-      _error = e.toString();
+      _error = e is Exception && e.toString().replaceFirst('Exception: ', '').isNotEmpty
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
       return null;
     } finally {
       _submitting = false;

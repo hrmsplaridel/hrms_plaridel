@@ -5,6 +5,7 @@ import '../../landingpage/constants/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../leave_provider.dart';
 import '../leave_repository.dart';
+import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
 import '../widgets/leave_request_card.dart';
@@ -181,9 +182,26 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
   }
 
   Future<void> _approve(LeaveRequest request) async {
+    final userId = request.userId;
+    if (userId.isEmpty) {
+      _showMessage('Cannot determine employee for this request.');
+      return;
+    }
+    final balances = await context.read<LeaveProvider>().fetchBalancesForUser(
+      userId,
+    );
+    LeaveBalance? leaveBalance;
+    try {
+      leaveBalance = balances.firstWhere(
+        (b) => b.leaveType == request.leaveType,
+      );
+    } catch (_) {}
+
+    if (!mounted) return;
     final input = await showDialog<LeaveApprovalInput>(
       context: context,
-      builder: (_) => _ApproveDialog(request: request),
+      builder: (_) =>
+          _ApproveDialog(request: request, leaveBalance: leaveBalance),
     );
     if (input == null) return;
 
@@ -199,10 +217,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
       reviewerId: reviewerId,
       reviewerName: auth.displayName,
       hrRemarks: input.hrRemarks,
-      recommendationRemarks: input.recommendationRemarks,
       approvedDaysWithPay: input.approvedDaysWithPay,
       approvedDaysWithoutPay: input.approvedDaysWithoutPay,
-      approvedOtherDetails: input.approvedOtherDetails,
       reviewedAt: DateTime.now(),
     );
 
@@ -436,60 +452,60 @@ class _FilterBar extends StatelessWidget {
           return ConstrainedBox(
             constraints: BoxConstraints(maxWidth: constraints.maxWidth),
             child: Wrap(
-        spacing: 12,
-        runSpacing: 12,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          SizedBox(
-            width: 160,
-            child: DropdownButtonFormField<LeaveRequestStatus?>(
-              isExpanded: true,
-              initialValue: status,
-              decoration: _inputDecoration('Status'),
-              items: [
-                const DropdownMenuItem<LeaveRequestStatus?>(
-                  value: null,
-                  child: Text('All statuses'),
-                ),
-                ...LeaveRequestStatus.values.map(
-                  (value) => DropdownMenuItem<LeaveRequestStatus?>(
-                    value: value,
-                    child: Text(value.displayName),
+              spacing: 12,
+              runSpacing: 12,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                SizedBox(
+                  width: 160,
+                  child: DropdownButtonFormField<LeaveRequestStatus?>(
+                    isExpanded: true,
+                    initialValue: status,
+                    decoration: _inputDecoration('Status'),
+                    items: [
+                      const DropdownMenuItem<LeaveRequestStatus?>(
+                        value: null,
+                        child: Text('All statuses'),
+                      ),
+                      ...LeaveRequestStatus.values.map(
+                        (value) => DropdownMenuItem<LeaveRequestStatus?>(
+                          value: value,
+                          child: Text(value.displayName),
+                        ),
+                      ),
+                    ],
+                    onChanged: onStatusChanged,
                   ),
                 ),
-              ],
-              onChanged: onStatusChanged,
-            ),
-          ),
-          SizedBox(
-            width: 180,
-            child: DropdownButtonFormField<LeaveType?>(
-              isExpanded: true,
-              initialValue: leaveType,
-              decoration: _inputDecoration('Leave Type'),
-              items: [
-                const DropdownMenuItem<LeaveType?>(
-                  value: null,
-                  child: Text('All leave types'),
-                ),
-                ...LeaveType.values.map(
-                  (value) => DropdownMenuItem<LeaveType?>(
-                    value: value,
-                    child: Text(value.displayName),
+                SizedBox(
+                  width: 180,
+                  child: DropdownButtonFormField<LeaveType?>(
+                    isExpanded: true,
+                    initialValue: leaveType,
+                    decoration: _inputDecoration('Leave Type'),
+                    items: [
+                      const DropdownMenuItem<LeaveType?>(
+                        value: null,
+                        child: Text('All leave types'),
+                      ),
+                      ...LeaveType.values.map(
+                        (value) => DropdownMenuItem<LeaveType?>(
+                          value: value,
+                          child: Text(value.displayName),
+                        ),
+                      ),
+                    ],
+                    onChanged: onLeaveTypeChanged,
                   ),
                 ),
+                TextButton.icon(
+                  onPressed: onReset,
+                  icon: const Icon(Icons.filter_alt_off_rounded),
+                  label: const Text('Reset Filters'),
+                ),
               ],
-              onChanged: onLeaveTypeChanged,
             ),
-          ),
-          TextButton.icon(
-            onPressed: onReset,
-            icon: const Icon(Icons.filter_alt_off_rounded),
-            label: const Text('Reset Filters'),
-          ),
-        ],
-      ),
-            );
+          );
         },
       ),
     );
@@ -732,9 +748,10 @@ class _DetailGrid extends StatelessWidget {
 }
 
 class _ApproveDialog extends StatefulWidget {
-  const _ApproveDialog({required this.request});
+  const _ApproveDialog({required this.request, this.leaveBalance});
 
   final LeaveRequest request;
+  final LeaveBalance? leaveBalance;
 
   @override
   State<_ApproveDialog> createState() => _ApproveDialogState();
@@ -744,50 +761,77 @@ class _ApproveDialogState extends State<_ApproveDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _withPayController;
   late final TextEditingController _withoutPayController;
-  late final TextEditingController _otherDetailsController;
-  late final TextEditingController _hrRemarksController;
-  late final TextEditingController _recommendationController;
+  late final TextEditingController _remarksController;
+
+  double get _totalRequested => widget.request.workingDaysApplied ?? 0.0;
 
   @override
   void initState() {
     super.initState();
     _withPayController = TextEditingController(
-      text: widget.request.workingDaysApplied?.toStringAsFixed(1) ?? '',
+      text: _totalRequested.toStringAsFixed(1),
     );
-    _withoutPayController = TextEditingController();
-    _otherDetailsController = TextEditingController();
-    _hrRemarksController = TextEditingController();
-    _recommendationController = TextEditingController();
+    _withoutPayController = TextEditingController(text: '0.0');
+    _remarksController = TextEditingController();
   }
 
   @override
   void dispose() {
     _withPayController.dispose();
     _withoutPayController.dispose();
-    _otherDetailsController.dispose();
-    _hrRemarksController.dispose();
-    _recommendationController.dispose();
+    _remarksController.dispose();
     super.dispose();
+  }
+
+  String? _validateApprovedDays(String? value) {
+    final withPay = _parseDouble(_withPayController.text) ?? 0;
+    final withoutPay = _parseDouble(_withoutPayController.text) ?? 0;
+    if (withPay < 0 || withoutPay < 0) {
+      return 'Days cannot be negative.';
+    }
+    final sum = withPay + withoutPay;
+    if (sum > _totalRequested) {
+      return 'Approved with pay + without pay must not exceed total requested ($_totalRequested days).';
+    }
+    if (sum != _totalRequested) {
+      return 'Approved days must equal total requested ($_totalRequested days).';
+    }
+    return null;
   }
 
   @override
   Widget build(BuildContext context) {
+    final balanceLabel = widget.leaveBalance != null
+        ? '${widget.leaveBalance!.leaveType.displayName}: ${widget.leaveBalance!.remainingDays.toStringAsFixed(1)} days remaining'
+        : 'No balance record for this leave type';
+
     return AlertDialog(
       title: const Text('Approve Leave Request'),
       content: SizedBox(
-        width: 520,
+        width: 440,
         child: Form(
           key: _formKey,
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Text(
+                  'Total Requested: ${_totalRequested.toStringAsFixed(1)} days',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 20),
                 _DialogField(
                   controller: _withPayController,
                   label: 'Approved Days With Pay',
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
+                  validator: (_) => _validateApprovedDays(null),
                 ),
                 const SizedBox(height: 12),
                 _DialogField(
@@ -796,27 +840,48 @@ class _ApproveDialogState extends State<_ApproveDialog> {
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
+                  validator: (_) => _validateApprovedDays(null),
                 ),
                 const SizedBox(height: 12),
                 _DialogField(
-                  controller: _otherDetailsController,
-                  label: 'Other Approval Details',
+                  controller: _remarksController,
+                  label: 'Remarks',
                   maxLines: null,
                   minLines: 2,
                 ),
-                const SizedBox(height: 12),
-                _DialogField(
-                  controller: _recommendationController,
-                  label: 'Recommendation Remarks',
-                  maxLines: null,
-                  minLines: 3,
-                ),
-                const SizedBox(height: 12),
-                _DialogField(
-                  controller: _hrRemarksController,
-                  label: 'HR Remarks',
-                  maxLines: null,
-                  minLines: 3,
+                const SizedBox(height: 16),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 12,
+                    horizontal: 14,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.offWhite,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.black.withOpacity(0.08)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Current Leave Balance:',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        balanceLabel,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -839,11 +904,7 @@ class _ApproveDialogState extends State<_ApproveDialog> {
                 approvedDaysWithoutPay: _parseDouble(
                   _withoutPayController.text,
                 ),
-                approvedOtherDetails: _trimOrNull(_otherDetailsController.text),
-                recommendationRemarks: _trimOrNull(
-                  _recommendationController.text,
-                ),
-                hrRemarks: _trimOrNull(_hrRemarksController.text),
+                hrRemarks: _trimOrNull(_remarksController.text),
               ),
             );
           },

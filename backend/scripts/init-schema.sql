@@ -256,21 +256,50 @@ CREATE TABLE IF NOT EXISTS leave_types (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Seed leave types (names must match Flutter LeaveType enum .value for API lookup).
+INSERT INTO leave_types (name, description, is_active)
+VALUES
+  ('vacationLeave', 'Vacation Leave', true),
+  ('mandatoryForcedLeave', 'Mandatory/Forced Leave', true),
+  ('sickLeave', 'Sick Leave', true),
+  ('maternityLeave', 'Maternity Leave', true),
+  ('paternityLeave', 'Paternity Leave', true),
+  ('specialPrivilegeLeave', 'Special Privilege Leave', true),
+  ('soloParentLeave', 'Solo Parent Leave', true),
+  ('studyLeave', 'Study Leave', true),
+  ('tenDayVawcLeave', '10-Day VAWC Leave', true),
+  ('rehabilitationPrivilege', 'Rehabilitation Privilege', true),
+  ('specialLeaveBenefitsForWomen', 'Special Leave Benefits for Women', true),
+  ('specialEmergencyCalamityLeave', 'Special Emergency (Calamity) Leave', true),
+  ('adoptionLeave', 'Adoption Leave', true),
+  ('others', 'Others', true)
+ON CONFLICT (name) DO NOTHING;
+
 -- =========================================
 -- LEAVE REQUESTS
 -- =========================================
 CREATE TABLE IF NOT EXISTS leave_requests (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  -- For forward compatibility with Flutter model + API payloads.
+  -- Keep employee_id as the canonical FK used across existing DTR queries.
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
   leave_type_id UUID REFERENCES leave_types(id) ON DELETE SET NULL,
 
   start_date DATE NOT NULL,
   end_date DATE NOT NULL,
   total_days NUMERIC(5,2),
+  number_of_days NUMERIC(5,2),
 
   reason TEXT,
+  -- Flexible payload for form fields (office_department, position_title, commutation, etc.)
+  details JSONB,
   status TEXT NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
+    CHECK (status IN ('draft', 'pending', 'returned', 'approved', 'rejected', 'cancelled')),
+
+  reviewer_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  reviewer_remarks TEXT,
+  reviewed_at TIMESTAMPTZ,
 
   approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
   approved_at TIMESTAMPTZ,
@@ -279,7 +308,10 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
   CONSTRAINT chk_leave_dates CHECK (end_date >= start_date),
-  CONSTRAINT chk_leave_total_days CHECK (total_days IS NULL OR total_days >= 0)
+  CONSTRAINT chk_leave_total_days CHECK (
+    (total_days IS NULL OR total_days >= 0)
+    AND (number_of_days IS NULL OR number_of_days >= 0)
+  )
 );
 
 -- =========================================
@@ -466,6 +498,7 @@ CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_employee_id ON dtr_daily_summar
 CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_date ON dtr_daily_summary(attendance_date);
 CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_status ON dtr_daily_summary(status);
 CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_assignment_id ON dtr_daily_summary(assignment_id);
+CREATE INDEX IF NOT EXISTS idx_dtr_leave_request ON dtr_daily_summary(leave_request_id);
 
 CREATE INDEX IF NOT EXISTS idx_dtr_corrections_employee_id ON dtr_corrections(employee_id);
 CREATE INDEX IF NOT EXISTS idx_dtr_corrections_status ON dtr_corrections(status);

@@ -10,6 +10,8 @@ import '../../../dtr/widgets/attendance_display.dart';
 import '../../../docutracker/docutracker_main.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
+import '../../../leave/leave_provider.dart';
+import '../../../leave/models/leave_type.dart';
 import '../../../widgets/user_avatar.dart';
 import '../../shared/screens/profile_and_settings_page.dart';
 
@@ -721,6 +723,10 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
       final dtr = context.read<DtrProvider>();
       dtr.loadTodayRecord();
       dtr.loadMyShiftToday();
+      final uid = context.read<AuthProvider>().user?.id;
+      if (uid != null && uid.isNotEmpty) {
+        context.read<LeaveProvider>().loadMyLeaveData(uid);
+      }
       final now = DateTime.now();
       final start = DateTime(now.year, now.month, 1);
       final end = DateTime(now.year, now.month + 1, 0);
@@ -1207,77 +1213,97 @@ class _AttendanceCard extends StatelessWidget {
 class _LeaveBalanceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Leave Balance',
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            '—',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 28,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Remaining Days',
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Icon(
-                Icons.arrow_downward_rounded,
-                size: 16,
-                color: AppTheme.textSecondary,
-              ),
-              const SizedBox(width: 6),
-              Text(
-                'Vacation —',
-                style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+    return Consumer<LeaveProvider>(
+      builder: (context, leave, _) {
+        final totalRemaining = leave.balances.fold<double>(
+          0,
+          (sum, b) => sum + b.remainingDays,
+        );
+        final vacation = leave.balances
+            .where((b) => b.leaveType == LeaveType.vacationLeave)
+            .toList();
+        final sick = leave.balances
+            .where((b) => b.leaveType == LeaveType.sickLeave)
+            .toList();
+        final vacationDays = vacation.isNotEmpty
+            ? vacation.first.remainingDays
+            : null;
+        final sickDays = sick.isNotEmpty ? sick.first.remainingDays : null;
+
+        final hasData = leave.balances.isNotEmpty;
+        return Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: AppTheme.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
-                Icons.medical_services_outlined,
-                size: 16,
-                color: AppTheme.textSecondary,
-              ),
-              const SizedBox(width: 6),
               Text(
-                'Sick —',
-                style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                'Leave Balance',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                hasData ? totalRemaining.toStringAsFixed(1) : '—',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 28,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Remaining Days',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Icon(
+                    Icons.arrow_downward_rounded,
+                    size: 16,
+                    color: AppTheme.textSecondary,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Vacation ${vacationDays != null ? vacationDays.toStringAsFixed(1) : '—'}',
+                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Icon(
+                    Icons.medical_services_outlined,
+                    size: 16,
+                    color: AppTheme.textSecondary,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Sick ${sickDays != null ? sickDays.toStringAsFixed(1) : '—'}',
+                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                  ),
+                ],
               ),
             ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
