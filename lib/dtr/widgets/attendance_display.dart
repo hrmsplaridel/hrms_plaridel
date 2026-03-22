@@ -8,13 +8,24 @@ import '../../landingpage/constants/app_theme.dart';
 /// Single attendance remark. Prefer record.attendanceRemark (backend); fallback for hardcoded/preview.
 /// For holidays, uses holiday name when available.
 String getAttendanceRemark(TimeRecord r) {
-  if (r.attendanceRemark != null && r.attendanceRemark!.isNotEmpty) return r.attendanceRemark!;
-  if (r.status == 'holiday' || r.holidayId != null) return r.holidayName ?? 'Holiday';
-  if (r.status == 'on_leave' || r.leaveRequestId != null) return 'Leave';
-  final hasAnyLog = r.timeIn != null || r.breakOut != null || r.breakIn != null || r.timeOut != null;
+  if (r.attendanceRemark != null && r.attendanceRemark!.isNotEmpty)
+    return r.attendanceRemark!;
+  if (r.status == 'holiday' || r.holidayId != null)
+    return r.holidayName ?? 'Holiday';
+  if (r.status == 'on_leave' || r.leaveRequestId != null)
+    return r.leaveTypeName ?? 'Leave';
+  final hasAnyLog =
+      r.timeIn != null ||
+      r.breakOut != null ||
+      r.breakIn != null ||
+      r.timeOut != null;
   if (!hasAnyLog) return 'Absent';
   if (r.status == 'invalid') return 'Invalid Log';
-  final hasAllFour = r.timeIn != null && r.breakOut != null && r.breakIn != null && r.timeOut != null;
+  final hasAllFour =
+      r.timeIn != null &&
+      r.breakOut != null &&
+      r.breakIn != null &&
+      r.timeOut != null;
   if (!hasAllFour) return 'Incomplete';
   final late = (r.lateMinutes ?? 0) > 0;
   final under = (r.undertimeMinutes ?? 0) > 0;
@@ -26,14 +37,31 @@ String getAttendanceRemark(TimeRecord r) {
 
 /// Display late minutes: "X min", "0 min", or "—" for holiday/leave.
 String formatLateMinutes(TimeRecord r) {
-  if (r.status == 'holiday' || r.holidayId != null || r.status == 'on_leave' || r.leaveRequestId != null) return '—';
+  if (r.status == 'holiday' ||
+      r.holidayId != null ||
+      r.status == 'on_leave' ||
+      r.leaveRequestId != null)
+    return '—';
   final m = r.lateMinutes ?? 0;
   return m == 0 ? '0 min' : '$m min';
 }
 
+/// Text color for an attendance remark (for plain text display, e.g. DTR reports table).
+Color colorForRemarkText(String remark, {bool isHoliday = false}) {
+  final (color, _) = AttendanceRemarksChip.colorsForRemark(
+    remark,
+    isHoliday: isHoliday,
+  );
+  return color;
+}
+
 /// Display undertime minutes: "X min", "0 min", or "—" for holiday/leave.
 String formatUndertimeMinutes(TimeRecord r) {
-  if (r.status == 'holiday' || r.holidayId != null || r.status == 'on_leave' || r.leaveRequestId != null) return '—';
+  if (r.status == 'holiday' ||
+      r.holidayId != null ||
+      r.status == 'on_leave' ||
+      r.leaveRequestId != null)
+    return '—';
   final m = r.undertimeMinutes ?? 0;
   return m == 0 ? '0 min' : '$m min';
 }
@@ -51,7 +79,7 @@ class AttendanceRemarksChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (color, bg) = _colorsForRemark(remark, isHoliday: isHoliday);
+    final (color, bg) = colorsForRemark(remark, isHoliday: isHoliday);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -71,7 +99,10 @@ class AttendanceRemarksChip extends StatelessWidget {
     );
   }
 
-  static (Color color, Color bg) _colorsForRemark(String r, {bool isHoliday = false}) {
+  static (Color color, Color bg) colorsForRemark(
+    String r, {
+    bool isHoliday = false,
+  }) {
     if (isHoliday) return (Colors.purple.shade700, Colors.purple.shade50);
     switch (r) {
       case 'On Time':
@@ -93,6 +124,8 @@ class AttendanceRemarksChip extends StatelessWidget {
       case 'Invalid Log':
         return (Colors.red.shade900, Colors.red.shade100);
       default:
+        if (r.toLowerCase().contains('leave'))
+          return (Colors.blue.shade700, Colors.blue.shade50);
         return (AppTheme.textPrimary, AppTheme.lightGray.withOpacity(0.5));
     }
   }

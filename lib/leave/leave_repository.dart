@@ -143,4 +143,7 @@ abstract class LeaveRepository {
 
   /// Optional hook for removing a supporting attachment.
   Future<LeaveRequest> removeAttachment(String requestId);
+
+  /// Fetch attachment bytes for viewing/downloading. Returns null if none or not supported.
+  Future<List<int>?> getAttachmentBytes(String requestId) => Future.value(null);
 }

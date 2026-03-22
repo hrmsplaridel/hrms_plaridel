@@ -9,12 +9,50 @@ const protect = [authMiddleware];
 
 const SALT_ROUNDS = 10;
 
-// GET /api/employees - list all (?status=Active|Inactive|All, ?role=admin|employee|All, ?department_id=uuid)
+// GET /api/employees - list all (?status=Active|Inactive|All, ?role=admin|employee|All, ?department_id=uuid, ?biometric_user_ids=id1,id2,id3)
 router.get('/', protect, async (req, res) => {
   try {
     const status = req.query.status || 'Active';
     const roleFilter = req.query.role || 'All';
     const departmentId = req.query.department_id || null;
+    const biometricUserIdsRaw = req.query.biometric_user_ids;
+
+    // When biometric_user_ids is provided, return only matching users (exact match).
+    if (biometricUserIdsRaw && typeof biometricUserIdsRaw === 'string') {
+      const ids = biometricUserIdsRaw.split(',').map((s) => s.trim()).filter(Boolean);
+      if (ids.length > 0) {
+        const result = await pool.query(
+          `SELECT id, employee_number, full_name, role, email, biometric_user_id, is_active, avatar_path,
+                  middle_name, suffix, sex, date_of_birth, contact_number, address,
+                  employment_type, salary_grade, date_hired, employment_status
+           FROM users
+           WHERE biometric_user_id = ANY($1::text[])
+           ORDER BY full_name`,
+          [ids]
+        );
+        const rows = result.rows.map((r) => ({
+          id: r.id,
+          employee_number: r.employee_number,
+          full_name: r.full_name ?? 'Unknown',
+          role: r.role ?? 'employee',
+          email: r.email,
+          biometric_user_id: r.biometric_user_id ?? null,
+          is_active: r.is_active ?? true,
+          avatar_path: r.avatar_path,
+          middle_name: r.middle_name,
+          suffix: r.suffix,
+          sex: r.sex,
+          date_of_birth: r.date_of_birth,
+          contact_number: r.contact_number,
+          address: r.address,
+          employment_type: r.employment_type,
+          salary_grade: r.salary_grade,
+          date_hired: r.date_hired,
+          employment_status: r.employment_status ?? 'active',
+        }));
+        return res.json(rows);
+      }
+    }
 
     const conditions = [];
     const params = [];
@@ -154,6 +192,18 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         (employment_status && ['active', 'inactive', 'resigned', 'retired', 'terminated'].includes(employment_status)) ? employment_status : 'active',
       ]
     );
+
+    try {
+      await pool.query(
+        `INSERT INTO leave_balances (user_id, leave_type, earned_days, used_days, pending_days, adjusted_days)
+         VALUES ($1::uuid, 'vacationLeave', 15, 0, 0, 0), ($1::uuid, 'sickLeave', 15, 0, 0, 0)
+         ON CONFLICT (user_id, leave_type) DO NOTHING`,
+        [result.rows[0].id]
+      );
+    } catch (lbErr) {
+      console.warn('[employees POST] Could not create default leave balances:', lbErr.message);
+    }
+
     res.status(201).json(result.rows[0]);
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Email already registered' });

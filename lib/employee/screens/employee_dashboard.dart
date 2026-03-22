@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -7,6 +9,7 @@ import '../../../login/screens/login_page.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../dtr/dtr_provider.dart';
 import '../../../dtr/widgets/attendance_display.dart';
+import '../../../dtr/widgets/attendance_source_badge.dart';
 import '../../../docutracker/docutracker_main.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
@@ -88,6 +91,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                   displayName: displayName,
                   email: email,
                   avatarPath: avatarPath,
+                  showMenuButton: !isWide,
                   onProfileTap: () {
                     Navigator.of(context).push(
                       MaterialPageRoute(
@@ -433,12 +437,14 @@ class _EmployeeTopBar extends StatelessWidget {
     required this.displayName,
     required this.email,
     this.avatarPath,
+    this.showMenuButton = false,
     this.onProfileTap,
   });
 
   final String displayName;
   final String email;
   final String? avatarPath;
+  final bool showMenuButton;
   final VoidCallback? onProfileTap;
 
   @override
@@ -455,6 +461,20 @@ class _EmployeeTopBar extends StatelessWidget {
       ),
       child: Row(
         children: [
+          if (showMenuButton)
+            IconButton(
+              icon: const Icon(Icons.menu_rounded),
+              onPressed: () => Scaffold.of(context).openDrawer(),
+              color: AppTheme.textPrimary,
+              tooltip: 'Menu',
+              style: IconButton.styleFrom(
+                backgroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          if (showMenuButton && !isCompact) const SizedBox(width: 12),
           Expanded(
             child: isCompact
                 ? const SizedBox.shrink()
@@ -716,6 +736,8 @@ class _EmployeeDashboardContent extends StatefulWidget {
 }
 
 class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
+  Timer? _pollingTimer;
+
   @override
   void initState() {
     super.initState();
@@ -730,11 +752,28 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
       final now = DateTime.now();
       final start = DateTime(now.year, now.month, 1);
       final end = DateTime(now.year, now.month + 1, 0);
-      context.read<DtrProvider>().loadTimeRecordsForUser(
+      dtr.loadTimeRecordsForUser(
         startDate: start,
         endDate: end,
       );
     });
+    _pollingTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!mounted) return;
+      final dtr = context.read<DtrProvider>();
+      if (dtr.loading) return;
+      dtr.loadTodayRecord();
+      final now = DateTime.now();
+      dtr.loadTimeRecordsForUser(
+        startDate: DateTime(now.year, now.month, 1),
+        endDate: DateTime(now.year, now.month + 1, 0),
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _pollingTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -1019,6 +1058,10 @@ class _ClockInCard extends StatelessWidget {
                       : 'AM: Absent  PM In: ${_formatTime(record.breakIn)}  PM Out: ${_formatTime(record.timeOut)}',
                   style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
                 ),
+                if (record.source != null && record.source!.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  AttendanceSourceBadge(source: record.source, compact: true),
+                ],
               ],
               const SizedBox(height: 6),
               Text(
@@ -1748,8 +1791,13 @@ class _EmployeeAttendanceContentState
     return '$h12:${m.toString().padLeft(2, '0')} $ampm';
   }
 
+  static const List<String> _shortWeekdays = [
+    'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun',
+  ];
+
   static String _formatDate(DateTime d) {
-    return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+    final weekday = _shortWeekdays[d.weekday - 1];
+    return '${d.day} $weekday';
   }
 
   @override
@@ -1934,25 +1982,28 @@ class _EmployeeAttendanceContentState
                     },
                   ),
                 ),
-                FilterChip(
-                  label: const Text('Today'),
-                  selected:
-                      _selectedDay != null &&
-                      _selectedMonth == DateTime.now().month &&
-                      _selectedYear == DateTime.now().year &&
-                      _selectedDay == DateTime.now().day,
-                  onSelected: (selected) {
-                    if (!selected) return;
+                IconButton(
+                  onPressed: () {
                     final now = DateTime.now();
                     setState(() {
                       _selectedMonth = now.month;
                       _selectedYear = now.year;
-                      _selectedDay = now.day;
+                      _selectedDay = null;
                     });
                     _load();
                   },
-                  selectedColor: AppTheme.primaryNavy.withOpacity(0.2),
-                  checkmarkColor: AppTheme.primaryNavy,
+                  icon: Icon(
+                    Icons.refresh_rounded,
+                    size: 22,
+                    color: AppTheme.textSecondary,
+                  ),
+                  tooltip: 'Reset filters',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppTheme.lightGray.withOpacity(0.5),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
                 ),
               ],
             );
@@ -2124,6 +2175,19 @@ class _EmployeeAttendanceContentState
                                   ),
                                 ),
                               ),
+                              Expanded(
+                                flex: 1,
+                                child: Center(
+                                  child: Text(
+                                    'Source',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 13,
+                                      color: AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -2246,6 +2310,15 @@ class _EmployeeAttendanceContentState
                                       isHoliday:
                                           r.status == 'holiday' ||
                                           r.holidayId != null,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  flex: 1,
+                                  child: Center(
+                                    child: AttendanceSourceBadge(
+                                      source: r.source,
+                                      compact: true,
                                     ),
                                   ),
                                 ),

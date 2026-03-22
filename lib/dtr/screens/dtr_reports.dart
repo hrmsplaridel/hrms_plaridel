@@ -10,6 +10,7 @@ import '../../data/time_record.dart';
 import '../dtr_export.dart';
 import '../dtr_provider.dart';
 import '../dtr_share.dart';
+import '../widgets/attendance_display.dart';
 
 enum _DtrExportFormat { pdf, word, excel }
 
@@ -44,6 +45,7 @@ class _DtrReportsState extends State<DtrReports> {
   String? _selectedEmployeeId;
   String? _selectedDepartmentId;
   List<TimeRecord> _employeeRecords = [];
+  bool _showMinutesFormat = true;
 
   @override
   void initState() {
@@ -141,7 +143,7 @@ class _DtrReportsState extends State<DtrReports> {
         case 'absent':
           return 'Absent';
         case 'on_leave':
-          return 'On Leave';
+          return r.leaveTypeName ?? r.attendanceRemark ?? 'On Leave';
         case 'holiday':
           return r.holidayName ?? 'Holiday';
         default:
@@ -1139,23 +1141,17 @@ class _DtrReportsState extends State<DtrReports> {
                                               rec.attendanceRemark!.isNotEmpty
                                           ? rec.attendanceRemark!
                                           : _getRemarks(rec);
-                                      final isLateRemark =
-                                          rec.status == 'late' ||
-                                          rec.attendanceRemark == 'Late' ||
-                                          rec.attendanceRemark ==
-                                              'Late + Undertime';
-                                      final isHolidayRemark =
+                                      final isHoliday =
                                           rec.status == 'holiday' ||
                                           rec.holidayId != null;
                                       return Text(
                                         remark,
                                         style: TextStyle(
                                           fontSize: 12,
-                                          color: isLateRemark
-                                              ? Colors.red.shade700
-                                              : isHolidayRemark
-                                              ? Colors.purple.shade700
-                                              : AppTheme.textPrimary,
+                                          color: colorForRemarkText(
+                                            remark,
+                                            isHoliday: isHoliday,
+                                          ),
                                         ),
                                       );
                                     },
@@ -1174,9 +1170,13 @@ class _DtrReportsState extends State<DtrReports> {
     );
   }
 
-  static String _formatTotalMinutes(int minutes) {
-    if (minutes <= 0) return '0 min';
-    return '$minutes min';
+  String _formatMinutesOrHours(int minutes) {
+    if (minutes <= 0) return _showMinutesFormat ? '0 min' : '0 hrs';
+    if (_showMinutesFormat) return '$minutes min';
+    final hours = minutes / 60;
+    return hours == hours.roundToDouble()
+        ? '${hours.toInt()} hrs'
+        : '${hours.toStringAsFixed(2)} hrs';
   }
 
   Widget _buildSummaryCard({
@@ -1235,7 +1235,50 @@ class _DtrReportsState extends State<DtrReports> {
               style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 12),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Text(
+                      'Show time as:',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Center(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: SegmentedButton<bool>(
+                          segments: const [
+                            ButtonSegment(value: true, label: Text('Min')),
+                            ButtonSegment(value: false, label: Text('Hrs')),
+                          ],
+                          selected: {_showMinutesFormat},
+                          onSelectionChanged: (selected) {
+                            setState(() => _showMinutesFormat = selected.first);
+                          },
+                          style: ButtonStyle(
+                            visualDensity: VisualDensity.compact,
+                            padding: WidgetStateProperty.all(
+                              const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 16),
             isResponsive
                 ? Wrap(
                     spacing: 12,
@@ -1252,7 +1295,7 @@ class _DtrReportsState extends State<DtrReports> {
                         width: 140,
                         child: _SummaryStat(
                           label: 'Late',
-                          value: _formatTotalMinutes(totalLateMinutes),
+                          value: _formatMinutesOrHours(totalLateMinutes),
                           hasBorder: true,
                           borderColor: totalLateMinutes > 0
                               ? Colors.red
@@ -1263,7 +1306,7 @@ class _DtrReportsState extends State<DtrReports> {
                         width: 140,
                         child: _SummaryStat(
                           label: 'Undertime',
-                          value: _formatTotalMinutes(totalUndertimeMinutes),
+                          value: _formatMinutesOrHours(totalUndertimeMinutes),
                           hasBorder: totalUndertimeMinutes > 0,
                           borderColor: Colors.orange,
                         ),
@@ -1298,7 +1341,7 @@ class _DtrReportsState extends State<DtrReports> {
                       const SizedBox(height: 12),
                       _SummaryStat(
                         label: 'Late',
-                        value: _formatTotalMinutes(totalLateMinutes),
+                        value: _formatMinutesOrHours(totalLateMinutes),
                         hasBorder: true,
                         borderColor: totalLateMinutes > 0
                             ? Colors.red
@@ -1307,7 +1350,7 @@ class _DtrReportsState extends State<DtrReports> {
                       const SizedBox(height: 12),
                       _SummaryStat(
                         label: 'Undertime',
-                        value: _formatTotalMinutes(totalUndertimeMinutes),
+                        value: _formatMinutesOrHours(totalUndertimeMinutes),
                         hasBorder: totalUndertimeMinutes > 0,
                         borderColor: Colors.orange,
                       ),

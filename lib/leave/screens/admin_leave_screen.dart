@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../landingpage/constants/app_theme.dart';
+import '../utils/open_attachment_io.dart'
+    if (dart.library.html) '../utils/open_attachment_web.dart'
+    as open_attachment;
 import '../../providers/auth_provider.dart';
 import '../leave_provider.dart';
 import '../leave_repository.dart';
@@ -55,8 +58,14 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
     final width = MediaQuery.of(context).size.width;
     final compact = width < 1080;
     final requests = provider.requests;
-    final selected =
-        _selectedRequest ?? (requests.isNotEmpty ? requests.first : null);
+    // Clear selection when the selected request is no longer in the list
+    // (e.g. employee cancelled it, or filters changed).
+    final selectionStillValid =
+        _selectedRequest != null &&
+        requests.any((r) => r.id == _selectedRequest!.id);
+    final selected = selectionStillValid
+        ? _selectedRequest
+        : (requests.isNotEmpty ? requests.first : null);
     if (selected != _selectedRequest) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -110,8 +119,10 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
                     requests: requests,
                     loading: provider.loading,
                     selectedRequest: selected,
-                    onSelect: (request) =>
-                        setState(() => _selectedRequest = request),
+                    onSelect: (request) {
+                      setState(() => _selectedRequest = request);
+                      _refetchSelectedRequest(request);
+                    },
                   ),
                   const SizedBox(height: 16),
                   _RequestDetailsPanel(
@@ -138,8 +149,10 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
                       requests: requests,
                       loading: provider.loading,
                       selectedRequest: selected,
-                      onSelect: (request) =>
-                          setState(() => _selectedRequest = request),
+                      onSelect: (request) {
+                        setState(() => _selectedRequest = request);
+                        _refetchSelectedRequest(request);
+                      },
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -177,7 +190,21 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
     );
     if (!mounted) return;
     if (_selectedRequest == null && provider.requests.isNotEmpty) {
-      setState(() => _selectedRequest = provider.requests.first);
+      final first = provider.requests.first;
+      setState(() => _selectedRequest = first);
+      await _refetchSelectedRequest(first);
+    }
+  }
+
+  /// Refetches the selected request by ID to ensure we have the latest data
+  /// (e.g. attachment) that may have been added after the list was loaded.
+  Future<void> _refetchSelectedRequest(LeaveRequest request) async {
+    final id = request.id;
+    if (id == null || id.isEmpty) return;
+    final provider = context.read<LeaveProvider>();
+    final fresh = await provider.refreshRequestById(id);
+    if (mounted && fresh != null && _selectedRequest?.id == id) {
+      setState(() => _selectedRequest = fresh);
     }
   }
 
@@ -232,8 +259,11 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
       ok = result != null;
     }
     if (!mounted) return;
+    final provider = context.read<LeaveProvider>();
     _showMessage(
-      ok ? 'Leave request approved.' : 'Approval could not be completed.',
+      ok
+          ? 'Leave request approved.'
+          : (provider.error ?? 'Approval could not be completed.'),
     );
     if (ok) {
       await _loadRequests();
@@ -726,24 +756,141 @@ class _DetailGrid extends StatelessWidget {
         label: 'Other Purpose Details',
         value: request.otherPurposeDetails ?? '—',
       ),
-      (
-        label: 'Attachment',
-        value: request.attachmentName ?? 'No attachment linked yet',
-      ),
     ];
+
+    final attachmentName = request.attachmentName?.trim();
+    final hasAttachment = attachmentName != null && attachmentName.isNotEmpty;
+    final requestId = request.id;
 
     return Wrap(
       spacing: 12,
       runSpacing: 12,
-      children: rows
-          .map(
-            (item) => SizedBox(
-              width: 260,
-              child: _InfoTile(label: item.label, value: item.value),
+      children: [
+        ...rows
+            .where((r) => r.label != 'Attachment')
+            .map(
+              (item) => SizedBox(
+                width: 260,
+                child: _InfoTile(label: item.label, value: item.value),
+              ),
             ),
-          )
-          .toList(),
+        SizedBox(
+          width: 260,
+          child: _AttachmentTile(
+            requestId: requestId,
+            attachmentName: attachmentName,
+            hasAttachment: hasAttachment,
+          ),
+        ),
+      ],
     );
+  }
+}
+
+class _AttachmentTile extends StatelessWidget {
+  const _AttachmentTile({
+    required this.requestId,
+    required this.attachmentName,
+    required this.hasAttachment,
+  });
+
+  final String? requestId;
+  final String? attachmentName;
+  final bool hasAttachment;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.offWhite,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.black.withOpacity(0.06)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Attachment',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 6),
+          if (!hasAttachment)
+            Text(
+              'No attachment linked yet',
+              style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
+            )
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    attachmentName!,
+                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: requestId != null && requestId!.isNotEmpty
+                      ? () => _openOrDownloadAttachment(context)
+                      : null,
+                  icon: const Icon(Icons.download_rounded, size: 18),
+                  label: const Text('View'),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openOrDownloadAttachment(BuildContext context) async {
+    if (requestId == null || requestId!.isEmpty) return;
+
+    final provider = context.read<LeaveProvider>();
+    final snackbar = ScaffoldMessenger.of(context);
+
+    try {
+      snackbar.showSnackBar(
+        const SnackBar(content: Text('Downloading attachment...')),
+      );
+      final bytes = await provider.getAttachmentBytes(requestId!);
+      if (!context.mounted) return;
+      if (bytes == null || bytes.isEmpty) {
+        snackbar.showSnackBar(
+          const SnackBar(content: Text('Attachment could not be loaded.')),
+        );
+        return;
+      }
+
+      snackbar.clearSnackBars();
+      snackbar.showSnackBar(
+        const SnackBar(content: Text('Opening attachment...')),
+      );
+
+      final name = attachmentName ?? 'attachment';
+      await open_attachment.openAttachmentBytes(bytes, name);
+      if (context.mounted) {
+        snackbar.showSnackBar(
+          const SnackBar(content: Text('Attachment opened.')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        snackbar.showSnackBar(
+          SnackBar(content: Text('Could not open attachment: $e')),
+        );
+      }
+    }
   }
 }
 

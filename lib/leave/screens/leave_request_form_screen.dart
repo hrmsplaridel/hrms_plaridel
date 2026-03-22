@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -43,6 +44,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   DateTime? _startDate;
   DateTime? _endDate;
   bool _busy = false;
+  LeaveRequest? _savedRequest;
+  bool _attachmentUploading = false;
 
   late final TextEditingController _officeDepartmentController;
   late final TextEditingController _lastNameController;
@@ -62,6 +65,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   void initState() {
     super.initState();
     final initial = widget.initialRequest;
+    _savedRequest = initial;
     _leaveType = initial?.leaveType ?? LeaveType.vacationLeave;
     _locationOption = initial?.locationOption;
     _sickLeaveNature = initial?.sickLeaveNature;
@@ -356,16 +360,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                               crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
                                 Expanded(
-                                  child: Text(
-                                    _leaveType.requiresAttachment
-                                        ? 'Supporting attachment: this leave type usually requires a supporting document. Upload wiring will be added next.'
-                                        : 'Supporting attachment: optional for this leave type. Upload wiring will be added next.',
-                                    style: TextStyle(
-                                      color: AppTheme.textSecondary,
-                                      fontSize: 13,
-                                      height: 1.45,
-                                    ),
-                                  ),
+                                  child: _buildAttachmentSection(),
                                 ),
                                 const SizedBox(width: 20),
                                 ConstrainedBox(
@@ -401,16 +396,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                           : Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  _leaveType.requiresAttachment
-                                      ? 'Supporting attachment: this leave type usually requires a supporting document. Upload wiring will be added next.'
-                                      : 'Supporting attachment: optional for this leave type. Upload wiring will be added next.',
-                                  style: TextStyle(
-                                    color: AppTheme.textSecondary,
-                                    fontSize: 13,
-                                    height: 1.45,
-                                  ),
-                                ),
+                                _buildAttachmentSection(),
                                 const SizedBox(height: 16),
                                 Row(
                                   children: [
@@ -446,6 +432,154 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         ),
       ),
     );
+  }
+
+  Widget _buildAttachmentSection() {
+    final current = _savedRequest ?? widget.initialRequest;
+    final requestId = current?.id;
+    final hasAttachment = (current?.attachmentName ?? '').trim().isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _leaveType.requiresAttachment
+              ? 'This leave type typically requires supporting documents (e.g. medical certificate).'
+              : 'Supporting attachment: optional. PDF, JPG, PNG (max 10MB).',
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 13,
+            height: 1.45,
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (requestId == null || requestId.isEmpty)
+          Text(
+            'Save draft first to add an attachment.',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 12,
+              fontStyle: FontStyle.italic,
+            ),
+          )
+        else ...[
+          if (hasAttachment)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  Icon(Icons.attach_file, size: 18, color: AppTheme.textSecondary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      current!.attachmentName!,
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 13,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          Row(
+            children: [
+              OutlinedButton.icon(
+                onPressed: (_busy || _attachmentUploading) ? null : _pickAndUploadAttachment,
+                icon: _attachmentUploading
+                    ? SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Icon(Icons.upload_file, size: 18),
+                label: Text(hasAttachment ? 'Replace' : 'Add attachment'),
+              ),
+              if (hasAttachment) ...[
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: (_busy || _attachmentUploading) ? null : _removeAttachment,
+                  child: const Text('Remove'),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _pickAndUploadAttachment() async {
+    final current = _savedRequest ?? widget.initialRequest;
+    final requestId = current?.id;
+    if (requestId == null || requestId.isEmpty) {
+      _showMessage('Save draft first to add an attachment.');
+      return;
+    }
+
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png'],
+      allowMultiple: false,
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty || result.files.single.bytes == null) return;
+
+    final file = result.files.single;
+    final bytes = file.bytes!;
+    final name = file.name;
+    if (name.isEmpty) return;
+
+    setState(() => _attachmentUploading = true);
+    try {
+      final provider = context.read<LeaveProvider>();
+      final updated = await provider.attachFile(
+        requestId: requestId,
+        fileBytes: bytes,
+        fileName: name,
+      );
+      if (!mounted) return;
+      if (updated != null) {
+        setState(() {
+          _savedRequest = updated;
+          _attachmentUploading = false;
+        });
+        _showMessage('Attachment uploaded.');
+      } else {
+        setState(() => _attachmentUploading = false);
+        _showMessage(provider.error ?? 'Upload failed.');
+      }
+    } catch (e) {
+      if (mounted) setState(() => _attachmentUploading = false);
+      _showMessage('Upload failed: $e');
+    }
+  }
+
+  Future<void> _removeAttachment() async {
+    final current = _savedRequest ?? widget.initialRequest;
+    final requestId = current?.id;
+    if (requestId == null || requestId.isEmpty) return;
+
+    setState(() => _attachmentUploading = true);
+    try {
+      final provider = context.read<LeaveProvider>();
+      final updated = await provider.removeAttachment(requestId);
+      if (!mounted) return;
+      if (updated != null) {
+        setState(() {
+          _savedRequest = updated;
+          _attachmentUploading = false;
+        });
+        _showMessage('Attachment removed.');
+      } else {
+        setState(() => _attachmentUploading = false);
+        _showMessage(provider.error ?? 'Remove failed.');
+      }
+    } catch (e) {
+      if (mounted) setState(() => _attachmentUploading = false);
+      _showMessage('Remove failed: $e');
+    }
   }
 
   Widget _buildTopInformationSection(String name, {required bool compact}) {
@@ -638,23 +772,25 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   }
 
   Widget _buildLeaveTypePanel() {
+    final employeeFileableTypes = LeaveType.values
+        .where((type) =>
+            type != LeaveType.others && type.employeeCanFile)
+        .toList();
     return _paperPanel(
       title: '6.A TYPE OF LEAVE TO BE AVAILED OF',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ...LeaveType.values
-              .where((type) => type != LeaveType.others)
-              .map(
-                (type) => _paperCheckRow(
-                  selected: _leaveType == type,
-                  label: type.displayName,
-                  onTap: () => setState(() {
-                    _leaveType = type;
-                    _resetConditionalSelectionsForType(type);
-                  }),
-                ),
-              ),
+          ...employeeFileableTypes.map(
+            (type) => _paperCheckRow(
+              selected: _leaveType == type,
+              label: type.displayName,
+              onTap: () => setState(() {
+                _leaveType = type;
+                _resetConditionalSelectionsForType(type);
+              }),
+            ),
+          ),
           const SizedBox(height: 10),
           Text(
             'Others:',
@@ -810,27 +946,30 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
           ),
           const SizedBox(height: 16),
           _paperSubheading('Other purpose:'),
+          if (_leaveType == LeaveType.others)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                'Monetization and Terminal Leave are HR/admin processes only.',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 11,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ),
           _paperCheckRow(
             selected:
                 _otherPurpose == LeaveOtherPurpose.monetizationOfLeaveCredits,
-            label: 'Monetization of Leave Credits',
-            enabled: _leaveType == LeaveType.others,
-            onTap: _leaveType == LeaveType.others
-                ? () => setState(
-                    () => _otherPurpose =
-                        LeaveOtherPurpose.monetizationOfLeaveCredits,
-                  )
-                : null,
+            label: 'Monetization of Leave Credits (HR process)',
+            enabled: false,
+            onTap: null,
           ),
           _paperCheckRow(
             selected: _otherPurpose == LeaveOtherPurpose.terminalLeave,
-            label: 'Terminal Leave',
-            enabled: _leaveType == LeaveType.others,
-            onTap: _leaveType == LeaveType.others
-                ? () => setState(
-                    () => _otherPurpose = LeaveOtherPurpose.terminalLeave,
-                  )
-                : null,
+            label: 'Terminal Leave (HR process)',
+            enabled: false,
+            onTap: null,
           ),
           const SizedBox(height: 6),
           _buildTextField(
@@ -1453,10 +1592,30 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       _showMessage('Draft is ready. Wire the save callback next.');
       return;
     }
-    await _runAction(
-      action: () => widget.onSaveDraft!(request),
-      successMessage: 'Leave request draft saved.',
-    );
+    setState(() => _busy = true);
+    try {
+      final ok = await widget.onSaveDraft!(request);
+      if (!mounted) return;
+      if (ok) {
+        final saved = context.read<LeaveProvider>().selectedRequest;
+        setState(() {
+          _savedRequest = saved;
+          _busy = false;
+        });
+        _showMessage('Leave request draft saved. You can add an attachment if needed.');
+      } else {
+        setState(() => _busy = false);
+        final providerError = context.read<LeaveProvider>().error;
+        _showMessage(
+          providerError != null && providerError.trim().isNotEmpty
+              ? providerError
+              : 'Action could not be completed.',
+        );
+      }
+    } catch (e) {
+      if (mounted) setState(() => _busy = false);
+      _showMessage('Action failed: $e');
+    }
   }
 
   Future<void> _submitRequest() async {
@@ -1523,6 +1682,32 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       _showMessage('Please choose the study leave purpose.');
       return false;
     }
+    if (_leaveType == LeaveType.others &&
+        (_otherPurpose == LeaveOtherPurpose.monetizationOfLeaveCredits ||
+            _otherPurpose == LeaveOtherPurpose.terminalLeave)) {
+      _showMessage('Monetization and Terminal Leave are HR/admin processes. Please contact HR.');
+      return false;
+    }
+    if (!_leaveType.allowsPastDates && _startDate != null) {
+      final today = DateTime.now();
+      final startOfToday = DateTime(today.year, today.month, today.day);
+      if (_startDate!.isBefore(startOfToday)) {
+        _showMessage(
+          'Past-date filing is not allowed for ${_leaveType.displayName}. Please file in advance.',
+        );
+        return false;
+      }
+    }
+    final maxDays = _leaveType.maxDays;
+    if (maxDays != null && _workingDaysApplied != null) {
+      final days = _workingDaysApplied!;
+      if (days > maxDays) {
+        _showMessage(
+          '${_leaveType.displayName} allows a maximum of $maxDays working days. Requested: ${days.toStringAsFixed(1)}.',
+        );
+        return false;
+      }
+    }
     return true;
   }
 
@@ -1539,8 +1724,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       _firstNameController.text.trim(),
       _middleNameController.text.trim(),
     ].where((s) => s.isNotEmpty).join(' ');
+    final current = _savedRequest ?? widget.initialRequest;
     return LeaveRequest(
-      id: widget.initialRequest?.id,
+      id: current?.id ?? widget.initialRequest?.id,
       userId: user.id,
       employeeName: fullName.isNotEmpty ? fullName : auth.displayName,
       officeDepartment: _officeDepartmentController.text.trim(),
@@ -1576,8 +1762,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       otherPurposeDetails: _leaveType == LeaveType.others
           ? _trimOrNull(_otherPurposeDetailsController.text)
           : null,
-      attachmentPath: widget.initialRequest?.attachmentPath,
-      attachmentName: widget.initialRequest?.attachmentName,
+      attachmentPath: current?.attachmentPath ?? widget.initialRequest?.attachmentPath,
+      attachmentName: current?.attachmentName ?? widget.initialRequest?.attachmentName,
       commutation: _commutation,
       status: status,
       createdAt: widget.initialRequest?.createdAt,

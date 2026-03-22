@@ -231,14 +231,17 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen> {
           userId: userId,
         );
     if (!mounted) return;
+    final provider = context.read<LeaveProvider>();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          updated != null ? 'Leave request cancelled.' : 'Cancel failed.',
+          updated != null
+              ? 'Leave request cancelled.'
+              : (provider.error ?? 'Cancel failed.'),
         ),
       ),
     );
-    await context.read<LeaveProvider>().loadMyLeaveData(userId);
+    await provider.loadMyLeaveData(userId);
   }
 }
 

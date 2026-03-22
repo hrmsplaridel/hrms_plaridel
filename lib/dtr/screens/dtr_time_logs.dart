@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../data/time_record.dart';
+import '../../providers/auth_provider.dart';
 import '../dtr_provider.dart';
+import '../widgets/attendance_source_badge.dart';
+import '../widgets/import_biometric_attendance_logs_dialog.dart';
 
 const List<String> _months = [
   'January',
@@ -136,6 +139,8 @@ class _RemarksChip extends StatelessWidget {
       case 'Invalid Log':
         return (Colors.red.shade900, Colors.red.shade100);
       default:
+        if (r.toLowerCase().contains('leave'))
+          return (Colors.blue.shade700, Colors.blue.shade50);
         return (AppTheme.textPrimary, AppTheme.lightGray.withOpacity(0.5));
     }
   }
@@ -168,6 +173,39 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
     return end.day;
   }
 
+  /// Intended filter range based on current month/year/day selection.
+  (DateTime, DateTime) _getIntendedFilterRange() {
+    final lastDay = _lastDayOfSelectedMonth;
+    final int day =
+        (_selectedDay != null && _selectedDay! >= 1 && _selectedDay! <= lastDay)
+        ? _selectedDay!
+        : 0;
+    if (day >= 1) {
+      final d = DateTime(_selectedYear, _selectedMonth, day);
+      return (d, d);
+    }
+    return (
+      DateTime(_selectedYear, _selectedMonth, 1),
+      DateTime(_selectedYear, _selectedMonth + 1, 0),
+    );
+  }
+
+  /// True if provider's filter range matches our intended range. Prevents showing
+  /// stale data from DtrDashboard (no date filter) or DtrReports (month range)
+  /// when Time Logs expects a different range.
+  bool _providerFilterMatches(DtrProvider dtr) {
+    final (intendedStart, intendedEnd) = _getIntendedFilterRange();
+    final start = dtr.filterStart;
+    final end = dtr.filterEnd;
+    if (start == null || end == null) return false;
+    return start.year == intendedStart.year &&
+        start.month == intendedStart.month &&
+        start.day == intendedStart.day &&
+        end.year == intendedEnd.year &&
+        end.month == intendedEnd.month &&
+        end.day == intendedEnd.day;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -176,7 +214,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
     // Auto-refresh every 30s so new time-in/time-out shows without manual refresh
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (mounted) _applyFilters();
+      if (mounted) _applyFilters(silent: true);
     });
   }
 
@@ -195,7 +233,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
     await _applyFilters();
   }
 
-  Future<void> _applyFilters() async {
+  Future<void> _applyFilters({bool silent = false}) async {
     if (!mounted) return;
     final dtr = context.read<DtrProvider>();
     final lastDay = _lastDayOfSelectedMonth;
@@ -219,6 +257,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
       departmentId: _selectedDepartmentId?.isEmpty == true
           ? null
           : _selectedDepartmentId,
+      silent: silent,
     );
   }
 
@@ -243,7 +282,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
       return r.attendanceRemark!;
     if (r.status == 'holiday' || r.holidayId != null)
       return r.holidayName ?? 'Holiday';
-    if (r.status == 'on_leave' || r.leaveRequestId != null) return 'Leave';
+    if (r.status == 'on_leave' || r.leaveRequestId != null)
+      return r.leaveTypeName ?? 'Leave';
     final hasAnyLog =
         r.timeIn != null ||
         r.breakOut != null ||
@@ -301,6 +341,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
 
   List<TimeRecord> _getDisplayRecords(DtrProvider dtr) {
     if (dtr.loading) return [];
+    // Don't show records when filter range doesn't match our selection (avoids
+    // displaying stale data from DtrDashboard or DtrReports that overwrote
+    // _timeRecords with a different date range).
+    if (!_providerFilterMatches(dtr)) return [];
     if (dtr.timeRecords.isNotEmpty) return dtr.timeRecords;
     if (_showHardcodedPreview) return _hardcodedSampleRecords();
     return [];
@@ -309,7 +353,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
   @override
   Widget build(BuildContext context) {
     final dtr = context.watch<DtrProvider>();
+    final auth = context.watch<AuthProvider>();
     final search = _searchController.text.toLowerCase();
+    final isAdmin = (auth.user?.role ?? 'employee') == 'admin';
     final displayRecords = _getDisplayRecords(dtr).where((r) {
       if (search.isEmpty) return true;
       return (r.employeeName ?? '').toLowerCase().contains(search);
@@ -616,21 +662,39 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
             ),
           ),
           const SizedBox(height: 16),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton.icon(
-              onPressed: () => _showAddDialog(context, dtr),
-              icon: const Icon(Icons.add_rounded, size: 18),
-              label: const Text('Add manual entry'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.primaryNavy,
-                foregroundColor: AppTheme.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 12,
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
+            alignment: WrapAlignment.start,
+            children: [
+              if (isAdmin)
+                FilledButton.icon(
+                  onPressed: _showImportBiometricLogsDialog,
+                  icon: const Icon(Icons.file_upload_rounded, size: 18),
+                  label: const Text('Import Biometric Logs'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.primaryNavy,
+                    foregroundColor: AppTheme.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                  ),
+                ),
+              FilledButton.icon(
+                onPressed: () => _showAddDialog(context, dtr),
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('Add manual entry'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.primaryNavy,
+                  foregroundColor: AppTheme.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 12,
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
           if (isHardcodedPreview && !dtr.tableMissing) ...[
             const SizedBox(height: 8),
@@ -736,6 +800,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                   600.0,
                   double.infinity,
                 );
+                final contentHeight = (displayRecords.length + 1) * 56.0 + 30;
+                final maxHeight = tableConstraints.maxHeight;
+                final constrainedHeight = contentHeight.clamp(100.0, maxHeight);
                 return Container(
                   decoration: BoxDecoration(
                     color: AppTheme.white,
@@ -751,285 +818,315 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                   ),
                   child: SizedBox(
                     width: double.infinity,
-                    height: (displayRecords.length + 1) * 56.0 + 30,
+                    height: constrainedHeight,
                     child: SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: SizedBox(
                         width: tableWidth,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.fromLTRB(
-                                16,
-                                10,
-                                24,
-                                10,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppTheme.lightGray.withOpacity(0.5),
-                                borderRadius: const BorderRadius.vertical(
-                                  top: Radius.circular(12),
-                                ),
-                              ),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    flex: 3,
-                                    child: _headerLabel('Employee'),
-                                  ),
-                                  Expanded(
-                                    flex: 2,
-                                    child: _headerLabel('Date'),
-                                  ),
-                                  Expanded(
-                                    flex: 1,
-                                    child: Center(child: _headerLabel('AM In')),
-                                  ),
-                                  Expanded(
-                                    flex: 1,
-                                    child: Center(
-                                      child: _headerLabel('AM Out'),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    flex: 1,
-                                    child: Center(child: _headerLabel('PM In')),
-                                  ),
-                                  Expanded(
-                                    flex: 1,
-                                    child: Center(
-                                      child: _headerLabel('PM Out'),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    flex: 1,
-                                    child: Center(child: _headerLabel('Late')),
-                                  ),
-                                  Expanded(
-                                    flex: 1,
-                                    child: Center(
-                                      child: _headerLabel('Undertime'),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    flex: 2,
-                                    child: Center(
-                                      child: _headerLabel('Remarks'),
-                                    ),
-                                  ),
-                                  if (!isHardcodedPreview)
-                                    const Expanded(
-                                      flex: 1,
-                                      child: SizedBox.shrink(),
-                                    ),
-                                ],
-                              ),
-                            ),
-                            ...displayRecords.asMap().entries.map((entry) {
-                              final i = entry.key;
-                              final r = entry.value;
-                              final timeIn = r.timeIn?.toLocal();
-                              final breakOut = r.breakOut?.toLocal();
-                              final breakIn = r.breakIn?.toLocal();
-                              final timeOut = r.timeOut?.toLocal();
-                              final remark = getAttendanceRemark(r);
-                              final lateStr = formatLateMinutes(r);
-                              final underStr = formatUndertimeMinutes(r);
-                              return Container(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.vertical,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Container(
                                 padding: const EdgeInsets.fromLTRB(
                                   16,
-                                  12,
+                                  10,
                                   24,
-                                  12,
+                                  10,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: i % 2 == 0
-                                      ? AppTheme.white
-                                      : AppTheme.lightGray.withOpacity(0.25),
+                                  color: AppTheme.lightGray.withOpacity(0.5),
+                                  borderRadius: const BorderRadius.vertical(
+                                    top: Radius.circular(12),
+                                  ),
                                 ),
                                 child: Row(
                                   children: [
                                     Expanded(
                                       flex: 3,
-                                      child: Text(
-                                        r.employeeName ?? r.userId,
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          color: AppTheme.textPrimary,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
+                                      child: _headerLabel('Employee'),
                                     ),
                                     Expanded(
                                       flex: 2,
-                                      child: Text(
-                                        _formatDate(r.recordDate),
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          color: AppTheme.textPrimary,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
+                                      child: _headerLabel('Date'),
+                                    ),
+                                    Expanded(
+                                      flex: 1,
+                                      child: Center(
+                                        child: _headerLabel('AM In'),
                                       ),
                                     ),
                                     Expanded(
                                       flex: 1,
                                       child: Center(
-                                        child: Text(
-                                          _formatTime(timeIn),
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            color: AppTheme.textPrimary,
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
+                                        child: _headerLabel('AM Out'),
                                       ),
                                     ),
                                     Expanded(
                                       flex: 1,
                                       child: Center(
-                                        child: Text(
-                                          _formatTime(breakOut),
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            color: AppTheme.textPrimary,
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
+                                        child: _headerLabel('PM In'),
                                       ),
                                     ),
                                     Expanded(
                                       flex: 1,
                                       child: Center(
-                                        child: Text(
-                                          _formatTime(breakIn),
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            color: AppTheme.textPrimary,
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
+                                        child: _headerLabel('PM Out'),
                                       ),
                                     ),
                                     Expanded(
                                       flex: 1,
                                       child: Center(
-                                        child: Text(
-                                          _formatTime(timeOut),
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            color: AppTheme.textPrimary,
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
+                                        child: _headerLabel('Late'),
                                       ),
                                     ),
                                     Expanded(
                                       flex: 1,
                                       child: Center(
-                                        child: Text(
-                                          lateStr,
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            color: AppTheme.textPrimary,
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      flex: 1,
-                                      child: Center(
-                                        child: Text(
-                                          underStr,
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            color: AppTheme.textPrimary,
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
+                                        child: _headerLabel('Undertime'),
                                       ),
                                     ),
                                     Expanded(
                                       flex: 2,
                                       child: Center(
-                                        child: _RemarksChip(
-                                          remark: remark,
-                                          isHoliday:
-                                              r.status == 'holiday' ||
-                                              r.holidayId != null,
-                                        ),
+                                        child: _headerLabel('Remarks'),
+                                      ),
+                                    ),
+                                    Expanded(
+                                      flex: 1,
+                                      child: Center(
+                                        child: _headerLabel('Source'),
                                       ),
                                     ),
                                     if (!isHardcodedPreview)
-                                      Expanded(
+                                      const Expanded(
                                         flex: 1,
-                                        child: Center(
-                                          child: PopupMenuButton<String>(
-                                            icon: const Icon(
-                                              Icons.more_vert,
-                                              size: 22,
-                                            ),
-                                            padding: EdgeInsets.zero,
-                                            constraints: const BoxConstraints(),
-                                            tooltip: 'Actions',
-                                            onSelected: (value) {
-                                              if (value == 'edit') {
-                                                _showEditDialog(
-                                                  context,
-                                                  dtr,
-                                                  r,
-                                                );
-                                              } else if (value == 'delete') {
-                                                _confirmDelete(context, dtr, r);
-                                              }
-                                            },
-                                            itemBuilder: (context) => [
-                                              const PopupMenuItem<String>(
-                                                value: 'edit',
-                                                child: Row(
-                                                  children: [
-                                                    Icon(
-                                                      Icons.edit_rounded,
-                                                      size: 20,
-                                                      color:
-                                                          AppTheme.textPrimary,
-                                                    ),
-                                                    SizedBox(width: 12),
-                                                    Text('Edit'),
-                                                  ],
-                                                ),
-                                              ),
-                                              PopupMenuItem<String>(
-                                                value: 'delete',
-                                                child: Row(
-                                                  children: [
-                                                    Icon(
-                                                      Icons.delete_rounded,
-                                                      size: 20,
-                                                      color:
-                                                          Colors.red.shade700,
-                                                    ),
-                                                    const SizedBox(width: 12),
-                                                    Text(
-                                                      'Delete',
-                                                      style: TextStyle(
-                                                        color:
-                                                            Colors.red.shade700,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
+                                        child: SizedBox.shrink(),
                                       ),
                                   ],
                                 ),
-                              );
-                            }),
-                          ],
+                              ),
+                              ...displayRecords.asMap().entries.map((entry) {
+                                final i = entry.key;
+                                final r = entry.value;
+                                final timeIn = r.timeIn?.toLocal();
+                                final breakOut = r.breakOut?.toLocal();
+                                final breakIn = r.breakIn?.toLocal();
+                                final timeOut = r.timeOut?.toLocal();
+                                final remark = getAttendanceRemark(r);
+                                final lateStr = formatLateMinutes(r);
+                                final underStr = formatUndertimeMinutes(r);
+                                return Container(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    16,
+                                    12,
+                                    24,
+                                    12,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: i % 2 == 0
+                                        ? AppTheme.white
+                                        : AppTheme.lightGray.withOpacity(0.25),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        flex: 3,
+                                        child: Text(
+                                          r.employeeName ?? r.userId,
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            color: AppTheme.textPrimary,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      Expanded(
+                                        flex: 2,
+                                        child: Text(
+                                          _formatDate(r.recordDate),
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            color: AppTheme.textPrimary,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      Expanded(
+                                        flex: 1,
+                                        child: Center(
+                                          child: Text(
+                                            _formatTime(timeIn),
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              color: AppTheme.textPrimary,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ),
+                                      Expanded(
+                                        flex: 1,
+                                        child: Center(
+                                          child: Text(
+                                            _formatTime(breakOut),
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              color: AppTheme.textPrimary,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ),
+                                      Expanded(
+                                        flex: 1,
+                                        child: Center(
+                                          child: Text(
+                                            _formatTime(breakIn),
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              color: AppTheme.textPrimary,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ),
+                                      Expanded(
+                                        flex: 1,
+                                        child: Center(
+                                          child: Text(
+                                            _formatTime(timeOut),
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              color: AppTheme.textPrimary,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ),
+                                      Expanded(
+                                        flex: 1,
+                                        child: Center(
+                                          child: Text(
+                                            lateStr,
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              color: AppTheme.textPrimary,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ),
+                                      Expanded(
+                                        flex: 1,
+                                        child: Center(
+                                          child: Text(
+                                            underStr,
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              color: AppTheme.textPrimary,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ),
+                                      Expanded(
+                                        flex: 2,
+                                        child: Center(
+                                          child: _RemarksChip(
+                                            remark: remark,
+                                            isHoliday:
+                                                r.status == 'holiday' ||
+                                                r.holidayId != null,
+                                          ),
+                                        ),
+                                      ),
+                                      Expanded(
+                                        flex: 1,
+                                        child: Center(
+                                          child: AttendanceSourceBadge(
+                                            source: r.source,
+                                            compact: true,
+                                          ),
+                                        ),
+                                      ),
+                                      if (!isHardcodedPreview)
+                                        Expanded(
+                                          flex: 1,
+                                          child: Center(
+                                            child: PopupMenuButton<String>(
+                                              icon: const Icon(
+                                                Icons.more_vert,
+                                                size: 22,
+                                              ),
+                                              padding: EdgeInsets.zero,
+                                              constraints:
+                                                  const BoxConstraints(),
+                                              tooltip: 'Actions',
+                                              onSelected: (value) {
+                                                if (value == 'edit') {
+                                                  _showEditDialog(
+                                                    context,
+                                                    dtr,
+                                                    r,
+                                                  );
+                                                } else if (value == 'delete') {
+                                                  _confirmDelete(
+                                                    context,
+                                                    dtr,
+                                                    r,
+                                                  );
+                                                }
+                                              },
+                                              itemBuilder: (context) => [
+                                                const PopupMenuItem<String>(
+                                                  value: 'edit',
+                                                  child: Row(
+                                                    children: [
+                                                      Icon(
+                                                        Icons.edit_rounded,
+                                                        size: 20,
+                                                        color: AppTheme
+                                                            .textPrimary,
+                                                      ),
+                                                      SizedBox(width: 12),
+                                                      Text('Edit'),
+                                                    ],
+                                                  ),
+                                                ),
+                                                PopupMenuItem<String>(
+                                                  value: 'delete',
+                                                  child: Row(
+                                                    children: [
+                                                      Icon(
+                                                        Icons.delete_rounded,
+                                                        size: 20,
+                                                        color:
+                                                            Colors.red.shade700,
+                                                      ),
+                                                      const SizedBox(width: 12),
+                                                      Text(
+                                                        'Delete',
+                                                        style: TextStyle(
+                                                          color: Colors
+                                                              .red
+                                                              .shade700,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                );
+                              }),
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -1244,6 +1341,19 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
           context,
         ).showSnackBar(const SnackBar(content: Text('Time entry added.')));
       }
+    }
+  }
+
+  Future<void> _showImportBiometricLogsDialog() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => ImportBiometricAttendanceLogsDialog(
+        onCancel: () => Navigator.of(ctx).pop(),
+        onImportSuccess: () => Navigator.of(ctx).pop(true),
+      ),
+    );
+    if (ok == true && mounted) {
+      _applyFilters();
     }
   }
 

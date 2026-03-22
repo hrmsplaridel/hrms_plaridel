@@ -106,13 +106,16 @@ class DtrExport {
 
   static String _getDisplayValue(TimeRecord? r, bool isWeekend) {
     if (r == null) return isWeekend ? '' : 'ABSENT';
-    if (r.timeIn == null) return 'ABSENT';
     final status = r.status;
     if (status != null && status.isNotEmpty) {
       if (status == 'absent') return 'ABSENT';
-      if (status == 'on_leave') return 'On Leave';
+      if (status == 'on_leave')
+        return r.leaveTypeName ?? r.attendanceRemark ?? 'On Leave';
       if (status == 'holiday') return r.holidayName ?? 'Holiday';
     }
+    if (r.leaveRequestId != null)
+      return r.leaveTypeName ?? r.attendanceRemark ?? 'On Leave';
+    if (r.timeIn == null) return 'ABSENT';
     return ''; // Show times in AM/PM columns
   }
 
@@ -122,7 +125,12 @@ class DtrExport {
     if (r.timeIn == null) {
       final s = r.status;
       if (s == 'holiday') return r.holidayName ?? 'HOLIDAY';
-      if (s == 'on_leave') return 'SICK LEAVE';
+      if (s == 'on_leave' || r.leaveRequestId != null) {
+        final leaveType = r.leaveTypeName ?? r.attendanceRemark;
+        return (leaveType != null && leaveType.isNotEmpty)
+            ? leaveType.toUpperCase()
+            : 'LEAVE';
+      }
       if (s != null && s.isNotEmpty) return s.toUpperCase();
       return 'ABSENT';
     }
@@ -142,7 +150,7 @@ class DtrExport {
   static const String _noon = '12:00pm';
   static const String _pmIn = '01:00pm';
 
-  /// Returns (hours, minutes) of undertime. Absent = 8h 0m. Weekend / Holiday = 0.
+  /// Returns (hours, minutes) of undertime. Absent = 8h 0m. Weekend / Holiday / Leave = 0.
   static (int, int) _computeUndertime(
     TimeRecord? r,
     DateTime dt,
@@ -151,6 +159,8 @@ class DtrExport {
   ) {
     if (isWeekend) return (0, 0);
     if (r != null && r.status == 'holiday') return (0, 0);
+    if (r != null && (r.status == 'on_leave' || r.leaveRequestId != null))
+      return (0, 0);
     final wh = workHoursPerDay > 0 ? workHoursPerDay : 8.0;
 
     // Absent: use configured work hours per day.
@@ -397,12 +407,53 @@ class DtrExport {
     return doc.save();
   }
 
+  /// Hex string for Excel font color (ARGB, e.g. 'FFC62828').
+  static String? _excelColorHexForStatus(
+    String? text, {
+    bool isHoliday = false,
+  }) {
+    if (text == null || text.isEmpty) return null;
+    final t = text.toLowerCase().trim();
+    if (isHoliday) return 'FF7B1FA2'; // purple
+    if (t == 'on time') return 'FF2E7D32'; // green
+    if (t == 'late') return 'FFC62828'; // red
+    if (t == 'undertime') return 'FFE65100'; // orange
+    if (t == 'late + undertime') return 'FFBF360C'; // deep orange
+    if (t == 'absent') return 'FFE65100'; // orange
+    if (t == 'holiday') return 'FF7B1FA2'; // purple
+    if (t.contains('leave')) return 'FF1976D2'; // blue
+    if (t == 'incomplete') return 'FFFF8F00'; // amber
+    if (t == 'invalid log') return 'FFB71C1C'; // dark red
+    if (t.contains('suspension')) return 'FF7B1FA2'; // purple
+    return null;
+  }
+
+  /// PdfColor for status/remark text in the DTR table (matches screen colors).
+  static PdfColor? _pdfColorForStatus(String? text, {bool isHoliday = false}) {
+    if (text == null || text.isEmpty) return null;
+    final t = text.toLowerCase().trim();
+    if (isHoliday) return PdfColor.fromInt(0xFF7B1FA2); // purple
+    if (t == 'on time') return PdfColor.fromInt(0xFF2E7D32); // green
+    if (t == 'late') return PdfColor.fromInt(0xFFC62828); // red
+    if (t == 'undertime') return PdfColor.fromInt(0xFFE65100); // orange
+    if (t == 'late + undertime')
+      return PdfColor.fromInt(0xFFBF360C); // deep orange
+    if (t == 'absent') return PdfColor.fromInt(0xFFE65100); // orange
+    if (t == 'holiday') return PdfColor.fromInt(0xFF7B1FA2); // purple
+    if (t.contains('leave')) return PdfColor.fromInt(0xFF1976D2); // blue
+    if (t == 'incomplete') return PdfColor.fromInt(0xFFFF8F00); // amber
+    if (t == 'invalid log') return PdfColor.fromInt(0xFFB71C1C); // dark red
+    if (t.contains('suspension')) return PdfColor.fromInt(0xFF7B1FA2); // purple
+    return null;
+  }
+
   static pw.Widget _cell(
     String text,
     double fs, {
     bool bold = false,
     bool center = false,
     bool right = false,
+    PdfColor? textColor,
   }) {
     pw.TextAlign? align;
     if (center) align = pw.TextAlign.center;
@@ -414,6 +465,7 @@ class DtrExport {
         style: pw.TextStyle(
           fontSize: fs,
           fontWeight: bold ? pw.FontWeight.bold : null,
+          color: textColor,
         ),
         textAlign: align,
       ),
@@ -581,6 +633,7 @@ class DtrExport {
       String amOutStr;
       String pmInStr;
       String pmOutStr;
+      PdfColor? statusColor;
       if (showTimes) {
         amInStr = rec.timeIn != null ? _formatTimePrint(rec.timeIn) : '';
         amOutStr = rec.breakOut != null
@@ -597,18 +650,37 @@ class DtrExport {
         amOutStr = '';
         pmInStr = '';
         pmOutStr = '';
+        final isHoliday = rec?.status == 'holiday' || rec?.holidayId != null;
+        statusColor = _pdfColorForStatus(
+          amInStr.isNotEmpty ? amInStr : null,
+          isHoliday: isHoliday,
+        );
       }
+
+      final undertimeColor = !isWeekend && (uh > 0 || um > 0)
+          ? PdfColor.fromInt(0xFFE65100)
+          : null;
 
       rows.add(
         pw.TableRow(
           children: [
             _cell(_formatDateWithDay(dt), fs),
-            _cell(amInStr, fs, center: true),
-            _cell(amOutStr, fs, center: true),
-            _cell(pmInStr, fs, center: true),
-            _cell(pmOutStr, fs, center: true),
-            _cell(isWeekend ? '' : '$uh', fs, right: true),
-            _cell(isWeekend ? '' : '$um', fs, right: true),
+            _cell(amInStr, fs, center: true, textColor: statusColor),
+            _cell(amOutStr, fs, center: true, textColor: statusColor),
+            _cell(pmInStr, fs, center: true, textColor: statusColor),
+            _cell(pmOutStr, fs, center: true, textColor: statusColor),
+            _cell(
+              isWeekend ? '' : '$uh',
+              fs,
+              right: true,
+              textColor: undertimeColor,
+            ),
+            _cell(
+              isWeekend ? '' : '$um',
+              fs,
+              right: true,
+              textColor: undertimeColor,
+            ),
           ],
         ),
       );
@@ -952,33 +1024,67 @@ class DtrExport {
       if (!isWeekend) totalUndertimeMin += uh * 60 + um;
       if (!isWeekend) totalLateMin += (rec?.lateMinutes ?? 0);
 
+      final remark = _getRowRemark(rec, dt, isWeekend);
       final displayVal = _getDisplayValue(rec, isWeekend);
-      final showTimes = displayVal.isEmpty && rec != null;
+      final showTimes = remark.isEmpty && displayVal.isEmpty && rec != null;
       final amInStr = showTimes && rec.timeIn != null
           ? _formatTime(rec.timeIn)
-          : (displayVal == 'ABSENT' ? 'ABSENT' : '');
+          : (remark.isNotEmpty
+                ? remark
+                : (displayVal == 'ABSENT' ? 'ABSENT' : ''));
       final amOutStr = showTimes ? _noon : '';
       final pmInStr = showTimes ? _pmIn : '';
       final pmOutStr = showTimes && rec.timeOut != null
           ? _formatTime(rec.timeOut)
           : '';
 
+      final isHoliday = rec?.status == 'holiday' || rec?.holidayId != null;
+      final statusColorHex = _excelColorHexForStatus(
+        amInStr.isNotEmpty ? amInStr : null,
+        isHoliday: isHoliday,
+      );
+      final statusStyleCenter = statusColorHex != null
+          ? CellStyle(
+              fontSize: 6,
+              fontColorHex: ExcelColor.fromHexString(statusColorHex),
+              leftBorder: thinBorder,
+              rightBorder: thinBorder,
+              topBorder: thinBorder,
+              bottomBorder: thinBorder,
+              horizontalAlign: HorizontalAlign.Center,
+            )
+          : cellStyleCenter;
+      final undertimeColorHex = !isWeekend && (uh > 0 || um > 0)
+          ? 'FFE65100'
+          : null;
+      final undertimeStyleRight = undertimeColorHex != null
+          ? CellStyle(
+              fontSize: 6,
+              fontColorHex: ExcelColor.fromHexString(undertimeColorHex),
+              leftBorder: thinBorder,
+              rightBorder: thinBorder,
+              topBorder: thinBorder,
+              bottomBorder: thinBorder,
+              horizontalAlign: HorizontalAlign.Right,
+            )
+          : cellStyleRight;
+
       setCellBoth(0, row, TextCellValue(_formatDateWithDay(dt)), cellStyle);
-      setCellBoth(1, row, TextCellValue(amInStr), cellStyleCenter);
-      setCellBoth(2, row, TextCellValue(amOutStr), cellStyleCenter);
-      setCellBoth(3, row, TextCellValue(pmInStr), cellStyleCenter);
-      setCellBoth(4, row, TextCellValue(pmOutStr), cellStyleCenter);
+      setCellBoth(1, row, TextCellValue(amInStr), statusStyleCenter);
+      setCellBoth(2, row, TextCellValue(amOutStr), statusStyleCenter);
+      setCellBoth(3, row, TextCellValue(pmInStr), statusStyleCenter);
+      setCellBoth(4, row, TextCellValue(pmOutStr), statusStyleCenter);
       setCellBoth(
         5,
         row,
         TextCellValue(isWeekend ? '' : '$uh'),
-        cellStyleRight,
+        undertimeStyleRight,
       );
       setCellBoth(
         6,
         row,
         TextCellValue(isWeekend ? '' : '$um'),
-        cellStyleRight,
+        undertimeStyleRight,
       );
       row++;
     }
@@ -1182,6 +1288,13 @@ class DtrExport {
       '<tr><th>IN</th><th>OUT</th><th>IN</th><th>OUT</th><th>Hours</th><th>Min</th></tr></thead><tbody>',
     );
 
+    String tdCenter(String t, String? c) => c != null && c.length >= 6
+        ? '<td class="center" style="color:#${c.length == 8 ? c.substring(2) : c};">$t</td>'
+        : '<td class="center">$t</td>';
+    String tdRight(String t, String? c) => c != null && c.length >= 6
+        ? '<td class="right" style="color:#${c.length == 8 ? c.substring(2) : c};">$t</td>'
+        : '<td class="right">$t</td>';
+
     for (var d = 1; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
@@ -1195,18 +1308,31 @@ class DtrExport {
       );
       if (!isWeekend) totalUndertimeMin += uh * 60 + um;
       if (!isWeekend) totalLateMin += (rec?.lateMinutes ?? 0);
+      final remark = _getRowRemark(rec, dt, isWeekend);
       final displayVal = _getDisplayValue(rec, isWeekend);
-      final showTimes = displayVal.isEmpty && rec != null;
+      final showTimes = remark.isEmpty && displayVal.isEmpty && rec != null;
       final amIn = showTimes && rec.timeIn != null
           ? _formatTime(rec.timeIn)
-          : (displayVal == 'ABSENT' ? 'ABSENT' : '');
+          : (remark.isNotEmpty
+                ? remark
+                : (displayVal == 'ABSENT' ? 'ABSENT' : ''));
       final amOut = showTimes ? _noon : '';
       final pmIn = showTimes ? _pmIn : '';
       final pmOut = showTimes && rec.timeOut != null
           ? _formatTime(rec.timeOut)
           : '';
+      final isHoliday = rec?.status == 'holiday' || rec?.holidayId != null;
+      final statusColorHex = _excelColorHexForStatus(
+        amIn.isNotEmpty ? amIn : null,
+        isHoliday: isHoliday,
+      );
+      final undertimeColorHex = !isWeekend && (uh > 0 || um > 0)
+          ? 'FFE65100'
+          : null;
       oneCopy.writeln(
-        '<tr><td>${_formatDateWithDay(dt)}</td><td class="center">$amIn</td><td class="center">$amOut</td><td class="center">$pmIn</td><td class="center">$pmOut</td><td class="right">${isWeekend ? '' : uh}</td><td class="right">${isWeekend ? '' : um}</td></tr>',
+        '<tr><td>${_formatDateWithDay(dt)}</td>'
+        '${tdCenter(amIn, statusColorHex)}${tdCenter(amOut, statusColorHex)}${tdCenter(pmIn, statusColorHex)}${tdCenter(pmOut, statusColorHex)}'
+        '${tdRight(isWeekend ? '' : '$uh', undertimeColorHex)}${tdRight(isWeekend ? '' : '$um', undertimeColorHex)}</tr>',
       );
     }
 
@@ -1360,6 +1486,13 @@ class DtrExport {
       '<tr><th>IN</th><th>OUT</th><th>IN</th><th>OUT</th><th>Hours</th><th>Min</th></tr></thead><tbody>',
     );
 
+    String tdCenter(String t, String? c) => c != null && c.length >= 6
+        ? '<td class="center" style="color:#${c.length == 8 ? c.substring(2) : c};">$t</td>'
+        : '<td class="center">$t</td>';
+    String tdRight(String t, String? c) => c != null && c.length >= 6
+        ? '<td class="right" style="color:#${c.length == 8 ? c.substring(2) : c};">$t</td>'
+        : '<td class="right">$t</td>';
+
     for (var d = 1; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
@@ -1373,18 +1506,31 @@ class DtrExport {
       );
       if (!isWeekend) totalUndertimeMin += uh * 60 + um;
       if (!isWeekend) totalLateMin += (rec?.lateMinutes ?? 0);
+      final remark = _getRowRemark(rec, dt, isWeekend);
       final displayVal = _getDisplayValue(rec, isWeekend);
-      final showTimes = displayVal.isEmpty && rec != null;
+      final showTimes = remark.isEmpty && displayVal.isEmpty && rec != null;
       final amIn = showTimes && rec.timeIn != null
           ? _formatTime(rec.timeIn)
-          : (displayVal == 'ABSENT' ? 'ABSENT' : '');
+          : (remark.isNotEmpty
+                ? remark
+                : (displayVal == 'ABSENT' ? 'ABSENT' : ''));
       final amOut = showTimes ? _noon : '';
       final pmIn = showTimes ? _pmIn : '';
       final pmOut = showTimes && rec.timeOut != null
           ? _formatTime(rec.timeOut)
           : '';
+      final isHoliday = rec?.status == 'holiday' || rec?.holidayId != null;
+      final statusColorHex = _excelColorHexForStatus(
+        amIn.isNotEmpty ? amIn : null,
+        isHoliday: isHoliday,
+      );
+      final undertimeColorHex = !isWeekend && (uh > 0 || um > 0)
+          ? 'FFE65100'
+          : null;
       oneCopy.writeln(
-        '<tr><td>${_formatDateWithDay(dt)}</td><td class="center">$amIn</td><td class="center">$amOut</td><td class="center">$pmIn</td><td class="center">$pmOut</td><td class="right">${isWeekend ? '' : uh}</td><td class="right">${isWeekend ? '' : um}</td></tr>',
+        '<tr><td>${_formatDateWithDay(dt)}</td>'
+        '${tdCenter(amIn, statusColorHex)}${tdCenter(amOut, statusColorHex)}${tdCenter(pmIn, statusColorHex)}${tdCenter(pmOut, statusColorHex)}'
+        '${tdRight(isWeekend ? '' : '$uh', undertimeColorHex)}${tdRight(isWeekend ? '' : '$um', undertimeColorHex)}</tr>',
       );
     }
 
@@ -1464,14 +1610,14 @@ class DtrExport {
       '.dtr-table th{background:#d3d3d3;font-weight:bold;text-align:center;}',
     );
     sb.writeln('.center{text-align:center;}.right{text-align:right;}');
-    sb.writeln(
-      '.total-row td{background:#e6e6e6;font-weight:bold;}',
-    );
+    sb.writeln('.total-row td{background:#e6e6e6;font-weight:bold;}');
     sb.writeln(
       '.two-col{display:flex;gap:20px;align-items:flex-start;}.col{flex:1;}h2{text-align:center;margin:0 0 6px;font-size:12pt;}',
     );
     sb.writeln('</style></head><body>');
-    sb.writeln('<div class="two-col"><div class="col">$oneCopyHtml</div><div class="col">$oneCopyHtml</div></div>');
+    sb.writeln(
+      '<div class="two-col"><div class="col">$oneCopyHtml</div><div class="col">$oneCopyHtml</div></div>',
+    );
     sb.writeln('</body></html>');
     return sb.toString();
   }

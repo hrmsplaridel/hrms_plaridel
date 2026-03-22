@@ -162,16 +162,20 @@ class DtrProvider extends ChangeNotifier {
   }
 
   /// Load time records for admin (with optional filters). [limit] caps results for dashboard.
+  /// When [silent] is true, does not set [loading] so existing data stays visible during refresh.
   Future<void> loadTimeRecordsForAdmin({
     DateTime? startDate,
     DateTime? endDate,
     String? userId,
     String? departmentId,
     int? limit,
+    bool silent = false,
   }) async {
-    _loading = true;
-    _error = null;
-    notifyListeners();
+    if (!silent) {
+      _loading = true;
+      _error = null;
+      notifyListeners();
+    }
     try {
       _tableMissing = false;
       _filterStart = startDate;
@@ -186,7 +190,7 @@ class DtrProvider extends ChangeNotifier {
         limit: limit,
       );
       _timeRecords = list;
-      _loading = false;
+      if (!silent) _loading = false;
       notifyListeners();
     } catch (e) {
       if (_isTableNotFoundError(e)) {
@@ -198,7 +202,7 @@ class DtrProvider extends ChangeNotifier {
         _timeRecords =
             []; // Show sample data on any load failure for flexible UI
       }
-      _loading = false;
+      if (!silent) _loading = false;
       notifyListeners();
     }
   }

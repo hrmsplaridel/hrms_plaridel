@@ -292,6 +292,11 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   number_of_days NUMERIC(5,2),
 
   reason TEXT,
+  -- Supporting document attachment (PDF, JPG, JPEG, PNG)
+  attachment_name TEXT,
+  attachment_path TEXT,
+  attachment_mime_type TEXT,
+  attachment_uploaded_at TIMESTAMPTZ,
   -- Flexible payload for form fields (office_department, position_title, commutation, etc.)
   details JSONB,
   status TEXT NOT NULL DEFAULT 'pending'
@@ -312,6 +317,43 @@ CREATE TABLE IF NOT EXISTS leave_requests (
     (total_days IS NULL OR total_days >= 0)
     AND (number_of_days IS NULL OR number_of_days >= 0)
   )
+);
+
+-- =========================================
+-- LEAVE BALANCES
+-- =========================================
+CREATE TABLE IF NOT EXISTS leave_balances (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  leave_type TEXT NOT NULL,
+  earned_days NUMERIC(8,2) NOT NULL DEFAULT 0 CHECK (earned_days >= 0),
+  used_days NUMERIC(8,2) NOT NULL DEFAULT 0 CHECK (used_days >= 0),
+  pending_days NUMERIC(8,2) NOT NULL DEFAULT 0 CHECK (pending_days >= 0),
+  adjusted_days NUMERIC(8,2) NOT NULL DEFAULT 0,
+  as_of_date DATE,
+  last_accrual_date DATE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(user_id, leave_type)
+);
+CREATE INDEX IF NOT EXISTS idx_leave_balances_user_id ON leave_balances(user_id);
+
+-- =========================================
+-- BIOMETRIC ATTENDANCE LOGS (raw import from .dat files)
+-- =========================================
+CREATE TABLE IF NOT EXISTS biometric_attendance_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  biometric_user_id TEXT NOT NULL,
+  logged_at TIMESTAMPTZ NOT NULL,
+  verify_code TEXT,
+  punch_code TEXT,
+  work_code TEXT,
+  raw_line TEXT NOT NULL,
+  source_file_name TEXT,
+  imported_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT uq_biometric_attendance_logs_user_time UNIQUE (biometric_user_id, logged_at)
 );
 
 -- =========================================
@@ -488,6 +530,10 @@ CREATE INDEX IF NOT EXISTS idx_leave_requests_employee_id ON leave_requests(empl
 CREATE INDEX IF NOT EXISTS idx_leave_requests_status ON leave_requests(status);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_dates ON leave_requests(start_date, end_date);
 
+CREATE INDEX IF NOT EXISTS idx_biometric_attendance_logs_user_id ON biometric_attendance_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_biometric_attendance_logs_logged_at ON biometric_attendance_logs(logged_at);
+CREATE INDEX IF NOT EXISTS idx_biometric_attendance_logs_biometric_user_id ON biometric_attendance_logs(biometric_user_id);
+
 CREATE INDEX IF NOT EXISTS idx_dtr_logs_employee_id ON dtr_logs(employee_id);
 CREATE INDEX IF NOT EXISTS idx_dtr_logs_log_time ON dtr_logs(log_time);
 CREATE INDEX IF NOT EXISTS idx_dtr_logs_biometric_user_id ON dtr_logs(biometric_user_id);
@@ -589,5 +635,11 @@ EXECUTE PROCEDURE set_updated_at();
 DROP TRIGGER IF EXISTS trg_overtime_requests_updated_at ON overtime_requests;
 CREATE TRIGGER trg_overtime_requests_updated_at
 BEFORE UPDATE ON overtime_requests
+FOR EACH ROW
+EXECUTE PROCEDURE set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_leave_balances_updated_at ON leave_balances;
+CREATE TRIGGER trg_leave_balances_updated_at
+BEFORE UPDATE ON leave_balances
 FOR EACH ROW
 EXECUTE PROCEDURE set_updated_at();

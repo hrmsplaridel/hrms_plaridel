@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../landingpage/constants/app_theme.dart';
@@ -14,15 +16,31 @@ class DtrDashboard extends StatefulWidget {
 }
 
 class _DtrDashboardState extends State<DtrDashboard> {
+  Timer? _pollingTimer;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+    _pollingTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!mounted) return;
+      final dtr = context.read<DtrProvider>();
+      if (dtr.loading) return;
+      _load();
+    });
+  }
+
+  @override
+  void dispose() {
+    _pollingTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _load() async {
+    if (!mounted) return;
     final dtr = context.read<DtrProvider>();
     await dtr.loadSummary();
+    if (!mounted) return;
     await dtr.loadTimeRecordsForAdmin(limit: 20);
   }
 

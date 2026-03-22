@@ -27,6 +27,8 @@ class TimeRecord {
     this.holidayName,
     this.coverage,
     this.attendanceRemark,
+    this.leaveTypeName,
+    this.source,
   });
 
   final String? id;
@@ -68,8 +70,14 @@ class TimeRecord {
   /// Holiday/suspension coverage: whole_day | am_only | pm_only (when holiday_id is set).
   final String? coverage;
 
-  /// Shift-aware attendance remark from backend: On Time, Late, Undertime, Late + Undertime, Incomplete, Invalid Log, Absent, Holiday, Leave.
+  /// Shift-aware attendance remark from backend: On Time, Late, Undertime, Late + Undertime, Incomplete, Invalid Log, Absent, Holiday, Leave, or specific leave type (e.g. Sick Leave).
   final String? attendanceRemark;
+
+  /// Leave type display name when status is on_leave (e.g. Sick Leave, Vacation Leave).
+  final String? leaveTypeName;
+
+  /// Attendance source: 'manual' (clock-in button), 'system' (biometric), 'adjusted' (admin correction).
+  final String? source;
 
   static const String tableName = 'time_records';
 
@@ -122,6 +130,8 @@ class TimeRecord {
       holidayName: json['holiday_name']?.toString(),
       coverage: json['coverage']?.toString(),
       attendanceRemark: json['attendance_remark']?.toString(),
+      leaveTypeName: json['leave_type_name']?.toString(),
+      source: json['source']?.toString(),
     );
   }
 
@@ -194,6 +204,8 @@ class TimeRecord {
     String? employeeName,
     String? holidayName,
     String? attendanceRemark,
+    String? leaveTypeName,
+    String? source,
   }) {
     return TimeRecord(
       id: id ?? this.id,
@@ -216,6 +228,8 @@ class TimeRecord {
       employeeName: employeeName ?? this.employeeName,
       holidayName: holidayName ?? this.holidayName,
       attendanceRemark: attendanceRemark ?? this.attendanceRemark,
+      leaveTypeName: leaveTypeName ?? this.leaveTypeName,
+      source: source ?? this.source,
     );
   }
 }

@@ -1,10 +1,18 @@
 const express = require('express');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const { v4: uuidv4 } = require('uuid');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const { validateEmployeeLeaveRequest } = require('./leaveTypeRules');
 
 const router = express.Router();
 const protect = [authMiddleware];
+
+const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
+const LEAVE_ATTACHMENT_SUBDIR = 'leave-attachments';
 
 function toIsoDateStr(val) {
   if (!val) return null;
@@ -63,12 +71,16 @@ async function ensureLeaveTypeIdByName(client, name) {
 
 function mapLeaveRowToApi(row) {
   // Keep response aligned with Flutter LeaveRequest.fromJson keys.
+  // Spread details FIRST so canonical DB fields (status, etc.) take precedence and are not overwritten.
+  const details = row.details && typeof row.details === 'object' ? row.details : {};
+  const employeeName = row.employee_name || row.full_name || row.employee_full_name || details.employee_name || details.employeeName || null;
   return {
+    ...details,
     id: row.id,
     user_id: row.user_id || row.employee_id,
-    employee_name: row.employee_name || row.full_name || null,
-    start_date: row.start_date ? String(row.start_date).slice(0, 10) : null,
-    end_date: row.end_date ? String(row.end_date).slice(0, 10) : null,
+    employee_name: employeeName,
+    start_date: toIsoDateStr(row.start_date),
+    end_date: toIsoDateStr(row.end_date),
     working_days_applied: row.number_of_days != null ? parseFloat(row.number_of_days) : (row.total_days != null ? parseFloat(row.total_days) : null),
     reason: row.reason || null,
     status: row.status,
@@ -77,11 +89,70 @@ function mapLeaveRowToApi(row) {
     reviewed_at: row.reviewed_at || row.approved_at || null,
     created_at: row.created_at || null,
     updated_at: row.updated_at || null,
-    // Leave type: return text name (must match Flutter enum values if you want direct mapping).
     leave_type: row.leave_type_name || row.leave_type || null,
-    // Carry full details payload for rich UI fields (optional).
-    ...(row.details ? row.details : {}),
+    attachment_name: row.attachment_name || null,
+    attachment_path: row.attachment_path || null,
+    attachment_mime_type: row.attachment_mime_type || null,
+    attachment_uploaded_at: row.attachment_uploaded_at || null,
   };
+}
+
+// Ensure leave attachment directory exists
+const leaveAttachmentDir = path.join(UPLOAD_DIR, LEAVE_ATTACHMENT_SUBDIR);
+if (!fs.existsSync(leaveAttachmentDir)) {
+  fs.mkdirSync(leaveAttachmentDir, { recursive: true });
+}
+
+const ALLOWED_LEAVE_ATTACHMENT_EXT = /\.(pdf|jpg|jpeg|png)$/i;
+const MAX_LEAVE_ATTACHMENT_SIZE = 10 * 1024 * 1024; // 10MB
+
+const leaveAttachmentStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, leaveAttachmentDir),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname) || '.pdf';
+    const safeExt = ALLOWED_LEAVE_ATTACHMENT_EXT.test(ext) ? ext : '.pdf';
+    cb(null, `lr_${uuidv4()}${safeExt}`);
+  },
+});
+
+const uploadLeaveAttachment = multer({
+  storage: leaveAttachmentStorage,
+  limits: { fileSize: MAX_LEAVE_ATTACHMENT_SIZE },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const ok = ['.pdf', '.jpg', '.jpeg', '.png'].includes(ext);
+    if (!ok) cb(new Error('Allowed file types: PDF, JPG, JPEG, PNG'), false);
+    else cb(null, true);
+  },
+});
+
+function uploadLeaveAttachmentMw(req, res, next) {
+  uploadLeaveAttachment.single('file')(req, res, (err) => {
+    if (err) {
+      if (err.message === 'Allowed file types: PDF, JPG, JPEG, PNG') {
+        return res.status(400).json({ error: err.message });
+      }
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ error: 'File too large. Max 10MB.' });
+      }
+      return next(err);
+    }
+    next();
+  });
+}
+
+/** Check if user can access leave request (owner or admin). */
+async function canAccessLeaveRequest(requestId, userId, isAdmin) {
+  const q = await pool.query(
+    'SELECT id FROM leave_requests WHERE id = $1 AND ($2 = true OR user_id = $3 OR employee_id = $3)',
+    [requestId, isAdmin, userId]
+  );
+  return q.rows.length > 0;
+}
+
+/** Check if attachment can be modified (draft, pending, returned). */
+function canModifyAttachment(status) {
+  return status === 'draft' || status === 'pending' || status === 'returned';
 }
 
 async function upsertLeaveBalanceDeduction(client, userId, leaveTypeName, daysToDeduct) {
@@ -129,6 +200,7 @@ async function applyApprovedLeaveToDtr(client, userId, leaveRequestId, startDate
         attendance_date,
         status,
         leave_request_id,
+        source,
         created_at,
         updated_at
       )
@@ -137,6 +209,7 @@ async function applyApprovedLeaveToDtr(client, userId, leaveRequestId, startDate
         gs::date AS attendance_date,
         'on_leave'::text AS status,
         $2::uuid AS leave_request_id,
+        'adjusted'::text AS source,
         now() AS created_at,
         now() AS updated_at
       FROM generate_series($3::date, $4::date, '1 day'::interval) AS gs
@@ -145,6 +218,7 @@ async function applyApprovedLeaveToDtr(client, userId, leaveRequestId, startDate
       DO UPDATE SET
         status = 'on_leave',
         leave_request_id = EXCLUDED.leave_request_id,
+        source = 'adjusted',
         updated_at = now()
       WHERE dtr_daily_summary.status IS DISTINCT FROM 'present'`,
     [userId, leaveRequestId, startDateStr, endDateStr]
@@ -190,6 +264,22 @@ router.post('/draft', protect, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Invalid leave type' });
       }
+      const payloadDetails = details && typeof details === 'object'
+        ? details
+        : { ...rest, leave_type, start_date: startStr, end_date: endStr };
+      const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
+      const validation = validateEmployeeLeaveRequest({
+        leaveType: leave_type,
+        otherPurpose: otherPurpose || null,
+        startDateStr: startStr,
+        endDateStr: endStr,
+        numberOfDays: days,
+        hasAttachment: false,
+      });
+      if (!validation.valid) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: validation.error });
+      }
       if (startStr && endStr) {
         const hasOverlap = await hasOverlappingLeaveRequest(client, userId, startStr, endStr, null);
         if (hasOverlap) {
@@ -197,10 +287,6 @@ router.post('/draft', protect, async (req, res) => {
           return res.status(400).json({ error: 'Overlapping leave request exists' });
         }
       }
-      const payloadDetails = details && typeof details === 'object'
-        ? details
-        : { ...rest, leave_type, start_date: startStr, end_date: endStr };
-
       const q = await client.query(
         `INSERT INTO leave_requests (
             employee_id,
@@ -264,14 +350,27 @@ router.post('/submit', protect, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Invalid leave type' });
       }
+      const payloadDetails = details && typeof details === 'object'
+        ? details
+        : { ...rest, leave_type, start_date: startStr, end_date: endStr };
+      const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
+      const validation = validateEmployeeLeaveRequest({
+        leaveType: leave_type,
+        otherPurpose: otherPurpose || null,
+        startDateStr: startStr,
+        endDateStr: endStr,
+        numberOfDays: days,
+        hasAttachment: false,
+      });
+      if (!validation.valid) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: validation.error });
+      }
       const hasOverlap = await hasOverlappingLeaveRequest(client, userId, startStr, endStr, null);
       if (hasOverlap) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Overlapping leave request exists' });
       }
-      const payloadDetails = details && typeof details === 'object'
-        ? details
-        : { ...rest, leave_type, start_date: startStr, end_date: endStr };
 
       const q = await client.query(
         `INSERT INTO leave_requests (
@@ -336,6 +435,24 @@ router.put('/:id', protect, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Invalid leave type' });
       }
+      const payloadDetails = details && typeof details === 'object'
+        ? details
+        : { ...rest, leave_type, start_date: startStr, end_date: endStr };
+      const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
+      if (leave_type && startStr && endStr && days != null) {
+        const validation = validateEmployeeLeaveRequest({
+          leaveType: leave_type,
+          otherPurpose: otherPurpose || null,
+          startDateStr: startStr,
+          endDateStr: endStr,
+          numberOfDays: days,
+          hasAttachment: false,
+        });
+        if (!validation.valid) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: validation.error });
+        }
+      }
       // Prevent overlapping ranges when dates are being set/changed.
       if (startStr && endStr) {
         const hasOverlap = await hasOverlappingLeaveRequest(client, userId, startStr, endStr, id);
@@ -344,9 +461,6 @@ router.put('/:id', protect, async (req, res) => {
           return res.status(400).json({ error: 'Overlapping leave request exists' });
         }
       }
-      const payloadDetails = details && typeof details === 'object'
-        ? details
-        : { ...rest, leave_type, start_date: startStr, end_date: endStr };
 
       // Strict transitions:
       // - draft -> pending
@@ -433,16 +547,23 @@ router.patch('/:id/cancel', protect, async (req, res) => {
       return res.status(400).json({ error: `Invalid status transition: ${status} -> cancelled` });
     }
 
-    const updated = await pool.query(
+    await pool.query(
       `UPDATE leave_requests
        SET status = 'cancelled',
            details = COALESCE(details, '{}'::jsonb) || jsonb_build_object('cancel_reason', $3::text),
            updated_at = now()
-       WHERE id = $1 AND (user_id = $2 OR employee_id = $2)
-       RETURNING *`,
+       WHERE id = $1 AND (user_id = $2 OR employee_id = $2)`,
       [id, userId, reason]
     );
-    res.json(mapLeaveRowToApi(updated.rows[0]));
+    const out = await pool.query(
+      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
+       FROM leave_requests lr
+       LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+       LEFT JOIN users u ON u.id = COALESCE(lr.employee_id, lr.user_id)
+       WHERE lr.id = $1`,
+      [id]
+    );
+    res.json(mapLeaveRowToApi(out.rows[0]));
   } catch (err) {
     console.error('[leave PATCH /:id/cancel]', err);
     res.status(500).json({ error: 'Failed to cancel leave request' });
@@ -456,9 +577,10 @@ router.get('/my', protect, async (req, res) => {
   try {
     const status = (req.query?.status || '').toString().trim() || null;
     const rows = await pool.query(
-      `SELECT lr.*, lt.name AS leave_type_name
+      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+       LEFT JOIN users u ON u.id = COALESCE(lr.employee_id, lr.user_id)
        WHERE (lr.user_id = $1 OR lr.employee_id = $1)
          AND ($2::text IS NULL OR lr.status = $2)
        ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC`,
@@ -485,9 +607,10 @@ router.get('/', protect, requireAdmin, async (req, res) => {
     const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 500) : null;
 
     const rows = await pool.query(
-      `SELECT lr.*, lt.name AS leave_type_name
+      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+       LEFT JOIN users u ON u.id = COALESCE(lr.employee_id, lr.user_id)
        WHERE ($1::text IS NULL OR lr.status = $1)
          AND ($2::text IS NULL OR lt.name = $2)
          AND ($3::uuid IS NULL OR lr.user_id = $3 OR lr.employee_id = $3)
@@ -506,9 +629,10 @@ router.get('/', protect, requireAdmin, async (req, res) => {
 router.get('/pending', protect, requireAdmin, async (_req, res) => {
   try {
     const rows = await pool.query(
-      `SELECT lr.*, lt.name AS leave_type_name
+      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+       LEFT JOIN users u ON u.id = COALESCE(lr.employee_id, lr.user_id)
        WHERE lr.status = 'pending'
        ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC
        LIMIT 200`
@@ -537,7 +661,7 @@ router.patch('/:id/approve', protect, requireAdmin, async (req, res) => {
          FROM leave_requests lr
          LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
          WHERE lr.id = $1
-         FOR UPDATE`,
+         FOR UPDATE OF lr`,
         [id]
       );
       if (existing.rows.length === 0) {
@@ -549,9 +673,10 @@ router.patch('/:id/approve', protect, requireAdmin, async (req, res) => {
       if (r.status === 'approved') {
         await client.query('COMMIT');
         const out = await pool.query(
-          `SELECT lr.*, lt.name AS leave_type_name
+          `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
            FROM leave_requests lr
            LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+           LEFT JOIN users u ON u.id = COALESCE(lr.employee_id, lr.user_id)
            WHERE lr.id = $1`,
           [id]
         );
@@ -578,8 +703,8 @@ router.patch('/:id/approve', protect, requireAdmin, async (req, res) => {
       );
       const row = updated.rows[0];
       const targetUserId = row.user_id || row.employee_id;
-      const startStr = String(row.start_date).slice(0, 10);
-      const endStr = String(row.end_date).slice(0, 10);
+      const startStr = toIsoDateStr(row.start_date);
+      const endStr = toIsoDateStr(row.end_date);
       const days = row.number_of_days != null ? parseFloat(row.number_of_days) : (row.total_days != null ? parseFloat(row.total_days) : null);
       const leaveTypeName = r.leave_type_name || null;
 
@@ -609,7 +734,8 @@ router.patch('/:id/approve', protect, requireAdmin, async (req, res) => {
       return res.status(err.statusCode).json({ error: err.message });
     }
     console.error('[leave PATCH /:id/approve]', err);
-    res.status(500).json({ error: 'Failed to approve leave request' });
+    const msg = err && err.message ? err.message : 'Failed to approve leave request';
+    res.status(500).json({ error: msg });
   }
 });
 
@@ -695,10 +821,11 @@ router.get('/balances/:userId', protect, async (req, res) => {
   }
   try {
     const rows = await pool.query(
-      `SELECT *
-       FROM leave_balances
-       WHERE user_id = $1::uuid
-       ORDER BY leave_type ASC`,
+      `SELECT lb.*, u.full_name AS employee_name
+       FROM leave_balances lb
+       LEFT JOIN users u ON u.id = lb.user_id
+       WHERE lb.user_id = $1::uuid
+       ORDER BY lb.leave_type ASC`,
       [targetId]
     );
     // Align response with Flutter LeaveBalance.fromJson keys.
@@ -706,7 +833,7 @@ router.get('/balances/:userId', protect, async (req, res) => {
       id: r.id,
       user_id: r.user_id,
       leave_type: r.leave_type,
-      employee_name: r.employee_name,
+      employee_name: r.employee_name || null,
       earned_days: r.earned_days != null ? parseFloat(r.earned_days) : 0,
       used_days: r.used_days != null ? parseFloat(r.used_days) : 0,
       pending_days: r.pending_days != null ? parseFloat(r.pending_days) : 0,
@@ -722,6 +849,122 @@ router.get('/balances/:userId', protect, async (req, res) => {
   }
 });
 
+// POST /api/leave/:id/attachment - upload attachment (owner or admin; draft/pending/returned only)
+router.post('/:id/attachment', protect, uploadLeaveAttachmentMw, async (req, res) => {
+  const userId = req.user?.id;
+  const role = req.user?.role;
+  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+  const { id } = req.params;
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded. Allowed: PDF, JPG, JPEG, PNG (max 10MB).' });
+    }
+    const isAdmin = role === 'admin';
+    const existing = await pool.query(
+      'SELECT id, status, attachment_path FROM leave_requests WHERE id = $1 AND ($2 = true OR user_id = $3 OR employee_id = $3)',
+      [id, isAdmin, userId]
+    );
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
+    const row = existing.rows[0];
+    if (!canModifyAttachment(row.status)) {
+      return res.status(400).json({ error: 'Attachment cannot be changed for this request status.' });
+    }
+    const relPath = `${LEAVE_ATTACHMENT_SUBDIR}/${req.file.filename}`;
+    const mimeType = req.file.mimetype || null;
+    if (row.attachment_path) {
+      const oldPath = path.join(UPLOAD_DIR, row.attachment_path);
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    }
+    await pool.query(
+      `UPDATE leave_requests
+       SET attachment_name = $1, attachment_path = $2, attachment_mime_type = $3, attachment_uploaded_at = now(), updated_at = now()
+       WHERE id = $4`,
+      [req.file.originalname || req.file.filename, relPath, mimeType, id]
+    );
+    const out = await pool.query(
+      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
+       FROM leave_requests lr
+       LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+       LEFT JOIN users u ON u.id = COALESCE(lr.employee_id, lr.user_id)
+       WHERE lr.id = $1`,
+      [id]
+    );
+    res.json(mapLeaveRowToApi(out.rows[0]));
+  } catch (err) {
+    console.error('[leave POST /:id/attachment]', err);
+    res.status(500).json({ error: 'Failed to upload attachment' });
+  }
+});
+
+// DELETE /api/leave/:id/attachment - remove attachment
+router.delete('/:id/attachment', protect, async (req, res) => {
+  const userId = req.user?.id;
+  const role = req.user?.role;
+  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+  const { id } = req.params;
+  try {
+    const isAdmin = role === 'admin';
+    const existing = await pool.query(
+      'SELECT id, status, attachment_path FROM leave_requests WHERE id = $1 AND ($2 = true OR user_id = $3 OR employee_id = $3)',
+      [id, isAdmin, userId]
+    );
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
+    const row = existing.rows[0];
+    if (!canModifyAttachment(row.status)) {
+      return res.status(400).json({ error: 'Attachment cannot be changed for this request status.' });
+    }
+    if (row.attachment_path) {
+      const filePath = path.join(UPLOAD_DIR, row.attachment_path);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
+    await pool.query(
+      `UPDATE leave_requests
+       SET attachment_name = NULL, attachment_path = NULL, attachment_mime_type = NULL, attachment_uploaded_at = NULL, updated_at = now()
+       WHERE id = $1`,
+      [id]
+    );
+    const out = await pool.query(
+      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
+       FROM leave_requests lr
+       LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+       LEFT JOIN users u ON u.id = COALESCE(lr.employee_id, lr.user_id)
+       WHERE lr.id = $1`,
+      [id]
+    );
+    res.json(mapLeaveRowToApi(out.rows[0]));
+  } catch (err) {
+    console.error('[leave DELETE /:id/attachment]', err);
+    res.status(500).json({ error: 'Failed to remove attachment' });
+  }
+});
+
+// GET /api/leave/:id/attachment - download attachment (owner or admin)
+router.get('/:id/attachment', protect, async (req, res) => {
+  const userId = req.user?.id;
+  const role = req.user?.role;
+  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+  const { id } = req.params;
+  try {
+    const isAdmin = role === 'admin';
+    const rows = await pool.query(
+      'SELECT attachment_path, attachment_name, attachment_mime_type FROM leave_requests WHERE id = $1 AND ($2 = true OR user_id = $3 OR employee_id = $3)',
+      [id, isAdmin, userId]
+    );
+    if (rows.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
+    const row = rows.rows[0];
+    if (!row.attachment_path) return res.status(404).json({ error: 'No attachment for this request' });
+    const filePath = path.join(UPLOAD_DIR, row.attachment_path);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Attachment file not found' });
+    const filename = row.attachment_name || 'attachment';
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    if (row.attachment_mime_type) res.setHeader('Content-Type', row.attachment_mime_type);
+    res.sendFile(path.resolve(filePath));
+  } catch (err) {
+    console.error('[leave GET /:id/attachment]', err);
+    res.status(500).json({ error: 'Failed to fetch attachment' });
+  }
+});
+
 // GET /api/leave/:id
 // IMPORTANT: keep this AFTER fixed-path endpoints like /pending
 router.get('/:id', protect, async (req, res) => {
@@ -732,9 +975,10 @@ router.get('/:id', protect, async (req, res) => {
   try {
     const isAdmin = role === 'admin';
     const rows = await pool.query(
-      `SELECT lr.*, lt.name AS leave_type_name
+      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+       LEFT JOIN users u ON u.id = COALESCE(lr.employee_id, lr.user_id)
        WHERE lr.id = $1
          AND ($2::boolean = true OR (lr.user_id = $3 OR lr.employee_id = $3))
        LIMIT 1`,

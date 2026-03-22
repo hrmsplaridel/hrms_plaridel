@@ -163,15 +163,19 @@ class ApiLeaveRepository implements LeaveRepository {
 
   @override
   Future<LeaveRequest> approveRequest(LeaveApprovalInput input) async {
-    final res = await ApiClient.instance.patch<Map<String, dynamic>>(
-      '/api/leave/${input.requestId}/approve',
-      data: {
-        'reviewer_remarks': input.hrRemarks,
-      },
-    );
-    final data = res.data;
-    if (data == null) throw Exception('No data returned');
-    return LeaveRequest.fromJson(data);
+    try {
+      final res = await ApiClient.instance.patch<Map<String, dynamic>>(
+        '/api/leave/${input.requestId}/approve',
+        data: {
+          'reviewer_remarks': input.hrRemarks,
+        },
+      );
+      final data = res.data;
+      if (data == null) throw Exception('No data returned');
+      return LeaveRequest.fromJson(data);
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
   }
 
   @override
@@ -206,16 +210,19 @@ class ApiLeaveRepository implements LeaveRepository {
     required String userId,
     String? reason,
   }) async {
-    // userId is inferred from JWT on backend; keep signature for compatibility.
-    final res = await ApiClient.instance.patch<Map<String, dynamic>>(
-      '/api/leave/$requestId/cancel',
-      data: {
-        if (reason != null) 'reason': reason,
-      },
-    );
-    final data = res.data;
-    if (data == null) throw Exception('No data returned');
-    return LeaveRequest.fromJson(data);
+    try {
+      final res = await ApiClient.instance.patch<Map<String, dynamic>>(
+        '/api/leave/$requestId/cancel',
+        data: {
+          if (reason != null) 'reason': reason,
+        },
+      );
+      final data = res.data;
+      if (data == null) throw Exception('No data returned');
+      return LeaveRequest.fromJson(data);
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
   }
 
   @override
@@ -224,12 +231,47 @@ class ApiLeaveRepository implements LeaveRepository {
     required List<int> fileBytes,
     required String fileName,
   }) async {
-    throw Exception('Leave attachments not implemented yet.');
+    try {
+      final res = await ApiClient.instance.uploadBytes<Map<String, dynamic>>(
+        '/api/leave/$requestId/attachment',
+        bytes: fileBytes,
+        fileName: fileName,
+        fieldName: 'file',
+      );
+      final data = res.data;
+      if (data == null) throw Exception('No data returned');
+      return LeaveRequest.fromJson(data);
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
   }
 
   @override
   Future<LeaveRequest> removeAttachment(String requestId) async {
-    throw Exception('Leave attachments not implemented yet.');
+    try {
+      final res = await ApiClient.instance.delete<Map<String, dynamic>>(
+        '/api/leave/$requestId/attachment',
+      );
+      final data = res.data;
+      if (data == null) throw Exception('No data returned');
+      return LeaveRequest.fromJson(data);
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
+  Future<List<int>?> getAttachmentBytes(String requestId) async {
+    try {
+      final res = await ApiClient.instance.dio.get<List<int>>(
+        '/api/leave/$requestId/attachment',
+        options: Options(responseType: ResponseType.bytes),
+      );
+      return res.data;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) return null;
+      rethrow;
+    }
   }
 }
 

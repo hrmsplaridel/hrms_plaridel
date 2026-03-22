@@ -10,7 +10,8 @@ import 'models/leave_type.dart';
 /// The provider depends only on the [LeaveRepository] contract, so the UI can
 /// stay unchanged if the backend later switches from Supabase to a custom API.
 class LeaveProvider extends ChangeNotifier {
-  LeaveProvider({required LeaveRepository repository}) : _repository = repository;
+  LeaveProvider({required LeaveRepository repository})
+    : _repository = repository;
 
   final LeaveRepository _repository;
 
@@ -38,13 +39,11 @@ class LeaveProvider extends ChangeNotifier {
   LeaveRequestStatus? get filterStatus => _filterStatus;
   LeaveType? get filterLeaveType => _filterLeaveType;
 
-  List<LeaveRequest> get pendingRequests => _requests
-      .where((r) => r.status == LeaveRequestStatus.pending)
-      .toList();
+  List<LeaveRequest> get pendingRequests =>
+      _requests.where((r) => r.status == LeaveRequestStatus.pending).toList();
 
-  List<LeaveRequest> get approvedRequests => _requests
-      .where((r) => r.status == LeaveRequestStatus.approved)
-      .toList();
+  List<LeaveRequest> get approvedRequests =>
+      _requests.where((r) => r.status == LeaveRequestStatus.approved).toList();
 
   List<LeaveRequest> get upcomingApprovedRequests {
     final today = DateTime.now();
@@ -69,10 +68,7 @@ class LeaveProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setFilters({
-    LeaveRequestStatus? status,
-    LeaveType? leaveType,
-  }) {
+  void setFilters({LeaveRequestStatus? status, LeaveType? leaveType}) {
     _filterStatus = status;
     _filterLeaveType = leaveType;
     notifyListeners();
@@ -175,10 +171,7 @@ class LeaveProvider extends ChangeNotifier {
         status: _filterStatus,
       );
       final balancesFuture = _repository.getBalancesForUser(userId);
-      final results = await Future.wait([
-        requestsFuture,
-        balancesFuture,
-      ]);
+      final results = await Future.wait([requestsFuture, balancesFuture]);
       _requests = results[0] as List<LeaveRequest>;
       _balances = results[1] as List<LeaveBalance>;
     } catch (e) {
@@ -204,6 +197,22 @@ class LeaveProvider extends ChangeNotifier {
     } finally {
       _loading = false;
       notifyListeners();
+    }
+  }
+
+  /// Refetches a request by ID without setting loading state (e.g. for admin
+  /// to get latest attachment). Updates _selectedRequest and upserts into list.
+  Future<LeaveRequest?> refreshRequestById(String requestId) async {
+    try {
+      final fresh = await _repository.getRequestById(requestId);
+      if (fresh != null) {
+        _selectedRequest = fresh;
+        _upsertRequest(fresh);
+        notifyListeners();
+      }
+      return fresh;
+    } catch (_) {
+      return null;
     }
   }
 
@@ -235,7 +244,9 @@ class LeaveProvider extends ChangeNotifier {
       _upsertRequest(saved);
       return saved;
     } catch (e) {
-      _error = e is Exception && e.toString().replaceFirst('Exception: ', '').isNotEmpty
+      _error =
+          e is Exception &&
+              e.toString().replaceFirst('Exception: ', '').isNotEmpty
           ? e.toString().replaceFirst('Exception: ', '')
           : e.toString();
       return null;
@@ -281,7 +292,9 @@ class LeaveProvider extends ChangeNotifier {
       _upsertRequest(updated);
       return updated;
     } catch (e) {
-      _error = e.toString();
+      _error = e is Exception && e.toString().startsWith('Exception: ')
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
       return null;
     } finally {
       _reviewing = false;
@@ -299,7 +312,9 @@ class LeaveProvider extends ChangeNotifier {
       _upsertRequest(updated);
       return updated;
     } catch (e) {
-      _error = e.toString();
+      _error = e is Exception && e.toString().startsWith('Exception: ')
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
       return null;
     } finally {
       _reviewing = false;
@@ -384,6 +399,14 @@ class LeaveProvider extends ChangeNotifier {
     } finally {
       _submitting = false;
       notifyListeners();
+    }
+  }
+
+  Future<List<int>?> getAttachmentBytes(String requestId) async {
+    try {
+      return await _repository.getAttachmentBytes(requestId);
+    } catch (_) {
+      return null;
     }
   }
 

@@ -48,9 +48,7 @@ class MockLeaveRepository implements LeaveRepository {
   @override
   Future<LeaveRequest> updateRequest(LeaveRequest request) async {
     final old = _getRequestByIdInternal(request.id);
-    final saved = request.copyWith(
-      updatedAt: DateTime.now(),
-    );
+    final saved = request.copyWith(updatedAt: DateTime.now());
     _upsertRequest(saved);
     _ensureDefaultBalances(saved.userId);
     _reconcilePendingEffect(old: old, updated: saved);
@@ -87,7 +85,8 @@ class MockLeaveRepository implements LeaveRepository {
         return false;
       }
       if (query.startDateFrom != null &&
-          (r.startDate == null || r.startDate!.isBefore(query.startDateFrom!))) {
+          (r.startDate == null ||
+              r.startDate!.isBefore(query.startDateFrom!))) {
         return false;
       }
       if (query.startDateTo != null &&
@@ -106,7 +105,9 @@ class MockLeaveRepository implements LeaveRepository {
     }).toList();
 
     results = _sortedRequests(results);
-    if (query.limit != null && query.limit! > 0 && results.length > query.limit!) {
+    if (query.limit != null &&
+        query.limit! > 0 &&
+        results.length > query.limit!) {
       results = results.take(query.limit!).toList();
     }
     return results;
@@ -115,9 +116,7 @@ class MockLeaveRepository implements LeaveRepository {
   @override
   Future<List<LeaveRequest>> listPendingRequests() async {
     return _sortedRequests(
-      _requests
-          .where((r) => r.status == LeaveRequestStatus.pending)
-          .toList(),
+      _requests.where((r) => r.status == LeaveRequestStatus.pending).toList(),
     );
   }
 
@@ -125,8 +124,9 @@ class MockLeaveRepository implements LeaveRepository {
   Future<List<LeaveBalance>> getBalancesForUser(String userId) async {
     _ensureDefaultBalances(userId);
     final list = _balancesByUser[userId] ?? const <LeaveBalance>[];
-    return List<LeaveBalance>.from(list)
-      ..sort((a, b) => a.leaveType.displayName.compareTo(b.leaveType.displayName));
+    return List<LeaveBalance>.from(list)..sort(
+      (a, b) => a.leaveType.displayName.compareTo(b.leaveType.displayName),
+    );
   }
 
   @override
@@ -136,8 +136,9 @@ class MockLeaveRepository implements LeaveRepository {
   ) async {
     _ensureDefaultBalances(userId);
     try {
-      return (_balancesByUser[userId] ?? const <LeaveBalance>[])
-          .firstWhere((b) => b.leaveType == leaveType);
+      return (_balancesByUser[userId] ?? const <LeaveBalance>[]).firstWhere(
+        (b) => b.leaveType == leaveType,
+      );
     } catch (_) {
       return null;
     }
@@ -171,7 +172,9 @@ class MockLeaveRepository implements LeaveRepository {
       hrRemarks: input.hrRemarks,
       recommendationRemarks: input.recommendationRemarks,
       approvedDaysWithPay:
-          input.approvedDaysWithPay ?? old.approvedDaysWithPay ?? old.workingDaysApplied,
+          input.approvedDaysWithPay ??
+          old.approvedDaysWithPay ??
+          old.workingDaysApplied,
       approvedDaysWithoutPay:
           input.approvedDaysWithoutPay ?? old.approvedDaysWithoutPay,
       approvedOtherDetails:
@@ -253,7 +256,8 @@ class MockLeaveRepository implements LeaveRepository {
     final old = _requireRequest(requestId);
     final updated = old.copyWith(
       attachmentName: fileName,
-      attachmentPath: 'mock://${LeaveRequest.storageBucket}/$requestId/$fileName',
+      attachmentPath:
+          'mock://${LeaveRequest.storageBucket}/$requestId/$fileName',
       updatedAt: DateTime.now(),
     );
     _upsertRequest(updated);
@@ -271,6 +275,9 @@ class MockLeaveRepository implements LeaveRepository {
     _upsertRequest(updated);
     return updated;
   }
+
+  @override
+  Future<List<int>?> getAttachmentBytes(String requestId) async => null;
 
   String _nextRequestId() {
     _requestCounter += 1;

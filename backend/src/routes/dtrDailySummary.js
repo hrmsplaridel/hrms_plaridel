@@ -265,7 +265,9 @@ async function computeAttendanceRemark(record, shiftInfo, holidayId, leaveReques
     if (cov === 'pm_only') return `${name} (PM)`;
     return name;
   }
-  if (record.leave_request_id != null || leaveRequestId != null || record.status === 'on_leave') return 'Leave';
+  if (record.leave_request_id != null || leaveRequestId != null || record.status === 'on_leave') {
+    return (record.leave_type_name && String(record.leave_type_name).trim()) || 'Leave';
+  }
   const hasAnyLog = record.time_in || record.break_out || record.break_in || record.time_out;
   if (!hasAnyLog) return 'Absent';
   if (record.status === 'invalid') return 'Invalid Log';
@@ -513,13 +515,16 @@ router.get('/', protect, async (req, res) => {
       : 'h.name AS holiday_name, h.holiday_type AS holiday_type, NULL::text AS holiday_coverage';
     const result = await pool.query(
       `SELECT d.id, d.employee_id, d.attendance_date, d.attendance_date::text AS attendance_date_iso, d.time_in, d.break_out, d.break_in, d.time_out, d.total_hours,
-              d.late_minutes, d.undertime_minutes, d.status, d.pm_status, d.remarks, d.holiday_id, d.leave_request_id,
+              d.late_minutes, d.undertime_minutes, d.status, d.pm_status, d.remarks, d.source, d.holiday_id, d.leave_request_id,
               d.created_at, d.updated_at,
               u.full_name AS employee_name,
-              ${joinCols}
+              ${joinCols},
+              lt.description AS leave_type_name
        FROM dtr_daily_summary d
        LEFT JOIN users u ON u.id = d.employee_id
        LEFT JOIN holidays h ON h.id = d.holiday_id
+       LEFT JOIN leave_requests lr ON lr.id = d.leave_request_id
+       LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
        ${where}
        ORDER BY d.attendance_date DESC, d.time_in DESC NULLS LAST
        LIMIT $${i}`,
@@ -554,6 +559,7 @@ router.get('/', protect, async (req, res) => {
         status: r.status,
         holiday_id: r.holiday_id,
         leave_request_id: r.leave_request_id,
+        leave_type_name: r.leave_type_name,
       };
       const holidayInfo = r.holiday_id ? { name: r.holiday_name, holiday_type: r.holiday_type, coverage } : null;
       let attendanceRemark = await computeAttendanceRemark(recordForRemark, shiftInfo, r.holiday_id, r.leave_request_id, holidayInfo);
@@ -578,6 +584,8 @@ router.get('/', protect, async (req, res) => {
       holiday_name: r.holiday_name,
       holiday_type: r.holiday_type,
         coverage,
+      leave_type_name: r.leave_type_name || null,
+      source: r.source || null,
       created_at: r.created_at,
       updated_at: r.updated_at,
       employee_name: r.employee_name,
@@ -668,6 +676,7 @@ router.get('/', protect, async (req, res) => {
               status: 'holiday',
               pm_status: null,
               remarks: null,
+              source: 'adjusted',
               attendance_remark: remark,
               holiday_id: h.id,
               leave_request_id: null,
@@ -742,6 +751,7 @@ router.get('/', protect, async (req, res) => {
             status: 'absent',
             pm_status: null,
             remarks: null,
+            source: null,
             attendance_remark: 'Absent',
             holiday_id: null,
             leave_request_id: null,
@@ -823,7 +833,7 @@ router.get('/today', protect, async (req, res) => {
       ? 'h.name AS holiday_name, h.holiday_type AS holiday_type, h.coverage AS holiday_coverage'
       : 'h.name AS holiday_name, h.holiday_type AS holiday_type, NULL::text AS holiday_coverage';
     const result = await pool.query(
-      `SELECT d.id, d.employee_id, d.attendance_date, d.attendance_date::text AS attendance_date_iso, d.time_in, d.break_out, d.break_in, d.time_out, d.total_hours, d.status, d.pm_status, d.remarks, d.holiday_id, d.created_at, d.updated_at,
+      `SELECT d.id, d.employee_id, d.attendance_date, d.attendance_date::text AS attendance_date_iso, d.time_in, d.break_out, d.break_in, d.time_out, d.total_hours, d.status, d.pm_status, d.remarks, d.source, d.holiday_id, d.created_at, d.updated_at,
               u.full_name AS employee_name,
               ${joinCols}
        FROM dtr_daily_summary d
@@ -853,6 +863,7 @@ router.get('/today', protect, async (req, res) => {
       status: r.status,
       pm_status: pmStatus,
       remarks: r.remarks,
+      source: r.source || null,
       holiday_id: r.holiday_id,
       holiday_name: r.holiday_name,
       holiday_type: r.holiday_type,
@@ -925,11 +936,13 @@ router.post('/', protect, async (req, res) => {
       undertimeMinutes = await computeUndertimeMinutes(targetId, date, time_out || null, break_out || null, status, holidayId, coverage);
     }
 
+    const sourceValue = (status === 'holiday' || holidayId) ? 'adjusted' : 'manual';
+
     const result = await pool.query(
       `INSERT INTO dtr_daily_summary (employee_id, attendance_date, time_in, break_out, break_in, time_out, total_hours, late_minutes, undertime_minutes, status, pm_status, source, holiday_id)
-       VALUES ($1, $2::date, $3::timestamptz, $4::timestamptz, $5::timestamptz, $6::timestamptz, $7::numeric, $8, $9, $10, $11, 'manual', $12)
-       RETURNING id, employee_id, attendance_date::text AS attendance_date_iso, time_in, break_out, break_in, time_out, total_hours, late_minutes, undertime_minutes, status, pm_status, created_at`,
-      [targetId, date, timeIn, break_out || null, break_in || null, time_out || null, total, lateMinutes, undertimeMinutes, status, pmStatus, holidayId]
+       VALUES ($1, $2::date, $3::timestamptz, $4::timestamptz, $5::timestamptz, $6::timestamptz, $7::numeric, $8, $9, $10, $11, $12, $13)
+       RETURNING id, employee_id, attendance_date::text AS attendance_date_iso, time_in, break_out, break_in, time_out, total_hours, late_minutes, undertime_minutes, status, pm_status, source, created_at`,
+      [targetId, date, timeIn, break_out || null, break_in || null, time_out || null, total, lateMinutes, undertimeMinutes, status, pmStatus, sourceValue, holidayId]
     );
     const r = result.rows[0];
     const recordDateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || date;
@@ -946,6 +959,7 @@ router.post('/', protect, async (req, res) => {
       undertime_minutes: r.undertime_minutes != null ? parseInt(r.undertime_minutes, 10) : 0,
       status: r.status,
       pm_status: r.pm_status,
+      source: r.source || 'manual',
       created_at: r.created_at,
     });
   } catch (err) {
@@ -1050,7 +1064,7 @@ router.put('/:id', protect, async (req, res) => {
     values.push(id);
 
     const result = await pool.query(
-      `UPDATE dtr_daily_summary SET ${updates.join(', ')} WHERE id = $${i} RETURNING id, employee_id, attendance_date::text AS attendance_date_iso, time_in, break_out, break_in, time_out, total_hours, late_minutes, undertime_minutes, status, pm_status, updated_at`,
+      `UPDATE dtr_daily_summary SET ${updates.join(', ')} WHERE id = $${i} RETURNING id, employee_id, attendance_date::text AS attendance_date_iso, time_in, break_out, break_in, time_out, total_hours, late_minutes, undertime_minutes, status, pm_status, source, updated_at`,
       values
     );
     const r = result.rows[0];
@@ -1068,6 +1082,7 @@ router.put('/:id', protect, async (req, res) => {
       undertime_minutes: r.undertime_minutes != null ? parseInt(r.undertime_minutes, 10) : 0,
       status: r.status,
       pm_status: r.pm_status,
+      source: r.source || null,
       updated_at: r.updated_at,
     });
   } catch (err) {
@@ -1096,7 +1111,7 @@ router.post('/sync-holidays', protect, requireAdmin, async (req, res) => {
     const end = end_date || start;
     const exact = await pool.query(
       `UPDATE dtr_daily_summary d
-       SET holiday_id = h.id, status = 'holiday', updated_at = now()
+       SET holiday_id = h.id, status = 'holiday', source = 'adjusted', updated_at = now()
        FROM holidays h
        WHERE d.attendance_date = h.holiday_date
          AND (h.is_active IS NULL OR h.is_active = true)
@@ -1106,7 +1121,7 @@ router.post('/sync-holidays', protect, requireAdmin, async (req, res) => {
     );
     const recurring = await pool.query(
       `UPDATE dtr_daily_summary d
-       SET holiday_id = h.id, status = 'holiday', updated_at = now()
+       SET holiday_id = h.id, status = 'holiday', source = 'adjusted', updated_at = now()
        FROM holidays h
        WHERE h.recurring = true AND (h.is_active IS NULL OR h.is_active = true)
          AND EXTRACT(MONTH FROM d.attendance_date) = EXTRACT(MONTH FROM h.holiday_date)

@@ -33,6 +33,17 @@ router.post('/register', async (req, res) => {
     );
     const user = result.rows[0];
 
+    try {
+      await pool.query(
+        `INSERT INTO leave_balances (user_id, leave_type, earned_days, used_days, pending_days, adjusted_days)
+         VALUES ($1::uuid, 'vacationLeave', 15, 0, 0, 0), ($1::uuid, 'sickLeave', 15, 0, 0, 0)
+         ON CONFLICT (user_id, leave_type) DO NOTHING`,
+        [user.id]
+      );
+    } catch (lbErr) {
+      console.warn('[auth/register] Could not create default leave balances:', lbErr.message);
+    }
+
     const token = jwt.sign(
       { id: user.id, email: user.email, role: user.role },
       process.env.JWT_SECRET,
