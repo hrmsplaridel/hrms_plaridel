@@ -36,7 +36,8 @@ router.get('/', protect, async (req, res) => {
       `SELECT a.id, a.employee_id, a.department_id, a.position_id, a.shift_id,
               a.override_start_time, a.override_end_time, a.effective_from, a.effective_to, a.is_active, a.remarks,
               d.name AS department_name, p.name AS position_name, s.name AS shift_name,
-              s.start_time AS shift_start_time, s.end_time AS shift_end_time
+              s.start_time AS shift_start_time, s.end_time AS shift_end_time,
+              s.working_days AS shift_working_days
        FROM assignments a
        LEFT JOIN departments d ON a.department_id = d.id
        LEFT JOIN positions p ON a.position_id = p.id
@@ -46,23 +47,30 @@ router.get('/', protect, async (req, res) => {
       [employeeId]
     );
 
-    res.json(result.rows.map((r) => ({
-      id: r.id,
-      employee_id: r.employee_id,
-      department_id: r.department_id,
-      position_id: r.position_id,
-      shift_id: r.shift_id,
-      effective_from: r.effective_from,
-      effective_to: r.effective_to,
-      is_active: r.is_active ?? true,
-      remarks: r.remarks,
-      department_name: r.department_name,
-      position_name: r.position_name,
-      shift_name: r.shift_name,
-      start_time: r.override_start_time || r.shift_start_time,
-      end_time: r.override_end_time || r.shift_end_time,
-      date_assigned: r.effective_from,
-    })));
+    res.json(result.rows.map((r) => {
+      const wd = r.shift_working_days;
+      const workingDays = Array.isArray(wd)
+        ? wd.map((x) => (typeof x === 'number' ? x : parseInt(x, 10))).filter((x) => Number.isFinite(x))
+        : (wd != null ? [1, 2, 3, 4, 5] : null);
+      return {
+        id: r.id,
+        employee_id: r.employee_id,
+        department_id: r.department_id,
+        position_id: r.position_id,
+        shift_id: r.shift_id,
+        effective_from: r.effective_from,
+        effective_to: r.effective_to,
+        is_active: r.is_active ?? true,
+        remarks: r.remarks,
+        department_name: r.department_name,
+        position_name: r.position_name,
+        shift_name: r.shift_name,
+        start_time: r.override_start_time || r.shift_start_time,
+        end_time: r.override_end_time || r.shift_end_time,
+        date_assigned: r.effective_from,
+        working_days: workingDays?.length ? workingDays : [1, 2, 3, 4, 5],
+      };
+    }));
   } catch (err) {
     console.error('[assignments GET]', err);
     res.status(500).json({ error: 'Failed to fetch assignments' });
