@@ -106,6 +106,8 @@ class DtrExport {
 
   static String _getDisplayValue(TimeRecord? r, bool isWeekend) {
     if (r == null) return isWeekend ? '' : 'ABSENT';
+    // If we have any punch (timeIn or breakIn), show times instead of remarks.
+    if (r.timeIn != null || r.breakIn != null) return '';
     final status = r.status;
     if (status != null && status.isNotEmpty) {
       if (status == 'absent') return 'ABSENT';
@@ -115,13 +117,14 @@ class DtrExport {
     }
     if (r.leaveRequestId != null)
       return r.leaveTypeName ?? r.attendanceRemark ?? 'On Leave';
-    if (r.timeIn == null) return 'ABSENT';
-    return ''; // Show times in AM/PM columns
+    return 'ABSENT';
   }
 
   /// Row-level remark for print (holiday, leave, suspension, absent, or custom remarks).
+  /// Returns empty when we have punches so times are shown instead.
   static String _getRowRemark(TimeRecord? r, DateTime dt, bool isWeekend) {
     if (r == null) return isWeekend ? '' : 'ABSENT';
+    if (r.timeIn != null || r.breakIn != null) return ''; // Show times, not remark
     if (r.timeIn == null) {
       final s = r.status;
       if (s == 'holiday') return r.holidayName ?? 'HOLIDAY';
@@ -147,24 +150,21 @@ class DtrExport {
     return '';
   }
 
-  static const String _noon = '12:00pm';
-  static const String _pmIn = '01:00pm';
-
-  /// Returns (hours, minutes) of undertime. Absent = 8h 0m. Weekend / Holiday / Leave = 0.
+  /// Returns (hours, minutes) of undertime. Absent = 8h 0m. Non-working day / Holiday / Leave = 0.
   static (int, int) _computeUndertime(
     TimeRecord? r,
     DateTime dt,
-    bool isWeekend,
+    bool isWeekendOrNonWorking,
     double workHoursPerDay,
   ) {
-    if (isWeekend) return (0, 0);
+    if (isWeekendOrNonWorking) return (0, 0);
     if (r != null && r.status == 'holiday') return (0, 0);
     if (r != null && (r.status == 'on_leave' || r.leaveRequestId != null))
       return (0, 0);
     final wh = workHoursPerDay > 0 ? workHoursPerDay : 8.0;
 
-    // Absent: use configured work hours per day.
-    if (r == null || r.timeIn == null) {
+    // Absent: no punch at all (no timeIn and no breakIn).
+    if (r == null || (r.timeIn == null && r.breakIn == null)) {
       final h = wh.floor();
       final m = ((wh - h) * 60).round();
       return (h, m);
@@ -326,6 +326,8 @@ class DtrExport {
   /// Generate PDF bytes — single page, matches official DTR form design.
   /// [reportTitle] — e.g. "Daily Time Record Report" for print; null uses "DAILY TIME RECORD".
   /// [department] and [position] — optional, shown when provided (e.g. for print).
+  /// [officialHours] — from assigned shift, e.g. "8:00AM-12:00PM 01:00PM-5:00PM".
+  /// [workingDays] — ISO weekdays 1–7 for shift; null = Mon–Fri.
   static Future<Uint8List> generatePdf({
     required String employeeName,
     required int year,
@@ -335,6 +337,8 @@ class DtrExport {
     String? reportTitle,
     String? department,
     String? position,
+    String? officialHours,
+    List<int>? workingDays,
   }) async {
     final policy = await _loadDefaultAttendancePolicy();
     final (formRows, totals) = _buildFormTableRows(
@@ -343,6 +347,7 @@ class DtrExport {
       end: end,
       recordsByDate: recordsByDate,
       policy: policy,
+      workingDays: workingDays,
     );
 
     final noteLines = <String>[];
@@ -369,6 +374,7 @@ class DtrExport {
       reportTitle: title,
       department: department,
       position: position,
+      officialHours: officialHours ?? '8:00AM-12:00PM 01:00PM-5:00PM',
       noteLines: noteLines,
     );
 
@@ -599,35 +605,40 @@ class DtrExport {
   }
 
   /// Build table rows: body rows only + total row (header built separately).
+  /// [workingDays] — ISO weekdays 1–7 for shift; null = use Mon–Fri.
   static (List<pw.TableRow>, _ExportTotals) _buildFormTableRows({
     required int year,
     required int month,
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
     required _ExportAttendancePolicy policy,
+    List<int>? workingDays,
   }) {
     var totalUndertimeMin = 0;
     var totalLateMin = 0;
     const fs = 5.0;
     final rows = <pw.TableRow>[];
+    final shiftWd = workingDays != null && workingDays.isNotEmpty
+        ? workingDays.toSet()
+        : {1, 2, 3, 4, 5};
 
     for (var d = 1; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
-      final isWeekend =
-          dt.weekday == DateTime.saturday || dt.weekday == DateTime.sunday;
+      final isNonWorking = !shiftWd.contains(dt.weekday);
       final (uh, um) = _computeUndertime(
         rec,
         dt,
-        isWeekend,
+        isNonWorking,
         policy.workHoursPerDay,
       );
-      if (!isWeekend) totalUndertimeMin += uh * 60 + um;
-      if (!isWeekend) totalLateMin += (rec?.lateMinutes ?? 0);
+      if (!isNonWorking) totalUndertimeMin += uh * 60 + um;
+      if (!isNonWorking) totalLateMin += (rec?.lateMinutes ?? 0);
 
-      final remark = _getRowRemark(rec, dt, isWeekend);
-      final displayVal = _getDisplayValue(rec, isWeekend);
-      final showTimes = remark.isEmpty && displayVal.isEmpty && rec != null;
+      final remark = _getRowRemark(rec, dt, isNonWorking);
+      final displayVal = _getDisplayValue(rec, isNonWorking);
+      final hasAnyPunch = rec != null && (rec.timeIn != null || rec.breakIn != null);
+      final showTimes = remark.isEmpty && displayVal.isEmpty && hasAnyPunch;
 
       String amInStr;
       String amOutStr;
@@ -636,12 +647,8 @@ class DtrExport {
       PdfColor? statusColor;
       if (showTimes) {
         amInStr = rec.timeIn != null ? _formatTimePrint(rec.timeIn) : '';
-        amOutStr = rec.breakOut != null
-            ? _formatTimePrint(rec.breakOut)
-            : '12:00pm';
-        pmInStr = rec.breakIn != null
-            ? _formatTimePrint(rec.breakIn)
-            : '01:00pm';
+        amOutStr = rec.breakOut != null ? _formatTimePrint(rec.breakOut) : '';
+        pmInStr = rec.breakIn != null ? _formatTimePrint(rec.breakIn) : '';
         pmOutStr = rec.timeOut != null ? _formatTimePrint(rec.timeOut) : '';
       } else {
         amInStr = remark.isNotEmpty
@@ -657,7 +664,7 @@ class DtrExport {
         );
       }
 
-      final undertimeColor = !isWeekend && (uh > 0 || um > 0)
+      final undertimeColor = !isNonWorking && (uh > 0 || um > 0)
           ? PdfColor.fromInt(0xFFE65100)
           : null;
 
@@ -670,13 +677,13 @@ class DtrExport {
             _cell(pmInStr, fs, center: true, textColor: statusColor),
             _cell(pmOutStr, fs, center: true, textColor: statusColor),
             _cell(
-              isWeekend ? '' : '$uh',
+              isNonWorking ? '' : '$uh',
               fs,
               right: true,
               textColor: undertimeColor,
             ),
             _cell(
-              isWeekend ? '' : '$um',
+              isNonWorking ? '' : '$um',
               fs,
               right: true,
               textColor: undertimeColor,
@@ -822,6 +829,8 @@ class DtrExport {
     String? reportTitle,
     String? department,
     String? position,
+    String? officialHours,
+    List<int>? workingDays,
   }) async {
     final policy = await _loadDefaultAttendancePolicy();
     final noteLines = <String>[];
@@ -987,11 +996,15 @@ class DtrExport {
     setCellBoth(
       0,
       row,
-      TextCellValue('Official Hours: 8:00AM-12:00PM 01:00PM-5:00PM'),
+      TextCellValue('Official Hours: ${officialHours ?? "8:00AM-12:00PM 01:00PM-5:00PM"}'),
       CellStyle(fontSize: 9, horizontalAlign: HorizontalAlign.Center),
     );
     mergeBoth(0, row, 6, row);
     row += 2;
+
+    final shiftWd = workingDays != null && workingDays.isNotEmpty
+        ? workingDays.toSet()
+        : {1, 2, 3, 4, 5};
 
     // Merged two-row header (same as PDF): Date spans 2 rows; AM, PM, UNDERTIME span 2 cols each
     final headerRow1 = row;
@@ -1013,27 +1026,27 @@ class DtrExport {
     for (var d = 1; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
-      final isWeekend =
-          dt.weekday == DateTime.saturday || dt.weekday == DateTime.sunday;
+      final isNonWorking = !shiftWd.contains(dt.weekday);
       final (uh, um) = _computeUndertime(
         rec,
         dt,
-        isWeekend,
+        isNonWorking,
         policy.workHoursPerDay,
       );
-      if (!isWeekend) totalUndertimeMin += uh * 60 + um;
-      if (!isWeekend) totalLateMin += (rec?.lateMinutes ?? 0);
+      if (!isNonWorking) totalUndertimeMin += uh * 60 + um;
+      if (!isNonWorking) totalLateMin += (rec?.lateMinutes ?? 0);
 
-      final remark = _getRowRemark(rec, dt, isWeekend);
-      final displayVal = _getDisplayValue(rec, isWeekend);
-      final showTimes = remark.isEmpty && displayVal.isEmpty && rec != null;
+      final remark = _getRowRemark(rec, dt, isNonWorking);
+      final displayVal = _getDisplayValue(rec, isNonWorking);
+      final hasAnyPunch = rec != null && (rec.timeIn != null || rec.breakIn != null);
+      final showTimes = remark.isEmpty && displayVal.isEmpty && hasAnyPunch;
       final amInStr = showTimes && rec.timeIn != null
           ? _formatTime(rec.timeIn)
           : (remark.isNotEmpty
                 ? remark
                 : (displayVal == 'ABSENT' ? 'ABSENT' : ''));
-      final amOutStr = showTimes ? _noon : '';
-      final pmInStr = showTimes ? _pmIn : '';
+      final amOutStr = showTimes && rec.breakOut != null ? _formatTime(rec.breakOut) : '';
+      final pmInStr = showTimes && rec.breakIn != null ? _formatTime(rec.breakIn) : '';
       final pmOutStr = showTimes && rec.timeOut != null
           ? _formatTime(rec.timeOut)
           : '';
@@ -1054,7 +1067,7 @@ class DtrExport {
               horizontalAlign: HorizontalAlign.Center,
             )
           : cellStyleCenter;
-      final undertimeColorHex = !isWeekend && (uh > 0 || um > 0)
+      final undertimeColorHex = !isNonWorking && (uh > 0 || um > 0)
           ? 'FFE65100'
           : null;
       final undertimeStyleRight = undertimeColorHex != null
@@ -1077,13 +1090,13 @@ class DtrExport {
       setCellBoth(
         5,
         row,
-        TextCellValue(isWeekend ? '' : '$uh'),
+        TextCellValue(isNonWorking ? '' : '$uh'),
         undertimeStyleRight,
       );
       setCellBoth(
         6,
         row,
-        TextCellValue(isWeekend ? '' : '$um'),
+        TextCellValue(isNonWorking ? '' : '$um'),
         undertimeStyleRight,
       );
       row++;
@@ -1239,6 +1252,8 @@ class DtrExport {
     String? reportTitle,
     String? department,
     String? position,
+    String? officialHours,
+    List<int>? workingDays,
   }) async {
     final policy = await _loadDefaultAttendancePolicy();
     final noteLines = <String>[];
@@ -1277,9 +1292,12 @@ class DtrExport {
       '<p style="text-align:center;font-size:10pt;margin:4px 0;"><strong>PERIOD :</strong> ${_months[month - 1]} 1-${end.day}, $year</p>',
     );
     oneCopy.writeln(
-      '<p style="text-align:center;font-size:10pt;margin:4px 0;"><strong>Official Hours:</strong> 8:00AM-12:00PM 01:00PM-5:00PM</p>',
+      '<p style="text-align:center;font-size:10pt;margin:4px 0;"><strong>Official Hours:</strong> ${officialHours ?? "8:00AM-12:00PM 01:00PM-5:00PM"}</p>',
     );
     oneCopy.writeln('</div>');
+    final shiftWd = workingDays != null && workingDays.isNotEmpty
+        ? workingDays.toSet()
+        : {1, 2, 3, 4, 5};
     oneCopy.writeln('<table class="dtr-table">');
     oneCopy.writeln(
       '<thead><tr><th rowspan="2">Date</th><th colspan="2">AM</th><th colspan="2">PM</th><th colspan="2">UNDERTIME</th></tr>',
@@ -1298,26 +1316,26 @@ class DtrExport {
     for (var d = 1; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
-      final isWeekend =
-          dt.weekday == DateTime.saturday || dt.weekday == DateTime.sunday;
+      final isNonWorking = !shiftWd.contains(dt.weekday);
       final (uh, um) = _computeUndertime(
         rec,
         dt,
-        isWeekend,
+        isNonWorking,
         policy.workHoursPerDay,
       );
-      if (!isWeekend) totalUndertimeMin += uh * 60 + um;
-      if (!isWeekend) totalLateMin += (rec?.lateMinutes ?? 0);
-      final remark = _getRowRemark(rec, dt, isWeekend);
-      final displayVal = _getDisplayValue(rec, isWeekend);
-      final showTimes = remark.isEmpty && displayVal.isEmpty && rec != null;
+      if (!isNonWorking) totalUndertimeMin += uh * 60 + um;
+      if (!isNonWorking) totalLateMin += (rec?.lateMinutes ?? 0);
+      final remark = _getRowRemark(rec, dt, isNonWorking);
+      final displayVal = _getDisplayValue(rec, isNonWorking);
+      final hasAnyPunch = rec != null && (rec.timeIn != null || rec.breakIn != null);
+      final showTimes = remark.isEmpty && displayVal.isEmpty && hasAnyPunch;
       final amIn = showTimes && rec.timeIn != null
           ? _formatTime(rec.timeIn)
           : (remark.isNotEmpty
                 ? remark
                 : (displayVal == 'ABSENT' ? 'ABSENT' : ''));
-      final amOut = showTimes ? _noon : '';
-      final pmIn = showTimes ? _pmIn : '';
+      final amOut = showTimes && rec.breakOut != null ? _formatTime(rec.breakOut) : '';
+      final pmIn = showTimes && rec.breakIn != null ? _formatTime(rec.breakIn) : '';
       final pmOut = showTimes && rec.timeOut != null
           ? _formatTime(rec.timeOut)
           : '';
@@ -1326,13 +1344,13 @@ class DtrExport {
         amIn.isNotEmpty ? amIn : null,
         isHoliday: isHoliday,
       );
-      final undertimeColorHex = !isWeekend && (uh > 0 || um > 0)
+      final undertimeColorHex = !isNonWorking && (uh > 0 || um > 0)
           ? 'FFE65100'
           : null;
       oneCopy.writeln(
         '<tr><td>${_formatDateWithDay(dt)}</td>'
         '${tdCenter(amIn, statusColorHex)}${tdCenter(amOut, statusColorHex)}${tdCenter(pmIn, statusColorHex)}${tdCenter(pmOut, statusColorHex)}'
-        '${tdRight(isWeekend ? '' : '$uh', undertimeColorHex)}${tdRight(isWeekend ? '' : '$um', undertimeColorHex)}</tr>',
+        '${tdRight(isNonWorking ? '' : '$uh', undertimeColorHex)}${tdRight(isNonWorking ? '' : '$um', undertimeColorHex)}</tr>',
       );
     }
 
@@ -1437,6 +1455,8 @@ class DtrExport {
     String? reportTitle,
     String? department,
     String? position,
+    String? officialHours,
+    List<int>? workingDays,
   }) {
     final policy = _ExportAttendancePolicy.defaults;
     final noteLines = <String>[];
@@ -1475,9 +1495,12 @@ class DtrExport {
       '<p style="text-align:center;font-size:10pt;margin:4px 0;"><strong>PERIOD :</strong> ${_months[month - 1]} 1-${end.day}, $year</p>',
     );
     oneCopy.writeln(
-      '<p style="text-align:center;font-size:10pt;margin:4px 0;"><strong>Official Hours:</strong> 8:00AM-12:00PM 01:00PM-5:00PM</p>',
+      '<p style="text-align:center;font-size:10pt;margin:4px 0;"><strong>Official Hours:</strong> ${officialHours ?? "8:00AM-12:00PM 01:00PM-5:00PM"}</p>',
     );
     oneCopy.writeln('</div>');
+    final shiftWd = workingDays != null && workingDays.isNotEmpty
+        ? workingDays.toSet()
+        : {1, 2, 3, 4, 5};
     oneCopy.writeln('<table class="dtr-table">');
     oneCopy.writeln(
       '<thead><tr><th rowspan="2">Date</th><th colspan="2">AM</th><th colspan="2">PM</th><th colspan="2">UNDERTIME</th></tr>',
@@ -1496,26 +1519,26 @@ class DtrExport {
     for (var d = 1; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
-      final isWeekend =
-          dt.weekday == DateTime.saturday || dt.weekday == DateTime.sunday;
+      final isNonWorking = !shiftWd.contains(dt.weekday);
       final (uh, um) = _computeUndertime(
         rec,
         dt,
-        isWeekend,
+        isNonWorking,
         policy.workHoursPerDay,
       );
-      if (!isWeekend) totalUndertimeMin += uh * 60 + um;
-      if (!isWeekend) totalLateMin += (rec?.lateMinutes ?? 0);
-      final remark = _getRowRemark(rec, dt, isWeekend);
-      final displayVal = _getDisplayValue(rec, isWeekend);
-      final showTimes = remark.isEmpty && displayVal.isEmpty && rec != null;
+      if (!isNonWorking) totalUndertimeMin += uh * 60 + um;
+      if (!isNonWorking) totalLateMin += (rec?.lateMinutes ?? 0);
+      final remark = _getRowRemark(rec, dt, isNonWorking);
+      final displayVal = _getDisplayValue(rec, isNonWorking);
+      final hasAnyPunch = rec != null && (rec.timeIn != null || rec.breakIn != null);
+      final showTimes = remark.isEmpty && displayVal.isEmpty && hasAnyPunch;
       final amIn = showTimes && rec.timeIn != null
           ? _formatTime(rec.timeIn)
           : (remark.isNotEmpty
                 ? remark
                 : (displayVal == 'ABSENT' ? 'ABSENT' : ''));
-      final amOut = showTimes ? _noon : '';
-      final pmIn = showTimes ? _pmIn : '';
+      final amOut = showTimes && rec.breakOut != null ? _formatTime(rec.breakOut) : '';
+      final pmIn = showTimes && rec.breakIn != null ? _formatTime(rec.breakIn) : '';
       final pmOut = showTimes && rec.timeOut != null
           ? _formatTime(rec.timeOut)
           : '';
@@ -1524,13 +1547,13 @@ class DtrExport {
         amIn.isNotEmpty ? amIn : null,
         isHoliday: isHoliday,
       );
-      final undertimeColorHex = !isWeekend && (uh > 0 || um > 0)
+      final undertimeColorHex = !isNonWorking && (uh > 0 || um > 0)
           ? 'FFE65100'
           : null;
       oneCopy.writeln(
         '<tr><td>${_formatDateWithDay(dt)}</td>'
         '${tdCenter(amIn, statusColorHex)}${tdCenter(amOut, statusColorHex)}${tdCenter(pmIn, statusColorHex)}${tdCenter(pmOut, statusColorHex)}'
-        '${tdRight(isWeekend ? '' : '$uh', undertimeColorHex)}${tdRight(isWeekend ? '' : '$um', undertimeColorHex)}</tr>',
+        '${tdRight(isNonWorking ? '' : '$uh', undertimeColorHex)}${tdRight(isNonWorking ? '' : '$um', undertimeColorHex)}</tr>',
       );
     }
 

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
+import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../data/time_record.dart';
 import '../dtr_export.dart';
@@ -47,6 +48,12 @@ class _DtrReportsState extends State<DtrReports> {
   List<TimeRecord> _employeeRecords = [];
   bool _showMinutesFormat = true;
 
+  /// Shift working days (ISO 1=Mon..7=Sun) for selected employee in report month. Null = use Mon–Fri.
+  List<int>? _shiftWorkingDays;
+
+  /// Official hours string from assigned shift, e.g. "8:00AM-12:00PM 01:00PM-5:00PM".
+  String? _shiftOfficialHours;
+
   @override
   void initState() {
     super.initState();
@@ -85,14 +92,89 @@ class _DtrReportsState extends State<DtrReports> {
     final start = DateTime(_selectedYear, _selectedMonth, 1);
     final end = DateTime(_selectedYear, _selectedMonth + 1, 0);
     final dtr = context.read<DtrProvider>();
-    await dtr.loadTimeRecordsForAdmin(
-      startDate: start,
-      endDate: end,
-      userId: _selectedEmployeeId,
-      limit: 100,
-    );
+    await Future.wait([
+      dtr.loadTimeRecordsForAdmin(
+        startDate: start,
+        endDate: end,
+        userId: _selectedEmployeeId,
+        limit: 100,
+      ),
+      _loadShiftWorkingDays(),
+    ]);
     if (!mounted) return;
     setState(() => _employeeRecords = List.from(dtr.timeRecords));
+  }
+
+  static String _formatOfficialHours(String start, String end) {
+    String toAmPm(String t) {
+      final parts = t.trim().split(RegExp(r'[:.\s]'));
+      if (parts.isEmpty) return t;
+      final h = int.tryParse(parts[0]) ?? 0;
+      final m = parts.length > 1 ? (int.tryParse(parts[1]) ?? 0) : 0;
+      final isPm = h >= 12;
+      final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+      return '${h12.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}${isPm ? 'PM' : 'AM'}';
+    }
+
+    return '${toAmPm(start)}-${toAmPm(end)}';
+  }
+
+  /// Fetch assignment for selected employee and set _shiftWorkingDays for report month.
+  Future<void> _loadShiftWorkingDays() async {
+    final employeeId = _selectedEmployeeId;
+    if (employeeId == null) return;
+    final monthStart = DateTime(_selectedYear, _selectedMonth, 1);
+    final monthEnd = DateTime(_selectedYear, _selectedMonth + 1, 0);
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/assignments',
+        queryParameters: {'employee_id': employeeId, 'status': 'Active'},
+      );
+      final list = res.data ?? [];
+      for (final a in list) {
+        final m = a as Map<String, dynamic>;
+        final from = m['effective_from'] != null
+            ? DateTime.tryParse(m['effective_from'].toString())
+            : null;
+        final to =
+            m['effective_to'] != null &&
+                m['effective_to'].toString().trim().isNotEmpty
+            ? DateTime.tryParse(m['effective_to'].toString())
+            : null;
+        if (from == null) continue;
+        if (from.isAfter(monthEnd)) continue;
+        if (to != null && to.isBefore(monthStart)) continue;
+        final wd = m['working_days'];
+        List<int>? days;
+        if (wd is List) {
+          days = wd
+              .map((x) => x is int ? x : int.tryParse(x.toString()))
+              .whereType<int>()
+              .where((x) => x >= 1 && x <= 7)
+              .toList();
+        }
+        String? officialHours;
+        final st = m['start_time'];
+        final et = m['end_time'];
+        if (st != null && et != null) {
+          officialHours = _formatOfficialHours(st.toString(), et.toString());
+        }
+        if (mounted) {
+          setState(() {
+            _shiftWorkingDays = (days != null && days.isNotEmpty) ? days : null;
+            _shiftOfficialHours = officialHours;
+          });
+          return;
+        }
+      }
+      if (mounted)
+        setState(() {
+          _shiftWorkingDays = null;
+          _shiftOfficialHours = null;
+        });
+    } catch (_) {
+      if (mounted) setState(() => _shiftWorkingDays = null);
+    }
   }
 
   void _reset() {
@@ -185,6 +267,8 @@ class _DtrReportsState extends State<DtrReports> {
             month: _selectedMonth,
             end: end,
             recordsByDate: recordsByDate,
+            officialHours: _shiftOfficialHours,
+            workingDays: _shiftWorkingDays,
           );
           if (!context.mounted) return;
           await shareOrDownloadPdf(bytes, '$baseName.pdf');
@@ -196,6 +280,8 @@ class _DtrReportsState extends State<DtrReports> {
             month: _selectedMonth,
             end: end,
             recordsByDate: recordsByDate,
+            officialHours: _shiftOfficialHours,
+            workingDays: _shiftWorkingDays,
           );
           if (!context.mounted) return;
           await shareOrDownloadFile(
@@ -211,6 +297,8 @@ class _DtrReportsState extends State<DtrReports> {
             month: _selectedMonth,
             end: end,
             recordsByDate: recordsByDate,
+            officialHours: _shiftOfficialHours,
+            workingDays: _shiftWorkingDays,
           );
           final bytes = Uint8List.fromList(utf8.encode(html));
           if (!context.mounted) return;
@@ -261,6 +349,8 @@ class _DtrReportsState extends State<DtrReports> {
         recordsByDate: recordsByDate,
         department: department,
         position: position,
+        officialHours: _shiftOfficialHours,
+        workingDays: _shiftWorkingDays,
       );
       if (!context.mounted) return;
       await Printing.layoutPdf(
@@ -283,6 +373,8 @@ class _DtrReportsState extends State<DtrReports> {
           reportTitle: 'Daily Time Record Report',
           department: department,
           position: position,
+          officialHours: _shiftOfficialHours,
+          workingDays: _shiftWorkingDays,
         );
         await shareOrDownloadPdf(bytes, '$baseName.pdf');
         if (!context.mounted) return;
@@ -305,14 +397,18 @@ class _DtrReportsState extends State<DtrReports> {
     }
   }
 
-  static int _countWorkingDays(int year, int month) {
+  /// Count days in month that fall on shift working days (ISO 1=Mon..7=Sun).
+  /// If workingDays is null or empty, defaults to Mon–Fri [1,2,3,4,5].
+  static int _countWorkingDays(int year, int month, {List<int>? workingDays}) {
+    final wd = workingDays != null && workingDays.isNotEmpty
+        ? workingDays.toSet()
+        : {1, 2, 3, 4, 5};
     int count = 0;
     final end = DateTime(year, month + 1, 0);
     for (var d = 1; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
-      if (dt.weekday >= DateTime.monday && dt.weekday <= DateTime.friday) {
-        count++;
-      }
+      // Dart: DateTime.weekday 1=Mon..7=Sun, matches ISO
+      if (wd.contains(dt.weekday)) count++;
     }
     return count;
   }
@@ -352,33 +448,40 @@ class _DtrReportsState extends State<DtrReports> {
     final sortedDates = recordsByDate.keys.toList()
       ..sort((a, b) => a.compareTo(b)); // ordered by date ascending
 
-    // Compute summary from real API records (recordsByDate from _employeeRecords).
-    // When there are no weekday punches at all, show 0 (no inferred absent).
-    final totalWeekdays = _countWorkingDays(_selectedYear, _selectedMonth);
+    // Compute summary from real API records, using shift working_days when available.
+    final shiftWd = _shiftWorkingDays != null && _shiftWorkingDays!.isNotEmpty
+        ? _shiftWorkingDays!.toSet()
+        : {1, 2, 3, 4, 5};
+    final totalWeekdays = _countWorkingDays(
+      _selectedYear,
+      _selectedMonth,
+      workingDays: _shiftWorkingDays,
+    );
     var lateCount = 0;
     var absentCount = 0;
     var holidaysCount = 0;
-    var hasAnyWeekdayPunch = false;
+    var hasAnyScheduledDayPunch = false;
     for (var d = 1; d <= end.day; d++) {
       final dt = DateTime(_selectedYear, _selectedMonth, d);
-      if (dt.weekday >= DateTime.monday && dt.weekday <= DateTime.friday) {
-        final rec = recordsByDate[dt];
-        if (rec?.status == 'holiday') {
-          holidaysCount++;
-        } else if (rec?.status == 'on_leave') {
-          // On leave: not absent for tardiness
-        } else if (rec == null || rec.timeIn == null) {
-          absentCount++;
-        } else {
-          hasAnyWeekdayPunch = true;
-          if (rec.status == 'late' || (rec.lateMinutes ?? 0) > 0) {
-            lateCount++;
-          }
+      if (!shiftWd.contains(dt.weekday)) continue;
+      final rec = recordsByDate[dt];
+      if (rec?.status == 'holiday') {
+        holidaysCount++;
+      } else if (rec?.status == 'on_leave') {
+        // On leave: not absent for tardiness
+      } else if (rec == null || (rec.timeIn == null && rec.breakIn == null)) {
+        absentCount++;
+      } else {
+        hasAnyScheduledDayPunch = true;
+        if (rec.status == 'late' || (rec.lateMinutes ?? 0) > 0) {
+          lateCount++;
         }
       }
     }
-    // No punches on any weekday = show zeros (don't infer 22 absent)
-    final hasRecords = hasAnyWeekdayPunch;
+    // Show summary when we have any attendance (timeIn or breakIn), including pm_only and weekend
+    final hasRecords =
+        hasAnyScheduledDayPunch ||
+        recordsByDate.values.any((r) => r.timeIn != null || r.breakIn != null);
     final workingDays = hasRecords ? totalWeekdays - holidaysCount : 0;
     final displayLateCount = hasRecords ? lateCount : 0;
     final displayAbsentCount = hasRecords ? absentCount : 0;
@@ -591,7 +694,7 @@ class _DtrReportsState extends State<DtrReports> {
           SizedBox(
             width: 140,
             child: DropdownButtonFormField<String?>(
-              value: _selectedDepartmentId,
+              initialValue: _selectedDepartmentId,
               decoration: InputDecoration(
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(
