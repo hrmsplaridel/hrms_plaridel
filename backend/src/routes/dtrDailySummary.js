@@ -565,30 +565,30 @@ router.get('/', protect, async (req, res) => {
       let attendanceRemark = await computeAttendanceRemark(recordForRemark, shiftInfo, r.holiday_id, r.leave_request_id, holidayInfo);
       const recordDateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || toIsoDateStr(r.attendance_date);
       return {
-      id: r.id,
-      user_id: r.employee_id,
+        id: r.id,
+        user_id: r.employee_id,
         record_date: recordDateStr,
-      time_in: r.time_in,
+        time_in: r.time_in,
         break_out: r.break_out,
         break_in: r.break_in,
-      time_out: r.time_out,
-      total_hours: r.total_hours != null ? parseFloat(r.total_hours) : null,
+        time_out: r.time_out,
+        total_hours: r.total_hours != null ? parseFloat(r.total_hours) : null,
         late_minutes: lateMinutes,
         undertime_minutes: undertimeMinutes,
-      status: r.status,
+        status: r.status,
         pm_status: r.pm_status,
-      remarks: r.remarks,
+        remarks: r.remarks,
         attendance_remark: attendanceRemark,
-      holiday_id: r.holiday_id,
+        holiday_id: r.holiday_id,
         leave_request_id: r.leave_request_id,
-      holiday_name: r.holiday_name,
-      holiday_type: r.holiday_type,
+        holiday_name: r.holiday_name,
+        holiday_type: r.holiday_type,
         coverage,
-      leave_type_name: r.leave_type_name || null,
-      source: r.source || null,
-      created_at: r.created_at,
-      updated_at: r.updated_at,
-      employee_name: r.employee_name,
+        leave_type_name: r.leave_type_name || null,
+        source: r.source || null,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+        employee_name: r.employee_name,
       };
     }));
 
@@ -810,9 +810,11 @@ router.get('/my-shift-today', protect, async (req, res) => {
     const today = new Date().toISOString().slice(0, 10);
     const shiftInfo = await getAssignmentShiftForDate(userId, today);
     if (!shiftInfo || shiftInfo.endMinutes == null) {
-      return res.json({ end_time: null }); // no shift or no end = no restriction
+      return res.json({ start_time: null, end_time: null }); // no shift or no end = no restriction
     }
     res.json({
+      start_time: shiftInfo.startMinutes != null ? minutesToTimeStr(shiftInfo.startMinutes) : null,
+      start_minutes: shiftInfo.startMinutes != null ? shiftInfo.startMinutes : null,
       end_time: minutesToTimeStr(shiftInfo.endMinutes),
       end_minutes: shiftInfo.endMinutes,
     });

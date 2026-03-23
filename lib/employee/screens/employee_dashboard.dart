@@ -752,10 +752,7 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
       final now = DateTime.now();
       final start = DateTime(now.year, now.month, 1);
       final end = DateTime(now.year, now.month + 1, 0);
-      dtr.loadTimeRecordsForUser(
-        startDate: start,
-        endDate: end,
-      );
+      dtr.loadTimeRecordsForUser(startDate: start, endDate: end);
     });
     _pollingTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (!mounted) return;
@@ -999,6 +996,9 @@ class _ClockInCard extends StatelessWidget {
         final isPmInDisabled =
             (nextAction == 'PM In') && dtr.isPmInPastShiftEnd;
 
+        // Block ALL clock actions when before shift start (with 30min grace)
+        final isShiftNotStarted = onTap != null && dtr.isBeforeShiftStart;
+
         return Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
@@ -1069,6 +1069,18 @@ class _ClockInCard extends StatelessWidget {
                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
               ),
               const SizedBox(height: 16),
+              if (isShiftNotStarted && dtr.myShiftStartFormatted != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    'Shift starts at ${dtr.myShiftStartFormatted}',
+                    style: TextStyle(
+                      color: Colors.blue.shade700,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
               if (isPmInDisabled && dtr.myShiftEndFormatted != null)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
@@ -1084,7 +1096,11 @@ class _ClockInCard extends StatelessWidget {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
-                  onPressed: dtr.loading || onTap == null || isPmInDisabled
+                  onPressed:
+                      dtr.loading ||
+                          onTap == null ||
+                          isPmInDisabled ||
+                          isShiftNotStarted
                       ? null
                       : () async {
                           final ok = await onTap!();
@@ -1792,7 +1808,13 @@ class _EmployeeAttendanceContentState
   }
 
   static const List<String> _shortWeekdays = [
-    'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun',
+    'Mon',
+    'Tue',
+    'Wed',
+    'Thu',
+    'Fri',
+    'Sat',
+    'Sun',
   ];
 
   static String _formatDate(DateTime d) {

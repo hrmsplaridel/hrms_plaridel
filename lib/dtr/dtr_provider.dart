@@ -106,15 +106,39 @@ class DtrProvider extends ChangeNotifier {
   TimeRecord? _todayRecord;
   TimeRecord? get todayRecord => _todayRecord;
 
+  /// Shift start time in minutes from midnight (from /my-shift-today). Null = no shift or no restriction.
+  int? _myShiftStartMinutes;
+  int? get myShiftStartMinutes => _myShiftStartMinutes;
+
   /// Shift end time in minutes from midnight (from /my-shift-today). Null = no shift or no restriction.
   int? _myShiftEndMinutes;
   int? get myShiftEndMinutes => _myShiftEndMinutes;
+
+  /// True if current time is before shift start (clock-in should be blocked).
+  /// Allows clocking in 30 minutes before shift start as a grace window.
+  bool get isBeforeShiftStart {
+    if (_myShiftStartMinutes == null) return false;
+    final now = DateTime.now();
+    final nowMinutes = now.hour * 60 + now.minute;
+    // Allow clock-in 30 minutes before shift start
+    return nowMinutes < (_myShiftStartMinutes! - 30);
+  }
 
   /// True if current time is past shift end (PM In would be blocked).
   bool get isPmInPastShiftEnd {
     if (_myShiftEndMinutes == null) return false;
     final now = DateTime.now();
     return now.hour * 60 + now.minute > _myShiftEndMinutes!;
+  }
+
+  /// Format shift start as "H:MM AM/PM" for display.
+  String? get myShiftStartFormatted {
+    if (_myShiftStartMinutes == null) return null;
+    final h = _myShiftStartMinutes! ~/ 60;
+    final m = _myShiftStartMinutes! % 60;
+    final isPm = h >= 12;
+    final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+    return '${h12}:${m.toString().padLeft(2, '0')} ${isPm ? 'PM' : 'AM'}';
   }
 
   /// Format shift end as "H:MM AM/PM" for display.
@@ -247,16 +271,18 @@ class DtrProvider extends ChangeNotifier {
     }
   }
 
-  /// Load current user's shift end time for today (for PM In validation).
+  /// Load current user's shift start/end time for today (for clock-in validation).
   Future<void> loadMyShiftToday() async {
     try {
       final res = await ApiClient.instance.get<Map<String, dynamic>>(
         '/api/dtr-daily-summary/my-shift-today',
       );
       final data = res.data;
+      _myShiftStartMinutes = data?['start_minutes'] as int?;
       _myShiftEndMinutes = data?['end_minutes'] as int?;
       notifyListeners();
     } catch (_) {
+      _myShiftStartMinutes = null;
       _myShiftEndMinutes = null;
       notifyListeners();
     }
