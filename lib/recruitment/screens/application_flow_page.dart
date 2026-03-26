@@ -16,9 +16,49 @@ const _defaultBeiQuestions = [
   'Tell me about a time you failed.',
 ];
 
+/// Answer keys (option text) used to auto-check the 3 MCQ exams.
+///
+/// The scoring matches each answer text against the question's `options`.
+/// If a match is not found, it falls back to the backend `correct` index.
+const _answerKeyGeneral = <String>[
+  'Design or Blueprint',
+  'Bud',
+  'Was',
+  'After',
+  'Screen',
+  'Scene',
+  '3, 2, 5, 4, 1',
+  'Temperature',
+  'Forget the past Quarrel',
+  'VY',
+];
+
+const _answerKeyMathematics = <String>[
+  '27 inches',
+  '20',
+  '6',
+  '292',
+  '144',
+  '1.25',
+  '6.00',
+  '28',
+  '22 seconds',
+];
+
+const _answerKeyGeneralInfo = <String>[
+  'Fair remuneration for equal work',
+  'Equitably diffuse property ownership and right',
+  'Bill of Rights',
+  'Constitution of Universality',
+  'No ex post facto law or bill of attainder shall not be enacted.',
+];
+
 /// Multi-step recruitment flow: Basic Info → Exam → Result → Registration (if passed) → Interview info.
 class ApplicationFlowPage extends StatefulWidget {
-  const ApplicationFlowPage({super.key});
+  const ApplicationFlowPage({super.key, this.selectedPositionHeadline});
+
+  /// Optional: shows which job hiring/position the applicant selected.
+  final String? selectedPositionHeadline;
 
   @override
   State<ApplicationFlowPage> createState() => _ApplicationFlowPageState();
@@ -31,6 +71,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   String? _applicationStatus;
   bool _examPassed = false;
   double _examScore = 0;
+  bool _examSubmitting = false;
 
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
@@ -267,7 +308,77 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadGeneralInfoQuestions());
   }
 
-  void _submitGeneralInfoExam() {
+  List<double> _numbersInString(String s) {
+    final matches = RegExp(r'[+-]?\d+(?:\.\d+)?').allMatches(s);
+    return matches
+        .map((m) => double.tryParse(m.group(0) ?? '') ?? double.nan)
+        .where((v) => !v.isNaN)
+        .toList();
+  }
+
+  bool _answersMatch(String expectedOptionText, String actualOptionText) {
+    final expNorm =
+        expectedOptionText.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+    final actNorm =
+        actualOptionText.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+
+    if (expNorm.isEmpty || actNorm.isEmpty) return false;
+    if (expNorm == actNorm) return true;
+
+    // Numeric match: only when both strings contain exactly one number token.
+    // This avoids false positives for values like "3, 2, 5, 4, 1" (multiple numbers).
+    final expNums = _numbersInString(expNorm);
+    final actNums = _numbersInString(actNorm);
+    if (expNums.length == 1 && actNums.length == 1) {
+      final diff = (expNums.first - actNums.first).abs();
+      return diff < 1e-9;
+    }
+
+    return false;
+  }
+
+  List<int> _computeCorrectIndicesFromAnswerKey({
+    required List<Map<String, dynamic>> questionsLoaded,
+    required List<String> answerKey,
+  }) {
+    final out = <int>[];
+    for (int i = 0; i < questionsLoaded.length; i++) {
+      final q = questionsLoaded[i];
+      final options =
+          (q['options'] as List<dynamic>?)?.map((x) => x.toString()).toList() ??
+              <String>[];
+      final backendCorrect = (q['correct'] as num?)?.toInt() ?? 0;
+
+      if (i < answerKey.length) {
+        final expected = answerKey[i];
+        for (int j = 0; j < options.length; j++) {
+          if (_answersMatch(expected, options[j])) {
+            out.add(j);
+            break;
+          }
+        }
+        if (out.length <= i) out.add(backendCorrect);
+      } else {
+        out.add(backendCorrect);
+      }
+    }
+    return out;
+  }
+
+  double _computeScorePercent({
+    required List<int> selected,
+    required List<int> correct,
+  }) {
+    final total = correct.length;
+    if (total == 0) return 0;
+    int correctCount = 0;
+    for (int i = 0; i < total; i++) {
+      if (i < selected.length && selected[i] == correct[i]) correctCount++;
+    }
+    return (correctCount / total) * 100.0;
+  }
+
+  Future<void> _submitGeneralInfoExam() async {
     if (_generalInfoQuestionsLoaded == null || _generalInfoQuestionsLoaded!.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No General Information Exam questions loaded.')));
       return;
@@ -276,56 +387,106 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please answer all questions.')));
       return;
     }
-    int correct = 0;
-    for (int i = 0; i < _generalInfoQuestionsLoaded!.length; i++) {
-      if (_generalInfoSelected[i] == (_generalInfoQuestionsLoaded![i]['correct'] as int)) correct++;
+    if (_applicationId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Application not found. Please restart the application flow.')));
+      return;
     }
-    final total = _generalInfoQuestionsLoaded!.length;
-    final double score = total > 0 ? (correct / total) * 100.0 : 0.0;
-    final passed = score >= 60;
-    setState(() {
-      _examScore = score;
-      _examPassed = passed;
-      _step = 7;
-    });
-    if (_applicationId != null) {
-      final answersJson = <String, dynamic>{
-        'general': _generalQuestionsLoaded != null
-            ? {
-                'questions': _generalQuestionsLoaded!.map((q) => q['question_text']).toList(),
-                'options': _generalQuestionsLoaded!.map((q) => q['options']).toList(),
-                'correct': _generalQuestionsLoaded!.map((q) => q['correct']).toList(),
-                'selected': _generalSelected,
-              }
-            : null,
-        'math': _mathQuestionsLoaded != null
-            ? {
-                'questions': _mathQuestionsLoaded!.map((q) => q['question_text']).toList(),
-                'options': _mathQuestionsLoaded!.map((q) => q['options']).toList(),
-                'correct': _mathQuestionsLoaded!.map((q) => q['correct']).toList(),
-                'selected': _mathSelected,
-              }
-            : null,
-        'general_info': {
-          'questions': _generalInfoQuestionsLoaded!.map((q) => q['question_text']).toList(),
-          'options': _generalInfoQuestionsLoaded!.map((q) => q['options']).toList(),
-          'correct': _generalInfoQuestionsLoaded!.map((q) => q['correct']).toList(),
-          'selected': _generalInfoSelected,
-          'score': score,
-          'passed': passed,
+
+    setState(() => _examSubmitting = true);
+
+    final generalQuestions = _generalQuestionsLoaded ?? <Map<String, dynamic>>[];
+    final mathQuestions = _mathQuestionsLoaded ?? <Map<String, dynamic>>[];
+    final generalInfoQuestions = _generalInfoQuestionsLoaded!;
+
+    final generalCorrect = generalQuestions.isEmpty
+        ? <int>[]
+        : _computeCorrectIndicesFromAnswerKey(
+            questionsLoaded: generalQuestions,
+            answerKey: _answerKeyGeneral,
+          );
+    final mathCorrect = mathQuestions.isEmpty
+        ? <int>[]
+        : _computeCorrectIndicesFromAnswerKey(
+            questionsLoaded: mathQuestions,
+            answerKey: _answerKeyMathematics,
+          );
+    final generalInfoCorrect = _computeCorrectIndicesFromAnswerKey(
+      questionsLoaded: generalInfoQuestions,
+      answerKey: _answerKeyGeneralInfo,
+    );
+
+    final generalScore = _computeScorePercent(
+      selected: _generalSelected,
+      correct: generalCorrect,
+    );
+    final mathScore = _computeScorePercent(
+      selected: _mathSelected,
+      correct: mathCorrect,
+    );
+    final infoScore = _computeScorePercent(
+      selected: _generalInfoSelected,
+      correct: generalInfoCorrect,
+    );
+
+    // Keep current app behavior: overall pass is based on General Information Exam score.
+    final passed = infoScore >= 60;
+
+    final answersJson = <String, dynamic>{
+      if (generalQuestions.isNotEmpty)
+        'general': {
+          'questions': generalQuestions.map((q) => q['question_text']).toList(),
+          'options': generalQuestions.map((q) => q['options']).toList(),
+          'correct': generalCorrect,
+          'selected': _generalSelected,
+          'score': generalScore,
+          'passed': generalScore >= 60,
         },
+      if (mathQuestions.isNotEmpty)
+        'math': {
+          'questions': mathQuestions.map((q) => q['question_text']).toList(),
+          'options': mathQuestions.map((q) => q['options']).toList(),
+          'correct': mathCorrect,
+          'selected': _mathSelected,
+          'score': mathScore,
+          'passed': mathScore >= 60,
+        },
+      'general_info': {
+        'questions': generalInfoQuestions.map((q) => q['question_text']).toList(),
+        'options': generalInfoQuestions.map((q) => q['options']).toList(),
+        'correct': generalInfoCorrect,
+        'selected': _generalInfoSelected,
+        'score': infoScore,
+        'passed': passed,
+      },
+    };
+
+    if (_beiAnswersForSubmit != null && _beiQuestionsLoaded != null) {
+      answersJson['bei'] = {
+        'questions': _beiQuestionsLoaded,
+        'answers': _beiAnswersForSubmit,
       };
-      if (_beiAnswersForSubmit != null && _beiQuestionsLoaded != null) {
-        answersJson['bei'] = {'questions': _beiQuestionsLoaded, 'answers': _beiAnswersForSubmit};
-      }
-      if (answersJson['general'] == null) answersJson.remove('general');
-      if (answersJson['math'] == null) answersJson.remove('math');
-      RecruitmentRepo.instance.submitExamResult(
+    }
+
+    try {
+      await RecruitmentRepo.instance.submitExamResult(
         applicationId: _applicationId!,
-        scorePercent: score,
+        scorePercent: infoScore,
         passed: passed,
         answersJson: answersJson,
       );
+
+      if (!mounted) return;
+      setState(() {
+        _examScore = infoScore;
+        _examPassed = passed;
+        _step = 7;
+        _examSubmitting = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _examSubmitting = false);
+      }
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to submit exam result: $e')));
     }
   }
 
@@ -431,6 +592,49 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (widget.selectedPositionHeadline != null &&
+            widget.selectedPositionHeadline!.trim().isNotEmpty)
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryNavy.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTheme.primaryNavy.withOpacity(0.2)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.campaign_rounded, color: AppTheme.primaryNavy, size: 22),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Applying for',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textSecondary,
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        widget.selectedPositionHeadline!.trim(),
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.textPrimary,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (widget.selectedPositionHeadline != null &&
+            widget.selectedPositionHeadline!.trim().isNotEmpty)
+          const SizedBox(height: 12),
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(color: AppTheme.primaryNavy.withOpacity(0.08), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.primaryNavy.withOpacity(0.2))),
@@ -873,7 +1077,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         SizedBox(
           width: double.infinity,
           child: FilledButton(
-            onPressed: _submitGeneralInfoExam,
+            onPressed: _examSubmitting ? null : () async => await _submitGeneralInfoExam(),
             style: FilledButton.styleFrom(backgroundColor: AppTheme.primaryNavy, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
             child: const Text('Submit General Information Exam'),
           ),

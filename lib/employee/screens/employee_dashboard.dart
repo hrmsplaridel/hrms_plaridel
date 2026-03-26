@@ -10,6 +10,7 @@ import '../../../docutracker/docutracker_main.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
 import '../../../widgets/user_avatar.dart';
+import '../../../ld/training_daily_report_employee_screen.dart';
 import '../../shared/screens/profile_and_settings_page.dart';
 
 /// Employee dashboard reference: dark blue sidebar (HR branding), nav items,
@@ -28,6 +29,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     'Dashboard',
     'My Attendance',
     'My Leave',
+    'Training Reports',
     'DocuTracker',
     'Announcements',
   ];
@@ -83,11 +85,11 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                   displayName: displayName,
                   email: email,
                   avatarPath: avatarPath,
-                  onProfileTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const ProfileAndSettingsPage()),
-                    );
-                  },
+            onProfileTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ProfileAndSettingsPage()),
+              );
+            },
                 ),
                 Expanded(
                   child: SingleChildScrollView(
@@ -100,12 +102,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                         : _selectedNavIndex == 1
                         ? const _EmployeeAttendanceContent()
                         : _selectedNavIndex == 2
-                        ? const LeaveMain(isAdmin: false)
-                        : _selectedNavIndex == 3
-                        ? const DocuTrackerMain(isAdmin: false)
-                        : _EmployeePlaceholderContent(
-                            title: _navItems[_selectedNavIndex],
-                          ),
+                            ? const LeaveMain(isAdmin: false)
+                            : _selectedNavIndex == 3
+                                ? const TrainingDailyReportEmployeeScreen()
+                                : _selectedNavIndex == 4
+                                    ? const DocuTrackerMain(isAdmin: false)
+                                    : _EmployeePlaceholderContent(
+                                        title: _navItems[_selectedNavIndex],
+                                      ),
                   ),
                 ),
               ],
@@ -254,16 +258,22 @@ class _EmployeeSidebar extends StatelessWidget {
             onTap: () => onTap(2),
           ),
           _EmployeeNavTile(
-            icon: Icons.description_rounded,
-            label: 'DocuTracker',
+            icon: Icons.assignment_rounded,
+            label: 'Training Reports',
             selected: selectedIndex == 3,
             onTap: () => onTap(3),
           ),
           _EmployeeNavTile(
-            icon: Icons.campaign_rounded,
-            label: 'Announcements',
+            icon: Icons.description_rounded,
+            label: 'DocuTracker',
             selected: selectedIndex == 4,
             onTap: () => onTap(4),
+          ),
+          _EmployeeNavTile(
+            icon: Icons.campaign_rounded,
+            label: 'Announcements',
+            selected: selectedIndex == 5,
+            onTap: () => onTap(5),
           ),
           const Spacer(),
           const Divider(height: 1, color: Colors.white24),
@@ -684,6 +694,8 @@ class _EmployeeUserMenu extends StatelessWidget {
           }
         }
         if (value == 'profile_settings') {
+          // Even though Settings content is empty for employees, they can still
+          // view and update their profile details.
           Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const ProfileAndSettingsPage()),
           );

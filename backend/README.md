@@ -49,6 +49,15 @@ psql -d hrms_plaridel -f scripts/init-schema.sql
 
 (Or use pgAdmin: create DB, then run the SQL file.)
 
+**RSP recruitment (optional):** after `init-schema.sql`, run `scripts/init-schema-rsp.sql`, then apply the **attachment access policy** in PostgreSQL (mirrors who may receive a signed file URL; required for `/api/rsp/storage/signed-url` to allow paths tied to `recruitment_applications`):
+
+```bash
+psql -d hrms_plaridel -f scripts/init-schema-rsp.sql
+psql -d hrms_plaridel -f scripts/rsp-storage-attachment-policy.sql
+```
+
+Admin attachment preview/download also needs `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env` (see `.env.example`). Supabase Storage RLS does not apply to server-side signing; the Postgres check above is the HRMS-side rule.
+
 ### 4. Run the server
 
 ```bash

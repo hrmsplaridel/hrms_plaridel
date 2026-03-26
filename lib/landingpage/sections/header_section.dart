@@ -24,11 +24,18 @@ class HeaderSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final isWide = MediaQuery.of(context).size.width > 800;
     final isNarrow = MediaQuery.of(context).size.width < 600;
-    const headerGray = Color(0xFFE9ECEF);
-
     return Container(
       width: double.infinity,
-      color: headerGray,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
       child: Stack(
         clipBehavior: Clip.none,
         children: [
@@ -37,16 +44,16 @@ class HeaderSection extends StatelessWidget {
             top: 0,
             bottom: 0,
             child: CustomPaint(
-              size: const Size(120, 200),
+              size: const Size(100, 200),
               painter: _TriangleAccentPainter(),
             ),
           ),
           SectionContainer(
             backgroundColor: Colors.transparent,
-            padding: EdgeInsets.symmetric(
-              horizontal: isWide ? 80 : 24,
-              vertical: isWide ? 16 : 12,
-            ),
+      padding: EdgeInsets.symmetric(
+        horizontal: isWide ? 80 : 20,
+        vertical: isWide ? 18 : 14,
+      ),
             child: isWide
             ? Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
@@ -67,8 +74,6 @@ class HeaderSection extends StatelessWidget {
                       _NavLink(label: 'Home', onTap: onHomeTap),
                       const SizedBox(width: 24),
                       _NavLink(label: 'Job Vacancies', onTap: onJobVacanciesTap),
-                      const SizedBox(width: 24),
-                      _NavLink(label: 'Recruitment Process', onTap: onRecruitmentProcessTap),
                       const SizedBox(width: 24),
                       _NavLink(label: 'Contact', onTap: onContactTap),
                       const SizedBox(width: 32),
@@ -100,7 +105,6 @@ class HeaderSection extends StatelessWidget {
                       children: [
                         _NavLink(label: 'Home', onTap: onHomeTap),
                         _NavLink(label: 'Job Vacancies', onTap: onJobVacanciesTap),
-                        _NavLink(label: 'Recruitment Process', onTap: onRecruitmentProcessTap),
                         _NavLink(label: 'Contact', onTap: onContactTap),
                       ],
                     ),
@@ -151,13 +155,13 @@ class _HeaderLoginButtonState extends State<_HeaderLoginButton> {
         ),
         child: FilledButton.icon(
           onPressed: widget.onLoginTap,
-          icon: Icon(Icons.login_rounded, size: 20, color: AppTheme.white),
-          label: const Text('Login', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+          icon: const Icon(Icons.login_rounded, size: 20, color: Colors.white),
+          label: const Text('Login', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
           style: FilledButton.styleFrom(
             backgroundColor: AppTheme.primaryNavy,
-            foregroundColor: AppTheme.white,
+            foregroundColor: Colors.white,
             padding: _padding,
-            minimumSize: const Size(120, 44),
+            minimumSize: const Size(120, 46),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_radius)),
             elevation: 0,
           ),
@@ -187,15 +191,17 @@ class _NavLinkState extends State<_NavLink> {
       onExit: (_) => setState(() => _hover = false),
       child: GestureDetector(
         onTap: widget.onTap,
-        child: Text(
-          widget.label,
+        child: AnimatedDefaultTextStyle(
+          duration: const Duration(milliseconds: 150),
           style: TextStyle(
             color: AppTheme.primaryNavy,
-            fontSize: 14,
-            fontWeight: _hover ? FontWeight.w600 : FontWeight.w500,
+            fontSize: 15,
+            fontWeight: _hover ? FontWeight.w700 : FontWeight.w500,
             decoration: _hover ? TextDecoration.underline : null,
             decorationColor: AppTheme.primaryNavy,
+            decorationThickness: 2,
           ),
+          child: Text(widget.label),
         ),
       ),
     );
@@ -297,8 +303,8 @@ class _LguBranding extends StatelessWidget {
         vertical: isWide ? 8 : 6,
       ),
       decoration: BoxDecoration(
-        color: const Color(0xFFE9ECEF),
-        borderRadius: BorderRadius.circular(8),
+        color: const Color(0xFFF1F3F5),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Stack(
         clipBehavior: Clip.none,

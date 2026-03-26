@@ -32,19 +32,30 @@ class RecruitmentProcessSection extends StatelessWidget {
             'Recruitment Process',
             style: TextStyle(
               color: AppTheme.primaryNavy,
-              fontSize: AppTheme.sectionTitleSize,
-              fontWeight: FontWeight.w700,
+              fontSize: AppTheme.sectionTitleSize + 2,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.3,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
+          Container(
+            width: 48,
+            height: 4,
+            decoration: BoxDecoration(
+              color: AppTheme.primaryNavy.withOpacity(0.8),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: 12),
           Text(
             'Applicants must take the screening exam before registration. Complete the steps below to apply.',
             style: TextStyle(
               color: AppTheme.textSecondary,
               fontSize: AppTheme.bodySize,
+              height: 1.5,
             ),
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 36),
           isWide
               ? Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -89,17 +100,22 @@ class RecruitmentProcessSection extends StatelessWidget {
                     ],
                   ],
                 ),
-          const SizedBox(height: 40),
+          const SizedBox(height: 44),
           Center(
             child: FilledButton.icon(
               onPressed: onStartApplicationTap,
-              icon: const Icon(Icons.play_arrow, size: 22),
+              icon: const Icon(Icons.play_arrow_rounded, size: 22),
               label: const Text('Start Application'),
               style: FilledButton.styleFrom(
                 backgroundColor: AppTheme.primaryNavy,
-                foregroundColor: AppTheme.white,
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                minimumSize: const Size(0, 52),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 18),
+                minimumSize: const Size(0, 54),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                elevation: 2,
+                shadowColor: AppTheme.primaryNavy.withOpacity(0.35),
               ),
             ),
           ),
@@ -134,14 +150,21 @@ class _ProcessStepState extends State<_ProcessStep> {
       onExit: (_) => setState(() => _hover = false),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(22),
         decoration: BoxDecoration(
           color: _hover ? AppTheme.offWhite : AppTheme.white,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: _hover ? AppTheme.primaryNavy.withOpacity(0.3) : AppTheme.lightGray,
+            color: _hover ? AppTheme.primaryNavy.withOpacity(0.35) : const Color(0xFFE8EAED),
             width: 1.5,
           ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(_hover ? 0.08 : 0.04),
+              blurRadius: _hover ? 16 : 10,
+              offset: Offset(0, _hover ? 4 : 2),
+            ),
+          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -150,33 +173,41 @@ class _ProcessStepState extends State<_ProcessStep> {
             Row(
               children: [
                 Container(
-                  width: 36,
-                  height: 36,
+                  width: 40,
+                  height: 40,
                   decoration: BoxDecoration(
                     color: AppTheme.primaryNavy,
                     shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppTheme.primaryNavy.withOpacity(0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
                   alignment: Alignment.center,
                   child: Text(
                     '${widget.stepNumber}',
                     style: const TextStyle(
-                      color: AppTheme.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 16,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 17,
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
-                Icon(widget.icon, color: AppTheme.primaryNavy, size: 24),
+                const SizedBox(width: 14),
+                Icon(widget.icon, color: AppTheme.primaryNavy, size: 26),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             Text(
               widget.title,
               style: const TextStyle(
                 color: AppTheme.textPrimary,
                 fontSize: AppTheme.smallSize,
                 fontWeight: FontWeight.w600,
+                height: 1.3,
               ),
             ),
           ],

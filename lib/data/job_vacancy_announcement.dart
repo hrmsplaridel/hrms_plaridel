@@ -1,4 +1,4 @@
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../api/client.dart';
 
 /// One job vacancy entry (headline + description). Used when multiple hirings are listed.
 class JobVacancyItem {
@@ -92,19 +92,16 @@ class JobVacancyAnnouncementRepo {
   JobVacancyAnnouncementRepo._();
   static final JobVacancyAnnouncementRepo instance = JobVacancyAnnouncementRepo._();
 
-  SupabaseClient get _client => Supabase.instance.client;
-
   /// Fetches the current announcement. Public (no auth required).
   /// Returns default (hasVacancies: true, null headline/body) if no row or error.
   Future<JobVacancyAnnouncement> fetch() async {
     try {
-      final res = await _client
-          .from(JobVacancyAnnouncement.tableName)
-          .select()
-          .eq('id', JobVacancyAnnouncement.defaultId)
-          .maybeSingle();
-      if (res == null) return const JobVacancyAnnouncement(hasVacancies: true);
-      return JobVacancyAnnouncement.fromJson(Map<String, dynamic>.from(res));
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/rsp/job-vacancies',
+      );
+      final data = res.data;
+      if (data == null) return const JobVacancyAnnouncement(hasVacancies: true);
+      return JobVacancyAnnouncement.fromJson(Map<String, dynamic>.from(data));
     } catch (_) {
       return const JobVacancyAnnouncement(hasVacancies: true);
     }
@@ -112,10 +109,12 @@ class JobVacancyAnnouncementRepo {
 
   /// Saves the announcement (upsert). Creates the default row if missing; otherwise updates. Requires authenticated user (admin).
   Future<void> update(JobVacancyAnnouncement announcement) async {
-    final payload = Map<String, dynamic>.from(announcement.toJson())
-      ..['id'] = JobVacancyAnnouncement.defaultId;
-    await _client
-        .from(JobVacancyAnnouncement.tableName)
-        .upsert(payload, onConflict: 'id');
+    // IMPORTANT: This app uses the Express API for login (JWT),
+    // while Supabase RLS policies expect Supabase Auth sessions.
+    // To avoid row-level security errors, we update this row via the backend.
+    await ApiClient.instance.put(
+      '/api/rsp/job-vacancies',
+      data: announcement.toJson(),
+    );
   }
 }

@@ -153,8 +153,9 @@ class DocuTrackerRepository {
           .like('document_number', '$prefix%')
           .order('document_number', ascending: false)
           .limit(1);
-      if (res is List && res.isNotEmpty) {
-        final last = (res.first as Map)['document_number']?.toString() ?? '';
+      final list = res as List;
+      if (list.isNotEmpty) {
+        final last = (list.first as Map)['document_number']?.toString() ?? '';
         final numStr = last.replaceFirst(prefix, '');
         final num = int.tryParse(numStr) ?? 0;
         return '$prefix${(num + 1).toString().padLeft(4, '0')}';
@@ -268,6 +269,7 @@ class DocuTrackerRepository {
     String? roleId,
     String? userId,
     String? documentType,
+    bool userOnly = false,
   }) async {
     try {
       dynamic query = _client.from(DocumentPermission.tableName).select();
@@ -275,13 +277,20 @@ class DocuTrackerRepository {
       if (userId != null) query = query.eq('user_id', userId);
       if (documentType != null) query = query.eq('document_type', documentType);
       final res = await query;
-      return (res as List)
+      final perms = (res as List)
           .map(
             (e) => DocumentPermission.fromJson(
               Map<String, dynamic>.from(e as Map),
             ),
           )
           .toList();
+
+      // "Per employee only": hide role-based grants from the admin table.
+      if (userOnly) {
+        return perms.where((p) => p.userId != null).toList();
+      }
+
+      return perms;
     } catch (_) {
       return [];
     }
@@ -292,9 +301,11 @@ class DocuTrackerRepository {
     try {
       final payload = Map<String, dynamic>.from(perm.toJson())..remove('id');
       if (perm.id != null) {
+        // Avoid attempting to update the primary key.
+        final updatePayload = Map<String, dynamic>.from(payload);
         await _client
             .from(DocumentPermission.tableName)
-            .update(perm.toJson())
+          .update(updatePayload)
             .eq('id', perm.id!);
       } else {
         await _client.from(DocumentPermission.tableName).insert(payload);
@@ -348,9 +359,29 @@ class DocuTrackerRepository {
       }
 
       // Wildcard
-      final wildPerms = await listPermissions(documentType: '*');
-      final wildAction = wildPerms.where((p) => p.action.name == action);
-      if (wildAction.isNotEmpty) return wildAction.first.granted;
+      // Resolve wildcard with the same precedence rules:
+      // 1) user_id wildcard override
+      // 2) role_id wildcard
+      // 3) global wildcard (any role/user)
+      final wildUserPerms = await listPermissions(
+        userId: userId,
+        documentType: '*',
+      );
+      final wildUserAction = wildUserPerms.where((p) => p.action.name == action);
+      if (wildUserAction.isNotEmpty) return wildUserAction.first.granted;
+
+      if (roleId != null) {
+        final wildRolePerms = await listPermissions(
+          roleId: roleId,
+          documentType: '*',
+        );
+        final wildRoleAction = wildRolePerms.where((p) => p.action.name == action);
+        if (wildRoleAction.isNotEmpty) return wildRoleAction.first.granted;
+      }
+
+      final globalWildPerms = await listPermissions(documentType: '*');
+      final globalWildAction = globalWildPerms.where((p) => p.action.name == action);
+      if (globalWildAction.isNotEmpty) return globalWildAction.first.granted;
     } catch (_) {}
     return true; // Default allow if no permissions table
   }

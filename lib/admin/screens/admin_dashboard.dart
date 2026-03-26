@@ -1,11 +1,13 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../data/job_vacancy_announcement.dart';
 import '../../../data/recruitment_application.dart';
 import '../../../data/action_brainstorming_coaching.dart';
 import '../../../data/training_need_analysis.dart';
+import '../../../data/training_daily_report.dart';
 import '../../../landingpage/constants/app_theme.dart';
 import '../../../landingpage/screens/landing_page.dart';
 import '../../../login/screens/login_page.dart';
@@ -52,6 +54,10 @@ class AdminDashboard extends StatefulWidget {
 
 class _AdminDashboardState extends State<AdminDashboard> {
   int _selectedNavIndex = 0;
+  final TextEditingController _dashboardSearchController =
+      TextEditingController();
+  String _dashboardSearchQuery = '';
+
   static const _navItems = [
     'Dashboard',
     'RSP',
@@ -60,6 +66,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
     'DocuTracker',
     'Create Account',
   ];
+
+  @override
+  void dispose() {
+    _dashboardSearchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -82,7 +94,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final contentPadding = width > 900 ? 24.0 : (width > 600 ? 20.0 : 16.0);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF0F2F5),
+      // Light orange background for the main admin dashboard.
+      backgroundColor: const Color(0xFFFFF3E0),
       drawer: isWide
           ? null
           : Drawer(
@@ -91,7 +104,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   selectedIndex: _selectedNavIndex,
                   avatarPath: avatarPath,
                   onTap: (i) {
-                    setState(() => _selectedNavIndex = i);
+                    setState(() {
+                      _selectedNavIndex = i;
+                      if (i != 0) {
+                        _dashboardSearchController.clear();
+                        _dashboardSearchQuery = '';
+                      }
+                    });
                     if (context.mounted) Navigator.of(context).pop();
                   },
                 ),
@@ -103,7 +122,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
             _Sidebar(
               selectedIndex: _selectedNavIndex,
               avatarPath: avatarPath,
-              onTap: (i) => setState(() => _selectedNavIndex = i),
+              onTap: (i) {
+                setState(() {
+                  _selectedNavIndex = i;
+                  if (i != 0) {
+                    _dashboardSearchController.clear();
+                    _dashboardSearchQuery = '';
+                  }
+                });
+              },
             ),
           Expanded(
             child: Container(
@@ -126,12 +153,20 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     displayName: displayName,
                     avatarPath: avatarPath,
                     showMenuButton: !isWide,
+                    searchEnabled: _selectedNavIndex == 0,
+                    searchController: _dashboardSearchController,
+                    searchQuery: _dashboardSearchQuery,
+                    onSearchChanged: (value) {
+                      setState(() => _dashboardSearchQuery = value);
+                    },
                   ),
                   Expanded(
                     child: SingleChildScrollView(
                       padding: EdgeInsets.all(contentPadding),
                       child: _selectedNavIndex == 0
-                          ? const _DashboardContent()
+                          ? _DashboardContent(
+                              searchQuery: _dashboardSearchQuery,
+                            )
                           : _selectedNavIndex == 1
                           ? const RspAdminContent()
                           : _selectedNavIndex == 2
@@ -514,12 +549,21 @@ class _TopBar extends StatelessWidget {
     required this.displayName,
     this.avatarPath,
     this.showMenuButton = false,
+    this.searchEnabled = false,
+    required this.searchController,
+    required this.searchQuery,
+    required this.onSearchChanged,
   });
 
   final String email;
   final String displayName;
   final String? avatarPath;
   final bool showMenuButton;
+  /// Dashboard tab only — search filters overview sections.
+  final bool searchEnabled;
+  final TextEditingController searchController;
+  final String searchQuery;
+  final ValueChanged<String> onSearchChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -559,11 +603,11 @@ class _TopBar extends StatelessWidget {
             ),
           if (showMenuButton && !isCompact) const SizedBox(width: 12),
           Expanded(
-            child: isCompact
+            child: !searchEnabled
                 ? const SizedBox.shrink()
                 : Container(
                     height: 48,
-                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
                     decoration: BoxDecoration(
                       color: AppTheme.offWhite,
                       borderRadius: BorderRadius.circular(24),
@@ -583,19 +627,50 @@ class _TopBar extends StatelessWidget {
                           size: 22,
                           color: AppTheme.textSecondary.withOpacity(0.8),
                         ),
-                        const SizedBox(width: 14),
-                        Text(
-                          'Search dashboard...',
-                          style: TextStyle(
-                            color: AppTheme.textSecondary.withOpacity(0.9),
-                            fontSize: 14,
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextField(
+                            controller: searchController,
+                            onChanged: onSearchChanged,
+                            textInputAction: TextInputAction.search,
+                            style: TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: isCompact ? 13 : 14,
+                            ),
+                            decoration: InputDecoration(
+                              isDense: true,
+                              border: InputBorder.none,
+                              hintText: 'Search dashboard...',
+                              hintStyle: TextStyle(
+                                color: AppTheme.textSecondary.withOpacity(0.85),
+                                fontSize: isCompact ? 13 : 14,
+                              ),
+                              contentPadding: EdgeInsets.zero,
+                            ),
                           ),
                         ),
+                        if (searchQuery.isNotEmpty)
+                          IconButton(
+                            icon: Icon(
+                              Icons.close_rounded,
+                              size: 20,
+                              color: AppTheme.textSecondary.withOpacity(0.8),
+                            ),
+                            tooltip: 'Clear',
+                            onPressed: () {
+                              searchController.clear();
+                              onSearchChanged('');
+                            },
+                            style: IconButton.styleFrom(
+                              padding: EdgeInsets.zero,
+                              minimumSize: const Size(32, 32),
+                            ),
+                          ),
                       ],
                     ),
                   ),
           ),
-          if (isCompact) const Spacer(),
+          if (!searchEnabled) const Spacer(),
           Stack(
             clipBehavior: Clip.none,
             children: [
@@ -818,7 +893,20 @@ class _AdminDropdown extends StatelessWidget {
 }
 
 class _DashboardContent extends StatelessWidget {
-  const _DashboardContent();
+  const _DashboardContent({required this.searchQuery});
+
+  /// Filters which overview blocks are shown (Dashboard tab only).
+  final String searchQuery;
+
+  static bool _sectionVisible(String query, List<String> keywords) {
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return true;
+    for (final k in keywords) {
+      final kl = k.toLowerCase();
+      if (kl.contains(q) || q.contains(kl)) return true;
+    }
+    return false;
+  }
 
   static String _formatDate(DateTime d) {
     const days = [
@@ -851,10 +939,122 @@ class _DashboardContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final isNarrow = MediaQuery.of(context).size.width < 500;
     final now = DateTime.now();
+    final q = searchQuery;
+
+    final showWelcome = _sectionVisible(q, [
+      'welcome',
+      'overview',
+      'hello',
+      'admin',
+      'dashboard',
+      'hr',
+      'activities',
+      'latest',
+      'date',
+      'back',
+    ]);
+    final showSummary = _sectionVisible(q, [
+      'summary',
+      'applicant',
+      'applications',
+      'pending',
+      'vacancy',
+      'vacancies',
+      'hiring',
+      'job',
+      'jobs',
+      'new',
+      'metric',
+      'stats',
+      'open',
+      'closed',
+      'status',
+      'card',
+    ]);
+    final showDocu = _sectionVisible(q, [
+      'docu',
+      'tracker',
+      'document',
+      'docutracker',
+    ]);
+    final showDtr = _sectionVisible(q, [
+      'dtr',
+      'time',
+      'record',
+      'attendance',
+      'clock',
+      'daily',
+      'employee',
+    ]);
+    final showAnnouncements = _sectionVisible(q, [
+      'announcement',
+      'announcements',
+      'landing',
+      'news',
+    ]);
+    final showRecruitment = _sectionVisible(q, [
+      'recruit',
+      'recruitment',
+      'rsp',
+      'overview',
+      'hiring',
+    ]);
+    final showPending = _sectionVisible(q, [
+      'pending',
+      'application',
+      'review',
+      'submitted',
+      'declined',
+      'approved',
+      'applicant',
+    ]);
+
+    final anySection = showWelcome ||
+        showSummary ||
+        showDocu ||
+        showDtr ||
+        showAnnouncements ||
+        showRecruitment ||
+        showPending;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
+        if (q.trim().isNotEmpty && !anySection)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 20),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF3E0),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.orange.withOpacity(0.35)),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.search_off_rounded,
+                    color: AppTheme.textSecondary,
+                    size: 22,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Walang tumugma sa “$q”. Subukan: docu, dtr, recruit, pending, time, announcement…',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 13,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        if (showWelcome)
+          Container(
           padding: EdgeInsets.all(isNarrow ? 20 : 28),
           decoration: BoxDecoration(
             gradient: LinearGradient(
@@ -1000,83 +1200,101 @@ class _DashboardContent extends StatelessWidget {
                   ],
                 ),
         ),
-        const SizedBox(height: 32),
-        const _SummaryCards(),
-        const SizedBox(height: 28),
-        Text(
-          'DocuTracker',
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            color: AppTheme.textPrimary,
-            letterSpacing: -0.2,
+        if (showWelcome && showSummary) const SizedBox(height: 32),
+        if (showSummary) const _SummaryCards(),
+        if ((showWelcome || showSummary) && showDocu) const SizedBox(height: 28),
+        if (showDocu) ...[
+          Text(
+            'DocuTracker',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.textPrimary,
+              letterSpacing: -0.2,
+            ),
           ),
-        ),
-        const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.06),
-                blurRadius: 20,
-                offset: const Offset(0, 4),
-              ),
-              BoxShadow(
-                color: Colors.black.withOpacity(0.02),
-                blurRadius: 16,
-                offset: const Offset(0, 2),
-              ),
-            ],
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: AppTheme.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.black.withOpacity(0.06)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.06),
+                  blurRadius: 20,
+                  offset: const Offset(0, 4),
+                ),
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.02),
+                  blurRadius: 16,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: const DocuTrackerDashboardScreen(
+              isAdmin: true,
+              showTitle: false,
+            ),
           ),
-          child: const DocuTrackerDashboardScreen(
-            isAdmin: true,
-            showTitle: false,
+        ],
+        if ((showWelcome || showSummary || showDocu) && showDtr)
+          const SizedBox(height: 28),
+        if (showDtr) ...[
+          Text(
+            'Daily Time Record',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.textPrimary,
+              letterSpacing: -0.2,
+            ),
           ),
-        ),
-        const SizedBox(height: 28),
-        // DTR snapshot (same cards + recent activity as DTR dashboard),
-        // embedded directly in the main admin dashboard.
-        Text(
-          'Daily Time Record',
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            color: AppTheme.textPrimary,
-            letterSpacing: -0.2,
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: AppTheme.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.black.withOpacity(0.06)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.06),
+                  blurRadius: 20,
+                  offset: const Offset(0, 4),
+                ),
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.02),
+                  blurRadius: 16,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: const DtrDashboard(),
           ),
-        ),
-        const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.06),
-                blurRadius: 20,
-                offset: const Offset(0, 4),
-              ),
-              BoxShadow(
-                color: Colors.black.withOpacity(0.02),
-                blurRadius: 16,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: const DtrDashboard(),
-        ),
-        const SizedBox(height: 28),
-        _AnnouncementsCard(),
-        const SizedBox(height: 28),
-        _RecruitmentOverviewCard(),
-        const SizedBox(height: 28),
-        _PendingApplicationsCard(),
+        ],
+        if ((showWelcome || showSummary || showDocu || showDtr) &&
+            showAnnouncements)
+          const SizedBox(height: 28),
+        if (showAnnouncements) _AnnouncementsCard(),
+        if ((showWelcome ||
+                showSummary ||
+                showDocu ||
+                showDtr ||
+                showAnnouncements) &&
+            showRecruitment)
+          const SizedBox(height: 28),
+        if (showRecruitment) _RecruitmentOverviewCard(),
+        if ((showWelcome ||
+                showSummary ||
+                showDocu ||
+                showDtr ||
+                showAnnouncements ||
+                showRecruitment) &&
+            showPending)
+          const SizedBox(height: 28),
+        if (showPending) _PendingApplicationsCard(),
         const SizedBox(height: 32),
       ],
     );
@@ -2147,9 +2365,12 @@ class _LdContentState extends State<_LdContent> {
             onPressed: () => setState(() => _ldSectionIndex = 0),
             icon: const Icon(Icons.arrow_back_rounded, size: 20),
             label: const Text('Back to L&D'),
-            style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.primaryNavy,
+              padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+            ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
         ],
         if (_ldSectionIndex == 0) ...[
           Text(
@@ -2189,12 +2410,21 @@ class _LdContentState extends State<_LdContent> {
                 icon: Icons.lightbulb_outline_rounded,
                 onTap: () => setState(() => _ldSectionIndex = 2),
               ),
+              FeatureCard(
+                title: 'Training Daily Reports (Monitoring)',
+                subtitle:
+                    'Monitor daily reports submitted by employees under training, with attachments and status.',
+                icon: Icons.assignment_turned_in_outlined,
+                onTap: () => setState(() => _ldSectionIndex = 3),
+              ),
             ],
           ),
         ] else if (_ldSectionIndex == 1)
           const _TrainingNeedAnalysisSection()
+        else if (_ldSectionIndex == 2)
+          const _ActionBrainstormingSection()
         else
-          const _ActionBrainstormingSection(),
+          const _LdTrainingReportsSection(),
       ],
     );
   }
@@ -2390,6 +2620,433 @@ class _TrainingNeedAnalysisSectionState
             onDownloadPdf: _downloadTna,
           ),
       ],
+    );
+  }
+}
+
+/// L&D: Training Daily Reports monitoring content (embedded in L&D page, not a separate screen).
+class _LdTrainingReportsSection extends StatefulWidget {
+  const _LdTrainingReportsSection();
+
+  @override
+  State<_LdTrainingReportsSection> createState() =>
+      _LdTrainingReportsSectionState();
+}
+
+class _LdTrainingReportsSectionState extends State<_LdTrainingReportsSection> {
+  final _searchController = TextEditingController();
+  bool _loading = false;
+  List<TrainingDailyReport> _reports = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final list = await TrainingDailyReportRepo.instance.listAllReports(
+        search: _searchController.text.trim().isEmpty
+            ? null
+            : _searchController.text.trim(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _reports = list;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _markSeen(TrainingDailyReport report) async {
+    try {
+      final updated =
+          await TrainingDailyReportRepo.instance.markAsSeen(report.id);
+      if (!mounted) return;
+      setState(() {
+        final idx = _reports.indexWhere((r) => r.id == report.id);
+        if (idx != -1) _reports[idx] = updated;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Marked report as seen.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to mark as seen: $e')),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Training Daily Reports',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: 24,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.3,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Monitor daily reports from employees under training, review attachments, and mark them as seen.',
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 14,
+            height: 1.4,
+          ),
+        ),
+        const SizedBox(height: 24),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: 'Search',
+                  prefixIcon: Icon(
+                    Icons.search_rounded,
+                    color: AppTheme.textSecondary.withOpacity(0.8),
+                    size: 22,
+                  ),
+                  filled: true,
+                  fillColor: AppTheme.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(
+                      color: Colors.black.withOpacity(0.08),
+                    ),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(
+                      color: Colors.black.withOpacity(0.08),
+                    ),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
+                ),
+                onSubmitted: (_) => _load(),
+              ),
+            ),
+            const SizedBox(width: 12),
+            IconButton.filled(
+              tooltip: 'Refresh',
+              onPressed: _load,
+              style: IconButton.styleFrom(
+                backgroundColor: Colors.grey.shade100,
+                foregroundColor: AppTheme.textPrimary,
+              ),
+              icon: const Icon(Icons.refresh_rounded, size: 22),
+            ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        if (_loading)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 32),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (_reports.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 32),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.assignment_outlined,
+                    size: 48,
+                    color: AppTheme.textSecondary.withOpacity(0.5),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'No training daily reports found.',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          )
+        else
+          ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _reports.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            itemBuilder: (context, index) {
+              final r = _reports[index];
+              return _LdReportCard(
+                report: r,
+                onViewFile: r.attachmentUrl != null
+                    ? () => _showAttachmentPreview(context, r.attachmentUrl!)
+                    : null,
+                onMarkSeen: () => _markSeen(r),
+              );
+            },
+          ),
+      ],
+    );
+  }
+
+  void _showAttachmentPreview(BuildContext context, String url) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return Dialog(
+          insetPadding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 900, maxHeight: 700),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Attachment preview',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Close',
+                        onPressed: () => Navigator.of(ctx).pop(),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: InteractiveViewer(
+                        minScale: 0.5,
+                        maxScale: 4,
+                        child: Image.network(
+                          url,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, __, ___) => Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Text(
+                                  'Preview for this file type is not supported.',
+                                  style: TextStyle(fontSize: 13),
+                                ),
+                                const SizedBox(height: 8),
+                                TextButton.icon(
+                                  onPressed: () async {
+                                    final uri = Uri.parse(url);
+                                    await launchUrl(
+                                      uri,
+                                      mode: LaunchMode.externalApplication,
+                                    );
+                                  },
+                                  icon: const Icon(
+                                    Icons.open_in_new_rounded,
+                                    size: 18,
+                                  ),
+                                  label: const Text('Open in new tab'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _LdReportCard extends StatelessWidget {
+  const _LdReportCard({
+    required this.report,
+    this.onViewFile,
+    required this.onMarkSeen,
+  });
+
+  final TrainingDailyReport report;
+  final VoidCallback? onViewFile;
+  final VoidCallback onMarkSeen;
+
+  @override
+  Widget build(BuildContext context) {
+    final r = report;
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      r.employeeName ?? 'Unknown employee',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      r.title,
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              _LdStatusChip(status: r.status),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            r.description ?? 'No description provided.',
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 13,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Submitted ${r.submittedAt.toLocal()}',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              if (onViewFile != null)
+                TextButton.icon(
+                  onPressed: onViewFile,
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppTheme.primaryNavy,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                  ),
+                  icon: const Icon(Icons.visibility_outlined, size: 18),
+                  label: const Text('View file'),
+                ),
+              const Spacer(),
+              TextButton(
+                onPressed: onMarkSeen,
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.primaryNavy,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                ),
+                child: const Text('Mark as seen'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LdStatusChip extends StatelessWidget {
+  const _LdStatusChip({required this.status});
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    Color color;
+    switch (status.toLowerCase()) {
+      case 'seen':
+        color = const Color(0xFF0EA5E9);
+        break;
+      case 'reviewed':
+        color = Colors.indigo;
+        break;
+      case 'approved':
+        color = Colors.green;
+        break;
+      case 'needs_revision':
+      case 'needs-revision':
+        color = Colors.orange;
+        break;
+      default:
+        color = Colors.grey;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: color.withOpacity(0.14),
+      ),
+      child: Text(
+        status[0].toUpperCase() + status.substring(1),
+        style: TextStyle(
+          color: color,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 }
