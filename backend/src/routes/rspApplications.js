@@ -1,10 +1,48 @@
 const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const { isAttachmentPathAllowedInDb } = require('../utils/rspAttachmentPolicy');
+const { resolveLocalRspAttachment, RSP_SUBDIR } = require('../utils/rspLocalAttachment');
 
 const router = express.Router();
 const protect = [authMiddleware, requireAdmin];
+
+const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
+const rspAttachmentsRoot = path.join(UPLOAD_DIR, RSP_SUBDIR);
+if (!fs.existsSync(rspAttachmentsRoot)) {
+  fs.mkdirSync(rspAttachmentsRoot, { recursive: true });
+}
+
+const rspUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, _file, cb) => {
+      const { applicationId } = req.params;
+      const dir = path.join(rspAttachmentsRoot, applicationId);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      cb(null, dir);
+    },
+    filename: (_req, file, cb) => {
+      const base = path
+        .basename(file.originalname || 'file')
+        .replace(/[^\w.\- ()]/g, '_')
+        .slice(0, 180);
+      cb(null, base || `file_${Date.now()}`);
+    },
+  }),
+  limits: { fileSize: 15 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ok = /\.(pdf|png|jpe?g|gif|webp|doc|docx|txt|xlsx?|csv)$/i.test(
+      file.originalname || '',
+    );
+    cb(null, ok);
+  },
+});
 
 async function ensureRspApplicationsTables() {
   // Defensive: allow delete to work even if init-schema-rsp.sql wasn't run yet.
@@ -194,6 +232,114 @@ router.put('/:applicationId/status', protect, async (req, res) => {
   }
 });
 
+// POST /api/rsp/applications/:applicationId/attachment-file
+// Public (applicant): save file under uploads/rsp-attachments/{id}/...
+// Query updateDb=0 to only store the file and return path (multi-upload helper).
+router.post(
+  '/:applicationId/attachment-file',
+  rspUpload.single('file'),
+  async (req, res) => {
+    try {
+      await ensureRspApplicationsTables();
+      const { applicationId } = req.params;
+      const updateDb =
+        req.query.updateDb !== '0' && req.query.updateDb !== 'false';
+
+      if (!req.file) {
+        return res.status(400).json({ error: 'file is required (multipart)' });
+      }
+
+      const exists = await pool.query(
+        'SELECT id FROM public.recruitment_applications WHERE id = $1',
+        [applicationId],
+      );
+      if (!exists.rows[0]) {
+        try {
+          fs.unlinkSync(req.file.path);
+        } catch (_) {
+          /* ignore */
+        }
+        return res.status(404).json({ error: 'Application not found' });
+      }
+
+      const relPath = `${applicationId}/${req.file.filename}`;
+      const origName = req.file.originalname || req.file.filename;
+
+      if (updateDb) {
+        await pool.query(
+          `
+          UPDATE public.recruitment_applications
+          SET attachment_path = $1,
+              attachment_name = $2,
+              updated_at = now()
+          WHERE id = $3
+          `,
+          [relPath, origName, applicationId],
+        );
+      }
+
+      return res.json({
+        ok: true,
+        path: relPath,
+        fileName: origName,
+        updateDb,
+      });
+    } catch (err) {
+      if (req.file?.path) {
+        try {
+          fs.unlinkSync(req.file.path);
+        } catch (_) {
+          /* ignore */
+        }
+      }
+      console.error('[rspApplications POST attachment-file]', err);
+      return res.status(500).json({
+        error: 'Failed to store attachment',
+        details: err?.message ? String(err.message) : String(err),
+      });
+    }
+  },
+);
+
+// DELETE /api/rsp/applications/attachment-file
+// Admin: remove a file from local disk (path must match an application in DB).
+router.delete('/attachment-file', ...protect, async (req, res) => {
+  try {
+    const objectPath =
+      req.body?.path ?? req.query.path ?? req.query.objectPath ?? null;
+    if (!objectPath || typeof objectPath !== 'string') {
+      return res.status(400).json({ error: 'path is required' });
+    }
+    const trimmed = String(objectPath).trim();
+    const allowed = await isAttachmentPathAllowedInDb(trimmed);
+    if (!allowed) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const abs = resolveLocalRspAttachment(UPLOAD_DIR, trimmed);
+    if (!abs || !fs.existsSync(abs)) {
+      return res.status(404).json({ error: 'Local file not found' });
+    }
+    fs.unlinkSync(abs);
+    await pool.query(
+      `
+      UPDATE public.recruitment_applications
+      SET attachment_path = NULL,
+          attachment_name = NULL,
+          updated_at = now()
+      WHERE btrim(attachment_path::text) = btrim($1::text)
+      `,
+      [trimmed],
+    );
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[rspApplications DELETE attachment-file]', err);
+    return res.status(500).json({
+      error: 'Failed to delete attachment file',
+      details: err?.message ? String(err.message) : String(err),
+    });
+  }
+});
+
 // PUT /api/rsp/applications/:applicationId/attachment
 // Public for applicants: store Supabase Storage attachment path/name.
 router.put('/:applicationId/attachment', async (req, res) => {
@@ -353,6 +499,15 @@ router.delete('/:applicationId', protect, async (req, res) => {
     const deleted = result.rowCount ?? 0;
     if (deleted === 0) {
       return res.status(404).json({ error: 'Application not found' });
+    }
+
+    const appDir = path.join(rspAttachmentsRoot, applicationId);
+    if (fs.existsSync(appDir)) {
+      try {
+        fs.rmSync(appDir, { recursive: true, force: true });
+      } catch (err) {
+        console.warn('[rspApplications DELETE] local attachments cleanup', err);
+      }
     }
 
     res.json({ ok: true, deleted });

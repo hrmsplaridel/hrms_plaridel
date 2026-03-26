@@ -29,21 +29,61 @@ class _LoginPageState extends State<LoginPage> {
     final isWide = MediaQuery.of(context).size.width > 800;
 
     return Scaffold(
-      body: Row(
+      body: Stack(
         children: [
-          if (isWide) Expanded(flex: 6, child: _BrandingSection()),
-          Expanded(
-            flex: isWide ? 4 : 1,
-            child: _LoginFormSection(
-              emailController: _emailController,
-              passwordController: _passwordController,
-              passwordFocusNode: _passwordFocusNode,
-              rememberMe: _rememberMe,
-              isLoading: _isLoading,
-              onRememberMeChanged: (v) =>
-                  setState(() => _rememberMe = v ?? false),
-              onLogin: _onLogin,
-              onForgotPassword: _onForgotPassword,
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: const BoxDecoration(
+                image: DecorationImage(
+                  image: AssetImage('assets/images/Building.jpg'),
+                  fit: BoxFit.cover,
+                ),
+              ),
+            ),
+          ),
+          if (kIsWeb)
+            Positioned(
+              top: 12,
+              left: 12,
+              child: SafeArea(child: _LoginBackButton()),
+            ),
+          // Place branding above the form, and push the form down a bit
+          // so there is clear separation (no overlap).
+          Positioned.fill(
+            child: SafeArea(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Align(
+                    alignment: Alignment.topCenter,
+                    child: SizedBox(
+                      width: isWide ? 460 : 420,
+                      child: _BrandingSection(),
+                    ),
+                  ),
+                  const SizedBox(height: 0),
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      child: Transform.translate(
+                        // More negative = moves the form upward.
+                        offset: const Offset(0, -27),
+                        child: _LoginFormSection(
+                          emailController: _emailController,
+                          passwordController: _passwordController,
+                          passwordFocusNode: _passwordFocusNode,
+                          rememberMe: _rememberMe,
+                          isLoading: _isLoading,
+                          onRememberMeChanged: (v) =>
+                              setState(() => _rememberMe = v ?? false),
+                          onLogin: _onLogin,
+                          onForgotPassword: _onForgotPassword,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -84,15 +124,15 @@ class _LoginPageState extends State<LoginPage> {
           ),
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(errorMessage)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(errorMessage)));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Login failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Login failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -104,95 +144,87 @@ class _LoginPageState extends State<LoginPage> {
   }
 }
 
-/// Left panel: blue gradient, HR logo/title, tagline, illustration.
-class _BrandingSection extends StatelessWidget {
+class _LoginBackButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        image: const DecorationImage(
-          image: AssetImage('assets/images/Building.jpg'),
-          fit: BoxFit.cover,
-        ),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            LoginTheme.brandingGradientStart,
-            LoginTheme.brandingGradientEnd,
-          ],
-        ),
+        color: Colors.black.withOpacity(0.25),
+        shape: BoxShape.circle,
       ),
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.start,
-            crossAxisAlignment: CrossAxisAlignment.center,
+      child: IconButton(
+        padding: const EdgeInsets.all(10),
+        onPressed: () => Navigator.of(context).pop(),
+        icon: const Icon(Icons.arrow_back, size: 30),
+        color: Colors.white,
+      ),
+    );
+  }
+}
+
+/// Left panel: blue gradient, HR logo/title, tagline, illustration.
+class _BrandingSection extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 24),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          const SizedBox(height: 56),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const SizedBox(height: 56),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      width: 120,
-                      height: 120,
-                      color: Colors.white.withOpacity(0.2),
-                      child: Image.asset(
-                        'assets/images/Plaridel Logo.jpg',
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const Icon(
-                          Icons.shield_outlined,
-                          color: Colors.white,
-                          size: 32,
-                        ),
-                      ),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  width: 92,
+                  height: 92,
+                  color: Colors.white.withOpacity(0.2),
+                  child: Image.asset(
+                    'assets/images/Plaridel Logo.jpg',
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const Icon(
+                      Icons.shield_outlined,
+                      color: Colors.white,
+                      size: 32,
                     ),
                   ),
-                  const SizedBox(width: 16),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Municipality of Plaridel',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 40,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.3,
-                          height: 1.2,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'HUMAN RESOURCE MANAGEMENT SYSTEM',
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.95),
-                          fontSize: 20,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 0.8,
-                          height: 1.2,
-                        ),
-                      ),
-                    ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Municipality of Plaridel',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 34,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.3,
+                      height: 1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'HUMAN RESOURCE MANAGEMENT SYSTEM',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.95),
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.8,
+                      height: 1.2,
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 48),
-              Text(
-                'Modernizing Human Resource Services',
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.95),
-                  fontSize: 30,
-                  fontWeight: FontWeight.w500,
-                  height: 1.3,
-                ),
-              ),
             ],
           ),
-        ),
+          const SizedBox(height: 0),
+          // Removed tagline as requested.
+        ],
       ),
     );
   }
@@ -223,38 +255,39 @@ class _LoginFormSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: const Color(0xFFD65A00),
-      child: SafeArea(
-        child: Stack(
-          children: [
-            if (kIsWeb)
-              Positioned(
-                top: 0,
-                left: 0,
-                child: IconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.arrow_back),
-                  color: Colors.white,
-                ),
-              ),
-            Center(
-              child: SingleChildScrollView(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 440),
+      color: Colors.transparent,
+      child: Stack(
+        children: [
+          Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 20),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 460),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.06),
+                    borderRadius: BorderRadius.circular(24),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF000000).withOpacity(0.12),
+                        blurRadius: 18,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  padding: const EdgeInsets.all(24),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const SizedBox(height: 40),
+                      const SizedBox(height: 0),
                       const Text(
-                    'Welcome Back!',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 28,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
+                        'Welcome Back!',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 28,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                       const SizedBox(height: 4),
                       Text(
                         'Please login to your account',
@@ -263,7 +296,7 @@ class _LoginFormSection extends StatelessWidget {
                           fontSize: 14,
                         ),
                       ),
-                      const SizedBox(height: 32),
+                      const SizedBox(height: 26),
                       _LoginTextField(
                         controller: emailController,
                         hint: 'Email',
@@ -292,29 +325,27 @@ class _LoginFormSection extends StatelessWidget {
                           const SizedBox(width: 8),
                           const Text(
                             'Remember Me',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                            ),
+                            style: TextStyle(color: Colors.white, fontSize: 14),
                           ),
                           const Spacer(),
                           TextButton(
                             onPressed: onForgotPassword,
                             style: TextButton.styleFrom(
                               foregroundColor: Colors.white,
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 8),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
                             ),
                             child: const Text('Forgot Password?'),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 22),
                       _LoginToHrmsButton(
                         onPressed: isLoading ? null : onLogin,
                         isLoading: isLoading,
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 22),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: const [
@@ -364,8 +395,8 @@ class _LoginFormSection extends StatelessWidget {
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -391,12 +422,10 @@ class _LoginTextField extends StatelessWidget {
       textInputAction: TextInputAction.next,
       onSubmitted: (_) => nextFocusNode?.requestFocus(),
       decoration: InputDecoration(
-        hintText: hint,
-        prefixIcon: Icon(
-          icon,
-          color: const Color(0xFFD65A00),
-          size: 22,
-        ),
+        labelText: hint,
+        hintText: null,
+        labelStyle: const TextStyle(color: Color(0xFFD65A00), fontSize: 12),
+        prefixIcon: Icon(icon, color: const Color(0xFFD65A00), size: 22),
         filled: true,
         fillColor: Colors.white,
         border: OutlineInputBorder(
@@ -409,10 +438,7 @@ class _LoginTextField extends StatelessWidget {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(
-            color: Colors.white,
-            width: 1.5,
-          ),
+          borderSide: const BorderSide(color: Colors.white, width: 1.5),
         ),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 16,
@@ -450,7 +476,9 @@ class _PasswordTextFieldState extends State<_PasswordTextField> {
       textInputAction: TextInputAction.done,
       onSubmitted: (_) => widget.onSubmitted?.call(),
       decoration: InputDecoration(
-        hintText: 'Password',
+        labelText: 'Password',
+        hintText: null,
+        labelStyle: const TextStyle(color: Color(0xFFD65A00), fontSize: 12),
         prefixIcon: const Icon(
           Icons.lock_outline,
           color: Color(0xFFD65A00),
@@ -479,10 +507,7 @@ class _PasswordTextFieldState extends State<_PasswordTextField> {
         ),
         focusedBorder: const OutlineInputBorder(
           borderRadius: BorderRadius.all(Radius.circular(12)),
-          borderSide: BorderSide(
-            color: Colors.white,
-            width: 1.5,
-          ),
+          borderSide: BorderSide(color: Colors.white, width: 1.5),
         ),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 16,

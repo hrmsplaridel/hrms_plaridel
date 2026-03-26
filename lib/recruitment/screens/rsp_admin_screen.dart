@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:html' as html;
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:ui_web' as ui_web;
 import 'package:dio/dio.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -8403,7 +8407,12 @@ class _AttachmentActions extends StatelessWidget {
     final url = await _resolveUrl();
     if (url != null && context.mounted) {
       if (kIsWeb) {
-        _showAttachmentPreviewDialog(context, url: url, fileName: fileName);
+        _showAttachmentPreviewDialog(
+          context,
+          url: url,
+          fileName: fileName,
+          objectPath: path,
+        );
         return;
       }
 
@@ -8427,10 +8436,7 @@ class _AttachmentActions extends StatelessWidget {
     final url = await _resolveUrl();
     if (url != null && context.mounted) {
       final uri = Uri.parse(url).replace(
-        queryParameters: {
-          ...Uri.parse(url).queryParameters,
-          'download': '1',
-        },
+        queryParameters: {...Uri.parse(url).queryParameters, 'download': '1'},
       );
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -8491,6 +8497,8 @@ bool _isImageExt(String ext) {
     'jpg',
     'jpeg',
     'gif',
+    'tif',
+    'tiff',
     'webp',
     'bmp',
   ].contains(ext.toLowerCase());
@@ -8508,14 +8516,26 @@ void _showAttachmentPreviewDialog(
   BuildContext context, {
   required String url,
   required String fileName,
+  required String objectPath,
 }) {
-  final ext = _extractExt(fileName);
+  // Prefer `fileName` (DB `attachment_name`), but if it has no extension,
+  // fall back to the stored object key (e.g. `${applicationId}/${fileName}`).
+  final ext = _extractExt(fileName).isNotEmpty
+      ? _extractExt(fileName)
+      : _extractExt(objectPath);
   final isImage = _isImageExt(ext);
+  final isPdf = ext.toLowerCase() == 'pdf';
+  final lowerExt = ext.toLowerCase();
+  final isWord = <String>[
+    'doc',
+    'docx',
+    'xls',
+    'xlsx',
+    'ppt',
+    'pptx',
+  ].contains(lowerExt);
   final downloadUri = Uri.parse(url).replace(
-    queryParameters: {
-      ...Uri.parse(url).queryParameters,
-      'download': '1',
-    },
+    queryParameters: {...Uri.parse(url).queryParameters, 'download': '1'},
   );
 
   showDialog<void>(
@@ -8572,8 +8592,7 @@ void _showAttachmentPreviewDialog(
                                       onPressed: () async {
                                         await launchUrl(
                                           Uri.parse(url),
-                                          mode:
-                                              LaunchMode.externalApplication,
+                                          mode: LaunchMode.externalApplication,
                                         );
                                       },
                                       icon: const Icon(
@@ -8587,6 +8606,37 @@ void _showAttachmentPreviewDialog(
                               ),
                             ),
                           )
+                        : kIsWeb
+                        ? (isPdf || isWord)
+                              ? _WebIframePreview(
+                                  url: isWord ? _withPreviewParam(url) : url,
+                                )
+                              : Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Text(
+                                        'Preview for this file type is not supported.',
+                                        style: TextStyle(fontSize: 13),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      TextButton.icon(
+                                        onPressed: () async {
+                                          await launchUrl(
+                                            Uri.parse(url),
+                                            mode:
+                                                LaunchMode.externalApplication,
+                                          );
+                                        },
+                                        icon: const Icon(
+                                          Icons.open_in_new_rounded,
+                                          size: 18,
+                                        ),
+                                        label: const Text('Open in new tab'),
+                                      ),
+                                    ],
+                                  ),
+                                )
                         : Center(
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
@@ -8648,4 +8698,76 @@ void _showAttachmentPreviewDialog(
       );
     },
   );
+}
+
+String _officeViewerUrl(String fileUrl) {
+  // Office Online viewer loads the file from `src` and renders it inline.
+  // NOTE: `fileUrl` must be reachable by the browser (ideally from the same LAN).
+  final encoded = Uri.encodeComponent(fileUrl);
+  return 'https://view.officeapps.live.com/op/view.aspx?src=$encoded';
+}
+
+String _withPreviewParam(String url) {
+  final uri = Uri.parse(url);
+  final qp = <String, String>{...uri.queryParameters};
+  qp['preview'] = '1';
+  // Ensure we don't accidentally request download mode for inline preview.
+  qp.remove('download');
+  return uri.replace(queryParameters: qp).toString();
+}
+
+bool _isPrivateHost(String host) {
+  final h = host.toLowerCase().trim();
+  if (h.isEmpty) return true;
+  if (h == 'localhost' || h == '127.0.0.1' || h == '0.0.0.0') return true;
+  if (h.startsWith('10.') || h.startsWith('192.168.')) return true;
+  if (h.startsWith('172.')) {
+    // 172.16.0.0 - 172.31.255.255
+    final parts = h.split('.');
+    if (parts.length >= 2) {
+      final second = int.tryParse(parts[1]);
+      if (second != null && second >= 16 && second <= 31) return true;
+    }
+  }
+  if (h.endsWith('.local') || h.endsWith('.lan')) return true;
+  return false;
+}
+
+/// Minimal web-only inline preview for PDFs/docs using an `<iframe>`.
+/// Works best for `application/pdf` and many browsers will render it inline.
+class _WebIframePreview extends StatefulWidget {
+  const _WebIframePreview({required this.url});
+  final String url;
+
+  @override
+  State<_WebIframePreview> createState() => _WebIframePreviewState();
+}
+
+class _WebIframePreviewState extends State<_WebIframePreview> {
+  static int _counter = 0;
+  late final String _viewType;
+
+  @override
+  void initState() {
+    super.initState();
+    _viewType = 'rsp-attachment-iframe-${_counter++}';
+
+    // Register a one-off platform view factory.
+    // ignore: avoid_web_libraries_in_flutter
+    ui_web.platformViewRegistry.registerViewFactory(_viewType, (int viewId) {
+      final iframe = html.IFrameElement()
+        ..src = widget.url
+        ..style.border = '0'
+        ..style.width = '100%'
+        ..style.height = '100%';
+      return iframe;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // HtmlElementView sometimes ignores parent constraints; `SizedBox.expand`
+    // ensures the iframe gets a non-zero height/width.
+    return SizedBox.expand(child: HtmlElementView(viewType: _viewType));
+  }
 }

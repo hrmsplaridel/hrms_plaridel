@@ -167,6 +167,14 @@ class RecruitmentRepo {
     List<int> fileBytes,
     String fileName,
   ) async {
+    if (ApiConfig.useLocalRspStorage) {
+      await ApiClient.instance.uploadBytes<Map<String, dynamic>>(
+        '/api/rsp/applications/$applicationId/attachment-file',
+        bytes: fileBytes,
+        fileName: fileName,
+      );
+      return;
+    }
     final path = '$applicationId/$fileName';
     await _client.storage
         .from(RecruitmentApplication.storageBucket)
@@ -181,6 +189,26 @@ class RecruitmentRepo {
   ) async {
     if (files.isEmpty) return;
     final now = DateTime.now().millisecondsSinceEpoch;
+
+    if (ApiConfig.useLocalRspStorage) {
+      for (var i = 0; i < files.length; i++) {
+        final f = files[i];
+        final uniqueName = '${now}_${i}_${f.fileName}';
+        await ApiClient.instance.uploadBytes<Map<String, dynamic>>(
+          '/api/rsp/applications/$applicationId/attachment-file?updateDb=0',
+          bytes: f.bytes,
+          fileName: uniqueName,
+        );
+      }
+      final first = files.first;
+      await setApplicationAttachment(
+        applicationId,
+        '$applicationId/${now}_0_${first.fileName}',
+        first.fileName,
+      );
+      return;
+    }
+
     for (var i = 0; i < files.length; i++) {
       final f = files[i];
       final uniquePath = '$applicationId/${now}_${i}_${f.fileName}';
@@ -261,6 +289,13 @@ class RecruitmentRepo {
 
   /// Remove an attachment file from storage (admin). Path is e.g. applicationId/filename.
   Future<void> deleteAttachment(String path) async {
+    if (ApiConfig.useLocalRspStorage) {
+      await ApiClient.instance.delete<void>(
+        '/api/rsp/applications/attachment-file',
+        queryParameters: {'path': path},
+      );
+      return;
+    }
     await _client.storage.from(RecruitmentApplication.storageBucket).remove([
       path,
     ]);

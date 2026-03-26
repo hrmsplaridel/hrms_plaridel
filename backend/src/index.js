@@ -33,6 +33,15 @@ if (!process.env.JWT_SECRET) {
   console.warn('[warn] JWT_SECRET not set; auth routes will fail. Add JWT_SECRET to .env');
 }
 
+if (
+  !process.env.SUPABASE_URL?.trim() ||
+  !process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
+) {
+  console.warn(
+    '[warn] Supabase storage not configured. RSP files still work from disk at uploads/rsp-attachments/ (see POST /api/rsp/applications/:id/attachment-file). Set SUPABASE_* for cloud bucket.',
+  );
+}
+
 // Middleware
 app.use(cors());
 app.use(express.json());
