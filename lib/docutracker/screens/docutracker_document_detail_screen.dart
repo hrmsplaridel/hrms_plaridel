@@ -7,6 +7,7 @@ import '../docutracker_provider.dart';
 import '../docutracker_styles.dart';
 import '../docutracker_repository.dart';
 import '../models/document.dart';
+import '../models/document_action.dart';
 import '../models/document_history.dart';
 import '../models/document_status.dart';
 
@@ -31,6 +32,14 @@ class _DocuTrackerDocumentDetailScreenState
     extends State<DocuTrackerDocumentDetailScreen> {
   final _remarkController = TextEditingController();
 
+  bool _permissionsLoading = true;
+  bool _canViewAuditTrail = false;
+  bool _canApprove = false;
+  bool _canReject = false;
+  bool _canReturn = false;
+  bool _canForward = false;
+  bool _canEdit = false; // Candidate documents / remark ability
+
   @override
   void initState() {
     super.initState();
@@ -52,7 +61,51 @@ class _DocuTrackerDocumentDetailScreenState
         Navigator.of(context).pop();
         return;
       }
+      // Load audit trail eagerly; we'll still hide it if permissions deny access.
       provider.loadDocumentHistory(widget.document.id!);
+
+      final userId = auth.user?.id ?? '';
+      final roleId = auth.user?.role;
+      final docType = widget.document.documentType;
+
+      // Step 4: apply per-action permissions (and "restrictions" from the dialog).
+      final results = await Future.wait<bool>([
+        repo.hasPermission(
+          userId: userId,
+          roleId: roleId,
+          documentType: docType,
+          action: DocumentAction.view.name,
+        ),
+        repo.hasPermission(
+          userId: userId,
+          roleId: roleId,
+          documentType: docType,
+          action: DocumentAction.approve.name,
+        ),
+        repo.hasPermission(
+          userId: userId,
+          roleId: roleId,
+          documentType: docType,
+          action: DocumentAction.forward.name,
+        ),
+        repo.hasPermission(
+          userId: userId,
+          roleId: roleId,
+          documentType: docType,
+          action: DocumentAction.edit.name,
+        ),
+      ]);
+
+      if (!mounted) return;
+      setState(() {
+        _canViewAuditTrail = results[0];
+        _canApprove = results[1];
+        _canReject = results[1]; // tie "Candidate activation" to both approve + reject
+        _canForward = results[2];
+        _canReturn = results[2]; // tie "Allocate job authority" to forward + return
+        _canEdit = results[3];
+        _permissionsLoading = false;
+      });
     });
   }
 
@@ -88,7 +141,8 @@ class _DocuTrackerDocumentDetailScreenState
                 const SizedBox(height: 24),
                 _buildInfoCard(doc),
                 const SizedBox(height: 24),
-                if (canAct) _buildActionButtons(doc, provider, userId),
+                if (canAct && !_permissionsLoading)
+                  _buildActionButtons(doc, provider, userId),
                 const SizedBox(height: 24),
                 _buildAuditTrail(provider),
                 const SizedBox(height: 24),
@@ -193,7 +247,8 @@ class _DocuTrackerDocumentDetailScreenState
       spacing: 12,
       runSpacing: 8,
       children: [
-        FilledButton.icon(
+        if (_canApprove)
+          FilledButton.icon(
           onPressed: provider.loading
               ? null
               : () async {
@@ -209,8 +264,9 @@ class _DocuTrackerDocumentDetailScreenState
           icon: const Icon(Icons.check_circle_rounded, size: 18),
           label: const Text('Approve'),
           style: DocuTrackerStyles.approveButtonStyle(),
-        ),
-        OutlinedButton.icon(
+          ),
+        if (_canReject)
+          OutlinedButton.icon(
           onPressed: provider.loading
               ? null
               : () async {
@@ -257,8 +313,9 @@ class _DocuTrackerDocumentDetailScreenState
           icon: const Icon(Icons.cancel_rounded, size: 18),
           label: const Text('Reject'),
           style: DocuTrackerStyles.outlinedRedStyle(),
-        ),
-        OutlinedButton.icon(
+          ),
+        if (_canReturn)
+          OutlinedButton.icon(
           onPressed: provider.loading
               ? null
               : () async {
@@ -305,8 +362,9 @@ class _DocuTrackerDocumentDetailScreenState
           icon: const Icon(Icons.reply_rounded, size: 18),
           label: const Text('Return'),
           style: DocuTrackerStyles.outlinedButtonStyle(),
-        ),
-        OutlinedButton.icon(
+          ),
+        if (_canForward)
+          OutlinedButton.icon(
           onPressed: provider.loading
               ? null
               : () async {
@@ -325,8 +383,9 @@ class _DocuTrackerDocumentDetailScreenState
           icon: const Icon(Icons.forward_rounded, size: 18),
           label: const Text('Forward'),
           style: DocuTrackerStyles.outlinedButtonStyle(),
-        ),
-        OutlinedButton.icon(
+          ),
+        if (_canEdit)
+          OutlinedButton.icon(
           onPressed: provider.loading
               ? null
               : () {
@@ -373,7 +432,7 @@ class _DocuTrackerDocumentDetailScreenState
           icon: const Icon(Icons.comment_rounded, size: 18),
           label: const Text('Add Remark'),
           style: DocuTrackerStyles.outlinedButtonStyle(),
-        ),
+          ),
       ],
     );
   }
@@ -400,7 +459,25 @@ class _DocuTrackerDocumentDetailScreenState
             ],
           ),
           const SizedBox(height: 16),
-          if (provider.documentHistory.isEmpty)
+          if (_permissionsLoading)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: CircularProgressIndicator(),
+              ),
+            )
+          else if (!_canViewAuditTrail)
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                'You do not have access to view the audit trail.',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 14,
+                ),
+              ),
+            )
+          else if (provider.documentHistory.isEmpty)
             Padding(
               padding: const EdgeInsets.all(24),
               child: Center(

@@ -10,27 +10,41 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:hrms_plaridel/main.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
+import 'package:hrms_plaridel/api/app_user.dart';
+
+class FakeAuthProvider extends AuthProvider {
+  FakeAuthProvider(this._fakeUser);
+
+  final AppUser? _fakeUser;
+
+  @override
+  AppUser? get user => _fakeUser;
+}
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(
-      MyApp(
-        auth: AuthProvider(),
-        storedLoginAs: 'Admin',
+  testWidgets('App smoke test', (WidgetTester tester) async {
+    // Provide a non-null user so `_initialHome` renders the dashboard
+    // instead of `LoginPage` (which can overflow at test viewport widths).
+    final auth = FakeAuthProvider(
+      const AppUser(
+        id: 'test-user-id',
+        email: 'test@example.com',
+        role: 'admin',
       ),
     );
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    // The default test viewport width can be too small for some of our pages
+    // (e.g. `LoginPage`), causing RenderFlex overflow exceptions.
+    await tester.binding.setSurfaceSize(const Size(1200, 2000));
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    // Build the app and trigger a frame.
+    await tester.pumpWidget(MyApp(
+      auth: auth,
+      storedLoginAs: 'Admin',
+    ));
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // Basic sanity check: the app bootstrapped without throwing.
+    expect(find.byType(MaterialApp), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }
