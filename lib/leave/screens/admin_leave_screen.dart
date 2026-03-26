@@ -11,7 +11,7 @@ import '../leave_repository.dart';
 import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
-import 'leave_request_print_layout.dart';
+import '../utils/leave_request_pdf.dart';
 import '../widgets/leave_request_card.dart';
 import '../widgets/leave_status_chip.dart';
 
@@ -144,22 +144,28 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
                   _RequestDetailsPanel(
                     request: selected,
                     reviewing: provider.reviewing,
-                    onApprove: selected == null ||
+                    onApprove:
+                        selected == null ||
                             selected.status != LeaveRequestStatus.pending
                         ? null
                         : () => _approve(selected),
-                    onReturn: selected == null ||
+                    onReturn:
+                        selected == null ||
                             selected.status != LeaveRequestStatus.pending
                         ? null
                         : () => _returnRequest(selected),
-                    onReject: selected == null ||
+                    onReject:
+                        selected == null ||
                             selected.status != LeaveRequestStatus.pending
                         ? null
                         : () => _rejectRequest(selected),
-                    onRevoke: selected == null ||
+                    onRevoke:
+                        selected == null ||
                             selected.status != LeaveRequestStatus.approved
                         ? null
                         : () => _revokeApproval(selected),
+                    onPrint:
+                        selected == null ? null : () => _printLeaveForm(selected),
                   ),
                 ],
               )
@@ -184,22 +190,28 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
                     child: _RequestDetailsPanel(
                       request: selected,
                       reviewing: provider.reviewing,
-                      onApprove: selected == null ||
+                      onApprove:
+                          selected == null ||
                               selected.status != LeaveRequestStatus.pending
                           ? null
                           : () => _approve(selected),
-                      onReturn: selected == null ||
+                      onReturn:
+                          selected == null ||
                               selected.status != LeaveRequestStatus.pending
                           ? null
                           : () => _returnRequest(selected),
-                      onReject: selected == null ||
+                      onReject:
+                          selected == null ||
                               selected.status != LeaveRequestStatus.pending
                           ? null
                           : () => _rejectRequest(selected),
-                      onRevoke: selected == null ||
+                      onRevoke:
+                          selected == null ||
                               selected.status != LeaveRequestStatus.approved
                           ? null
                           : () => _revokeApproval(selected),
+                      onPrint:
+                          selected == null ? null : () => _printLeaveForm(selected),
                     ),
                   ),
                 ],
@@ -215,8 +227,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
       query: LeaveRequestQuery(
         status: _statusFilter,
         leaveType: _leaveTypeFilter,
-        startDateFrom: _startDateFrom,    // #11
-        startDateTo: _startDateTo,        // #11
+        startDateFrom: _startDateFrom, // #11
+        startDateTo: _startDateTo, // #11
         limit: 200,
       ),
     );
@@ -237,6 +249,45 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
     final fresh = await provider.refreshRequestById(id);
     if (mounted && fresh != null && _selectedRequest?.id == id) {
       setState(() => _selectedRequest = fresh);
+    }
+  }
+
+  Future<void> _printLeaveForm(LeaveRequest request) async {
+    final provider = context.read<LeaveProvider>();
+    if (!mounted) return;
+
+    try {
+      // Best-effort refresh so we print the latest snapshot (e.g. after HR changes).
+      LeaveRequest target = request;
+      final id = request.id;
+      if (id != null && id.isNotEmpty) {
+        final fresh = await provider.refreshRequestById(id);
+        if (fresh != null) {
+          target = fresh;
+          if (_selectedRequest?.id == id) {
+            setState(() => _selectedRequest = fresh);
+          }
+        }
+      }
+
+      final balances = await provider.fetchBalancesForUser(target.userId);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Preparing print...')),
+        );
+      }
+
+      await LeaveRequestPdf.printLeaveRequest(
+        request: target,
+        balances: balances,
+        name: 'Leave_Application_${target.id ?? target.userId}.pdf',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Print failed: $e')),
+      );
     }
   }
 
@@ -425,7 +476,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
       reviewedAt: DateTime.now(),
     );
 
-    final result = await context.read<LeaveProvider>().revokeApproval(finalInput);
+    final result = await context.read<LeaveProvider>().revokeApproval(
+      finalInput,
+    );
     final ok = result != null;
     if (!mounted) return;
     final provider = context.read<LeaveProvider>();
@@ -728,7 +781,8 @@ class _RequestDetailsPanel extends StatelessWidget {
     this.onApprove,
     this.onReturn,
     this.onReject,
-    this.onRevoke,  // #15
+    this.onRevoke, // #15
+    this.onPrint,
   });
 
   final LeaveRequest? request;
@@ -736,7 +790,8 @@ class _RequestDetailsPanel extends StatelessWidget {
   final VoidCallback? onApprove;
   final VoidCallback? onReturn;
   final VoidCallback? onReject;
-  final VoidCallback? onRevoke;  // #15
+  final VoidCallback? onRevoke; // #15
+  final VoidCallback? onPrint;
 
   @override
   Widget build(BuildContext context) {
@@ -856,18 +911,12 @@ class _RequestDetailsPanel extends StatelessWidget {
                   ),
                   label: const Text('Revoke Approval'),
                 ),
-              OutlinedButton.icon(
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          LeaveRequestPrintLayout(initialRequest: request),
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.print_rounded),
-                label: const Text('Print Form'),
-              ),
+              if (onPrint != null)
+                OutlinedButton.icon(
+                  onPressed: reviewing ? null : onPrint,
+                  icon: const Icon(Icons.print_rounded),
+                  label: const Text('Print Form'),
+                ),
             ],
           ),
         ],

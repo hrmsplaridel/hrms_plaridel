@@ -9,6 +9,7 @@ import '../leave_provider.dart';
 import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
+import '../utils/leave_request_pdf.dart';
 
 typedef LeaveRequestAction = Future<bool> Function(LeaveRequest request);
 
@@ -139,8 +140,8 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
   }
 
   Future<void> _loadEmployeeAssignmentPrefill() async {
-    final targetUserId = widget.initialRequest?.userId ??
-        context.read<AuthProvider>().user?.id;
+    final targetUserId =
+        widget.initialRequest?.userId ?? context.read<AuthProvider>().user?.id;
     if (targetUserId == null || targetUserId.isEmpty) return;
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
@@ -198,7 +199,20 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
 
     return Scaffold(
       backgroundColor: AppTheme.offWhite,
-      appBar: AppBar(title: const Text('Leave Request Form')),
+      appBar: AppBar(
+        title: const Text('Leave Request Form'),
+        actions: [
+          IconButton(
+            onPressed: _busy
+                ? null
+                : () {
+                    _printCurrentRequest();
+                  },
+            icon: const Icon(Icons.print_rounded),
+            tooltip: 'Print / Save PDF',
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Form(
           key: _formKey,
@@ -1130,7 +1144,8 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
         : 0.0;
 
     final asOfDate = widget.initialRequest?.dateFiled ?? DateTime.now();
-    final asOfStr = '${asOfDate.year}-${asOfDate.month.toString().padLeft(2, '0')}-${asOfDate.day.toString().padLeft(2, '0')}';
+    final asOfStr =
+        '${asOfDate.year}-${asOfDate.month.toString().padLeft(2, '0')}-${asOfDate.day.toString().padLeft(2, '0')}';
 
     String formatDays(double d) => d == 0 ? '—' : d.toStringAsFixed(3);
 
@@ -1647,6 +1662,37 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
         _endDate = picked;
       }
     });
+  }
+
+  Future<void> _printCurrentRequest() async {
+    final status = widget.initialRequest?.status ?? LeaveRequestStatus.pending;
+    final request = _buildRequest(status: status);
+    if (request == null) return;
+
+    if (_startDate == null || _endDate == null) {
+      _showMessage('Please select both start and end dates before printing.');
+      return;
+    }
+
+    setState(() => _busy = true);
+    try {
+      final userId = request.userId;
+      final balances = _employeeBalances.isNotEmpty
+          ? _employeeBalances
+          : await context
+              .read<LeaveProvider>()
+              .fetchBalancesForUser(userId);
+
+      await LeaveRequestPdf.printLeaveRequest(
+        request: request,
+        balances: balances,
+        name: 'Leave_Application_${request.id ?? request.userId}.pdf',
+      );
+    } catch (e) {
+      _showMessage('Print failed: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _saveDraft() async {
