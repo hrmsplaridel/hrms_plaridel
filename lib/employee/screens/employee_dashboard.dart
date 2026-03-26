@@ -93,13 +93,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                   displayName: displayName,
                   email: email,
                   avatarPath: avatarPath,
-<<<<<<< HEAD
-            onProfileTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ProfileAndSettingsPage()),
-              );
-            },
-=======
                   showMenuButton: !isWide,
                   onProfileTap: () {
                     Navigator.of(context).push(
@@ -108,7 +101,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                       ),
                     );
                   },
->>>>>>> feature/dtr-module
                 ),
                 Expanded(
                   child: SingleChildScrollView(

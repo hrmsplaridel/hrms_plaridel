@@ -20,15 +20,12 @@ const overtimeRoutes = require('./routes/overtime');
 const calendarRoutes = require('./routes/calendar');
 const dtrDailySummaryRoutes = require('./routes/dtrDailySummary');
 const docutrackerRoutes = require('./routes/docutracker');
-<<<<<<< HEAD
 const trainingDailyReportsRoutes = require('./routes/trainingDailyReports');
 const rspJobVacanciesRoutes = require('./routes/rspJobVacancies');
 const rspExamQuestionsRoutes = require('./routes/rspExamQuestions');
 const rspApplicationsRoutes = require('./routes/rspApplications');
 const rspStorageRoutes = require('./routes/rspStorage');
-=======
 const leaveRoutes = require('./routes/leaveRoutes');
->>>>>>> feature/dtr-module
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -104,15 +101,12 @@ app.use('/api/overtime', overtimeRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/dtr-daily-summary', dtrDailySummaryRoutes);
 app.use('/api/docutracker', docutrackerRoutes);
-<<<<<<< HEAD
 app.use('/api/training-daily-reports', trainingDailyReportsRoutes);
 app.use('/api/rsp/job-vacancies', rspJobVacanciesRoutes);
 app.use('/api/rsp/exam-questions', rspExamQuestionsRoutes);
 app.use('/api/rsp/applications', rspApplicationsRoutes);
 app.use('/api/rsp/storage', rspStorageRoutes);
-=======
 app.use('/api/leave', leaveRoutes);
->>>>>>> feature/dtr-module
 
 // --- Start server ---
 app.listen(PORT, HOST, () => {
