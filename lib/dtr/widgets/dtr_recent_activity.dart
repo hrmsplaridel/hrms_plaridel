@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../data/time_record.dart';
+import 'attendance_source_badge.dart';
 
 /// Recent time logs table for DTR dashboard.
 class DtrRecentActivity extends StatelessWidget {
@@ -15,7 +16,12 @@ class DtrRecentActivity extends StatelessWidget {
 
   static String _formatTime(DateTime? dt) {
     if (dt == null) return '—';
-    return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    final local = dt.toLocal();
+    final h = local.hour;
+    final m = local.minute;
+    final ampm = h >= 12 ? 'PM' : 'AM';
+    final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+    return '$h12:${m.toString().padLeft(2, '0')} $ampm';
   }
 
   static String _formatDate(DateTime d) {
@@ -85,6 +91,7 @@ class DtrRecentActivity extends StatelessWidget {
                 DataColumn(label: Text('Time In')),
                 DataColumn(label: Text('Time Out')),
                 DataColumn(label: Text('Hours')),
+                DataColumn(label: Text('Source')),
               ],
               rows: records.take(15).map((r) {
                 final timeIn = r.timeIn?.toLocal();
@@ -99,6 +106,7 @@ class DtrRecentActivity extends StatelessWidget {
                     DataCell(Text(_formatTime(timeIn))),
                     DataCell(Text(_formatTime(timeOut))),
                     DataCell(Text(hours)),
+                    DataCell(AttendanceSourceBadge(source: r.source, compact: true)),
                   ],
                 );
               }).toList(),

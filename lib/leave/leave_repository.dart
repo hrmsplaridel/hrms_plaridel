@@ -23,6 +23,22 @@ class LeaveRequestQuery {
   final DateTime? createdFrom;
   final DateTime? createdTo;
   final int? limit;
+
+  /// Convert to URL query-param map for the API layer.
+  Map<String, dynamic> toQueryParams() => {
+    if (status != null) 'status': status!.value,
+    if (leaveType != null) 'leave_type': leaveType!.value,
+    if (userId != null && userId!.isNotEmpty) 'user_id': userId,
+    if (limit != null) 'limit': limit,
+    if (startDateFrom != null)
+      'start_date_from': _toDateStr(startDateFrom!),
+    if (startDateTo != null) 'start_date_to': _toDateStr(startDateTo!),
+    if (createdFrom != null) 'created_from': createdFrom!.toIso8601String(),
+    if (createdTo != null) 'created_to': createdTo!.toIso8601String(),
+  };
+
+  static String _toDateStr(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 }
 
 /// Approval payload used by HR/admin actions.
@@ -94,6 +110,7 @@ abstract class LeaveRepository {
   Future<List<LeaveRequest>> listMyRequests(
     String userId, {
     LeaveRequestStatus? status,
+    int? limit,
   });
 
   /// General request listing for admin tables/reports.
@@ -119,6 +136,10 @@ abstract class LeaveRepository {
   /// Approve a request and apply any balance changes required by policy.
   Future<LeaveRequest> approveRequest(LeaveApprovalInput input);
 
+  /// Revoke a previously approved leave request (Admin only).
+  /// Restores the used_days balance and cleans up DTR on_leave rows.
+  Future<LeaveRequest> revokeApproval(LeaveReviewDecisionInput input);
+
   /// Send a request back to the employee for correction.
   Future<LeaveRequest> returnRequest(LeaveReviewDecisionInput input);
 
@@ -143,4 +164,7 @@ abstract class LeaveRepository {
 
   /// Optional hook for removing a supporting attachment.
   Future<LeaveRequest> removeAttachment(String requestId);
+
+  /// Fetch attachment bytes for viewing/downloading. Returns null if none or not supported.
+  Future<List<int>?> getAttachmentBytes(String requestId) => Future.value(null);
 }

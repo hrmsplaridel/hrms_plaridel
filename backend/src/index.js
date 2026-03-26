@@ -15,15 +15,20 @@ const holidaysRoutes = require('./routes/holidays');
 const attendancePoliciesRoutes = require('./routes/attendancePolicies');
 const dtrCorrectionsRoutes = require('./routes/dtrCorrections');
 const biometricDevicesRoutes = require('./routes/biometricDevices');
+const biometricAttendanceLogsRoutes = require('./routes/biometricAttendanceLogs');
 const overtimeRoutes = require('./routes/overtime');
 const calendarRoutes = require('./routes/calendar');
 const dtrDailySummaryRoutes = require('./routes/dtrDailySummary');
 const docutrackerRoutes = require('./routes/docutracker');
+<<<<<<< HEAD
 const trainingDailyReportsRoutes = require('./routes/trainingDailyReports');
 const rspJobVacanciesRoutes = require('./routes/rspJobVacancies');
 const rspExamQuestionsRoutes = require('./routes/rspExamQuestions');
 const rspApplicationsRoutes = require('./routes/rspApplications');
 const rspStorageRoutes = require('./routes/rspStorage');
+=======
+const leaveRoutes = require('./routes/leaveRoutes');
+>>>>>>> feature/dtr-module
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -55,10 +60,20 @@ app.get('/health', (_req, res) => {
 
 app.get('/health/db', async (_req, res) => {
   try {
-    const result = await pool.query('SELECT 1 AS ok, current_database() AS db');
+    const result = await pool.query(
+      `SELECT
+        1 AS ok,
+        current_database() AS db,
+        inet_server_addr()::text AS server_addr,
+        inet_server_port() AS server_port,
+        current_user AS db_user`
+    );
     res.json({
       ok: true,
       database: result.rows[0].db,
+      server_addr: result.rows[0].server_addr,
+      server_port: result.rows[0].server_port,
+      db_user: result.rows[0].db_user,
       message: 'PostgreSQL connection OK',
     });
   } catch (err) {
@@ -84,15 +99,20 @@ app.use('/api/holidays', holidaysRoutes);
 app.use('/api/attendance-policies', attendancePoliciesRoutes);
 app.use('/api/dtr-corrections', dtrCorrectionsRoutes);
 app.use('/api/biometric-devices', biometricDevicesRoutes);
+app.use('/api/biometric-attendance-logs', biometricAttendanceLogsRoutes);
 app.use('/api/overtime', overtimeRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/dtr-daily-summary', dtrDailySummaryRoutes);
 app.use('/api/docutracker', docutrackerRoutes);
+<<<<<<< HEAD
 app.use('/api/training-daily-reports', trainingDailyReportsRoutes);
 app.use('/api/rsp/job-vacancies', rspJobVacanciesRoutes);
 app.use('/api/rsp/exam-questions', rspExamQuestionsRoutes);
 app.use('/api/rsp/applications', rspApplicationsRoutes);
 app.use('/api/rsp/storage', rspStorageRoutes);
+=======
+app.use('/api/leave', leaveRoutes);
+>>>>>>> feature/dtr-module
 
 // --- Start server ---
 app.listen(PORT, HOST, () => {

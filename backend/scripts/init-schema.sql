@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS shifts (
 
   start_time TIME NOT NULL,
   end_time TIME NOT NULL,
+  break_end TIME,
 
   grace_period_minutes INT NOT NULL DEFAULT 0 CHECK (grace_period_minutes >= 0),
 
@@ -119,12 +120,25 @@ CREATE TABLE IF NOT EXISTS attendance_policies (
   name TEXT NOT NULL UNIQUE,
   description TEXT,
 
-  grace_period_minutes INT NOT NULL DEFAULT 0 CHECK (grace_period_minutes >= 0),
-  max_late_per_month_minutes INT CHECK (max_late_per_month_minutes IS NULL OR max_late_per_month_minutes >= 0),
+  -- Structured computation settings (Shift holds grace period; keep it out of policy)
+  work_hours_per_day NUMERIC(4,2) NOT NULL DEFAULT 8 CHECK (work_hours_per_day > 0),
+  use_equivalent_day_conversion BOOLEAN NOT NULL DEFAULT true,
 
-  late_deduction_rule TEXT,
-  absent_deduction_rule TEXT,
-  undertime_rule TEXT,
+  -- Late settings
+  deduct_late BOOLEAN NOT NULL DEFAULT false,
+  max_late_minutes_per_month INT CHECK (max_late_minutes_per_month IS NULL OR max_late_minutes_per_month >= 0),
+  convert_late_to_equivalent_day BOOLEAN NOT NULL DEFAULT true,
+
+  -- Undertime settings
+  deduct_undertime BOOLEAN NOT NULL DEFAULT true,
+  convert_undertime_to_equivalent_day BOOLEAN NOT NULL DEFAULT true,
+
+  -- Absence settings
+  absent_equals_full_day_deduction BOOLEAN NOT NULL DEFAULT true,
+
+  -- Advanced
+  combine_late_and_undertime BOOLEAN NOT NULL DEFAULT false,
+  deduction_multiplier NUMERIC(6,3) NOT NULL DEFAULT 1.0 CHECK (deduction_multiplier > 0),
 
   is_default BOOLEAN NOT NULL DEFAULT false,
   is_active BOOLEAN NOT NULL DEFAULT true,
@@ -164,6 +178,7 @@ CREATE TABLE IF NOT EXISTS assignments (
 
   override_start_time TIME,
   override_end_time TIME,
+  override_break_end TIME,
 
   effective_from DATE NOT NULL,
   effective_to DATE,
@@ -219,10 +234,12 @@ CREATE TABLE IF NOT EXISTS holidays (
   holiday_date DATE NOT NULL,
   name TEXT NOT NULL,
   holiday_type TEXT NOT NULL DEFAULT 'regular'
-    CHECK (holiday_type IN ('regular', 'special', 'local')),
+    CHECK (holiday_type IN ('regular', 'special', 'local', 'work_suspension')),
   description TEXT,
   is_active BOOLEAN NOT NULL DEFAULT true,
   recurring BOOLEAN NOT NULL DEFAULT false,
+  coverage TEXT NOT NULL DEFAULT 'whole_day'
+    CHECK (coverage IN ('whole_day', 'am_only', 'pm_only')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
   CONSTRAINT uq_holiday_date_name UNIQUE (holiday_date, name)
@@ -239,21 +256,55 @@ CREATE TABLE IF NOT EXISTS leave_types (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Seed leave types (names must match Flutter LeaveType enum .value for API lookup).
+INSERT INTO leave_types (name, description, is_active)
+VALUES
+  ('vacationLeave', 'Vacation Leave', true),
+  ('mandatoryForcedLeave', 'Mandatory/Forced Leave', true),
+  ('sickLeave', 'Sick Leave', true),
+  ('maternityLeave', 'Maternity Leave', true),
+  ('paternityLeave', 'Paternity Leave', true),
+  ('specialPrivilegeLeave', 'Special Privilege Leave', true),
+  ('soloParentLeave', 'Solo Parent Leave', true),
+  ('studyLeave', 'Study Leave', true),
+  ('tenDayVawcLeave', '10-Day VAWC Leave', true),
+  ('rehabilitationPrivilege', 'Rehabilitation Privilege', true),
+  ('specialLeaveBenefitsForWomen', 'Special Leave Benefits for Women', true),
+  ('specialEmergencyCalamityLeave', 'Special Emergency (Calamity) Leave', true),
+  ('adoptionLeave', 'Adoption Leave', true),
+  ('others', 'Others', true)
+ON CONFLICT (name) DO NOTHING;
+
 -- =========================================
 -- LEAVE REQUESTS
 -- =========================================
 CREATE TABLE IF NOT EXISTS leave_requests (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  -- user_id mirrors employee_id. Both are written on every INSERT.
+  -- NOT NULL enforced here so fresh installs match the Phase 3 migration constraint.
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   leave_type_id UUID REFERENCES leave_types(id) ON DELETE SET NULL,
 
   start_date DATE NOT NULL,
   end_date DATE NOT NULL,
   total_days NUMERIC(5,2),
+  number_of_days NUMERIC(5,2),
 
   reason TEXT,
+  -- Supporting document attachment (PDF, JPG, JPEG, PNG)
+  attachment_name TEXT,
+  attachment_path TEXT,
+  attachment_mime_type TEXT,
+  attachment_uploaded_at TIMESTAMPTZ,
+  -- Flexible payload for form fields (office_department, position_title, commutation, etc.)
+  details JSONB,
   status TEXT NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
+    CHECK (status IN ('draft', 'pending', 'returned', 'approved', 'rejected', 'cancelled')),
+
+  reviewer_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  reviewer_remarks TEXT,
+  reviewed_at TIMESTAMPTZ,
 
   approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
   approved_at TIMESTAMPTZ,
@@ -262,7 +313,89 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
   CONSTRAINT chk_leave_dates CHECK (end_date >= start_date),
-  CONSTRAINT chk_leave_total_days CHECK (total_days IS NULL OR total_days >= 0)
+  CONSTRAINT chk_leave_total_days CHECK (
+    (total_days IS NULL OR total_days >= 0)
+    AND (number_of_days IS NULL OR number_of_days >= 0)
+  )
+);
+
+-- =========================================
+-- LEAVE BALANCES
+-- =========================================
+CREATE TABLE IF NOT EXISTS leave_balances (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  -- leave_type must match a value in leave_types(name).
+  -- FK enforces referential integrity; CHECK is a belt-and-suspenders guard.
+  leave_type TEXT NOT NULL,
+  earned_days NUMERIC(8,2) NOT NULL DEFAULT 0 CHECK (earned_days >= 0),
+  used_days NUMERIC(8,2) NOT NULL DEFAULT 0 CHECK (used_days >= 0),
+  pending_days NUMERIC(8,2) NOT NULL DEFAULT 0 CHECK (pending_days >= 0),
+  adjusted_days NUMERIC(8,2) NOT NULL DEFAULT 0,
+  as_of_date DATE,
+  last_accrual_date DATE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(user_id, leave_type),
+  CONSTRAINT fk_leave_balances_leave_type
+    FOREIGN KEY (leave_type) REFERENCES leave_types(name)
+    ON UPDATE CASCADE
+    ON DELETE RESTRICT
+    DEFERRABLE INITIALLY DEFERRED,
+  CONSTRAINT chk_leave_balances_leave_type CHECK (
+    leave_type IN (
+      'vacationLeave',
+      'mandatoryForcedLeave',
+      'sickLeave',
+      'maternityLeave',
+      'paternityLeave',
+      'specialPrivilegeLeave',
+      'soloParentLeave',
+      'studyLeave',
+      'tenDayVawcLeave',
+      'rehabilitationPrivilege',
+      'specialLeaveBenefitsForWomen',
+      'specialEmergencyCalamityLeave',
+      'adoptionLeave',
+      'others'
+    )
+  )
+);
+CREATE INDEX IF NOT EXISTS idx_leave_balances_user_id ON leave_balances(user_id);
+
+-- =========================================
+-- LEAVE REQUEST HISTORY (AUDIT TRAIL)
+-- =========================================
+CREATE TABLE IF NOT EXISTS leave_request_history (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  leave_request_id UUID NOT NULL REFERENCES leave_requests(id) ON DELETE CASCADE,
+  action TEXT NOT NULL,
+  from_status TEXT,
+  to_status TEXT NOT NULL,
+  acted_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  acted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  remarks TEXT,
+  metadata_json JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_leave_request_history_leave_request_id
+  ON leave_request_history(leave_request_id);
+
+-- =========================================
+-- BIOMETRIC ATTENDANCE LOGS (raw import from .dat files)
+-- =========================================
+CREATE TABLE IF NOT EXISTS biometric_attendance_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  biometric_user_id TEXT NOT NULL,
+  logged_at TIMESTAMPTZ NOT NULL,
+  verify_code TEXT,
+  punch_code TEXT,
+  work_code TEXT,
+  raw_line TEXT NOT NULL,
+  source_file_name TEXT,
+  imported_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT uq_biometric_attendance_logs_user_time UNIQUE (biometric_user_id, logged_at)
 );
 
 -- =========================================
@@ -325,6 +458,7 @@ CREATE TABLE IF NOT EXISTS dtr_daily_summary (
       'rest_day',
       'incomplete'
     )),
+  pm_status TEXT CHECK (pm_status IS NULL OR pm_status IN ('present', 'late')),
 
   source TEXT NOT NULL DEFAULT 'system'
     CHECK (source IN ('system', 'manual', 'adjusted')),
@@ -435,8 +569,19 @@ CREATE INDEX IF NOT EXISTS idx_holidays_holiday_date ON holidays(holiday_date);
 CREATE INDEX IF NOT EXISTS idx_holidays_type ON holidays(holiday_type);
 
 CREATE INDEX IF NOT EXISTS idx_leave_requests_employee_id ON leave_requests(employee_id);
+CREATE INDEX IF NOT EXISTS idx_leave_requests_user_id ON leave_requests(user_id);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_status ON leave_requests(status);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_dates ON leave_requests(start_date, end_date);
+
+-- Phase 3 Fix #8: Prevent duplicate pending/approved requests on the same date range.
+-- PARTIAL so draft/returned/cancelled records are not affected.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_leave_requests_no_overlap
+ON leave_requests (user_id, start_date, end_date)
+WHERE status IN ('pending', 'approved');
+
+CREATE INDEX IF NOT EXISTS idx_biometric_attendance_logs_user_id ON biometric_attendance_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_biometric_attendance_logs_logged_at ON biometric_attendance_logs(logged_at);
+CREATE INDEX IF NOT EXISTS idx_biometric_attendance_logs_biometric_user_id ON biometric_attendance_logs(biometric_user_id);
 
 CREATE INDEX IF NOT EXISTS idx_dtr_logs_employee_id ON dtr_logs(employee_id);
 CREATE INDEX IF NOT EXISTS idx_dtr_logs_log_time ON dtr_logs(log_time);
@@ -448,6 +593,7 @@ CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_employee_id ON dtr_daily_summar
 CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_date ON dtr_daily_summary(attendance_date);
 CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_status ON dtr_daily_summary(status);
 CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_assignment_id ON dtr_daily_summary(assignment_id);
+CREATE INDEX IF NOT EXISTS idx_dtr_leave_request ON dtr_daily_summary(leave_request_id);
 
 CREATE INDEX IF NOT EXISTS idx_dtr_corrections_employee_id ON dtr_corrections(employee_id);
 CREATE INDEX IF NOT EXISTS idx_dtr_corrections_status ON dtr_corrections(status);
@@ -538,5 +684,11 @@ EXECUTE PROCEDURE set_updated_at();
 DROP TRIGGER IF EXISTS trg_overtime_requests_updated_at ON overtime_requests;
 CREATE TRIGGER trg_overtime_requests_updated_at
 BEFORE UPDATE ON overtime_requests
+FOR EACH ROW
+EXECUTE PROCEDURE set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_leave_balances_updated_at ON leave_balances;
+CREATE TRIGGER trg_leave_balances_updated_at
+BEFORE UPDATE ON leave_balances
 FOR EACH ROW
 EXECUTE PROCEDURE set_updated_at();

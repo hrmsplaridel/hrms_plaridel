@@ -2,11 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../landingpage/constants/app_theme.dart';
+import '../utils/open_attachment_io.dart'
+    if (dart.library.html) '../utils/open_attachment_web.dart'
+    as open_attachment;
 import '../../providers/auth_provider.dart';
 import '../leave_provider.dart';
 import '../leave_repository.dart';
+import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
+import '../utils/leave_request_pdf.dart';
 import '../widgets/leave_request_card.dart';
 import '../widgets/leave_status_chip.dart';
 
@@ -39,6 +44,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
   LeaveRequest? _selectedRequest;
   LeaveRequestStatus? _statusFilter = LeaveRequestStatus.pending;
   LeaveType? _leaveTypeFilter;
+  // #11: Date range filters.
+  DateTime? _startDateFrom;
+  DateTime? _startDateTo;
 
   @override
   void didChangeDependencies() {
@@ -54,8 +62,14 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
     final width = MediaQuery.of(context).size.width;
     final compact = width < 1080;
     final requests = provider.requests;
-    final selected =
-        _selectedRequest ?? (requests.isNotEmpty ? requests.first : null);
+    // Clear selection when the selected request is no longer in the list
+    // (e.g. employee cancelled it, or filters changed).
+    final selectionStillValid =
+        _selectedRequest != null &&
+        requests.any((r) => r.id == _selectedRequest!.id);
+    final selected = selectionStillValid
+        ? _selectedRequest
+        : (requests.isNotEmpty ? requests.first : null);
     if (selected != _selectedRequest) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -85,6 +99,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
         _FilterBar(
           status: _statusFilter,
           leaveType: _leaveTypeFilter,
+          startDateFrom: _startDateFrom,
+          startDateTo: _startDateTo,
           onStatusChanged: (value) {
             setState(() => _statusFilter = value);
             _loadRequests();
@@ -93,10 +109,20 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
             setState(() => _leaveTypeFilter = value);
             _loadRequests();
           },
+          onStartDateFromChanged: (value) {
+            setState(() => _startDateFrom = value);
+            _loadRequests();
+          },
+          onStartDateToChanged: (value) {
+            setState(() => _startDateTo = value);
+            _loadRequests();
+          },
           onReset: () {
             setState(() {
               _statusFilter = LeaveRequestStatus.pending;
               _leaveTypeFilter = null;
+              _startDateFrom = null;
+              _startDateTo = null;
             });
             _loadRequests();
           },
@@ -109,22 +135,37 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
                     requests: requests,
                     loading: provider.loading,
                     selectedRequest: selected,
-                    onSelect: (request) =>
-                        setState(() => _selectedRequest = request),
+                    onSelect: (request) {
+                      setState(() => _selectedRequest = request);
+                      _refetchSelectedRequest(request);
+                    },
                   ),
                   const SizedBox(height: 16),
                   _RequestDetailsPanel(
                     request: selected,
                     reviewing: provider.reviewing,
-                    onApprove: selected == null
+                    onApprove:
+                        selected == null ||
+                            selected.status != LeaveRequestStatus.pending
                         ? null
                         : () => _approve(selected),
-                    onReturn: selected == null
+                    onReturn:
+                        selected == null ||
+                            selected.status != LeaveRequestStatus.pending
                         ? null
                         : () => _returnRequest(selected),
-                    onReject: selected == null
+                    onReject:
+                        selected == null ||
+                            selected.status != LeaveRequestStatus.pending
                         ? null
                         : () => _rejectRequest(selected),
+                    onRevoke:
+                        selected == null ||
+                            selected.status != LeaveRequestStatus.approved
+                        ? null
+                        : () => _revokeApproval(selected),
+                    onPrint:
+                        selected == null ? null : () => _printLeaveForm(selected),
                   ),
                 ],
               )
@@ -137,8 +178,10 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
                       requests: requests,
                       loading: provider.loading,
                       selectedRequest: selected,
-                      onSelect: (request) =>
-                          setState(() => _selectedRequest = request),
+                      onSelect: (request) {
+                        setState(() => _selectedRequest = request);
+                        _refetchSelectedRequest(request);
+                      },
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -147,15 +190,28 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
                     child: _RequestDetailsPanel(
                       request: selected,
                       reviewing: provider.reviewing,
-                      onApprove: selected == null
+                      onApprove:
+                          selected == null ||
+                              selected.status != LeaveRequestStatus.pending
                           ? null
                           : () => _approve(selected),
-                      onReturn: selected == null
+                      onReturn:
+                          selected == null ||
+                              selected.status != LeaveRequestStatus.pending
                           ? null
                           : () => _returnRequest(selected),
-                      onReject: selected == null
+                      onReject:
+                          selected == null ||
+                              selected.status != LeaveRequestStatus.pending
                           ? null
                           : () => _rejectRequest(selected),
+                      onRevoke:
+                          selected == null ||
+                              selected.status != LeaveRequestStatus.approved
+                          ? null
+                          : () => _revokeApproval(selected),
+                      onPrint:
+                          selected == null ? null : () => _printLeaveForm(selected),
                     ),
                   ),
                 ],
@@ -171,19 +227,91 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
       query: LeaveRequestQuery(
         status: _statusFilter,
         leaveType: _leaveTypeFilter,
-        limit: 100,
+        startDateFrom: _startDateFrom, // #11
+        startDateTo: _startDateTo, // #11
+        limit: 200,
       ),
     );
     if (!mounted) return;
     if (_selectedRequest == null && provider.requests.isNotEmpty) {
-      setState(() => _selectedRequest = provider.requests.first);
+      final first = provider.requests.first;
+      setState(() => _selectedRequest = first);
+      await _refetchSelectedRequest(first);
+    }
+  }
+
+  /// Refetches the selected request by ID to ensure we have the latest data
+  /// (e.g. attachment) that may have been added after the list was loaded.
+  Future<void> _refetchSelectedRequest(LeaveRequest request) async {
+    final id = request.id;
+    if (id == null || id.isEmpty) return;
+    final provider = context.read<LeaveProvider>();
+    final fresh = await provider.refreshRequestById(id);
+    if (mounted && fresh != null && _selectedRequest?.id == id) {
+      setState(() => _selectedRequest = fresh);
+    }
+  }
+
+  Future<void> _printLeaveForm(LeaveRequest request) async {
+    final provider = context.read<LeaveProvider>();
+    if (!mounted) return;
+
+    try {
+      // Best-effort refresh so we print the latest snapshot (e.g. after HR changes).
+      LeaveRequest target = request;
+      final id = request.id;
+      if (id != null && id.isNotEmpty) {
+        final fresh = await provider.refreshRequestById(id);
+        if (fresh != null) {
+          target = fresh;
+          if (_selectedRequest?.id == id) {
+            setState(() => _selectedRequest = fresh);
+          }
+        }
+      }
+
+      final balances = await provider.fetchBalancesForUser(target.userId);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Preparing print...')),
+        );
+      }
+
+      await LeaveRequestPdf.printLeaveRequest(
+        request: target,
+        balances: balances,
+        name: 'Leave_Application_${target.id ?? target.userId}.pdf',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Print failed: $e')),
+      );
     }
   }
 
   Future<void> _approve(LeaveRequest request) async {
+    final userId = request.userId;
+    if (userId.isEmpty) {
+      _showMessage('Cannot determine employee for this request.');
+      return;
+    }
+    final balances = await context.read<LeaveProvider>().fetchBalancesForUser(
+      userId,
+    );
+    LeaveBalance? leaveBalance;
+    try {
+      leaveBalance = balances.firstWhere(
+        (b) => b.leaveType == request.leaveType,
+      );
+    } catch (_) {}
+
+    if (!mounted) return;
     final input = await showDialog<LeaveApprovalInput>(
       context: context,
-      builder: (_) => _ApproveDialog(request: request),
+      builder: (_) =>
+          _ApproveDialog(request: request, leaveBalance: leaveBalance),
     );
     if (input == null) return;
 
@@ -199,10 +327,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
       reviewerId: reviewerId,
       reviewerName: auth.displayName,
       hrRemarks: input.hrRemarks,
-      recommendationRemarks: input.recommendationRemarks,
       approvedDaysWithPay: input.approvedDaysWithPay,
       approvedDaysWithoutPay: input.approvedDaysWithoutPay,
-      approvedOtherDetails: input.approvedOtherDetails,
       reviewedAt: DateTime.now(),
     );
 
@@ -216,8 +342,11 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
       ok = result != null;
     }
     if (!mounted) return;
+    final provider = context.read<LeaveProvider>();
     _showMessage(
-      ok ? 'Leave request approved.' : 'Approval could not be completed.',
+      ok
+          ? 'Leave request approved.'
+          : (provider.error ?? 'Approval could not be completed.'),
     );
     if (ok) {
       await _loadRequests();
@@ -314,6 +443,51 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
     if (ok) {
       await _loadRequests();
     }
+  }
+
+  // #15: Revoke approval.
+  Future<void> _revokeApproval(LeaveRequest request) async {
+    final input = await showDialog<LeaveReviewDecisionInput>(
+      context: context,
+      builder: (_) => _DecisionDialog(
+        title: 'Revoke Approval',
+        subtitle:
+            'This will reverse the approval: balance will be restored and DTR leave entries removed. The request returns to the employee for correction.',
+        confirmLabel: 'Revoke Approval',
+        requireReason: false,
+        request: request,
+      ),
+    );
+    if (input == null) return;
+
+    final auth = context.read<AuthProvider>();
+    final reviewerId = auth.user?.id;
+    if (reviewerId == null || reviewerId.isEmpty) {
+      _showMessage('No logged-in reviewer found.');
+      return;
+    }
+
+    final finalInput = LeaveReviewDecisionInput(
+      requestId: request.id ?? '',
+      reviewerId: reviewerId,
+      reviewerName: auth.displayName,
+      hrRemarks: input.hrRemarks,
+      reason: input.reason,
+      reviewedAt: DateTime.now(),
+    );
+
+    final result = await context.read<LeaveProvider>().revokeApproval(
+      finalInput,
+    );
+    final ok = result != null;
+    if (!mounted) return;
+    final provider = context.read<LeaveProvider>();
+    _showMessage(
+      ok
+          ? 'Approval revoked. Leave balance restored.'
+          : (provider.error ?? 'Revoke failed.'),
+    );
+    if (ok) await _loadRequests();
   }
 
   void _showMessage(String message) {
@@ -413,6 +587,10 @@ class _FilterBar extends StatelessWidget {
     required this.onStatusChanged,
     required this.onLeaveTypeChanged,
     required this.onReset,
+    this.startDateFrom,
+    this.startDateTo,
+    this.onStartDateFromChanged,
+    this.onStartDateToChanged,
   });
 
   final LeaveRequestStatus? status;
@@ -420,6 +598,11 @@ class _FilterBar extends StatelessWidget {
   final ValueChanged<LeaveRequestStatus?> onStatusChanged;
   final ValueChanged<LeaveType?> onLeaveTypeChanged;
   final VoidCallback onReset;
+  // #11: Date range filters.
+  final DateTime? startDateFrom;
+  final DateTime? startDateTo;
+  final ValueChanged<DateTime?>? onStartDateFromChanged;
+  final ValueChanged<DateTime?>? onStartDateToChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -436,62 +619,113 @@ class _FilterBar extends StatelessWidget {
           return ConstrainedBox(
             constraints: BoxConstraints(maxWidth: constraints.maxWidth),
             child: Wrap(
-        spacing: 12,
-        runSpacing: 12,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          SizedBox(
-            width: 160,
-            child: DropdownButtonFormField<LeaveRequestStatus?>(
-              isExpanded: true,
-              initialValue: status,
-              decoration: _inputDecoration('Status'),
-              items: [
-                const DropdownMenuItem<LeaveRequestStatus?>(
-                  value: null,
-                  child: Text('All statuses'),
-                ),
-                ...LeaveRequestStatus.values.map(
-                  (value) => DropdownMenuItem<LeaveRequestStatus?>(
-                    value: value,
-                    child: Text(value.displayName),
+              spacing: 12,
+              runSpacing: 12,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                SizedBox(
+                  width: 160,
+                  child: DropdownButtonFormField<LeaveRequestStatus?>(
+                    isExpanded: true,
+                    initialValue: status,
+                    decoration: _inputDecoration('Status'),
+                    items: [
+                      const DropdownMenuItem<LeaveRequestStatus?>(
+                        value: null,
+                        child: Text('All statuses'),
+                      ),
+                      ...LeaveRequestStatus.values.map(
+                        (value) => DropdownMenuItem<LeaveRequestStatus?>(
+                          value: value,
+                          child: Text(value.displayName),
+                        ),
+                      ),
+                    ],
+                    onChanged: onStatusChanged,
                   ),
                 ),
-              ],
-              onChanged: onStatusChanged,
-            ),
-          ),
-          SizedBox(
-            width: 180,
-            child: DropdownButtonFormField<LeaveType?>(
-              isExpanded: true,
-              initialValue: leaveType,
-              decoration: _inputDecoration('Leave Type'),
-              items: [
-                const DropdownMenuItem<LeaveType?>(
-                  value: null,
-                  child: Text('All leave types'),
-                ),
-                ...LeaveType.values.map(
-                  (value) => DropdownMenuItem<LeaveType?>(
-                    value: value,
-                    child: Text(value.displayName),
+                SizedBox(
+                  width: 180,
+                  child: DropdownButtonFormField<LeaveType?>(
+                    isExpanded: true,
+                    initialValue: leaveType,
+                    decoration: _inputDecoration('Leave Type'),
+                    items: [
+                      const DropdownMenuItem<LeaveType?>(
+                        value: null,
+                        child: Text('All leave types'),
+                      ),
+                      ...LeaveType.values.map(
+                        (value) => DropdownMenuItem<LeaveType?>(
+                          value: value,
+                          child: Text(value.displayName),
+                        ),
+                      ),
+                    ],
+                    onChanged: onLeaveTypeChanged,
                   ),
                 ),
+                // #11: Date range pickers.
+                _DateFilterChip(
+                  label: 'From',
+                  date: startDateFrom,
+                  onChanged: onStartDateFromChanged,
+                ),
+                _DateFilterChip(
+                  label: 'To',
+                  date: startDateTo,
+                  onChanged: onStartDateToChanged,
+                ),
+                TextButton.icon(
+                  onPressed: onReset,
+                  icon: const Icon(Icons.filter_alt_off_rounded),
+                  label: const Text('Reset Filters'),
+                ),
               ],
-              onChanged: onLeaveTypeChanged,
             ),
-          ),
-          TextButton.icon(
-            onPressed: onReset,
-            icon: const Icon(Icons.filter_alt_off_rounded),
-            label: const Text('Reset Filters'),
-          ),
-        ],
-      ),
-            );
+          );
         },
       ),
+    );
+  }
+}
+
+/// Small chip-style date picker for filter bar.
+class _DateFilterChip extends StatelessWidget {
+  const _DateFilterChip({
+    required this.label,
+    required this.date,
+    required this.onChanged,
+  });
+
+  final String label;
+  final DateTime? date;
+  final ValueChanged<DateTime?>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasDate = date != null;
+    final text = hasDate
+        ? '$label: ${date!.year}-${date!.month.toString().padLeft(2, '0')}-${date!.day.toString().padLeft(2, '0')}'
+        : label;
+    return InputChip(
+      label: Text(text, style: const TextStyle(fontSize: 13)),
+      avatar: Icon(
+        hasDate ? Icons.event_available_rounded : Icons.calendar_today_rounded,
+        size: 16,
+      ),
+      deleteIcon: hasDate ? const Icon(Icons.close_rounded, size: 14) : null,
+      onDeleted: hasDate ? () => onChanged?.call(null) : null,
+      onPressed: () async {
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: date ?? DateTime.now(),
+          firstDate: DateTime(2020),
+          lastDate: DateTime(2030),
+          helpText: 'Select $label date',
+        );
+        if (picked != null) onChanged?.call(picked);
+      },
     );
   }
 }
@@ -547,6 +781,8 @@ class _RequestDetailsPanel extends StatelessWidget {
     this.onApprove,
     this.onReturn,
     this.onReject,
+    this.onRevoke, // #15
+    this.onPrint,
   });
 
   final LeaveRequest? request;
@@ -554,6 +790,8 @@ class _RequestDetailsPanel extends StatelessWidget {
   final VoidCallback? onApprove;
   final VoidCallback? onReturn;
   final VoidCallback? onReject;
+  final VoidCallback? onRevoke; // #15
+  final VoidCallback? onPrint;
 
   @override
   Widget build(BuildContext context) {
@@ -640,25 +878,45 @@ class _RequestDetailsPanel extends StatelessWidget {
             spacing: 12,
             runSpacing: 12,
             children: [
-              FilledButton.icon(
-                onPressed: reviewing ? null : onApprove,
-                icon: const Icon(Icons.check_circle_rounded),
-                label: const Text('Approve'),
-              ),
-              OutlinedButton.icon(
-                onPressed: reviewing ? null : onReturn,
-                icon: const Icon(Icons.reply_rounded),
-                label: const Text('Return'),
-              ),
-              OutlinedButton.icon(
-                onPressed: reviewing ? null : onReject,
-                icon: const Icon(Icons.cancel_rounded),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.red.shade700,
-                  side: BorderSide(color: Colors.red.shade300),
+              if (onApprove != null)
+                FilledButton.icon(
+                  onPressed: reviewing ? null : onApprove,
+                  icon: const Icon(Icons.check_circle_rounded),
+                  label: const Text('Approve'),
                 ),
-                label: const Text('Reject'),
-              ),
+              if (onReturn != null)
+                OutlinedButton.icon(
+                  onPressed: reviewing ? null : onReturn,
+                  icon: const Icon(Icons.reply_rounded),
+                  label: const Text('Return'),
+                ),
+              if (onReject != null)
+                OutlinedButton.icon(
+                  onPressed: reviewing ? null : onReject,
+                  icon: const Icon(Icons.cancel_rounded),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red.shade700,
+                    side: BorderSide(color: Colors.red.shade300),
+                  ),
+                  label: const Text('Reject'),
+                ),
+              // #15: Revoke — shown only when status is approved.
+              if (onRevoke != null)
+                OutlinedButton.icon(
+                  onPressed: reviewing ? null : onRevoke,
+                  icon: const Icon(Icons.undo_rounded),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.orange.shade800,
+                    side: BorderSide(color: Colors.orange.shade300),
+                  ),
+                  label: const Text('Revoke Approval'),
+                ),
+              if (onPrint != null)
+                OutlinedButton.icon(
+                  onPressed: reviewing ? null : onPrint,
+                  icon: const Icon(Icons.print_rounded),
+                  label: const Text('Print Form'),
+                ),
             ],
           ),
         ],
@@ -710,31 +968,149 @@ class _DetailGrid extends StatelessWidget {
         label: 'Other Purpose Details',
         value: request.otherPurposeDetails ?? '—',
       ),
-      (
-        label: 'Attachment',
-        value: request.attachmentName ?? 'No attachment linked yet',
-      ),
     ];
+
+    final attachmentName = request.attachmentName?.trim();
+    final hasAttachment = attachmentName != null && attachmentName.isNotEmpty;
+    final requestId = request.id;
 
     return Wrap(
       spacing: 12,
       runSpacing: 12,
-      children: rows
-          .map(
-            (item) => SizedBox(
-              width: 260,
-              child: _InfoTile(label: item.label, value: item.value),
+      children: [
+        ...rows
+            .where((r) => r.label != 'Attachment')
+            .map(
+              (item) => SizedBox(
+                width: 260,
+                child: _InfoTile(label: item.label, value: item.value),
+              ),
             ),
-          )
-          .toList(),
+        SizedBox(
+          width: 260,
+          child: _AttachmentTile(
+            requestId: requestId,
+            attachmentName: attachmentName,
+            hasAttachment: hasAttachment,
+          ),
+        ),
+      ],
     );
   }
 }
 
+class _AttachmentTile extends StatelessWidget {
+  const _AttachmentTile({
+    required this.requestId,
+    required this.attachmentName,
+    required this.hasAttachment,
+  });
+
+  final String? requestId;
+  final String? attachmentName;
+  final bool hasAttachment;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.offWhite,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.black.withOpacity(0.06)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Attachment',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 6),
+          if (!hasAttachment)
+            Text(
+              'No attachment linked yet',
+              style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
+            )
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    attachmentName!,
+                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: requestId != null && requestId!.isNotEmpty
+                      ? () => _openOrDownloadAttachment(context)
+                      : null,
+                  icon: const Icon(Icons.download_rounded, size: 18),
+                  label: const Text('View'),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openOrDownloadAttachment(BuildContext context) async {
+    if (requestId == null || requestId!.isEmpty) return;
+
+    final provider = context.read<LeaveProvider>();
+    final snackbar = ScaffoldMessenger.of(context);
+
+    try {
+      snackbar.showSnackBar(
+        const SnackBar(content: Text('Downloading attachment...')),
+      );
+      final bytes = await provider.getAttachmentBytes(requestId!);
+      if (!context.mounted) return;
+      if (bytes == null || bytes.isEmpty) {
+        snackbar.showSnackBar(
+          const SnackBar(content: Text('Attachment could not be loaded.')),
+        );
+        return;
+      }
+
+      snackbar.clearSnackBars();
+      snackbar.showSnackBar(
+        const SnackBar(content: Text('Opening attachment...')),
+      );
+
+      final name = attachmentName ?? 'attachment';
+      await open_attachment.openAttachmentBytes(bytes, name);
+      if (context.mounted) {
+        snackbar.showSnackBar(
+          const SnackBar(content: Text('Attachment opened.')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        snackbar.showSnackBar(
+          SnackBar(content: Text('Could not open attachment: $e')),
+        );
+      }
+    }
+  }
+}
+
 class _ApproveDialog extends StatefulWidget {
-  const _ApproveDialog({required this.request});
+  const _ApproveDialog({required this.request, this.leaveBalance});
 
   final LeaveRequest request;
+  final LeaveBalance? leaveBalance;
 
   @override
   State<_ApproveDialog> createState() => _ApproveDialogState();
@@ -744,50 +1120,77 @@ class _ApproveDialogState extends State<_ApproveDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _withPayController;
   late final TextEditingController _withoutPayController;
-  late final TextEditingController _otherDetailsController;
-  late final TextEditingController _hrRemarksController;
-  late final TextEditingController _recommendationController;
+  late final TextEditingController _remarksController;
+
+  double get _totalRequested => widget.request.workingDaysApplied ?? 0.0;
 
   @override
   void initState() {
     super.initState();
     _withPayController = TextEditingController(
-      text: widget.request.workingDaysApplied?.toStringAsFixed(1) ?? '',
+      text: _totalRequested.toStringAsFixed(1),
     );
-    _withoutPayController = TextEditingController();
-    _otherDetailsController = TextEditingController();
-    _hrRemarksController = TextEditingController();
-    _recommendationController = TextEditingController();
+    _withoutPayController = TextEditingController(text: '0.0');
+    _remarksController = TextEditingController();
   }
 
   @override
   void dispose() {
     _withPayController.dispose();
     _withoutPayController.dispose();
-    _otherDetailsController.dispose();
-    _hrRemarksController.dispose();
-    _recommendationController.dispose();
+    _remarksController.dispose();
     super.dispose();
+  }
+
+  String? _validateApprovedDays(String? value) {
+    final withPay = _parseDouble(_withPayController.text) ?? 0;
+    final withoutPay = _parseDouble(_withoutPayController.text) ?? 0;
+    if (withPay < 0 || withoutPay < 0) {
+      return 'Days cannot be negative.';
+    }
+    final sum = withPay + withoutPay;
+    if (sum > _totalRequested) {
+      return 'Approved with pay + without pay must not exceed total requested ($_totalRequested days).';
+    }
+    if (sum != _totalRequested) {
+      return 'Approved days must equal total requested ($_totalRequested days).';
+    }
+    return null;
   }
 
   @override
   Widget build(BuildContext context) {
+    final balanceLabel = widget.leaveBalance != null
+        ? '${widget.leaveBalance!.leaveType.displayName}: ${widget.leaveBalance!.remainingDays.toStringAsFixed(1)} days remaining'
+        : 'No balance record for this leave type';
+
     return AlertDialog(
       title: const Text('Approve Leave Request'),
       content: SizedBox(
-        width: 520,
+        width: 440,
         child: Form(
           key: _formKey,
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Text(
+                  'Total Requested: ${_totalRequested.toStringAsFixed(1)} days',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 20),
                 _DialogField(
                   controller: _withPayController,
                   label: 'Approved Days With Pay',
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
+                  validator: (_) => _validateApprovedDays(null),
                 ),
                 const SizedBox(height: 12),
                 _DialogField(
@@ -796,27 +1199,48 @@ class _ApproveDialogState extends State<_ApproveDialog> {
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
+                  validator: (_) => _validateApprovedDays(null),
                 ),
                 const SizedBox(height: 12),
                 _DialogField(
-                  controller: _otherDetailsController,
-                  label: 'Other Approval Details',
+                  controller: _remarksController,
+                  label: 'Remarks',
                   maxLines: null,
                   minLines: 2,
                 ),
-                const SizedBox(height: 12),
-                _DialogField(
-                  controller: _recommendationController,
-                  label: 'Recommendation Remarks',
-                  maxLines: null,
-                  minLines: 3,
-                ),
-                const SizedBox(height: 12),
-                _DialogField(
-                  controller: _hrRemarksController,
-                  label: 'HR Remarks',
-                  maxLines: null,
-                  minLines: 3,
+                const SizedBox(height: 16),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 12,
+                    horizontal: 14,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.offWhite,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.black.withOpacity(0.08)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Current Leave Balance:',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        balanceLabel,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -839,11 +1263,7 @@ class _ApproveDialogState extends State<_ApproveDialog> {
                 approvedDaysWithoutPay: _parseDouble(
                   _withoutPayController.text,
                 ),
-                approvedOtherDetails: _trimOrNull(_otherDetailsController.text),
-                recommendationRemarks: _trimOrNull(
-                  _recommendationController.text,
-                ),
-                hrRemarks: _trimOrNull(_hrRemarksController.text),
+                hrRemarks: _trimOrNull(_remarksController.text),
               ),
             );
           },

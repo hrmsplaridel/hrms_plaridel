@@ -30,6 +30,7 @@ class _EmployeeProfile {
     this.salaryGrade,
     this.dateHired,
     this.employmentStatus,
+    this.biometricUserId,
   });
   final String id;
   final String fullName;
@@ -50,6 +51,7 @@ class _EmployeeProfile {
   final String? salaryGrade;
   final DateTime? dateHired;
   final String? employmentStatus;
+  final String? biometricUserId;
 
   String get roleDisplay => role == 'admin' ? 'Admin' : 'Employee';
 }
@@ -645,6 +647,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                 ? DateTime.tryParse(dateHiredRaw.toString())
                 : null,
             employmentStatus: m['employment_status'] as String?,
+            biometricUserId: m['biometric_user_id'] as String?,
           );
         }).toList();
       }
@@ -752,6 +755,23 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                   setState(() => _statusFilter = v ?? 'Active');
                   _loadEmployees();
                 },
+              ),
+              const Spacer(),
+              FilledButton.icon(
+                onPressed: () => _showImportDialog(context),
+                icon: const Icon(Icons.download_rounded, size: 18),
+                label: const Text('Import from Device'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.primaryNavy,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
               ),
             ],
           ),
@@ -863,14 +883,43 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                                   horizontal: 12,
                                   vertical: 10,
                                 ),
-                                child: Text(
-                                  e.fullName,
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: AppTheme.textPrimary,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                  maxLines: 1,
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        e.fullName,
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: AppTheme.textPrimary,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                        maxLines: 1,
+                                      ),
+                                    ),
+                                    if (!e.isActive)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                          vertical: 2,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.red.withOpacity(0.1),
+                                          borderRadius: BorderRadius.circular(
+                                            4,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          e.biometricUserId != null
+                                              ? 'Imported (Inactive)'
+                                              : 'Inactive',
+                                          style: const TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.red,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -1179,6 +1228,19 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     }
   }
 
+  void _showImportDialog(BuildContext context) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => _BiometricImportDialog(
+        _employees,
+        onImportSuccess: () {
+          _loadEmployees();
+          context.read<DtrProvider>().loadEmployees();
+        },
+      ),
+    );
+  }
+
   void _confirmDeactivate(
     BuildContext context,
     _EmployeeProfile profile,
@@ -1276,6 +1338,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
   final _contactController = TextEditingController();
   final _addressController = TextEditingController();
   final _salaryGradeController = TextEditingController();
+  final _biometricIdController = TextEditingController();
 
   String? _privilege;
   String? _suffix;
@@ -1310,6 +1373,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
     _employmentType = _profile.employmentType;
     _dateHired = _profile.dateHired;
     _employmentStatus = _profile.employmentStatus ?? 'active';
+    _biometricIdController.text = _profile.biometricUserId ?? '';
   }
 
   @override
@@ -1396,6 +1460,8 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
         if (_dateHired != null)
           'date_hired': _dateHired!.toIso8601String().split('T')[0],
         if (_employmentStatus != null) 'employment_status': _employmentStatus,
+        if (_biometricIdController.text.trim().isNotEmpty)
+          'biometric_user_id': _biometricIdController.text.trim(),
       };
 
       if (_selectedImageBytes != null && _selectedImageBytes!.isNotEmpty) {
@@ -1638,6 +1704,11 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
             onChanged: (v) => setState(() => _privilege = v),
             validator: (v) => v == null ? 'Required' : null,
           ),
+          const SizedBox(height: 16),
+          TextFormField(
+            controller: _biometricIdController,
+            decoration: _inputDecoration('Biometric User ID (optional)'),
+          ),
         ],
       ),
     );
@@ -1834,6 +1905,436 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
             onChanged: (v) => setState(() => _employmentStatus = v ?? 'active'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _BiometricImportDialog extends StatefulWidget {
+  final List<_EmployeeProfile> existingEmployees;
+  final VoidCallback onImportSuccess;
+  const _BiometricImportDialog(
+    this.existingEmployees, {
+    required this.onImportSuccess,
+  });
+
+  @override
+  State<_BiometricImportDialog> createState() => _BiometricImportDialogState();
+}
+
+class _BiometricImportDialogState extends State<_BiometricImportDialog> {
+  bool _loadingDevices = true;
+  List<dynamic> _devices = [];
+  String? _selectedDeviceId;
+
+  bool _loadingUsers = false;
+  List<dynamic> _fetchedUsers = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDevices();
+  }
+
+  Future<void> _loadDevices() async {
+    try {
+      final res = await ApiClient.instance.get('/api/biometric-devices');
+      if (mounted) {
+        setState(() {
+          _devices = res.data ?? [];
+          if (_devices.isNotEmpty) {
+            _selectedDeviceId = _devices.first['id'];
+          }
+          _loadingDevices = false;
+        });
+        if (_selectedDeviceId != null) {
+          _fetchUsers();
+        }
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingDevices = false);
+    }
+  }
+
+  Future<void> _fetchUsers() async {
+    if (_selectedDeviceId == null) return;
+    setState(() {
+      _loadingUsers = true;
+      _fetchedUsers = [];
+    });
+    try {
+      final res = await ApiClient.instance.get(
+        '/api/biometric-devices/$_selectedDeviceId/users',
+      );
+      if (mounted) {
+        setState(() {
+          _fetchedUsers = res.data ?? [];
+          _loadingUsers = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to fetch users: $e')));
+        setState(() => _loadingUsers = false);
+      }
+    }
+  }
+
+  void _openUserImportModal(Map<String, dynamic> user, bool isDuplicate) async {
+    if (isDuplicate) return;
+    final success = await showDialog<bool>(
+      context: context,
+      builder: (_) => _SingleUserImportModal(user, _selectedDeviceId!),
+    );
+    if (success == true) {
+      widget.onImportSuccess(); // Refresh employees tree behind
+      // Add a dummy employee profile logic locally so this dialog sees them as "Duplicate" now
+      setState(() {
+        widget.existingEmployees.add(
+          _EmployeeProfile(
+            id: 'temp',
+            fullName: user['full_name'] ?? 'Imported User',
+            role: 'employee',
+            biometricUserId: user['biometric_user_id']?.toString(),
+            isActive: false,
+          ),
+        );
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      child: Container(
+        width: 600,
+        height: 600,
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Import from Biometric Device',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            if (_loadingDevices)
+              const CircularProgressIndicator()
+            else if (_devices.isEmpty)
+              const Text('No devices found.')
+            else
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      value: _selectedDeviceId,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        labelText: 'Select Device',
+                        isDense: true,
+                      ),
+                      items: _devices
+                          .map(
+                            (d) => DropdownMenuItem<String>(
+                              value: d['id'],
+                              child: Text(d['name']),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) => setState(() {
+                        _selectedDeviceId = v;
+                        _fetchUsers();
+                      }),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  FilledButton.icon(
+                    onPressed: _loadingUsers ? null : _fetchUsers,
+                    icon: const Icon(Icons.sync),
+                    label: const Text('Fetch Users'),
+                  ),
+                ],
+              ),
+            const SizedBox(height: 16),
+            if (_loadingUsers)
+              const Expanded(child: Center(child: CircularProgressIndicator()))
+            else
+              Expanded(
+                child: _fetchedUsers.isEmpty
+                    ? const Center(child: Text('No users fetched yet.'))
+                    : ListView.builder(
+                        itemCount: _fetchedUsers.length,
+                        itemBuilder: (context, index) {
+                          final u = _fetchedUsers[index];
+                          final bioId = u['biometric_user_id']?.toString();
+                          if (bioId == null) return const SizedBox.shrink();
+
+                          final isDuplicate = widget.existingEmployees.any(
+                            (e) => e.biometricUserId == bioId,
+                          );
+                          final name = u['full_name']?.toString() ?? 'Unknown';
+
+                          return ListTile(
+                            title: Text(name),
+                            subtitle: Text('Bio ID: $bioId'),
+                            trailing: isDuplicate
+                                ? const Chip(
+                                    label: Text(
+                                      'Duplicate',
+                                      style: TextStyle(fontSize: 10),
+                                    ),
+                                    backgroundColor: Colors.orange,
+                                  )
+                                : FilledButton.icon(
+                                    onPressed: () =>
+                                        _openUserImportModal(u, isDuplicate),
+                                    icon: const Icon(
+                                      Icons.person_add_rounded,
+                                      size: 16,
+                                    ),
+                                    label: const Text('Import'),
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: const Color(0xFF4CAF50),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                      ),
+                                    ),
+                                  ),
+                          );
+                        },
+                      ),
+              ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Done'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SingleUserImportModal extends StatefulWidget {
+  final Map<String, dynamic> user;
+  final String deviceId;
+  const _SingleUserImportModal(this.user, this.deviceId);
+
+  @override
+  State<_SingleUserImportModal> createState() => _SingleUserImportModalState();
+}
+
+class _SingleUserImportModalState extends State<_SingleUserImportModal> {
+  final _formKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _confirmController = TextEditingController();
+  final _nameController = TextEditingController();
+
+  String _role = 'employee';
+  bool _importing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController.text =
+        widget.user['full_name']?.toString() ?? 'Imported User';
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    _confirmController.dispose();
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+
+    setState(() => _importing = true);
+    try {
+      await ApiClient.instance.post(
+        '/api/biometric-devices/${widget.deviceId}/import-user',
+        data: {
+          'biometric_user_id': widget.user['biometric_user_id'].toString(),
+          'full_name': _nameController.text.trim(),
+          'email': _emailController.text.trim(),
+          'password': _passwordController.text,
+          'role': _role,
+        },
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('User imported securely and marked inactive.'),
+          ),
+        );
+        Navigator.of(context).pop(true);
+      }
+    } catch (e) {
+      if (mounted) {
+        String errMsg = 'Import failed: $e';
+        if (e is DioException) {
+          errMsg = (e.response?.data is Map)
+              ? e.response?.data['error']?.toString() ?? 'Network Error'
+              : e.message ?? 'Unknown error';
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(errMsg, style: const TextStyle(color: Colors.white)),
+            backgroundColor: Colors.red,
+          ),
+        );
+        setState(() => _importing = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      child: Container(
+        width: 400,
+        padding: const EdgeInsets.all(24),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Import Biometric User',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Biometric ID: ${widget.user['biometric_user_id']}',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              TextFormField(
+                controller: _nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Full Name',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                validator: (v) =>
+                    v == null || v.trim().isEmpty ? 'Required' : null,
+              ),
+              const SizedBox(height: 16),
+
+              TextFormField(
+                controller: _emailController,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(
+                  labelText: 'Admin Email for User',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                validator: (v) =>
+                    v == null || v.trim().isEmpty ? 'Required' : null,
+              ),
+              const SizedBox(height: 16),
+
+              TextFormField(
+                controller: _passwordController,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Initial Password',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                validator: (v) =>
+                    v == null || v.trim().isEmpty ? 'Required' : null,
+              ),
+              const SizedBox(height: 16),
+
+              TextFormField(
+                controller: _confirmController,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Confirm Password',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                validator: (v) {
+                  if (v == null || v.trim().isEmpty) return 'Required';
+                  if (v != _passwordController.text)
+                    return 'Passwords do not match';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+
+              DropdownButtonFormField<String>(
+                value: _role,
+                decoration: const InputDecoration(
+                  labelText: 'Role',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                items: ['employee', 'admin']
+                    .map(
+                      (r) => DropdownMenuItem(
+                        value: r,
+                        child: Text(r.toUpperCase()),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (v) => setState(() => _role = v ?? 'employee'),
+              ),
+              const SizedBox(height: 24),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: _importing
+                        ? null
+                        : () => Navigator.of(context).pop(false),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  FilledButton(
+                    onPressed: _importing ? null : _submit,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF4CAF50),
+                    ),
+                    child: _importing
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Text('Import as Inactive'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

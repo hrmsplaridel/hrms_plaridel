@@ -17,6 +17,7 @@ import '../../../widgets/user_avatar.dart';
 import '../../shared/screens/profile_and_settings_page.dart';
 import '../../../dtr/dtr_main.dart';
 import '../../../dtr/dtr_provider.dart';
+import '../../../dtr/widgets/real_time_clock.dart';
 import '../../../dtr/screens/dtr_dashboard.dart';
 import '../../../dtr/dtr_routes.dart';
 import '../../../dtr/manage/manage_employee.dart';
@@ -2148,125 +2149,150 @@ class _DtrContentState extends State<_DtrContent> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (_dtrSectionIndex != 0) ...[
-          TextButton.icon(
-            onPressed: () => setState(() => _dtrSectionIndex = 0),
-            icon: const Icon(Icons.arrow_back_rounded, size: 20),
-            label: const Text('Back to DTR'),
-            style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
-          ),
-          const SizedBox(height: 16),
-        ],
-        if (_dtrSectionIndex == 0) ...[
-          Text(
-            'DTR',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 24,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.3,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Daily Time Record. Choose a feature below.',
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 14,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 24),
-          Wrap(
-            spacing: 16,
-            runSpacing: 16,
+    return SizedBox(
+      width: double.infinity,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              FeatureCard(
-                title: 'Time Logs',
-                subtitle:
-                    'Manage and correct daily time-in/out records. Add, edit, or delete entries.',
-                icon: Icons.schedule_rounded,
-                onTap: () => setState(() => _dtrSectionIndex = 1),
-              ),
-              FeatureCard(
-                title: 'Reports',
-                subtitle: 'View attendance and tardiness reports.',
-                icon: Icons.summarize_rounded,
-                onTap: () => setState(() => _dtrSectionIndex = 2),
-              ),
-              FeatureCard(
-                title: 'Employees',
-                subtitle: 'Manage employee profiles and accounts.',
-                icon: Icons.people_rounded,
-                onTap: () => setState(() => _dtrSectionIndex = 3),
-              ),
-              FeatureCard(
-                title: 'Assignment',
-                subtitle:
-                    'Assign employees to departments, positions, and shifts.',
-                icon: Icons.assignment_rounded,
-                onTap: () => setState(() => _dtrSectionIndex = 4),
-              ),
-              FeatureCard(
-                title: 'Department',
-                subtitle: 'Manage departments.',
-                icon: Icons.business_rounded,
-                onTap: () => setState(() => _dtrSectionIndex = 5),
-              ),
-              FeatureCard(
-                title: 'Position',
-                subtitle: 'Manage positions.',
-                icon: Icons.work_rounded,
-                onTap: () => setState(() => _dtrSectionIndex = 6),
-              ),
-              FeatureCard(
-                title: 'Shift',
-                subtitle: 'Manage work shifts and schedules.',
-                icon: Icons.access_time_rounded,
-                onTap: () => setState(() => _dtrSectionIndex = 7),
-              ),
-              FeatureCard(
-                title: 'Leave Management',
-                subtitle:
-                    'Review employee leave requests, approvals, and leave-related records.',
-                icon: Icons.event_note_rounded,
-                onTap: () => setState(() => _dtrSectionIndex = 8),
-              ),
-              FeatureCard(
-                title: 'Holiday Management',
-                subtitle:
-                    'Define regular, special, and local holidays for DTR and payroll.',
-                icon: Icons.calendar_today_rounded,
-                onTap: () => setState(() => _dtrSectionIndex = 9),
-              ),
-              FeatureCard(
-                title: 'Attendance Policy',
-                subtitle:
-                    'Set grace period, late/absent/undertime rules, and default policy.',
-                icon: Icons.policy_rounded,
-                onTap: () => setState(() => _dtrSectionIndex = 10),
-              ),
-              FeatureCard(
-                title: 'Attendance Adjustment',
-                subtitle:
-                    'Review and approve or reject DTR correction requests.',
-                icon: Icons.edit_calendar_rounded,
-                onTap: () => setState(() => _dtrSectionIndex = 11),
-              ),
+              if (_dtrSectionIndex != 0) ...[
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => setState(() => _dtrSectionIndex = 0),
+                    icon: const Icon(Icons.arrow_back_rounded, size: 20),
+                    label: const Text('Back to DTR'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppTheme.primaryNavy,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              if (_dtrSectionIndex == 0) ...[
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'DTR',
+                          style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Daily Time Record. Choose a feature below.',
+                          style: TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 14,
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const RealTimeClock(),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                Wrap(
+                  spacing: 16,
+                  runSpacing: 16,
+                  children: [
+                    FeatureCard(
+                      title: 'Time Logs',
+                      subtitle:
+                          'Manage and correct daily time-in/out records. Add, edit, or delete entries.',
+                      icon: Icons.schedule_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 1),
+                    ),
+                    FeatureCard(
+                      title: 'Reports',
+                      subtitle: 'View attendance and tardiness reports.',
+                      icon: Icons.summarize_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 2),
+                    ),
+                    FeatureCard(
+                      title: 'Employees',
+                      subtitle: 'Manage employee profiles and accounts.',
+                      icon: Icons.people_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 3),
+                    ),
+                    FeatureCard(
+                      title: 'Assignment',
+                      subtitle:
+                          'Assign employees to departments, positions, and shifts.',
+                      icon: Icons.assignment_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 4),
+                    ),
+                    FeatureCard(
+                      title: 'Department',
+                      subtitle: 'Manage departments.',
+                      icon: Icons.business_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 5),
+                    ),
+                    FeatureCard(
+                      title: 'Position',
+                      subtitle: 'Manage positions.',
+                      icon: Icons.work_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 6),
+                    ),
+                    FeatureCard(
+                      title: 'Shift',
+                      subtitle: 'Manage work shifts and schedules.',
+                      icon: Icons.access_time_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 7),
+                    ),
+                    FeatureCard(
+                      title: 'Leave Management',
+                      subtitle:
+                          'Review employee leave requests, approvals, and leave-related records.',
+                      icon: Icons.event_note_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 8),
+                    ),
+                    FeatureCard(
+                      title: 'Holiday Management',
+                      subtitle:
+                          'Define regular, special, and local holidays for DTR and payroll.',
+                      icon: Icons.calendar_today_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 9),
+                    ),
+                    FeatureCard(
+                      title: 'Attendance Policy',
+                      subtitle:
+                          'Set grace period, late/absent/undertime rules, and default policy.',
+                      icon: Icons.policy_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 10),
+                    ),
+                    FeatureCard(
+                      title: 'Attendance Adjustment',
+                      subtitle:
+                          'Review and approve or reject DTR correction requests.',
+                      icon: Icons.edit_calendar_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 11),
+                    ),
+                  ],
+                ),
+              ] else if (_dtrSectionIndex == 1)
+                DtrMain(section: DtrSection.timeLogs)
+              else if (_dtrSectionIndex == 2)
+                DtrMain(section: DtrSection.reports)
+              else if (_dtrSectionIndex == 8)
+                const LeaveMain(isAdmin: true)
+              else
+                _ManageContent(subIndex: _dtrSectionIndex - 3),
             ],
-          ),
-        ] else if (_dtrSectionIndex == 1)
-          DtrMain(section: DtrSection.timeLogs)
-        else if (_dtrSectionIndex == 2)
-          DtrMain(section: DtrSection.reports)
-        else if (_dtrSectionIndex == 8)
-          const LeaveMain(isAdmin: true)
-        else
-          _ManageContent(subIndex: _dtrSectionIndex - 3),
-      ],
+          );
+        },
+      ),
     );
   }
 }

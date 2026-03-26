@@ -1,17 +1,17 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../landingpage/constants/app_theme.dart';
 import '../../providers/auth_provider.dart';
+import '../leave_provider.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
+import '../widgets/leave_guidance_widgets.dart';
 
 typedef LeaveRequestAction = Future<bool> Function(LeaveRequest request);
 
-/// Employee leave request form based on the CSC Application for Leave.
-///
-/// This screen focuses on collecting structured data first. File attachment
-/// upload can be added later once the storage/backend implementation is ready.
+/// Modern, digital-first employee leave request form.
 class LeaveRequestFormScreen extends StatefulWidget {
   const LeaveRequestFormScreen({
     super.key,
@@ -41,13 +41,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   DateTime? _startDate;
   DateTime? _endDate;
   bool _busy = false;
+  LeaveRequest? _savedRequest;
+  bool _attachmentUploading = false;
 
-  late final TextEditingController _officeDepartmentController;
-  late final TextEditingController _lastNameController;
-  late final TextEditingController _firstNameController;
-  late final TextEditingController _middleNameController;
-  late final TextEditingController _positionTitleController;
-  late final TextEditingController _salaryController;
   late final TextEditingController _customLeaveTypeController;
   late final TextEditingController _reasonController;
   late final TextEditingController _locationDetailsController;
@@ -55,11 +51,13 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   late final TextEditingController _womenIllnessController;
   late final TextEditingController _studyPurposeDetailsController;
   late final TextEditingController _otherPurposeDetailsController;
+  late final TextEditingController _workingDaysController;
 
   @override
   void initState() {
     super.initState();
     final initial = widget.initialRequest;
+    _savedRequest = initial;
     _leaveType = initial?.leaveType ?? LeaveType.vacationLeave;
     _locationOption = initial?.locationOption;
     _sickLeaveNature = initial?.sickLeaveNature;
@@ -69,22 +67,6 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _startDate = initial?.startDate;
     _endDate = initial?.endDate;
 
-    _officeDepartmentController = TextEditingController(
-      text: initial?.officeDepartment ?? '',
-    );
-    final authName = context.read<AuthProvider>().displayName;
-    final nameParts = _parseNameToLastFirstMiddle(
-      authName.isNotEmpty ? authName : (initial?.employeeName ?? ''),
-    );
-    _lastNameController = TextEditingController(text: nameParts.last);
-    _firstNameController = TextEditingController(text: nameParts.first);
-    _middleNameController = TextEditingController(text: nameParts.middle);
-    _positionTitleController = TextEditingController(
-      text: initial?.positionTitle ?? '',
-    );
-    _salaryController = TextEditingController(
-      text: initial?.salary?.toString() ?? '',
-    );
     _customLeaveTypeController = TextEditingController(
       text: initial?.customLeaveTypeText ?? '',
     );
@@ -104,16 +86,13 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _otherPurposeDetailsController = TextEditingController(
       text: initial?.otherPurposeDetails ?? '',
     );
+    _workingDaysController = TextEditingController(
+      text: initial?.workingDaysApplied?.toString() ?? '',
+    );
   }
 
   @override
   void dispose() {
-    _officeDepartmentController.dispose();
-    _lastNameController.dispose();
-    _firstNameController.dispose();
-    _middleNameController.dispose();
-    _positionTitleController.dispose();
-    _salaryController.dispose();
     _customLeaveTypeController.dispose();
     _reasonController.dispose();
     _locationDetailsController.dispose();
@@ -121,1663 +100,861 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _womenIllnessController.dispose();
     _studyPurposeDetailsController.dispose();
     _otherPurposeDetailsController.dispose();
+    _workingDaysController.dispose();
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
-    final name = auth.displayName.isNotEmpty ? auth.displayName : 'Employee';
-    final width = MediaQuery.of(context).size.width;
-    final isDesktop = width >= 1200;
-    final isTablet = width >= 900;
-    final compact = !isTablet;
-    final formMaxWidth = isDesktop ? 1180.0 : (isTablet ? 1000.0 : 760.0);
-    final outerPadding = isDesktop ? 28.0 : (isTablet ? 20.0 : 16.0);
-    final sheetPadding = isDesktop ? 16.0 : 12.0;
-
-    return Scaffold(
-      backgroundColor: AppTheme.offWhite,
-      appBar: AppBar(title: const Text('Leave Request Form')),
-      body: SafeArea(
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            padding: EdgeInsets.all(outerPadding),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: formMaxWidth),
-                    child: RepaintBoundary(
-                      child: Container(
-                        width: double.infinity,
-                        decoration: BoxDecoration(
-                          color: AppTheme.white,
-                          border: Border.all(color: Colors.black, width: 1),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.04),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            SizedBox(height: isDesktop ? 20 : 16),
-                            Text(
-                              'APPLICATION FOR LEAVE',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: AppTheme.textPrimary,
-                                fontSize: isDesktop ? 30 : 28,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: 0.4,
-                              ),
-                            ),
-                            SizedBox(height: isDesktop ? 18 : 14),
-                            _buildTopInformationSection(name, compact: compact),
-                            _paperSectionHeader('6. DETAILS OF APPLICATION'),
-                            Padding(
-                              padding: EdgeInsets.all(sheetPadding),
-                              child: compact
-                                  ? Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        _buildLeaveTypePanel(),
-                                        const SizedBox(height: 12),
-                                        _buildDetailsOfLeavePanel(),
-                                      ],
-                                    )
-                                  : IntrinsicHeight(
-                                      child: Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.stretch,
-                                        children: [
-                                          Expanded(
-                                            child: _buildLeaveTypePanel(),
-                                          ),
-                                          const SizedBox(width: 0),
-                                          Expanded(
-                                            child: _buildDetailsOfLeavePanel(),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                            ),
-                            Padding(
-                              padding: EdgeInsets.fromLTRB(
-                                sheetPadding,
-                                0,
-                                sheetPadding,
-                                sheetPadding,
-                              ),
-                              child: compact
-                                  ? Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        _buildWorkingDaysPanel(),
-                                        const SizedBox(height: 12),
-                                        _buildCommutationPanel(),
-                                      ],
-                                    )
-                                  : IntrinsicHeight(
-                                      child: Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.stretch,
-                                        children: [
-                                          Expanded(
-                                            child: _buildWorkingDaysPanel(),
-                                          ),
-                                          const SizedBox(width: 0),
-                                          Expanded(
-                                            child: _buildCommutationPanel(
-                                              showSignature: true,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                            ),
-                            if (compact)
-                              Padding(
-                                padding: EdgeInsets.fromLTRB(
-                                  sheetPadding,
-                                  0,
-                                  sheetPadding,
-                                  sheetPadding,
-                                ),
-                                child: _buildApplicantSignatureBox(),
-                              ),
-                            _paperSectionHeader(
-                              '7. DETAILS OF ACTION ON APPLICATION',
-                            ),
-                            Padding(
-                              padding: EdgeInsets.all(sheetPadding),
-                              child: compact
-                                  ? Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        _buildCertificationPanel(),
-                                        const SizedBox(height: 12),
-                                        _buildRecommendationPanel(),
-                                        const SizedBox(height: 12),
-                                        _buildApprovedDisapprovedSection(
-                                          compact: true,
-                                        ),
-                                      ],
-                                    )
-                                  : Column(
-                                      children: [
-                                        IntrinsicHeight(
-                                          child: Row(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.stretch,
-                                            children: [
-                                              Expanded(
-                                                child:
-                                                    _buildCertificationPanel(),
-                                              ),
-                                              const SizedBox(width: 0),
-                                              Expanded(
-                                                child:
-                                                    _buildRecommendationPanel(),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        const SizedBox(height: 0),
-                                        _buildApprovedDisapprovedSection(
-                                          compact: false,
-                                        ),
-                                      ],
-                                    ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Center(
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: formMaxWidth),
-                    child: Container(
-                      width: double.infinity,
-                      padding: EdgeInsets.all(isDesktop ? 18 : 16),
-                      decoration: BoxDecoration(
-                        color: AppTheme.white,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: Colors.black.withOpacity(0.06),
-                        ),
-                      ),
-                      child: isDesktop
-                          ? Row(
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    _leaveType.requiresAttachment
-                                        ? 'Supporting attachment: this leave type usually requires a supporting document. Upload wiring will be added next.'
-                                        : 'Supporting attachment: optional for this leave type. Upload wiring will be added next.',
-                                    style: TextStyle(
-                                      color: AppTheme.textSecondary,
-                                      fontSize: 13,
-                                      height: 1.45,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 20),
-                                ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    maxWidth: 360,
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Expanded(
-                                        child: OutlinedButton(
-                                          onPressed: _busy ? null : _saveDraft,
-                                          child: const Text('Save Draft'),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: FilledButton(
-                                          onPressed: _busy
-                                              ? null
-                                              : _submitRequest,
-                                          child: Text(
-                                            _busy
-                                                ? 'Processing...'
-                                                : 'Submit Request',
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            )
-                          : Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _leaveType.requiresAttachment
-                                      ? 'Supporting attachment: this leave type usually requires a supporting document. Upload wiring will be added next.'
-                                      : 'Supporting attachment: optional for this leave type. Upload wiring will be added next.',
-                                  style: TextStyle(
-                                    color: AppTheme.textSecondary,
-                                    fontSize: 13,
-                                    height: 1.45,
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: OutlinedButton(
-                                        onPressed: _busy ? null : _saveDraft,
-                                        child: const Text('Save Draft'),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: FilledButton(
-                                        onPressed: _busy
-                                            ? null
-                                            : _submitRequest,
-                                        child: Text(
-                                          _busy
-                                              ? 'Processing...'
-                                              : 'Submit Request',
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+  void _showMessage(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
-  Widget _buildTopInformationSection(String name, {required bool compact}) {
-    final dateStr = _formatDate(
-      widget.initialRequest?.dateFiled ?? DateTime.now(),
-    );
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Column(
-        children: [
-          // Row 1: 1. OFFICE/DEPARTMENT | 2. NAME (Last) (First) (Middle)
-          compact
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _paperFieldRow1Left(
-                      child: TextFormField(
-                        controller: _officeDepartmentController,
-                        validator: _requiredValidator,
-                        decoration: _paperUnderlineDecoration(),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    _paperFieldRow1Right(
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: _paperNameField(
-                              hint: 'Last',
-                              controller: _lastNameController,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: _paperNameField(
-                              hint: 'First',
-                              controller: _firstNameController,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: _paperNameField(
-                              hint: 'Middle',
-                              controller: _middleNameController,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                )
-              : IntrinsicHeight(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(
-                        flex: 5,
-                        child: _paperFieldRow1Left(
-                          child: TextFormField(
-                            controller: _officeDepartmentController,
-                            validator: _requiredValidator,
-                            decoration: _paperUnderlineDecoration(),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        flex: 7,
-                        child: _paperFieldRow1Right(
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: _paperNameField(
-                                  hint: 'Last',
-                                  controller: _lastNameController,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: _paperNameField(
-                                  hint: 'First',
-                                  controller: _firstNameController,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: _paperNameField(
-                                  hint: 'Middle',
-                                  controller: _middleNameController,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-          const SizedBox(height: 10),
-          // Row 2: 3. DATE OF FILING | 4. POSITION | 5. SALARY P
-          compact
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _paperFieldRow2Item(
-                      label: '3. DATE OF FILING',
-                      child: _paperUnderlineReadOnly(dateStr),
-                    ),
-                    const SizedBox(height: 10),
-                    _paperFieldRow2Item(
-                      label: '4. POSITION',
-                      child: TextFormField(
-                        controller: _positionTitleController,
-                        validator: _requiredValidator,
-                        decoration: _paperUnderlineDecoration(),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    _paperFieldRow2Item(
-                      label: '5. SALARY P',
-                      child: TextFormField(
-                        controller: _salaryController,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        validator: (value) {
-                          if ((value ?? '').trim().isEmpty) return 'Required';
-                          if (double.tryParse(value!.trim()) == null) {
-                            return 'Invalid amount';
-                          }
-                          return null;
-                        },
-                        decoration: _paperUnderlineDecoration(),
-                      ),
-                    ),
-                  ],
-                )
-              : IntrinsicHeight(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(
-                        flex: 4,
-                        child: _paperFieldRow2Item(
-                          label: '3. DATE OF FILING',
-                          child: _paperUnderlineReadOnly(dateStr),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        flex: 4,
-                        child: _paperFieldRow2Item(
-                          label: '4. POSITION',
-                          child: TextFormField(
-                            controller: _positionTitleController,
-                            validator: _requiredValidator,
-                            decoration: _paperUnderlineDecoration(),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        flex: 3,
-                        child: _paperFieldRow2Item(
-                          label: '5. SALARY P',
-                          child: TextFormField(
-                            controller: _salaryController,
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                            validator: (value) {
-                              if ((value ?? '').trim().isEmpty)
-                                return 'Required';
-                              if (double.tryParse(value!.trim()) == null) {
-                                return 'Invalid amount';
-                              }
-                              return null;
-                            },
-                            decoration: _paperUnderlineDecoration(),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-          const SizedBox(height: 12),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLeaveTypePanel() {
-    return _paperPanel(
-      title: '6.A TYPE OF LEAVE TO BE AVAILED OF',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ...LeaveType.values
-              .where((type) => type != LeaveType.others)
-              .map(
-                (type) => _paperCheckRow(
-                  selected: _leaveType == type,
-                  label: type.displayName,
-                  onTap: () => setState(() {
-                    _leaveType = type;
-                    _resetConditionalSelectionsForType(type);
-                  }),
-                ),
-              ),
-          const SizedBox(height: 10),
-          Text(
-            'Others:',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontWeight: FontWeight.w600,
-              fontSize: 12,
-            ),
-          ),
-          const SizedBox(height: 6),
-          _paperCheckRow(
-            selected: _leaveType == LeaveType.others,
-            label: 'Select "Others" and specify below',
-            onTap: () => setState(() {
-              _leaveType = LeaveType.others;
-            }),
-          ),
-          const SizedBox(height: 8),
-          _buildTextField(
-            controller: _customLeaveTypeController,
-            label: 'Specify other leave type',
-            validator: _leaveType.requiresCustomDescription
-                ? _requiredValidator
-                : null,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDetailsOfLeavePanel() {
-    return _paperPanel(
-      title: '6.B DETAILS OF LEAVE',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _paperSubheading('In case of Vacation/Special Privilege Leave:'),
-          _paperCheckRow(
-            selected: _locationOption == LeaveLocationOption.withinPhilippines,
-            label: 'Within the Philippines',
-            enabled: _usesLocationDetails,
-            onTap: _usesLocationDetails
-                ? () => setState(
-                    () =>
-                        _locationOption = LeaveLocationOption.withinPhilippines,
-                  )
-                : null,
-          ),
-          _paperCheckRow(
-            selected: _locationOption == LeaveLocationOption.abroad,
-            label: 'Abroad (Specify)',
-            enabled: _usesLocationDetails,
-            onTap: _usesLocationDetails
-                ? () => setState(
-                    () => _locationOption = LeaveLocationOption.abroad,
-                  )
-                : null,
-          ),
-          const SizedBox(height: 6),
-          _buildTextField(
-            controller: _locationDetailsController,
-            label: 'Location details',
-            validator: _usesLocationDetails ? _requiredValidator : null,
-          ),
-          const SizedBox(height: 16),
-          _paperSubheading('In case of Sick Leave:'),
-          _paperCheckRow(
-            selected: _sickLeaveNature == SickLeaveNature.inHospital,
-            label: 'In Hospital (Specify Illness)',
-            enabled: _leaveType == LeaveType.sickLeave,
-            onTap: _leaveType == LeaveType.sickLeave
-                ? () => setState(
-                    () => _sickLeaveNature = SickLeaveNature.inHospital,
-                  )
-                : null,
-          ),
-          _paperCheckRow(
-            selected: _sickLeaveNature == SickLeaveNature.outPatient,
-            label: 'Out Patient (Specify Illness)',
-            enabled: _leaveType == LeaveType.sickLeave,
-            onTap: _leaveType == LeaveType.sickLeave
-                ? () => setState(
-                    () => _sickLeaveNature = SickLeaveNature.outPatient,
-                  )
-                : null,
-          ),
-          const SizedBox(height: 6),
-          _buildTextField(
-            controller: _sickIllnessController,
-            label: 'Specify illness',
-            validator: _leaveType == LeaveType.sickLeave
-                ? _requiredValidator
-                : null,
-          ),
-          const SizedBox(height: 16),
-          _paperSubheading('In case of Special Leave Benefits for Women:'),
-          _buildTextField(
-            controller: _womenIllnessController,
-            label: 'Specify illness',
-            validator: _leaveType == LeaveType.specialLeaveBenefitsForWomen
-                ? _requiredValidator
-                : null,
-          ),
-          const SizedBox(height: 16),
-          _paperSubheading('In case of Study Leave:'),
-          _paperCheckRow(
-            selected:
-                _studyPurpose == StudyLeavePurpose.completionOfMastersDegree,
-            label: "Completion of Master's Degree",
-            enabled: _leaveType == LeaveType.studyLeave,
-            onTap: _leaveType == LeaveType.studyLeave
-                ? () => setState(
-                    () => _studyPurpose =
-                        StudyLeavePurpose.completionOfMastersDegree,
-                  )
-                : null,
-          ),
-          _paperCheckRow(
-            selected:
-                _studyPurpose == StudyLeavePurpose.barBoardExaminationReview,
-            label: 'BAR/Board Examination Review',
-            enabled: _leaveType == LeaveType.studyLeave,
-            onTap: _leaveType == LeaveType.studyLeave
-                ? () => setState(
-                    () => _studyPurpose =
-                        StudyLeavePurpose.barBoardExaminationReview,
-                  )
-                : null,
-          ),
-          _paperCheckRow(
-            selected: _studyPurpose == StudyLeavePurpose.otherPurpose,
-            label: 'Other purpose',
-            enabled: _leaveType == LeaveType.studyLeave,
-            onTap: _leaveType == LeaveType.studyLeave
-                ? () => setState(
-                    () => _studyPurpose = StudyLeavePurpose.otherPurpose,
-                  )
-                : null,
-          ),
-          const SizedBox(height: 6),
-          _buildTextField(
-            controller: _studyPurposeDetailsController,
-            label: 'Specify other study purpose',
-            validator:
-                _leaveType == LeaveType.studyLeave &&
-                    _studyPurpose == StudyLeavePurpose.otherPurpose
-                ? _requiredValidator
-                : null,
-          ),
-          const SizedBox(height: 16),
-          _paperSubheading('Other purpose:'),
-          _paperCheckRow(
-            selected:
-                _otherPurpose == LeaveOtherPurpose.monetizationOfLeaveCredits,
-            label: 'Monetization of Leave Credits',
-            enabled: _leaveType == LeaveType.others,
-            onTap: _leaveType == LeaveType.others
-                ? () => setState(
-                    () => _otherPurpose =
-                        LeaveOtherPurpose.monetizationOfLeaveCredits,
-                  )
-                : null,
-          ),
-          _paperCheckRow(
-            selected: _otherPurpose == LeaveOtherPurpose.terminalLeave,
-            label: 'Terminal Leave',
-            enabled: _leaveType == LeaveType.others,
-            onTap: _leaveType == LeaveType.others
-                ? () => setState(
-                    () => _otherPurpose = LeaveOtherPurpose.terminalLeave,
-                  )
-                : null,
-          ),
-          const SizedBox(height: 6),
-          _buildTextField(
-            controller: _otherPurposeDetailsController,
-            label: 'Additional details / reason',
-            maxLines: 2,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildWorkingDaysPanel() {
-    return _paperPanel(
-      title: '6.C NUMBER OF WORKING DAYS APPLIED FOR',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildReadOnlyField(
-            label: 'Working Days',
-            value: _workingDaysApplied != null
-                ? '${_workingDaysApplied!.toStringAsFixed(1)} day(s)'
-                : 'Will be computed from selected dates',
-          ),
-          const SizedBox(height: 10),
-          Text(
-            'INCLUSIVE DATES',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: _DateField(
-                  label: 'Start Date',
-                  value: _startDate,
-                  onTap: () => _pickDate(isStart: true),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _DateField(
-                  label: 'End Date',
-                  value: _endDate,
-                  onTap: () => _pickDate(isStart: false),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCommutationPanel({bool showSignature = false}) {
-    return _paperPanel(
-      title: '6.D COMMUTATION',
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _paperCheckRow(
-            selected: _commutation == LeaveCommutationOption.notRequested,
-            label: 'Not Requested',
-            onTap: () => setState(
-              () => _commutation = LeaveCommutationOption.notRequested,
-            ),
-          ),
-          _paperCheckRow(
-            selected: _commutation == LeaveCommutationOption.requested,
-            label: 'Requested',
-            onTap: () =>
-                setState(() => _commutation = LeaveCommutationOption.requested),
-          ),
-          if (showSignature) ...[
-            const SizedBox(height: 28),
-            _buildApplicantSignatureBox(),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildApplicantSignatureBox() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        const SizedBox(height: 20),
-        Container(height: 1, color: Colors.black54),
-        const SizedBox(height: 6),
-        Text(
-          '(Signature of Applicant)',
-          style: TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: 12,
-            fontStyle: FontStyle.italic,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildCertificationPanel() {
-    return _paperPanel(
-      title: '7.A CERTIFICATION OF LEAVE CREDITS',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'As of ____________',
-            style: TextStyle(color: AppTheme.textPrimary, fontSize: 12),
-          ),
-          const SizedBox(height: 10),
-          Table(
-            border: TableBorder.all(color: Colors.black54, width: 1),
-            columnWidths: const {
-              0: FlexColumnWidth(2.2),
-              1: FlexColumnWidth(1.5),
-              2: FlexColumnWidth(1.5),
-            },
-            children: const [
-              TableRow(
-                children: [
-                  _TableCell(text: ''),
-                  _TableCell(text: 'Vacation Leave', bold: true),
-                  _TableCell(text: 'Sick Leave', bold: true),
-                ],
-              ),
-              TableRow(
-                children: [
-                  _TableCell(text: 'Total Earned'),
-                  _TableCell(text: '—'),
-                  _TableCell(text: '—'),
-                ],
-              ),
-              TableRow(
-                children: [
-                  _TableCell(text: 'Less this application'),
-                  _TableCell(text: '—'),
-                  _TableCell(text: '—'),
-                ],
-              ),
-              TableRow(
-                children: [
-                  _TableCell(text: 'Balance'),
-                  _TableCell(text: '—'),
-                  _TableCell(text: '—'),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 32),
-          Container(height: 1, color: Colors.black54),
-          const SizedBox(height: 8),
-          Center(
-            child: Text(
-              '(Authorized HR Officer)',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRecommendationPanel() {
-    return _paperPanel(
-      title: '7.B RECOMMENDATION',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _paperStaticCheckRow(label: 'For approval'),
-          const SizedBox(height: 8),
-          _paperStaticCheckRow(label: 'For disapproval due to'),
-          const SizedBox(height: 10),
-          _section7TextDisplay(
-            widget.initialRequest?.recommendationRemarks,
-            minLines: 3,
-          ),
-          const SizedBox(height: 24),
-          Container(height: 1, color: Colors.black54),
-          const SizedBox(height: 8),
-          Center(
-            child: Text(
-              '(Authorized Officer)',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildApprovedDisapprovedSection({required bool compact}) {
-    final req = widget.initialRequest;
-    final withPay = req?.approvedDaysWithPay;
-    final withoutPay = req?.approvedDaysWithoutPay;
-    final others = req?.approvedOtherDetails;
-    final approvedContent = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _approvalLine(
-          withPay != null
-              ? '${withPay.toStringAsFixed(1)} days with pay'
-              : '_______ days with pay',
-        ),
-        const SizedBox(height: 8),
-        _approvalLine(
-          withoutPay != null
-              ? '${withoutPay.toStringAsFixed(1)} days without pay'
-              : '_______ days without pay',
-        ),
-        const SizedBox(height: 8),
-        _approvalLine(
-          others != null && others.isNotEmpty
-              ? '$others'
-              : '_______ others (Specify)',
-        ),
-      ],
-    );
-    final disapprovedContent = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _section7TextDisplay(
-          widget.initialRequest?.disapprovalReason,
-          minLines: 4,
-        ),
-      ],
-    );
-    final signatureBlock = Column(
-      children: [
-        const SizedBox(height: 24),
-        Container(height: 1, color: Colors.black54),
-        const SizedBox(height: 8),
-        Center(
-          child: Text(
-            '(Approving Authority)',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-          ),
-        ),
-      ],
-    );
-
-    if (compact) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _paperPanel(title: '7.C APPROVED FOR', child: approvedContent),
-          const SizedBox(height: 12),
-          _paperPanel(
-            title: '7.D DISAPPROVED DUE TO',
-            child: disapprovedContent,
-          ),
-          signatureBlock,
-        ],
-      );
-    }
-
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.black, width: 1),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: _paperPanelSection(
-                    title: '7.C APPROVED FOR',
-                    child: approvedContent,
-                  ),
-                ),
-                Expanded(
-                  child: _paperPanelSection(
-                    title: '7.D DISAPPROVED DUE TO',
-                    child: disapprovedContent,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Padding(padding: const EdgeInsets.all(10), child: signatureBlock),
-        ],
-      ),
-    );
-  }
-
-  Widget _paperPanelSection({required String title, required Widget child}) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Container(
-          decoration: BoxDecoration(
-            color: Colors.grey.shade200,
-            border: const Border(
-              bottom: BorderSide(color: Colors.black, width: 1),
-            ),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          child: Text(
-            title,
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-        Padding(padding: const EdgeInsets.all(10), child: child),
-      ],
-    );
-  }
-
-  Widget _paperPanel({required String title, required Widget child}) {
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.black, width: 1),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.grey.shade200,
-              border: const Border(
-                bottom: BorderSide(color: Colors.black, width: 1),
-              ),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            child: Text(
-              title,
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-          Padding(padding: const EdgeInsets.all(10), child: child),
-        ],
-      ),
-    );
-  }
-
-  Widget _paperFieldRow1Left({required Widget child}) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '1. OFFICE/DEPARTMENT - DISTRICT/SCHOOL',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 4),
-        child,
-      ],
-    );
-  }
-
-  Widget _paperFieldRow1Right({required Widget child}) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '2. NAME (Last) (First) (Middle)',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 4),
-        child,
-      ],
-    );
-  }
-
-  Widget _paperFieldRow2Item({required String label, required Widget child}) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 4),
-        child,
-      ],
-    );
-  }
-
-  InputDecoration _paperUnderlineDecoration() {
-    return InputDecoration(
-      isDense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      border: const UnderlineInputBorder(
-        borderSide: BorderSide(color: Colors.black),
-      ),
-      enabledBorder: const UnderlineInputBorder(
-        borderSide: BorderSide(color: Colors.black),
-      ),
-      focusedBorder: const UnderlineInputBorder(
-        borderSide: BorderSide(color: Colors.black, width: 1.2),
-      ),
-    );
-  }
-
-  Widget _paperUnderlineReadOnly(String value) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Colors.black, width: 1)),
-      ),
-      child: Text(
-        value,
-        style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-      ),
-    );
-  }
-
-  Widget _paperNameField({
-    required String hint,
-    required TextEditingController controller,
-  }) {
-    return TextFormField(
-      controller: controller,
-      decoration: _paperUnderlineDecoration().copyWith(
-        hintText: hint,
-        hintStyle: TextStyle(color: Colors.black45, fontSize: 12),
-      ),
-    );
-  }
-
-  Widget _paperSectionHeader(String title) {
-    return Container(
-      margin: const EdgeInsets.only(top: 4),
-      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade300,
-        border: const Border.symmetric(
-          horizontal: BorderSide(color: Colors.black, width: 1),
-        ),
-      ),
-      child: Text(
-        title,
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          color: AppTheme.textPrimary,
-          fontSize: 13,
-          fontWeight: FontWeight.w800,
-        ),
-      ),
-    );
-  }
-
-  Widget _paperCheckRow({
-    required bool selected,
-    required String label,
-    required VoidCallback? onTap,
-    bool enabled = true,
-  }) {
-    final textColor = enabled ? AppTheme.textPrimary : Colors.black45;
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              margin: const EdgeInsets.only(top: 2),
-              width: 14,
-              height: 14,
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.black54, width: 1),
-                color: selected ? AppTheme.primaryNavy.withOpacity(0.15) : null,
-              ),
-              child: selected
-                  ? Icon(Icons.check, size: 12, color: AppTheme.primaryNavyDark)
-                  : null,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(
-                  color: textColor,
-                  fontSize: 12.5,
-                  height: 1.35,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _paperStaticCheckRow({required String label}) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          margin: const EdgeInsets.only(top: 2),
-          width: 14,
-          height: 14,
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.black54, width: 1),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            label,
-            style: TextStyle(color: AppTheme.textPrimary, fontSize: 12.5),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _paperSubheading(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Text(
-        text,
-        style: TextStyle(
-          color: AppTheme.textPrimary,
-          fontSize: 12,
-          fontStyle: FontStyle.italic,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-
-  Widget _placeholderLines(int count) {
-    return Column(
-      children: List.generate(
-        count,
-        (_) => Container(
-          margin: const EdgeInsets.only(bottom: 10),
-          height: 1,
-          color: Colors.black45,
-        ),
-      ),
-    );
-  }
-
-  /// Displays section 7 admin text (recommendation/disapproval) when present,
-  /// otherwise placeholder lines for the paper form layout.
-  Widget _section7TextDisplay(String? text, {required int minLines}) {
-    final hasText = text != null && text.trim().isNotEmpty;
-    if (hasText) {
-      return SelectableText(
-        text.trim(),
-        style: TextStyle(
-          color: AppTheme.textPrimary,
-          fontSize: 12.5,
-          height: 1.4,
-        ),
-      );
-    }
-    return _placeholderLines(minLines);
-  }
-
-  Widget _approvalLine(String text) {
-    return Text(
-      text,
-      style: TextStyle(color: AppTheme.textPrimary, fontSize: 12.5),
-    );
-  }
-
-  Future<void> _pickDate({required bool isStart}) async {
-    final initialDate = isStart
-        ? (_startDate ?? DateTime.now())
-        : (_endDate ?? _startDate ?? DateTime.now());
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: initialDate,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2100),
-    );
-    if (picked == null) return;
-
-    setState(() {
-      if (isStart) {
-        _startDate = picked;
-        if (_endDate != null && _endDate!.isBefore(picked)) {
-          _endDate = picked;
-        }
-      } else {
-        _endDate = picked;
-      }
-    });
+  void _resetConditionalSelectionsForType(LeaveType type) {
+    _locationOption = null;
+    _sickLeaveNature = null;
+    _studyPurpose = null;
+    _otherPurpose = null;
+    _customLeaveTypeController.clear();
+    _locationDetailsController.clear();
+    _sickIllnessController.clear();
+    _womenIllnessController.clear();
+    _studyPurposeDetailsController.clear();
+    _otherPurposeDetailsController.clear();
   }
 
   Future<void> _saveDraft() async {
-    final request = _buildRequest(status: LeaveRequestStatus.draft);
-    if (request == null) return;
-    if (widget.onSaveDraft == null) {
-      _showMessage('Draft is ready. Wire the save callback next.');
+    if (!_formKey.currentState!.validate()) return;
+    if (_startDate == null || _endDate == null) {
+      _showMessage('Please select date(s)');
       return;
     }
-    await _runAction(
-      action: () => widget.onSaveDraft!(request),
-      successMessage: 'Leave request draft saved.',
-    );
+    await _submit(isDraft: true);
   }
 
   Future<void> _submitRequest() async {
-    if (!_validateForm()) return;
-    final request = _buildRequest(status: LeaveRequestStatus.pending);
-    if (request == null) return;
-    if (widget.onSubmitRequest == null) {
-      _showMessage('Request is valid. Wire the submit callback next.');
+    if (!_formKey.currentState!.validate()) return;
+    if (_startDate == null || _endDate == null) {
+      _showMessage('Please select start and end dates');
       return;
     }
-    await _runAction(
-      action: () => widget.onSubmitRequest!(request),
-      successMessage: 'Leave request submitted.',
+
+    // FIX #7: Validate that the working days field matches the computed value.
+    final computed = _computeWorkingDays();
+    if (computed != null) {
+      final entered = double.tryParse(_workingDaysController.text.trim());
+      if (entered == null) {
+        _showMessage('Please enter a valid number of working days.');
+        return;
+      }
+      if (entered <= 0) {
+        _showMessage('Working days must be greater than 0.');
+        return;
+      }
+      if (entered > computed) {
+        _showMessage(
+          'Working days ($entered) cannot exceed the computed '
+          'Mon–Fri days for the selected range ($computed).'
+        );
+        return;
+      }
+    }
+
+    // FIX #6: Block submit if leave type requires an attachment and none exists.
+    if (_leaveType.requiresAttachment && !_hasAttachment()) {
+      // For sick leave, the attachment is only strictly required when > 5 days
+      // (matching the backend leaveTypeRules.js rule).
+      final isSickLeaveMandatory = _leaveType == LeaveType.sickLeave
+          ? ((_computeWorkingDays() ?? 0) > 5)
+          : true;
+      if (isSickLeaveMandatory) {
+        _showAttachmentRequiredDialog();
+        return;
+      }
+    }
+
+    await _submit(isDraft: false);
+  }
+
+  /// Returns the number of Mon–Fri days between start and end date (inclusive),
+  /// or null if dates are not yet set.
+  int? _computeWorkingDays() {
+    if (_startDate == null || _endDate == null) return null;
+    if (_endDate!.isBefore(_startDate!)) return null;
+    int count = 0;
+    DateTime d = _startDate!;
+    while (!d.isAfter(_endDate!)) {
+      final wd = d.weekday; // 1=Mon … 7=Sun
+      if (wd != DateTime.saturday && wd != DateTime.sunday) count++;
+      d = d.add(const Duration(days: 1));
+    }
+    return count;
+  }
+
+  bool _hasAttachment() {
+    final current = _savedRequest ?? widget.initialRequest;
+    return (current?.attachmentName ?? '').trim().isNotEmpty;
+  }
+
+  void _showAttachmentRequiredDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.orange[700]),
+            const SizedBox(width: 8),
+            const Text('Attachment Required'),
+          ],
+        ),
+        content: Text(
+          'This leave type (${_leaveType.displayName}) requires a supporting '
+          'document (e.g. medical certificate, birth certificate).\n\n'
+          'Please save as draft first, upload the required document, then submit.',
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
     );
   }
 
-  Future<void> _runAction({
-    required Future<bool> Function() action,
-    required String successMessage,
-  }) async {
+  Future<void> _submit({required bool isDraft}) async {
     setState(() => _busy = true);
     try {
-      final ok = await action();
-      if (!mounted) return;
-      if (ok) {
-        _showMessage(successMessage);
-        Navigator.of(context).pop(true);
+      final initial = widget.initialRequest;
+      final userId = context.read<AuthProvider>().user!.id;
+
+      // FIX #4: prefer the ID from _savedRequest (set on first save) so that
+      // subsequent "Save Draft" clicks do a PUT (update) rather than another POST.
+      final existingId = _savedRequest?.id ?? initial?.id;
+
+      final req = LeaveRequest(
+        id: existingId,
+        userId: userId,
+        leaveType: _leaveType,
+        customLeaveTypeText: _leaveType == LeaveType.others
+            ? _customLeaveTypeController.text.trim()
+            : null,
+        startDate: _startDate,
+        endDate: _endDate,
+        workingDaysApplied: double.tryParse(_workingDaysController.text.trim()),
+        reason: _reasonController.text.trim(),
+        locationOption:
+            (_leaveType == LeaveType.vacationLeave ||
+                _leaveType == LeaveType.specialPrivilegeLeave)
+            ? _locationOption
+            : null,
+        locationDetails: _locationDetailsController.text.trim(),
+        sickLeaveNature: _leaveType == LeaveType.sickLeave
+            ? _sickLeaveNature
+            : null,
+        sickIllnessDetails: _sickIllnessController.text.trim(),
+        womenIllnessDetails:
+            _leaveType == LeaveType.specialLeaveBenefitsForWomen
+            ? _womenIllnessController.text.trim()
+            : null,
+        studyPurpose: _leaveType == LeaveType.studyLeave ? _studyPurpose : null,
+        studyPurposeDetails: _studyPurposeDetailsController.text.trim(),
+        otherPurpose: _leaveType == LeaveType.others ? _otherPurpose : null,
+        otherPurposeDetails: _otherPurposeDetailsController.text.trim(),
+        commutation: _commutation,
+        attachmentName:
+            _savedRequest?.attachmentName ?? initial?.attachmentName,
+        attachmentPath:
+            _savedRequest?.attachmentPath ?? initial?.attachmentPath,
+        status: isDraft ? LeaveRequestStatus.draft : LeaveRequestStatus.pending,
+      );
+
+      if (isDraft) {
+        // The onSaveDraft callback (in leave_main.dart) handles the
+        // saveDraft vs updateRequest routing based on whether req.id is set.
+        final success = widget.onSaveDraft != null
+            ? await widget.onSaveDraft!(req)
+            : false;
+        if (!mounted) return;
+        if (success) Navigator.of(context).pop(true);
       } else {
-        _showMessage('Action could not be completed.');
+        final action = widget.onSubmitRequest;
+        if (action != null) {
+          final success = await action(req);
+          if (!mounted) return;
+          if (success) Navigator.of(context).pop(true);
+        }
       }
     } catch (e) {
-      if (!mounted) return;
-      _showMessage('Action failed: $e');
+      _showMessage('Error: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  bool _validateForm() {
-    final valid = _formKey.currentState?.validate() ?? false;
-    if (!valid) return false;
-    if (_startDate == null || _endDate == null) {
-      _showMessage('Please select both start and end dates.');
-      return false;
-    }
-    if (_endDate!.isBefore(_startDate!)) {
-      _showMessage('End date cannot be earlier than start date.');
-      return false;
-    }
-    if (_usesLocationDetails && _locationOption == null) {
-      _showMessage('Please choose the location for this leave request.');
-      return false;
-    }
-    if (_leaveType == LeaveType.sickLeave && _sickLeaveNature == null) {
-      _showMessage('Please choose the sick leave nature.');
-      return false;
-    }
-    if (_leaveType == LeaveType.studyLeave && _studyPurpose == null) {
-      _showMessage('Please choose the study leave purpose.');
-      return false;
-    }
-    return true;
-  }
+  @override
+  Widget build(BuildContext context) {
+    final formMaxWidth = 800.0; // Clean, narrow column for digital entry
 
-  LeaveRequest? _buildRequest({required LeaveRequestStatus status}) {
-    final auth = context.read<AuthProvider>();
-    final user = auth.user;
-    if (user == null) {
-      _showMessage('No logged-in user found.');
-      return null;
-    }
+    return Scaffold(
+      backgroundColor: AppTheme.offWhite,
+      appBar: AppBar(
+        title: const Text('File Leave Request'),
+        centerTitle: true,
+      ),
+      body: SafeArea(
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24.0),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: formMaxWidth),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Leave Details',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Select the type of leave and provide the necessary details.',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
 
-    final fullName = [
-      _lastNameController.text.trim(),
-      _firstNameController.text.trim(),
-      _middleNameController.text.trim(),
-    ].where((s) => s.isNotEmpty).join(' ');
-    return LeaveRequest(
-      id: widget.initialRequest?.id,
-      userId: user.id,
-      employeeName: fullName.isNotEmpty ? fullName : auth.displayName,
-      officeDepartment: _officeDepartmentController.text.trim(),
-      positionTitle: _positionTitleController.text.trim(),
-      salary: double.tryParse(_salaryController.text.trim()),
-      dateFiled: widget.initialRequest?.dateFiled ?? DateTime.now(),
-      leaveType: _leaveType,
-      customLeaveTypeText: _leaveType.requiresCustomDescription
-          ? _trimOrNull(_customLeaveTypeController.text)
-          : null,
-      startDate: _startDate,
-      endDate: _endDate,
-      workingDaysApplied: _workingDaysApplied,
-      reason: _trimOrNull(_reasonController.text),
-      locationOption: _locationOption,
-      locationDetails: _usesLocationDetails
-          ? _trimOrNull(_locationDetailsController.text)
-          : null,
-      sickLeaveNature: _leaveType == LeaveType.sickLeave
-          ? _sickLeaveNature
-          : null,
-      sickIllnessDetails: _leaveType == LeaveType.sickLeave
-          ? _trimOrNull(_sickIllnessController.text)
-          : null,
-      womenIllnessDetails: _leaveType == LeaveType.specialLeaveBenefitsForWomen
-          ? _trimOrNull(_womenIllnessController.text)
-          : null,
-      studyPurpose: _leaveType == LeaveType.studyLeave ? _studyPurpose : null,
-      studyPurposeDetails: _leaveType == LeaveType.studyLeave
-          ? _trimOrNull(_studyPurposeDetailsController.text)
-          : null,
-      otherPurpose: _leaveType == LeaveType.others ? _otherPurpose : null,
-      otherPurposeDetails: _leaveType == LeaveType.others
-          ? _trimOrNull(_otherPurposeDetailsController.text)
-          : null,
-      attachmentPath: widget.initialRequest?.attachmentPath,
-      attachmentName: widget.initialRequest?.attachmentName,
-      commutation: _commutation,
-      status: status,
-      createdAt: widget.initialRequest?.createdAt,
-      updatedAt: DateTime.now(),
+                    // A. General instruction panel
+                    const LeaveGeneralInstructionsPanel(),
+                    const SizedBox(height: 24),
+
+                    // Card 1: Leave Type
+                    _buildCard(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _buildSectionTitle('1. Leave Type'),
+                          const SizedBox(height: 16),
+                          DropdownButtonFormField<LeaveType>(
+                            value: _leaveType,
+                            decoration: _inputDecoration('Select Leave Type'),
+                            items: LeaveType.values
+                                .where(
+                                  (t) => t.employeeCanFile || t == _leaveType,
+                                )
+                                .map(
+                                  (t) => DropdownMenuItem(
+                                    value: t,
+                                    child: Text(t.displayName),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (val) {
+                              if (val != null) {
+                                setState(() {
+                                  _leaveType = val;
+                                  _resetConditionalSelectionsForType(val);
+                                });
+                              }
+                            },
+                          ),
+
+                          // B. Dynamic leave-type guidance
+                          const SizedBox(height: 14),
+                          LeaveTypeGuidanceCard(leaveType: _leaveType),
+
+                          if (_leaveType == LeaveType.others) ...[
+                            const SizedBox(height: 16),
+                            TextFormField(
+                              controller: _customLeaveTypeController,
+                              decoration: _inputDecoration(
+                                'Specify other leave type...',
+                              ),
+                              validator: (val) =>
+                                  val == null || val.trim().isEmpty
+                                  ? 'Required'
+                                  : null,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // C. Full guidelines button (below Card 1)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: const ViewFullGuidelinesButton(),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Card 2: Dates
+                    _buildCard(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _buildSectionTitle('2. Dates of Leave'),
+                          const SizedBox(height: 16),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _buildDatePicker(
+                                  label: 'Start Date',
+                                  value: _startDate,
+                                  onChanged: (d) =>
+                                      setState(() => _startDate = d),
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: _buildDatePicker(
+                                  label: 'End Date',
+                                  value: _endDate,
+                                  onChanged: (d) =>
+                                      setState(() => _endDate = d),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          // FIX #7: Auto-fill working days and validate against computed.
+                          Builder(
+                            builder: (context) {
+                              final computed = _computeWorkingDays();
+                              return TextFormField(
+                                controller: _workingDaysController,
+                                keyboardType: TextInputType.numberWithOptions(
+                                  decimal: true,
+                                ),
+                                decoration: _inputDecoration(
+                                  'Number of Working Days Applied For',
+                                ).copyWith(
+                                  suffixIcon:  computed != null
+                                      ? Tooltip(
+                                          message:
+                                              'Auto-computed: $computed Mon–Fri day(s)',
+                                          child: IconButton(
+                                            icon: const Icon(
+                                              Icons.auto_fix_high,
+                                              size: 18,
+                                            ),
+                                            onPressed: () => setState(
+                                              () => _workingDaysController.text =
+                                                  computed.toString(),
+                                            ),
+                                          ),
+                                        )
+                                      : null,
+                                  helperText: computed != null
+                                      ? 'Mon–Fri days for selected range: $computed'
+                                      : 'Select dates to auto-compute',
+                                ),
+                                validator: (val) {
+                                  if (val == null || val.trim().isEmpty)
+                                    return 'Required';
+                                  final entered = double.tryParse(val.trim());
+                                  if (entered == null) return 'Must be a number';
+                                  if (entered <= 0)
+                                    return 'Must be greater than 0';
+                                  // FIX #7: Hard-block if entered > computed.
+                                  if (computed != null && entered > computed) {
+                                    return 'Cannot exceed $computed computed working day(s) for this range';
+                                  }
+                                  // Warn about max days for leave type
+                                  final maxDays = _leaveType.maxDays;
+                                  if (maxDays != null && entered > maxDays) {
+                                    return '${_leaveType.displayName} allows max $maxDays days';
+                                  }
+                                  return null;
+                                },
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Card 3: Dynamic Details based on leave type
+                    _buildDetailsCard(),
+
+                    const SizedBox(height: 16),
+
+                    // Card 4: Attachments & Commutation
+                    _buildCard(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _buildSectionTitle('4. Additional Information'),
+                          const SizedBox(height: 16),
+                          Row(
+                            children: [
+                              Checkbox(
+                                value:
+                                    _commutation ==
+                                    LeaveCommutationOption.requested,
+                                onChanged: (val) {
+                                  setState(() {
+                                    _commutation = val == true
+                                        ? LeaveCommutationOption.requested
+                                        : LeaveCommutationOption.notRequested;
+                                  });
+                                },
+                              ),
+                              const Expanded(
+                                child: Text('Requested Commutation of Leave'),
+                              ),
+                            ],
+                          ),
+                          const Divider(height: 32),
+                          _buildAttachmentSection(),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 32),
+
+                    // Actions
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        if (widget.onSaveDraft != null)
+                          OutlinedButton(
+                            onPressed: _busy ? null : _saveDraft,
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 24,
+                                vertical: 16,
+                              ),
+                            ),
+                            child: const Text('Save Draft'),
+                          ),
+                        const SizedBox(width: 16),
+                        if (widget.onSubmitRequest != null)
+                          FilledButton(
+                            onPressed: _busy ? null : _submitRequest,
+                            style: FilledButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 24,
+                                vertical: 16,
+                              ),
+                            ),
+                            child: _busy
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Text('Submit Request'),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 40),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
-  double? get _workingDaysApplied {
-    if (_startDate == null || _endDate == null) return null;
-    if (_endDate!.isBefore(_startDate!)) return null;
-    var current = DateTime(
-      _startDate!.year,
-      _startDate!.month,
-      _startDate!.day,
-    );
-    final end = DateTime(_endDate!.year, _endDate!.month, _endDate!.day);
-    var count = 0;
-    while (!current.isAfter(end)) {
-      if (current.weekday != DateTime.saturday &&
-          current.weekday != DateTime.sunday) {
-        count++;
-      }
-      current = current.add(const Duration(days: 1));
-    }
-    return count.toDouble();
-  }
-
-  ({String last, String first, String middle}) _parseNameToLastFirstMiddle(
-    String displayName,
-  ) {
-    final parts = displayName
-        .trim()
-        .split(RegExp(r'\s+'))
-        .where((s) => s.isNotEmpty)
-        .toList();
-    if (parts.isEmpty) return (last: '', first: '', middle: '');
-    if (parts.length == 1) return (last: '', first: parts[0], middle: '');
-    if (parts.length == 2) return (last: parts[1], first: parts[0], middle: '');
-    return (
-      last: parts.sublist(2).join(' '),
-      first: parts[0],
-      middle: parts[1],
+  Widget _buildCard({required Widget child}) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: AppTheme.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: child,
     );
   }
 
-  bool get _usesLocationDetails =>
-      _leaveType == LeaveType.vacationLeave ||
-      _leaveType == LeaveType.specialPrivilegeLeave;
-
-  String? _requiredValidator(String? value) {
-    if ((value ?? '').trim().isEmpty) {
-      return 'This field is required.';
-    }
-    return null;
-  }
-
-  void _resetConditionalSelectionsForType(LeaveType value) {
-    if (value != LeaveType.vacationLeave &&
-        value != LeaveType.specialPrivilegeLeave) {
-      _locationOption = null;
-      _locationDetailsController.clear();
-    }
-    if (value != LeaveType.sickLeave) {
-      _sickLeaveNature = null;
-      _sickIllnessController.clear();
-    }
-    if (value != LeaveType.specialLeaveBenefitsForWomen) {
-      _womenIllnessController.clear();
-    }
-    if (value != LeaveType.studyLeave) {
-      _studyPurpose = null;
-      _studyPurposeDetailsController.clear();
-    }
-    if (value != LeaveType.others) {
-      _otherPurpose = null;
-      _otherPurposeDetailsController.clear();
-      _customLeaveTypeController.clear();
-    }
+  Widget _buildSectionTitle(String title) {
+    return Text(
+      title,
+      style: TextStyle(
+        fontSize: 16,
+        fontWeight: FontWeight.w600,
+        color: AppTheme.primaryNavy,
+      ),
+    );
   }
 
   InputDecoration _inputDecoration(String label) {
     return InputDecoration(
       labelText: label,
-      filled: true,
-      fillColor: AppTheme.white,
-      isDense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(2),
-        borderSide: const BorderSide(color: Colors.black54),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(2),
-        borderSide: const BorderSide(color: Colors.black54),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(2),
-        borderSide: BorderSide(color: AppTheme.primaryNavyDark, width: 1.2),
-      ),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
     );
   }
 
-  Widget _buildTextField({
-    required TextEditingController controller,
+  Widget _buildDatePicker({
     required String label,
-    String? Function(String?)? validator,
-    int maxLines = 1,
-    TextInputType? keyboardType,
+    required DateTime? value,
+    required ValueChanged<DateTime?> onChanged,
   }) {
-    return TextFormField(
-      controller: controller,
-      validator: validator,
-      maxLines: maxLines,
-      keyboardType: keyboardType,
-      decoration: _inputDecoration(label),
+    return InkWell(
+      onTap: () async {
+        final d = await showDatePicker(
+          context: context,
+          initialDate: value ?? DateTime.now(),
+          firstDate: DateTime(2000),
+          lastDate: DateTime(2100),
+        );
+        if (d != null) onChanged(d);
+      },
+      child: InputDecorator(
+        decoration: _inputDecoration(label),
+        child: Text(
+          value == null
+              ? 'Select Date'
+              : '${value.year}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}',
+        ),
+      ),
     );
   }
 
-  Widget _buildReadOnlyField({required String label, required String value}) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppTheme.offWhite,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+  Widget _buildDetailsCard() {
+    List<Widget> children = [_buildSectionTitle('3. Leave Details')];
+
+    // Shared Reasons
+    children.addAll([
+      const SizedBox(height: 16),
+      TextFormField(
+        controller: _reasonController,
+        maxLines: 2,
+        decoration: _inputDecoration('General Reason / Remarks (Optional)'),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
+    ]);
+
+    // Dynamic based on type
+    if (_leaveType == LeaveType.vacationLeave ||
+        _leaveType == LeaveType.specialPrivilegeLeave) {
+      children.addAll([
+        const SizedBox(height: 16),
+        Text('Location Option', style: TextStyle(fontWeight: FontWeight.w500)),
+        RadioListTile<LeaveLocationOption>(
+          title: const Text('Within Philippines'),
+          value: LeaveLocationOption.withinPhilippines,
+          groupValue: _locationOption,
+          onChanged: (v) => setState(() => _locationOption = v),
+        ),
+        RadioListTile<LeaveLocationOption>(
+          title: const Text('Abroad'),
+          value: LeaveLocationOption.abroad,
+          groupValue: _locationOption,
+          onChanged: (v) => setState(() => _locationOption = v),
+        ),
+        if (_locationOption != null) ...[
+          const SizedBox(height: 8),
+          TextFormField(
+            controller: _locationDetailsController,
+            decoration: _inputDecoration('Specify location...'),
+            validator: (v) =>
+                (v == null || v.trim().isEmpty) ? 'Required' : null,
           ),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
+        ],
+      ]);
+    } else if (_leaveType == LeaveType.sickLeave) {
+      children.addAll([
+        const SizedBox(height: 16),
+        Text(
+          'Nature of Illness',
+          style: TextStyle(fontWeight: FontWeight.w500),
+        ),
+        RadioListTile<SickLeaveNature>(
+          title: const Text('In Hospital'),
+          value: SickLeaveNature.inHospital,
+          groupValue: _sickLeaveNature,
+          onChanged: (v) => setState(() => _sickLeaveNature = v),
+        ),
+        RadioListTile<SickLeaveNature>(
+          title: const Text('Out Patient'),
+          value: SickLeaveNature.outPatient,
+          groupValue: _sickLeaveNature,
+          onChanged: (v) => setState(() => _sickLeaveNature = v),
+        ),
+        if (_sickLeaveNature != null) ...[
+          const SizedBox(height: 8),
+          TextFormField(
+            controller: _sickIllnessController,
+            decoration: _inputDecoration('Specify illness details...'),
+            validator: (v) =>
+                (v == null || v.trim().isEmpty) ? 'Required' : null,
+          ),
+        ],
+      ]);
+    } else if (_leaveType == LeaveType.specialLeaveBenefitsForWomen) {
+      children.addAll([
+        const SizedBox(height: 16),
+        TextFormField(
+          controller: _womenIllnessController,
+          decoration: _inputDecoration('Specify illness details...'),
+          validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+        ),
+      ]);
+    } else if (_leaveType == LeaveType.studyLeave) {
+      children.addAll([
+        const SizedBox(height: 16),
+        Text(
+          'Purpose of Study Leave',
+          style: TextStyle(fontWeight: FontWeight.w500),
+        ),
+        RadioListTile<StudyLeavePurpose>(
+          title: const Text('Completion of Master\'s Degree'),
+          value: StudyLeavePurpose.completionOfMastersDegree,
+          groupValue: _studyPurpose,
+          onChanged: (v) => setState(() => _studyPurpose = v),
+        ),
+        RadioListTile<StudyLeavePurpose>(
+          title: const Text('BAR / Board Examination Review'),
+          value: StudyLeavePurpose.barBoardExaminationReview,
+          groupValue: _studyPurpose,
+          onChanged: (v) => setState(() => _studyPurpose = v),
+        ),
+        if (_studyPurpose != null) ...[
+          const SizedBox(height: 8),
+          TextFormField(
+            controller: _studyPurposeDetailsController,
+            decoration: _inputDecoration('Specify study leave details...'),
+          ),
+        ],
+      ]);
+    }
+
+    return _buildCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: children,
+      ),
+    );
+  }
+
+  Widget _buildAttachmentSection() {
+    final current = _savedRequest ?? widget.initialRequest;
+    final requestId = current?.id;
+    final hasAttachment = (current?.attachmentName ?? '').trim().isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text('Attachments', style: TextStyle(fontWeight: FontWeight.w500)),
+            if (_leaveType.requiresAttachment) ...[
+              const SizedBox(width: 8),
+              // FIX #6: Show mandatory badge for attachment-required types.
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.orange[100],
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.orange.shade300),
+                ),
+                child: Text(
+                  _leaveType == LeaveType.sickLeave
+                      ? 'Required if > 5 days'
+                      : 'Required',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.orange[800],
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          _leaveType.requiresAttachment
+              ? 'A supporting document is required for this leave type (e.g. medical certificate, birth certificate). PDF, JPG, PNG (max 10MB).'
+              : 'Supporting attachment: optional. PDF, JPG, PNG (max 10MB).',
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+        ),
+        const SizedBox(height: 12),
+        if (requestId == null || requestId.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppTheme.lightGray,
+              borderRadius: BorderRadius.circular(8),
             ),
+            child: const Row(
+              children: [
+                Icon(Icons.info_outline, size: 20),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Save draft first to upload an attachment.',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else ...[
+          if (hasAttachment)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                children: [
+                  Icon(Icons.attach_file, color: AppTheme.primaryNavy),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      current!.attachmentName!,
+                      style: const TextStyle(fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          Row(
+            children: [
+              OutlinedButton.icon(
+                onPressed: (_busy || _attachmentUploading)
+                    ? null
+                    : _pickAndUploadAttachment,
+                icon: _attachmentUploading
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.upload_file, size: 18),
+                label: Text(hasAttachment ? 'Replace File' : 'Upload File'),
+              ),
+              if (hasAttachment) ...[
+                const SizedBox(width: 12),
+                TextButton(
+                  onPressed: (_busy || _attachmentUploading)
+                      ? null
+                      : _removeAttachment,
+                  style: TextButton.styleFrom(foregroundColor: Colors.red),
+                  child: const Text('Remove'),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _pickAndUploadAttachment() async {
+    final current = _savedRequest ?? widget.initialRequest;
+    final requestId = current?.id;
+    if (requestId == null || requestId.isEmpty) {
+      _showMessage('Save draft first to add an attachment.');
+      return;
+    }
+
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png'],
+      allowMultiple: false,
+      withData: true,
+    );
+    if (result == null ||
+        result.files.isEmpty ||
+        result.files.single.bytes == null)
+      return;
+    if (!mounted) return;
+
+    final file = result.files.single;
+    final bytes = file.bytes!;
+    final name = file.name;
+    if (name.isEmpty) return;
+
+    setState(() => _attachmentUploading = true);
+    try {
+      final provider = context.read<LeaveProvider>();
+      final updated = await provider.attachFile(
+        requestId: requestId,
+        fileBytes: bytes,
+        fileName: name,
+      );
+      if (!mounted) return;
+      if (updated != null) {
+        setState(() {
+          _savedRequest = updated;
+          _attachmentUploading = false;
+        });
+        _showMessage('Attachment uploaded.');
+      } else {
+        setState(() => _attachmentUploading = false);
+        _showMessage(provider.error ?? 'Upload failed.');
+      }
+    } catch (e) {
+      if (mounted) setState(() => _attachmentUploading = false);
+      _showMessage('Upload failed: $e');
+    }
+  }
+
+  Future<void> _removeAttachment() async {
+    final current = _savedRequest ?? widget.initialRequest;
+    final requestId = current?.id;
+    if (requestId == null || requestId.isEmpty) return;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove attachment?'),
+        content: const Text(
+          'Are you sure you want to remove the uploaded file?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Remove'),
           ),
         ],
       ),
     );
+    if (ok != true) return;
+    if (!mounted) return;
+
+    setState(() => _attachmentUploading = true);
+    try {
+      final provider = context.read<LeaveProvider>();
+      final updated = await provider.removeAttachment(requestId);
+      if (!mounted) return;
+      if (updated != null) {
+        setState(() {
+          _savedRequest = updated;
+          _attachmentUploading = false;
+        });
+        _showMessage('Attachment removed.');
+      } else {
+        setState(() => _attachmentUploading = false);
+        _showMessage(provider.error ?? 'Remove failed.');
+      }
+    } catch (e) {
+      if (mounted) setState(() => _attachmentUploading = false);
+      _showMessage('Remove failed: $e');
+    }
   }
-
-  void _showMessage(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  String? _trimOrNull(String value) {
-    final trimmed = value.trim();
-    return trimmed.isEmpty ? null : trimmed;
-  }
-}
-
-class _DateField extends StatelessWidget {
-  const _DateField({
-    required this.label,
-    required this.value,
-    required this.onTap,
-  });
-
-  final String label;
-  final DateTime? value;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: InputDecorator(
-        decoration: InputDecoration(
-          labelText: label,
-          filled: true,
-          fillColor: AppTheme.offWhite,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: Colors.black.withOpacity(0.08)),
-          ),
-        ),
-        child: Text(
-          value == null ? 'Select date' : _formatDate(value!),
-          style: TextStyle(
-            color: value == null
-                ? AppTheme.textSecondary
-                : AppTheme.textPrimary,
-            fontSize: 14,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _TableCell extends StatelessWidget {
-  const _TableCell({required this.text, this.bold = false});
-
-  final String text;
-  final bool bold;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(6),
-      child: Text(
-        text,
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          color: AppTheme.textPrimary,
-          fontSize: 11,
-          fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
-        ),
-      ),
-    );
-  }
-}
-
-String _formatDate(DateTime value) {
-  const months = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ];
-  return '${months[value.month - 1]} ${value.day}, ${value.year}';
 }

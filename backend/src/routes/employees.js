@@ -9,37 +9,89 @@ const protect = [authMiddleware];
 
 const SALT_ROUNDS = 10;
 
-// GET /api/employees - list all (?status=Active|Inactive|All, ?role=admin|employee|All)
+// GET /api/employees - list all (?status=Active|Inactive|All, ?role=admin|employee|All, ?department_id=uuid, ?biometric_user_ids=id1,id2,id3)
 router.get('/', protect, async (req, res) => {
   try {
     const status = req.query.status || 'Active';
     const roleFilter = req.query.role || 'All';
+    const departmentId = req.query.department_id || null;
+    const biometricUserIdsRaw = req.query.biometric_user_ids;
+
+    // When biometric_user_ids is provided, return only matching users (exact match).
+    if (biometricUserIdsRaw && typeof biometricUserIdsRaw === 'string') {
+      const ids = biometricUserIdsRaw.split(',').map((s) => s.trim()).filter(Boolean);
+      if (ids.length > 0) {
+        const result = await pool.query(
+          `SELECT id, employee_number, full_name, role, email, biometric_user_id, is_active, avatar_path,
+                  middle_name, suffix, sex, date_of_birth, contact_number, address,
+                  employment_type, salary_grade, date_hired, employment_status
+           FROM users
+           WHERE biometric_user_id = ANY($1::text[])
+           ORDER BY full_name`,
+          [ids]
+        );
+        const rows = result.rows.map((r) => ({
+          id: r.id,
+          employee_number: r.employee_number,
+          full_name: r.full_name ?? 'Unknown',
+          role: r.role ?? 'employee',
+          email: r.email,
+          biometric_user_id: r.biometric_user_id ?? null,
+          is_active: r.is_active ?? true,
+          avatar_path: r.avatar_path,
+          middle_name: r.middle_name,
+          suffix: r.suffix,
+          sex: r.sex,
+          date_of_birth: r.date_of_birth,
+          contact_number: r.contact_number,
+          address: r.address,
+          employment_type: r.employment_type,
+          salary_grade: r.salary_grade,
+          date_hired: r.date_hired,
+          employment_status: r.employment_status ?? 'active',
+        }));
+        return res.json(rows);
+      }
+    }
 
     const conditions = [];
     const params = [];
     let i = 1;
 
+    const tbl = departmentId ? 'u' : 'users';
     if (status === 'Active') {
-      conditions.push('(is_active IS NULL OR is_active = true)');
+      conditions.push(`(${tbl}.is_active IS NULL OR ${tbl}.is_active = true)`);
     } else if (status === 'Inactive') {
-      conditions.push('is_active = false');
+      conditions.push(`${tbl}.is_active = false`);
     }
     if (roleFilter === 'Admin') {
-      conditions.push(`role = $${i++}`);
+      conditions.push(`${tbl}.role = $${i++}`);
       params.push('admin');
     } else if (roleFilter === 'User' || roleFilter === 'Employee') {
-      conditions.push(`role = $${i++}`);
+      conditions.push(`${tbl}.role = $${i++}`);
       params.push('employee');
     }
+    if (departmentId) {
+      conditions.push(`${tbl}.id IN (
+        SELECT DISTINCT a.employee_id FROM assignments a
+        WHERE a.department_id = $${i}
+          AND (a.is_active IS NULL OR a.is_active = true)
+          AND a.effective_from <= CURRENT_DATE
+          AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
+      )`);
+      params.push(departmentId);
+      i++;
+    }
 
+    const fromClause = departmentId ? 'FROM users u' : 'FROM users';
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const result = await pool.query(
-      `SELECT id, employee_number, full_name, role, email, is_active, avatar_path, middle_name, suffix, sex, date_of_birth, contact_number, address,
-              employment_type, salary_grade, date_hired, employment_status
-       FROM users
+      `SELECT ${tbl}.id, ${tbl}.employee_number, ${tbl}.full_name, ${tbl}.role, ${tbl}.email, ${tbl}.is_active, ${tbl}.avatar_path, ${tbl}.middle_name, ${tbl}.suffix, ${tbl}.sex, ${tbl}.date_of_birth, ${tbl}.contact_number, ${tbl}.address,
+              ${tbl}.employment_type, ${tbl}.salary_grade, ${tbl}.date_hired, ${tbl}.employment_status
+       ${fromClause}
        ${where}
-       ORDER BY full_name`,
+       ORDER BY ${tbl}.full_name`,
       params
     );
 
@@ -140,6 +192,18 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         (employment_status && ['active', 'inactive', 'resigned', 'retired', 'terminated'].includes(employment_status)) ? employment_status : 'active',
       ]
     );
+
+    try {
+      await pool.query(
+        `INSERT INTO leave_balances (user_id, leave_type, earned_days, used_days, pending_days, adjusted_days)
+         VALUES ($1::uuid, 'vacationLeave', 15, 0, 0, 0), ($1::uuid, 'sickLeave', 15, 0, 0, 0)
+         ON CONFLICT (user_id, leave_type) DO NOTHING`,
+        [result.rows[0].id]
+      );
+    } catch (lbErr) {
+      console.warn('[employees POST] Could not create default leave balances:', lbErr.message);
+    }
+
     res.status(201).json(result.rows[0]);
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Email already registered' });
@@ -152,7 +216,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 router.put('/:id', protect, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { full_name, role, email, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address, avatar_path, employment_type, salary_grade, date_hired, employment_status } = req.body;
+    const { full_name, role, email, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address, avatar_path, employment_type, salary_grade, date_hired, employment_status, biometric_user_id } = req.body;
 
     const updates = [];
     const values = [];
@@ -174,6 +238,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       ['salary_grade', salary_grade],
       ['date_hired', date_hired],
       ['employment_status', employment_status],
+      ['biometric_user_id', biometric_user_id],
     ];
     for (const [col, val] of fields) {
       if (val !== undefined) {
@@ -196,7 +261,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
     const result = await pool.query(
       `UPDATE users SET ${updates.join(', ')} WHERE id = $${i}
-       RETURNING id, employee_number, email, role, full_name, avatar_path, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address`,
+       RETURNING id, employee_number, email, role, full_name, avatar_path, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address, biometric_user_id`,
       values
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Employee not found' });

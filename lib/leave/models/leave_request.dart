@@ -14,13 +14,13 @@ extension LeaveRequestStatusExtension on LeaveRequestStatus {
   String get value => name;
 
   String get displayName => switch (this) {
-        LeaveRequestStatus.draft => 'Draft',
-        LeaveRequestStatus.pending => 'Pending',
-        LeaveRequestStatus.returned => 'Returned',
-        LeaveRequestStatus.approved => 'Approved',
-        LeaveRequestStatus.rejected => 'Rejected',
-        LeaveRequestStatus.cancelled => 'Cancelled',
-      };
+    LeaveRequestStatus.draft => 'Draft',
+    LeaveRequestStatus.pending => 'Pending',
+    LeaveRequestStatus.returned => 'Returned',
+    LeaveRequestStatus.approved => 'Approved',
+    LeaveRequestStatus.rejected => 'Rejected',
+    LeaveRequestStatus.cancelled => 'Cancelled',
+  };
 }
 
 LeaveRequestStatus leaveRequestStatusFromString(String? s) {
@@ -35,18 +35,15 @@ LeaveRequestStatus leaveRequestStatusFromString(String? s) {
 }
 
 /// Section 6.D in the official form.
-enum LeaveCommutationOption {
-  notRequested,
-  requested,
-}
+enum LeaveCommutationOption { notRequested, requested }
 
 extension LeaveCommutationOptionExtension on LeaveCommutationOption {
   String get value => name;
 
   String get displayName => switch (this) {
-        LeaveCommutationOption.notRequested => 'Not Requested',
-        LeaveCommutationOption.requested => 'Requested',
-      };
+    LeaveCommutationOption.notRequested => 'Not Requested',
+    LeaveCommutationOption.requested => 'Requested',
+  };
 }
 
 LeaveCommutationOption leaveCommutationOptionFromString(String? s) {
@@ -197,9 +194,7 @@ class LeaveRequest {
       recommendationRemarks: json['recommendation_remarks']?.toString(),
       disapprovalReason: json['disapproval_reason']?.toString(),
       approvedDaysWithPay: _parseDouble(json['approved_days_with_pay']),
-      approvedDaysWithoutPay: _parseDouble(
-        json['approved_days_without_pay'],
-      ),
+      approvedDaysWithoutPay: _parseDouble(json['approved_days_without_pay']),
       approvedOtherDetails: json['approved_other_details']?.toString(),
       reviewerId: json['reviewer_id']?.toString(),
       reviewerName: json['reviewer_name']?.toString(),
@@ -339,12 +334,23 @@ class LeaveRequest {
 
   static DateTime? _parseDate(dynamic value) {
     if (value == null) return null;
-    return DateTime.tryParse(value.toString());
+    final s = value.toString().trim();
+    if (s.isEmpty) return null;
+    // Pure YYYY-MM-DD check.
+    if (RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(s)) {
+      try {
+        final p = s.split('-').map(int.parse).toList();
+        return DateTime(p[0], p[1], p[2]);
+      } catch (_) {}
+    }
+    return DateTime.tryParse(s);
   }
 
   static DateTime? _parseDateTime(dynamic value) {
     if (value == null) return null;
-    return DateTime.tryParse(value.toString());
+    final s = value.toString().trim();
+    if (s.isEmpty) return null;
+    return DateTime.tryParse(s);
   }
 
   static String? _dateOnly(DateTime? value) {

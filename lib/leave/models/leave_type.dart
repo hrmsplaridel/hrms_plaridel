@@ -57,6 +57,34 @@ extension LeaveTypeExtension on LeaveType {
       };
 
   bool get requiresCustomDescription => this == LeaveType.others;
+
+  /// Employee can file this leave type; false = admin-only.
+  bool get employeeCanFile => switch (this) {
+        LeaveType.mandatoryForcedLeave => false,
+        _ => true,
+      };
+
+  /// Maximum working days for this leave type; null = no limit.
+  int? get maxDays => switch (this) {
+        LeaveType.mandatoryForcedLeave => 5,
+        LeaveType.maternityLeave => 105,
+        LeaveType.paternityLeave => 7,
+        LeaveType.specialPrivilegeLeave => 3,
+        LeaveType.soloParentLeave => 7,
+        LeaveType.studyLeave => 180,
+        LeaveType.tenDayVawcLeave => 10,
+        LeaveType.rehabilitationPrivilege => 180,
+        LeaveType.specialLeaveBenefitsForWomen => 60,
+        LeaveType.specialEmergencyCalamityLeave => 5,
+        _ => null,
+      };
+
+  /// Past-date filing allowed.
+  bool get allowsPastDates => switch (this) {
+        LeaveType.vacationLeave => false,
+        LeaveType.specialPrivilegeLeave => false,
+        _ => true,
+      };
 }
 
 LeaveType leaveTypeFromString(String? s) {
@@ -173,6 +201,9 @@ extension LeaveOtherPurposeExtension on LeaveOtherPurpose {
           'Monetization of Leave Credits',
         LeaveOtherPurpose.terminalLeave => 'Terminal Leave',
       };
+
+  /// HR/admin process only; not employee-fileable.
+  bool get isSpecialProcessOnly => true;
 }
 
 LeaveOtherPurpose? leaveOtherPurposeFromString(String? s) {
