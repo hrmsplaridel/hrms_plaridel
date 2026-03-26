@@ -8,6 +8,7 @@ import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
 import 'leave_request_form_screen.dart';
+import 'leave_request_print_layout.dart';
 import '../widgets/leave_balance_card.dart';
 import '../widgets/leave_request_card.dart';
 
@@ -18,10 +19,7 @@ import '../widgets/leave_request_card.dart';
 /// - pending/upcoming requests
 /// - recent leave request history
 class EmployeeLeaveScreen extends StatefulWidget {
-  const EmployeeLeaveScreen({
-    super.key,
-    this.onFileLeavePressed,
-  });
+  const EmployeeLeaveScreen({super.key, this.onFileLeavePressed});
 
   final VoidCallback? onFileLeavePressed;
 
@@ -96,7 +94,8 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen> {
                   _SummaryCard(
                     title: 'Pending Requests',
                     value: '${provider.pendingCount}',
-                    subtitle: '${totalPendingDays.toStringAsFixed(1)} day(s) awaiting review',
+                    subtitle:
+                        '${totalPendingDays.toStringAsFixed(1)} day(s) awaiting review',
                     icon: Icons.pending_actions_rounded,
                   ),
                   const SizedBox(height: 16),
@@ -123,7 +122,8 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen> {
                     child: _SummaryCard(
                       title: 'Pending Requests',
                       value: '${provider.pendingCount}',
-                      subtitle: '${totalPendingDays.toStringAsFixed(1)} day(s) awaiting review',
+                      subtitle:
+                          '${totalPendingDays.toStringAsFixed(1)} day(s) awaiting review',
                       icon: Icons.pending_actions_rounded,
                     ),
                   ),
@@ -159,7 +159,9 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen> {
   }
 
   String _approvedLeaveSubtitle(LeaveRequest? request) {
-    if (request == null || request.startDate == null || request.endDate == null) {
+    if (request == null ||
+        request.startDate == null ||
+        request.endDate == null) {
       return 'No approved upcoming leave yet';
     }
     return '${_formatDate(request.startDate!)} to ${_formatDate(request.endDate!)}';
@@ -174,18 +176,24 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen> {
           onSaveDraft: (updated) async {
             final saved = updated.id == null || updated.id!.isEmpty
                 ? await provider.saveDraft(updated)
-                : await provider.updateRequest(updated.copyWith(
-                    status: LeaveRequestStatus.draft,
-                  ));
+                : await provider.updateRequest(
+                    updated.copyWith(
+                      // Backend does NOT allow returned -> draft.
+                      // Keep status as returned when editing a returned request.
+                      status: request.status == LeaveRequestStatus.returned
+                          ? LeaveRequestStatus.returned
+                          : LeaveRequestStatus.draft,
+                    ),
+                  );
             return saved != null;
           },
           onSubmitRequest: (updated) async {
             // For draft/returned edits, resubmission updates the same request to pending.
             final saved = updated.id == null || updated.id!.isEmpty
                 ? await provider.submitRequest(updated)
-                : await provider.updateRequest(updated.copyWith(
-                    status: LeaveRequestStatus.pending,
-                  ));
+                : await provider.updateRequest(
+                    updated.copyWith(status: LeaveRequestStatus.pending),
+                  );
             return saved != null;
           },
         ),
@@ -198,7 +206,10 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen> {
     }
   }
 
-  Future<void> _cancelRequest(BuildContext context, LeaveRequest request) async {
+  Future<void> _cancelRequest(
+    BuildContext context,
+    LeaveRequest request,
+  ) async {
     final auth = context.read<AuthProvider>();
     final userId = auth.user?.id;
     if (userId == null || userId.isEmpty) return;
@@ -227,9 +238,9 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen> {
     if (ok != true) return;
 
     final updated = await context.read<LeaveProvider>().cancelRequest(
-          requestId: requestId,
-          userId: userId,
-        );
+      requestId: requestId,
+      userId: userId,
+    );
     if (!mounted) return;
     final provider = context.read<LeaveProvider>();
     ScaffoldMessenger.of(context).showSnackBar(
@@ -393,10 +404,7 @@ class _SummaryCard extends StatelessWidget {
 }
 
 class _BalancesPanel extends StatelessWidget {
-  const _BalancesPanel({
-    required this.balances,
-    required this.loading,
-  });
+  const _BalancesPanel({required this.balances, required this.loading});
 
   final List<LeaveBalance> balances;
   final bool loading;
@@ -410,29 +418,29 @@ class _BalancesPanel extends StatelessWidget {
       child: loading && balances.isEmpty
           ? const _CenteredState(message: 'Loading leave balances...')
           : balances.isEmpty
-              ? const _CenteredState(message: 'No leave balances available yet.')
-              : LayoutBuilder(
-                  builder: (context, constraints) {
-                    final crossAxisCount = constraints.maxWidth < 600
-                        ? 1
-                        : (constraints.maxWidth < 960 ? 2 : 3);
-                    final cardWidth =
-                        (constraints.maxWidth - (crossAxisCount - 1) * 12) /
-                            crossAxisCount;
-                    return Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
-                      children: balances
-                          .map(
-                            (balance) => SizedBox(
-                              width: cardWidth,
-                              child: LeaveBalanceCard(balance: balance),
-                            ),
-                          )
-                          .toList(),
-                    );
-                  },
-                ),
+          ? const _CenteredState(message: 'No leave balances available yet.')
+          : LayoutBuilder(
+              builder: (context, constraints) {
+                final crossAxisCount = constraints.maxWidth < 600
+                    ? 1
+                    : (constraints.maxWidth < 960 ? 2 : 3);
+                final cardWidth =
+                    (constraints.maxWidth - (crossAxisCount - 1) * 12) /
+                    crossAxisCount;
+                return Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: balances
+                      .map(
+                        (balance) => SizedBox(
+                          width: cardWidth,
+                          child: LeaveBalanceCard(balance: balance),
+                        ),
+                      )
+                      .toList(),
+                );
+              },
+            ),
     );
   }
 }
@@ -459,23 +467,24 @@ class _RequestsPanel extends StatelessWidget {
       child: loading && requests.isEmpty
           ? const _CenteredState(message: 'Loading leave requests...')
           : requests.isEmpty
-              ? const _CenteredState(
-                  message: 'No leave requests yet. Start by filing your first leave request.',
-                )
-              : Column(
-                  children: requests
-                      .map(
-                        (request) => Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: _EmployeeRequestItem(
-                            request: request,
-                            onEdit: () => onEdit(request),
-                            onCancel: () => onCancel(request),
-                          ),
-                        ),
-                      )
-                      .toList(),
-                ),
+          ? const _CenteredState(
+              message:
+                  'No leave requests yet. Start by filing your first leave request.',
+            )
+          : Column(
+              children: requests
+                  .map(
+                    (request) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: _EmployeeRequestItem(
+                        request: request,
+                        onEdit: () => onEdit(request),
+                        onCancel: () => onCancel(request),
+                      ),
+                    ),
+                  )
+                  .toList(),
+            ),
     );
   }
 }
@@ -502,33 +511,42 @@ class _EmployeeRequestItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final showActions = _canEdit || _canCancel;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         LeaveRequestCard(request: request),
-        if (showActions) ...[
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            alignment: WrapAlignment.end,
-            children: [
-              if (_canEdit)
-                OutlinedButton.icon(
-                  onPressed: onEdit,
-                  icon: const Icon(Icons.edit_rounded),
-                  label: const Text('Edit'),
-                ),
-              if (_canCancel)
-                OutlinedButton.icon(
-                  onPressed: onCancel,
-                  icon: const Icon(Icons.close_rounded),
-                  label: const Text('Cancel'),
-                ),
-            ],
-          ),
-        ],
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          alignment: WrapAlignment.end,
+          children: [
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        LeaveRequestPrintLayout(initialRequest: request),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.print_rounded),
+              label: const Text('Print Form'),
+            ),
+            if (_canEdit)
+              OutlinedButton.icon(
+                onPressed: onEdit,
+                icon: const Icon(Icons.edit_rounded),
+                label: const Text('Edit'),
+              ),
+            if (_canCancel)
+              OutlinedButton.icon(
+                onPressed: onCancel,
+                icon: const Icon(Icons.close_rounded),
+                label: const Text('Cancel'),
+              ),
+          ],
+        ),
       ],
     );
   }
@@ -623,20 +641,14 @@ class _CenteredState extends StatelessWidget {
       child: Text(
         message,
         textAlign: TextAlign.center,
-        style: TextStyle(
-          color: AppTheme.textSecondary,
-          fontSize: 14,
-        ),
+        style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
       ),
     );
   }
 }
 
 class _ErrorBanner extends StatelessWidget {
-  const _ErrorBanner({
-    required this.message,
-    required this.onDismiss,
-  });
+  const _ErrorBanner({required this.message, required this.onDismiss});
 
   final String message;
   final VoidCallback onDismiss;
@@ -658,10 +670,7 @@ class _ErrorBanner extends StatelessWidget {
           Expanded(
             child: Text(
               message,
-              style: TextStyle(
-                color: Colors.red.shade900,
-                fontSize: 13,
-              ),
+              style: TextStyle(color: Colors.red.shade900, fontSize: 13),
             ),
           ),
           IconButton(

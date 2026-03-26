@@ -124,12 +124,18 @@ class DtrProvider extends ChangeNotifier {
     return nowMinutes < (_myShiftStartMinutes! - 30);
   }
 
-  /// True if current time is past shift end (PM In would be blocked).
-  bool get isPmInPastShiftEnd {
+  /// True if current time is past shift end (ALL clock actions should be blocked).
+  bool get isPastShiftEnd {
     if (_myShiftEndMinutes == null) return false;
     final now = DateTime.now();
     return now.hour * 60 + now.minute > _myShiftEndMinutes!;
   }
+
+  /// Legacy alias for backward compatibility.
+  bool get isPmInPastShiftEnd => isPastShiftEnd;
+
+  /// True if current time is outside the allowed shift window (before start or after end).
+  bool get isOutsideShiftWindow => isBeforeShiftStart || isPastShiftEnd;
 
   /// Format shift start as "H:MM AM/PM" for display.
   String? get myShiftStartFormatted {

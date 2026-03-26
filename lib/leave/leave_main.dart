@@ -192,7 +192,14 @@ class _LeaveMainState extends State<LeaveMain> {
       MaterialPageRoute(
         builder: (_) => LeaveRequestFormScreen(
           onSaveDraft: (LeaveRequest request) async {
-            final saved = await context.read<LeaveProvider>().saveDraft(request);
+            // FIX #4: If the request already has an ID it was previously saved.
+            // Route to updateRequest (PUT) to avoid creating a duplicate draft.
+            final provider = context.read<LeaveProvider>();
+            if (request.id != null && request.id!.isNotEmpty) {
+              final updated = await provider.updateRequest(request);
+              return updated != null;
+            }
+            final saved = await provider.saveDraft(request);
             return saved != null;
           },
           onSubmitRequest: (LeaveRequest request) async {

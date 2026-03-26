@@ -7,6 +7,15 @@ const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
 const { validateEmployeeLeaveRequest } = require('./leaveTypeRules');
+const {
+  validateEmployeeUpdateTransition,
+  validateEmployeeCancelTransition,
+  validateAdminTransition,
+} = require('../services/leaveWorkflowRules');
+const {
+  initLeaveRequestHistory,
+  insertLeaveRequestHistory,
+} = require('../services/leaveRequestHistory');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -14,12 +23,20 @@ const protect = [authMiddleware];
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
 const LEAVE_ATTACHMENT_SUBDIR = 'leave-attachments';
 
+initLeaveRequestHistory(pool);
+
 function toIsoDateStr(val) {
   if (!val) return null;
-  if (val instanceof Date) return val.toISOString().slice(0, 10);
+  if (val instanceof Date) {
+    // Manually format so we don't shift by timezone.
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
   const s = String(val);
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  return m ? m[0] : null;
+  const match = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? match[0] : null;
 }
 
 function isWeekday(dateObj) {
@@ -27,8 +44,54 @@ function isWeekday(dateObj) {
   return d !== 0 && d !== 6;
 }
 
-/** Mon–Fri day count (inclusive), acceptable for now. */
-function computeNumberOfDays(startStr, endStr) {
+/**
+ * #12 Holiday-aware working day count (Mon–Fri, excluding public holidays).
+ *
+ * @param {string} startStr  YYYY-MM-DD
+ * @param {string} endStr    YYYY-MM-DD
+ * @param {import('pg').PoolClient|null} [dbClient]  optional DB client for holiday lookup.
+ *        If null, falls back to simple Mon–Fri count (safe for contexts where a
+ *        DB client is not available, e.g. validation before the transaction begins).
+ * @returns {Promise<number|null>} count or null on invalid input
+ */
+async function computeNumberOfDays(startStr, endStr, dbClient = null) {
+  if (!startStr || !endStr) return null;
+  const start = new Date(`${startStr}T12:00:00`);
+  const end = new Date(`${endStr}T12:00:00`);
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) return null;
+  if (end < start) return null;
+
+  // Fetch active public holidays in the range from the DB (if client provided).
+  const holidayDates = new Set();
+  if (dbClient) {
+    try {
+      const hq = await dbClient.query(
+        `SELECT holiday_date::text AS hd
+         FROM holidays
+         WHERE is_active = true
+           AND holiday_date BETWEEN $1::date AND $2::date
+           AND holiday_type IN ('regular', 'special', 'local')`,
+        [startStr, endStr]
+      );
+      for (const row of hq.rows) {
+        holidayDates.add(row.hd.slice(0, 10));
+      }
+    } catch (_) {
+      // Silently fall back to plain Mon–Fri count if holiday query fails.
+    }
+  }
+
+  let count = 0;
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    if (!isWeekday(d)) continue;
+    const ds = toIsoDateStr(d); // use the same shift-proof helper
+    if (!holidayDates.has(ds)) count += 1;
+  }
+  return count;
+}
+
+/** Synchronous fallback (Mon–Fri only), used where async is not possible. */
+function computeNumberOfDaysSync(startStr, endStr) {
   if (!startStr || !endStr) return null;
   const start = new Date(`${startStr}T12:00:00`);
   const end = new Date(`${endStr}T12:00:00`);
@@ -43,6 +106,7 @@ function computeNumberOfDays(startStr, endStr) {
 
 async function hasOverlappingLeaveRequest(client, userId, startStr, endStr, excludeId = null) {
   if (!userId || !startStr || !endStr) return false;
+  // FIX #10: prefer user_id; fallback to employee_id only for legacy records not yet backfilled.
   const q = await client.query(
     `SELECT 1
      FROM leave_requests
@@ -143,6 +207,7 @@ function uploadLeaveAttachmentMw(req, res, next) {
 
 /** Check if user can access leave request (owner or admin). */
 async function canAccessLeaveRequest(requestId, userId, isAdmin) {
+  // FIX #10: prefer user_id first; employee_id kept as fallback for legacy rows.
   const q = await pool.query(
     'SELECT id FROM leave_requests WHERE id = $1 AND ($2 = true OR user_id = $3 OR employee_id = $3)',
     [requestId, isAdmin, userId]
@@ -225,15 +290,6 @@ async function applyApprovedLeaveToDtr(client, userId, leaveRequestId, startDate
   );
 }
 
-function canEmployeeEdit(status) {
-  return status === 'draft' || status === 'returned';
-}
-
-function canEmployeeCancel(status) {
-  // Strict: pending -> cancelled only
-  return status === 'pending';
-}
-
 // ============================
 // EMPLOYEE ENDPOINTS
 // ============================
@@ -254,11 +310,15 @@ router.post('/draft', protect, async (req, res) => {
 
     const startStr = toIsoDateStr(start_date);
     const endStr = toIsoDateStr(end_date);
-    const days = computeNumberOfDays(startStr, endStr);
+    // #12: holiday-aware count — client connected below inside try.
+    // We'll compute properly inside the transaction using the client.
+    const days = computeNumberOfDaysSync(startStr, endStr);
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      // #12: Recompute with holiday awareness now that we have a DB client.
+      const daysHolidayAware = await computeNumberOfDays(startStr, endStr, client);
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
       if (!leaveTypeId) {
         await client.query('ROLLBACK');
@@ -304,10 +364,25 @@ router.post('/draft', protect, async (req, res) => {
           )
           VALUES ($1::uuid, $1::uuid, $2::uuid, $3::date, $4::date, $5::numeric, $5::numeric, $6::text, $7::jsonb, 'draft', now(), now())
           RETURNING *`,
-        [userId, leaveTypeId, startStr, endStr, days, reason || null, payloadDetails]
+        [userId, leaveTypeId, startStr, endStr, daysHolidayAware ?? days, reason || null, payloadDetails]
       );
 
       const row = q.rows[0];
+      // FIX #2: Only one history row on create (removed duplicate 'created' + 'saved_draft' pair).
+      await insertLeaveRequestHistory(client, {
+        leaveRequestId: row.id,
+        action: 'saved_draft',
+        fromStatus: null,
+        toStatus: 'draft',
+        actedBy: userId,
+        remarks: reason || null,
+        metadataJson: {
+          leave_type: leave_type || null,
+          start_date: startStr,
+          end_date: endStr,
+          number_of_days: daysHolidayAware ?? days,
+        },
+      });
       const typeName = leave_type ? String(leave_type) : null;
       await client.query('COMMIT');
       res.status(201).json(mapLeaveRowToApi({ ...row, leave_type_name: typeName }));
@@ -339,12 +414,14 @@ router.post('/submit', protect, async (req, res) => {
 
     const startStr = toIsoDateStr(start_date);
     const endStr = toIsoDateStr(end_date);
-    const days = computeNumberOfDays(startStr, endStr);
     if (!startStr || !endStr) return res.status(400).json({ error: 'start_date and end_date are required' });
+    const days = computeNumberOfDaysSync(startStr, endStr); // holiday-aware recomputed inside tx
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      // #12: Holiday-aware recompute inside transaction.
+      const daysHolidayAwareSubmit = await computeNumberOfDays(startStr, endStr, client);
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
       if (!leaveTypeId) {
         await client.query('ROLLBACK');
@@ -354,6 +431,20 @@ router.post('/submit', protect, async (req, res) => {
         ? details
         : { ...rest, leave_type, start_date: startStr, end_date: endStr };
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
+
+      // FIX #7 (backend): Validate numberOfDays is positive and <= computed (holiday-aware) days.
+      const effectiveDaysSubmit = daysHolidayAwareSubmit ?? days;
+      if (effectiveDaysSubmit == null || effectiveDaysSubmit <= 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Number of working days must be greater than 0.' });
+      }
+      if (effectiveDaysSubmit != null && days > effectiveDaysSubmit) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          error: `Requested days (${days}) exceed the computed Mon–Fri working days for the selected range (${effectiveDaysSubmit}).`,
+        });
+      }
+
       const validation = validateEmployeeLeaveRequest({
         leaveType: leave_type,
         otherPurpose: otherPurpose || null,
@@ -366,6 +457,23 @@ router.post('/submit', protect, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: validation.error });
       }
+
+      // FIX #6 (backend): POST /submit creates a new record — no attachment yet.
+      // Block attachment-required leave types from direct submit. Employee must save draft first.
+      const { getRule: getLeaveRule } = require('./leaveTypeRules');
+      const submitRule = getLeaveRule(leave_type);
+      if (submitRule && submitRule.requires_attachment) {
+        const needsAttach = leave_type === 'sickLeave'
+          ? (days > (submitRule.requires_attachment_when_over_days || 5))
+          : true;
+        if (needsAttach) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({
+            error: `${leave_type} requires a supporting document. Please save a draft, upload the document, then submit.`,
+          });
+        }
+      }
+
       const hasOverlap = await hasOverlappingLeaveRequest(client, userId, startStr, endStr, null);
       if (hasOverlap) {
         await client.query('ROLLBACK');
@@ -389,10 +497,39 @@ router.post('/submit', protect, async (req, res) => {
           )
           VALUES ($1::uuid, $1::uuid, $2::uuid, $3::date, $4::date, $5::numeric, $5::numeric, $6::text, $7::jsonb, 'pending', now(), now())
           RETURNING *`,
-        [userId, leaveTypeId, startStr, endStr, days, reason || null, payloadDetails]
+        [userId, leaveTypeId, startStr, endStr, daysHolidayAwareSubmit ?? days, reason || null, payloadDetails]
       );
 
       const row = q.rows[0];
+      // FIX #2: Only one history row on submit (removed duplicate 'created' + 'submitted' pair).
+      await insertLeaveRequestHistory(client, {
+        leaveRequestId: row.id,
+        action: 'submitted',
+        fromStatus: null,
+        toStatus: 'pending',
+        actedBy: userId,
+        remarks: reason || null,
+        metadataJson: {
+          leave_type: leave_type || null,
+          start_date: startStr,
+          end_date: endStr,
+          number_of_days: days,
+        },
+      });
+      // FIX #5a: Increment pending_days on direct submit (no existing draft ID).
+      if (days != null && days > 0) {
+        const leaveTypeName = leave_type ? String(leave_type) : null;
+        if (leaveTypeName) {
+          await client.query(
+            `INSERT INTO leave_balances (user_id, leave_type, earned_days, used_days, pending_days, adjusted_days, as_of_date, last_accrual_date, created_at, updated_at)
+             VALUES ($1::uuid, $2::text, 0, 0, $3::numeric, 0, now()::date, now()::date, now(), now())
+             ON CONFLICT (user_id, leave_type)
+             DO UPDATE SET pending_days = COALESCE(leave_balances.pending_days, 0) + EXCLUDED.pending_days,
+                           updated_at = now()`,
+            [userId, leaveTypeName, days]
+          );
+        }
+      }
       const typeName = leave_type ? String(leave_type) : null;
       await client.query('COMMIT');
       res.status(201).json(mapLeaveRowToApi({ ...row, leave_type_name: typeName }));
@@ -420,18 +557,28 @@ router.put('/:id', protect, async (req, res) => {
     );
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
     const status = existing.rows[0].status;
-    if (!canEmployeeEdit(status)) return res.status(400).json({ error: 'Only draft or returned requests can be updated' });
 
     const { leave_type, start_date, end_date, reason, details, status: desiredStatus, ...rest } = req.body || {};
+    let nextStatus;
+    let historyAction;
+    try {
+      ({ nextStatus, historyAction } = validateEmployeeUpdateTransition({
+        currentStatus: status,
+        desiredStatus,
+      }));
+    } catch (err) {
+      return res.status(err.statusCode || 400).json({ error: err.message });
+    }
     const startStr = toIsoDateStr(start_date);
     const endStr = toIsoDateStr(end_date);
-    const days = computeNumberOfDays(startStr, endStr);
+    const days = await computeNumberOfDays(startStr, endStr);
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
-      if (leave_type != null && String(leave_type).trim().isNotEmpty && !leaveTypeId) {
+      // FIX #1: isNotEmpty is Dart/Swift, not JS. Use .length > 0 instead.
+      if (leave_type != null && String(leave_type).trim().length > 0 && !leaveTypeId) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Invalid leave type' });
       }
@@ -440,6 +587,19 @@ router.put('/:id', protect, async (req, res) => {
         : { ...rest, leave_type, start_date: startStr, end_date: endStr };
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
       if (leave_type && startStr && endStr && days != null) {
+        // FIX #7 (backend): Validate numberOfDays correctness on PUT.
+        if (days <= 0) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'Number of working days must be greater than 0.' });
+        }
+        const computedDays = await computeNumberOfDays(startStr, endStr, client);
+        if (computedDays != null && days > computedDays) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({
+            error: `Requested days (${days}) exceed the computed Mon–Fri working days for the selected range (${computedDays}).`,
+          });
+        }
+
         const validation = validateEmployeeLeaveRequest({
           leaveType: leave_type,
           otherPurpose: otherPurpose || null,
@@ -452,6 +612,28 @@ router.put('/:id', protect, async (req, res) => {
           await client.query('ROLLBACK');
           return res.status(400).json({ error: validation.error });
         }
+
+        // FIX #6 (backend): When transitioning to pending via PUT, check attachment.
+        if (nextStatus === 'pending') {
+          const existingRow = await client.query(
+            'SELECT attachment_path FROM leave_requests WHERE id = $1',
+            [id]
+          );
+          const hasAttachment = !!(existingRow.rows[0]?.attachment_path);
+          const { getRule } = require('./leaveTypeRules');
+          const rule = getRule(leave_type);
+          if (rule && rule.requires_attachment && !hasAttachment) {
+            const needsAttach = leave_type === 'sickLeave'
+              ? (days > (rule.requires_attachment_when_over_days || 5))
+              : true;
+            if (needsAttach) {
+              await client.query('ROLLBACK');
+              return res.status(400).json({
+                error: `${leave_type} requires a supporting document before submission. Please upload one first.`,
+              });
+            }
+          }
+        }
       }
       // Prevent overlapping ranges when dates are being set/changed.
       if (startStr && endStr) {
@@ -459,44 +641,6 @@ router.put('/:id', protect, async (req, res) => {
         if (hasOverlap) {
           await client.query('ROLLBACK');
           return res.status(400).json({ error: 'Overlapping leave request exists' });
-        }
-      }
-
-      // Strict transitions:
-      // - draft -> pending
-      // - returned -> pending
-      // - draft stays draft; returned stays returned (if not resubmitting)
-      // - No other transitions allowed from this endpoint.
-      let nextStatus = status;
-      if (desiredStatus != null) {
-        const want = String(desiredStatus).trim();
-        if (want === 'pending') {
-          if (status === 'draft' || status === 'returned') nextStatus = 'pending';
-          else {
-            await client.query('ROLLBACK');
-            return res
-              .status(400)
-              .json({ error: `Invalid status transition: ${status} -> pending` });
-          }
-        } else if (want === 'draft') {
-          if (status === 'draft') nextStatus = 'draft';
-          else {
-            await client.query('ROLLBACK');
-            return res
-              .status(400)
-              .json({ error: `Invalid status transition: ${status} -> draft` });
-          }
-        } else if (want === 'returned') {
-          if (status === 'returned') nextStatus = 'returned';
-          else {
-            await client.query('ROLLBACK');
-            return res
-              .status(400)
-              .json({ error: `Invalid status transition: ${status} -> returned` });
-          }
-        } else {
-          await client.query('ROLLBACK');
-          return res.status(400).json({ error: `Invalid status value '${want}'` });
         }
       }
 
@@ -515,9 +659,40 @@ router.put('/:id', protect, async (req, res) => {
          RETURNING *`,
         [leaveTypeId, startStr, endStr, days, reason || null, payloadDetails, id, userId, nextStatus]
       );
-      await client.query('COMMIT');
       const row = q.rows[0];
-      res.json(mapLeaveRowToApi({ ...row, leave_type_name: leave_type ? String(leave_type) : null }));
+      await insertLeaveRequestHistory(client, {
+        leaveRequestId: row.id,
+        action: historyAction,
+        fromStatus: status,
+        toStatus: nextStatus,
+        actedBy: userId,
+        remarks: reason || null,
+        metadataJson: {
+          leave_type: leave_type || null,
+          start_date: startStr,
+          end_date: endStr,
+          number_of_days: days,
+        },
+      });
+      // FIX #5b: Update pending_days when status transitions to/from pending via PUT.
+      // Cases: draft→pending (+pending_days), returned→pending (+pending_days),
+      //        draft→draft or returned→returned (no balance change).
+      const leaveTypeName = leave_type ? String(leave_type) : null;
+      if (leaveTypeName && days != null && days > 0) {
+        if (nextStatus === 'pending' && status !== 'pending') {
+          // Moving INTO pending: increment pending_days.
+          await client.query(
+            `INSERT INTO leave_balances (user_id, leave_type, earned_days, used_days, pending_days, adjusted_days, as_of_date, last_accrual_date, created_at, updated_at)
+             VALUES ($1::uuid, $2::text, 0, 0, $3::numeric, 0, now()::date, now()::date, now(), now())
+             ON CONFLICT (user_id, leave_type)
+             DO UPDATE SET pending_days = COALESCE(leave_balances.pending_days, 0) + EXCLUDED.pending_days,
+                           updated_at = now()`,
+            [userId, leaveTypeName, days]
+          );
+        }
+      }
+      await client.query('COMMIT');
+      res.json(mapLeaveRowToApi({ ...row, leave_type_name: leaveTypeName }));
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
@@ -526,6 +701,7 @@ router.put('/:id', protect, async (req, res) => {
     }
   } catch (err) {
     console.error('[leave PUT /:id]', err);
+    if (err && err.statusCode) return res.status(err.statusCode).json({ error: err.message });
     res.status(500).json({ error: 'Failed to update leave request' });
   }
 });
@@ -536,26 +712,68 @@ router.patch('/:id/cancel', protect, async (req, res) => {
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
   const reason = (req.body?.reason || '').toString().trim() || null;
+  const client = await pool.connect();
   try {
-    const q = await pool.query(
+    await client.query('BEGIN');
+
+    const q = await client.query(
       'SELECT id, status FROM leave_requests WHERE id = $1 AND (user_id = $2 OR employee_id = $2)',
       [id, userId]
     );
-    if (q.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
-    const status = q.rows[0].status;
-    if (!canEmployeeCancel(status)) {
-      return res.status(400).json({ error: `Invalid status transition: ${status} -> cancelled` });
+    if (q.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Leave request not found' });
     }
+    const status = q.rows[0].status;
 
-    await pool.query(
+    const { nextStatus, historyAction } = validateEmployeeCancelTransition({
+      currentStatus: status,
+    });
+
+    const cancelledReq = await client.query(
       `UPDATE leave_requests
        SET status = 'cancelled',
            details = COALESCE(details, '{}'::jsonb) || jsonb_build_object('cancel_reason', $3::text),
            updated_at = now()
-       WHERE id = $1 AND (user_id = $2 OR employee_id = $2)`,
+       WHERE id = $1 AND (user_id = $2 OR employee_id = $2)
+       RETURNING COALESCE(number_of_days, total_days) AS days, user_id, employee_id, leave_type_id`,
       [id, userId, reason]
     );
-    const out = await pool.query(
+
+    await insertLeaveRequestHistory(client, {
+      leaveRequestId: id,
+      action: historyAction,
+      fromStatus: status,
+      toStatus: nextStatus,
+      actedBy: userId,
+      remarks: reason || null,
+      metadataJson: null,
+    });
+
+    // FIX #5c: Decrement pending_days on cancel (only if it was pending — not draft).
+    if (status === 'pending') {
+      const cancelRow = cancelledReq.rows[0];
+      const cancelDays = cancelRow?.days != null ? parseFloat(cancelRow.days) : null;
+      const cancelUserId = cancelRow?.user_id || cancelRow?.employee_id;
+      if (cancelDays && cancelDays > 0 && cancelUserId) {
+        const ltRow = await client.query(
+          'SELECT name FROM leave_types WHERE id = $1',
+          [cancelRow.leave_type_id]
+        );
+        const ltName = ltRow.rows[0]?.name || null;
+        if (ltName) {
+          await client.query(
+            `UPDATE leave_balances
+             SET pending_days = GREATEST(0, COALESCE(pending_days, 0) - $3::numeric),
+                 updated_at = now()
+             WHERE user_id = $1::uuid AND leave_type = $2::text`,
+            [cancelUserId, ltName, cancelDays]
+          );
+        }
+      }
+    }
+
+    const out = await client.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
@@ -563,28 +781,41 @@ router.patch('/:id/cancel', protect, async (req, res) => {
        WHERE lr.id = $1`,
       [id]
     );
+
+    await client.query('COMMIT');
     res.json(mapLeaveRowToApi(out.rows[0]));
   } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) { }
     console.error('[leave PATCH /:id/cancel]', err);
+    if (err && err.statusCode) return res.status(err.statusCode).json({ error: err.message });
     res.status(500).json({ error: 'Failed to cancel leave request' });
+  } finally {
+    client.release();
   }
 });
 
+// GET /api/leave/my
 // GET /api/leave/my
 router.get('/my', protect, async (req, res) => {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
   try {
     const status = (req.query?.status || '').toString().trim() || null;
+    // FIX #14 (Phase 4 preview): Pagination on /my with a safe default cap.
+    const limitRaw = req.query?.limit ? parseInt(req.query.limit, 10) : 100;
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 500) : 100;
     const rows = await pool.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
-       LEFT JOIN users u ON u.id = COALESCE(lr.employee_id, lr.user_id)
+       LEFT JOIN users u ON u.id = COALESCE(lr.user_id, lr.employee_id)
        WHERE (lr.user_id = $1 OR lr.employee_id = $1)
          AND ($2::text IS NULL OR lr.status = $2)
-       ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC`,
-      [userId, status]
+       ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC
+       LIMIT $3`,
+      [userId, status, limit]
     );
     res.json(rows.rows.map(mapLeaveRowToApi));
   } catch (err) {
@@ -597,26 +828,38 @@ router.get('/my', protect, async (req, res) => {
 // ADMIN ENDPOINTS
 // ============================
 
-// GET /api/leave (admin list; optional status/leave_type/user_id)
+// GET /api/leave (admin list)
+// Query params: status, leave_type, user_id, limit,
+//               start_date_from, start_date_to, created_from, created_to
 router.get('/', protect, requireAdmin, async (req, res) => {
   try {
     const status = (req.query?.status || '').toString().trim() || null;
     const leaveType = (req.query?.leave_type || '').toString().trim() || null;
     const userId = (req.query?.user_id || '').toString().trim() || null;
-    const limit = req.query?.limit ? parseInt(req.query.limit, 10) : null;
-    const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 500) : null;
+    const limitRaw = req.query?.limit ? parseInt(req.query.limit, 10) : null;
+    const safeLimit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 500) : null;
+
+    // FIX #12 (Phase 4 preview wired here): Date range filters.
+    const startDateFrom = (req.query?.start_date_from || '').toString().trim() || null;
+    const startDateTo = (req.query?.start_date_to || '').toString().trim() || null;
+    const createdFrom = (req.query?.created_from || '').toString().trim() || null;
+    const createdTo = (req.query?.created_to || '').toString().trim() || null;
 
     const rows = await pool.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
-       LEFT JOIN users u ON u.id = COALESCE(lr.employee_id, lr.user_id)
+       LEFT JOIN users u ON u.id = COALESCE(lr.user_id, lr.employee_id)
        WHERE ($1::text IS NULL OR lr.status = $1)
          AND ($2::text IS NULL OR lt.name = $2)
          AND ($3::uuid IS NULL OR lr.user_id = $3 OR lr.employee_id = $3)
+         AND ($4::date IS NULL OR lr.start_date >= $4)
+         AND ($5::date IS NULL OR lr.start_date <= $5)
+         AND ($6::timestamptz IS NULL OR lr.created_at >= $6)
+         AND ($7::timestamptz IS NULL OR lr.created_at <= $7)
        ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC
        ${safeLimit ? 'LIMIT ' + safeLimit : ''}`,
-      [status, leaveType, userId]
+      [status, leaveType, userId, startDateFrom, startDateTo, createdFrom, createdTo]
     );
     res.json(rows.rows.map(mapLeaveRowToApi));
   } catch (err) {
@@ -682,11 +925,10 @@ router.patch('/:id/approve', protect, requireAdmin, async (req, res) => {
         );
         return res.json(mapLeaveRowToApi(out.rows[0]));
       }
-      // Strict: ONLY allow approve from pending.
-      if (r.status !== 'pending') {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ error: `Invalid status transition: ${r.status} -> approved` });
-      }
+      const { historyAction } = validateAdminTransition({
+        currentStatus: r.status,
+        desiredStatus: 'approved',
+      });
 
       const updated = await client.query(
         `UPDATE leave_requests
@@ -721,6 +963,21 @@ router.patch('/:id/approve', protect, requireAdmin, async (req, res) => {
       // DTR integration: mark each date as on_leave and link leave_request_id.
       await applyApprovedLeaveToDtr(client, targetUserId, id, startStr, endStr);
 
+      await insertLeaveRequestHistory(client, {
+        leaveRequestId: id,
+        action: historyAction,
+        fromStatus: r.status,
+        toStatus: 'approved',
+        actedBy: reviewerId,
+        remarks: remarks || null,
+        metadataJson: {
+          leave_type: leaveTypeName,
+          start_date: startStr,
+          end_date: endStr,
+          number_of_days: days,
+        },
+      });
+
       await client.query('COMMIT');
       res.json(mapLeaveRowToApi({ ...row, leave_type_name: leaveTypeName }));
     } catch (e) {
@@ -745,30 +1002,196 @@ router.patch('/:id/reject', protect, requireAdmin, async (req, res) => {
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
   const remarks = (req.body?.reviewer_remarks || req.body?.reason || req.body?.hr_remarks || '').toString().trim() || null;
+  const client = await pool.connect();
   try {
-    const current = await pool.query('SELECT status FROM leave_requests WHERE id = $1', [id]);
-    if (current.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
-    if (current.rows[0].status !== 'pending') {
-      return res.status(400).json({
-        error: `Invalid status transition: ${current.rows[0].status} -> rejected`,
-      });
+    await client.query('BEGIN');
+    const current = await client.query(
+      `SELECT lr.status, COALESCE(lr.number_of_days, lr.total_days) AS days,
+              lr.user_id, lr.employee_id, lt.name AS leave_type_name
+       FROM leave_requests lr
+       LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+       WHERE lr.id = $1`,
+      [id]
+    );
+    if (current.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Leave request not found' });
     }
+    const currentRow = current.rows[0];
 
-    const updated = await pool.query(
+    const { historyAction } = validateAdminTransition({
+      currentStatus: currentRow.status,
+      desiredStatus: 'rejected',
+    });
+
+    await client.query(
       `UPDATE leave_requests
        SET status = 'rejected',
            reviewer_id = $2::uuid,
            reviewer_remarks = $3::text,
            reviewed_at = now(),
            updated_at = now()
-       WHERE id = $1
-       RETURNING *`,
+       WHERE id = $1`,
       [id, reviewerId, remarks]
     );
-    res.json(mapLeaveRowToApi(updated.rows[0]));
+
+    await insertLeaveRequestHistory(client, {
+      leaveRequestId: id,
+      action: historyAction,
+      fromStatus: 'pending',
+      toStatus: 'rejected',
+      actedBy: reviewerId,
+      remarks: remarks || null,
+      metadataJson: null,
+    });
+
+    // FIX #5d: Decrement pending_days on reject.
+    const rejectDays = currentRow.days != null ? parseFloat(currentRow.days) : null;
+    const rejectUserId = currentRow.user_id || currentRow.employee_id;
+    const rejectLtName = currentRow.leave_type_name || null;
+    if (rejectDays && rejectDays > 0 && rejectUserId && rejectLtName) {
+      await client.query(
+        `UPDATE leave_balances
+         SET pending_days = GREATEST(0, COALESCE(pending_days, 0) - $3::numeric),
+             updated_at = now()
+         WHERE user_id = $1::uuid AND leave_type = $2::text`,
+        [rejectUserId, rejectLtName, rejectDays]
+      );
+    }
+
+    await client.query('COMMIT');
+    // FIX #3: Re-fetch with full join so leave_type_name is in the response.
+    const out = await pool.query(
+      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
+       FROM leave_requests lr
+       LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+       LEFT JOIN users u ON u.id = COALESCE(lr.employee_id, lr.user_id)
+       WHERE lr.id = $1`,
+      [id]
+    );
+    res.json(mapLeaveRowToApi(out.rows[0]));
   } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) { }
     console.error('[leave PATCH /:id/reject]', err);
+    if (err && err.statusCode) return res.status(err.statusCode).json({ error: err.message });
     res.status(500).json({ error: 'Failed to reject leave request' });
+  } finally {
+    client.release();
+  }
+});
+
+// ============================================================
+// PATCH /api/leave/:id/revoke  (Phase 4 #15 — Admin only)
+// Revoke an approved leave: restore used_days balance + clean DTR.
+// ============================================================
+router.patch('/:id/revoke', protect, requireAdmin, async (req, res) => {
+  const reviewerId = req.user?.id;
+  if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
+  const { id } = req.params;
+  const remarks = (req.body?.reviewer_remarks || req.body?.reason || '').toString().trim() || null;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const current = await client.query(
+      `SELECT lr.id, lr.status,
+              COALESCE(lr.number_of_days, lr.total_days) AS days,
+              lr.user_id, lr.employee_id,
+              lr.start_date, lr.end_date,
+              lt.name AS leave_type_name
+       FROM leave_requests lr
+       LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+       WHERE lr.id = $1
+       FOR UPDATE OF lr`,
+      [id]
+    );
+    if (current.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Leave request not found' });
+    }
+    const r = current.rows[0];
+    if (r.status !== 'approved') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: `Cannot revoke a leave request with status '${r.status}'. Only approved requests can be revoked.`,
+      });
+    }
+
+    const targetUserId = r.user_id || r.employee_id;
+    const revokeDays = r.days != null ? parseFloat(r.days) : null;
+    const ltName = r.leave_type_name || null;
+    const startStr = toIsoDateStr(r.start_date);
+    const endStr = toIsoDateStr(r.end_date);
+
+    // 1. Set status back to 'returned' (employee must re-file or Admin closes it separately).
+    await client.query(
+      `UPDATE leave_requests
+       SET status = 'returned',
+           reviewer_id   = $2::uuid,
+           reviewer_remarks = $3::text,
+           reviewed_at   = now(),
+           updated_at    = now()
+       WHERE id = $1`,
+      [id, reviewerId, remarks || 'Approval revoked by admin.']
+    );
+
+    // 2. Restore used_days balance (reverse the deduction from approval).
+    if (revokeDays && revokeDays > 0 && targetUserId && ltName) {
+      await client.query(
+        `UPDATE leave_balances
+         SET used_days  = GREATEST(0, COALESCE(used_days, 0)  - $3::numeric),
+             pending_days = COALESCE(pending_days, 0) + $3::numeric,
+             updated_at = now()
+         WHERE user_id = $1::uuid AND leave_type = $2::text`,
+        [targetUserId, ltName, revokeDays]
+      );
+    }
+
+    // 3. Remove DTR on_leave entries that were written by this approval.
+    //    Only removes rows that are still 'on_leave' and linked to this request.
+    //    Rows already changed to 'present' (employee actually showed up) are untouched.
+    await client.query(
+      `DELETE FROM dtr_daily_summary
+       WHERE leave_request_id = $1
+         AND status = 'on_leave'`,
+      [id]
+    );
+
+    // 4. Audit trail.
+    await insertLeaveRequestHistory(client, {
+      leaveRequestId: id,
+      action: 'revoked',
+      fromStatus: 'approved',
+      toStatus: 'returned',
+      actedBy: reviewerId,
+      remarks: remarks || 'Approval revoked.',
+      metadataJson: {
+        leave_type: ltName,
+        start_date: startStr,
+        end_date: endStr,
+        number_of_days: revokeDays,
+        revoked_by: reviewerId,
+      },
+    });
+
+    await client.query('COMMIT');
+    const out = await pool.query(
+      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
+       FROM leave_requests lr
+       LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+       LEFT JOIN users u ON u.id = COALESCE(lr.user_id, lr.employee_id)
+       WHERE lr.id = $1`,
+      [id]
+    );
+    res.json(mapLeaveRowToApi(out.rows[0]));
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { }
+    console.error('[leave PATCH /:id/revoke]', err);
+    if (err && err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to revoke leave approval' });
+  } finally {
+    client.release();
   }
 });
 
@@ -778,30 +1201,83 @@ router.patch('/:id/return', protect, requireAdmin, async (req, res) => {
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
   const remarks = (req.body?.reviewer_remarks || req.body?.reason || req.body?.hr_remarks || '').toString().trim() || null;
+  const client = await pool.connect();
   try {
-    const current = await pool.query('SELECT status FROM leave_requests WHERE id = $1', [id]);
-    if (current.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
-    if (current.rows[0].status !== 'pending') {
-      return res.status(400).json({
-        error: `Invalid status transition: ${current.rows[0].status} -> returned`,
-      });
+    await client.query('BEGIN');
+    const current = await client.query(
+      `SELECT lr.status, COALESCE(lr.number_of_days, lr.total_days) AS days,
+              lr.user_id, lr.employee_id, lt.name AS leave_type_name
+       FROM leave_requests lr
+       LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+       WHERE lr.id = $1`,
+      [id]
+    );
+    if (current.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Leave request not found' });
     }
+    const currentRow = current.rows[0];
 
-    const updated = await pool.query(
+    const { historyAction } = validateAdminTransition({
+      currentStatus: currentRow.status,
+      desiredStatus: 'returned',
+    });
+
+    await client.query(
       `UPDATE leave_requests
        SET status = 'returned',
            reviewer_id = $2::uuid,
            reviewer_remarks = $3::text,
            reviewed_at = now(),
            updated_at = now()
-       WHERE id = $1
-       RETURNING *`,
+       WHERE id = $1`,
       [id, reviewerId, remarks]
     );
-    res.json(mapLeaveRowToApi(updated.rows[0]));
+
+    await insertLeaveRequestHistory(client, {
+      leaveRequestId: id,
+      action: historyAction,
+      fromStatus: 'pending',
+      toStatus: 'returned',
+      actedBy: reviewerId,
+      remarks: remarks || null,
+      metadataJson: null,
+    });
+
+    // FIX #5e: Decrement pending_days when a request is returned to employee.
+    const returnDays = currentRow.days != null ? parseFloat(currentRow.days) : null;
+    const returnUserId = currentRow.user_id || currentRow.employee_id;
+    const returnLtName = currentRow.leave_type_name || null;
+    if (returnDays && returnDays > 0 && returnUserId && returnLtName) {
+      await client.query(
+        `UPDATE leave_balances
+         SET pending_days = GREATEST(0, COALESCE(pending_days, 0) - $3::numeric),
+             updated_at = now()
+         WHERE user_id = $1::uuid AND leave_type = $2::text`,
+        [returnUserId, returnLtName, returnDays]
+      );
+    }
+
+    await client.query('COMMIT');
+    // FIX #3: Re-fetch with full join so leave_type_name is in the response.
+    const out = await pool.query(
+      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
+       FROM leave_requests lr
+       LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+       LEFT JOIN users u ON u.id = COALESCE(lr.employee_id, lr.user_id)
+       WHERE lr.id = $1`,
+      [id]
+    );
+    res.json(mapLeaveRowToApi(out.rows[0]));
   } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) { }
     console.error('[leave PATCH /:id/return]', err);
+    if (err && err.statusCode) return res.status(err.statusCode).json({ error: err.message });
     res.status(500).json({ error: 'Failed to return leave request' });
+  } finally {
+    client.release();
   }
 });
 

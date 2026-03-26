@@ -64,14 +64,19 @@ class MockLeaveRepository implements LeaveRepository {
   Future<List<LeaveRequest>> listMyRequests(
     String userId, {
     LeaveRequestStatus? status,
+    int? limit,
   }) async {
-    return _sortedRequests(
+    var results = _sortedRequests(
       _requests.where((r) {
         if (r.userId != userId) return false;
         if (status != null && r.status != status) return false;
         return true;
       }).toList(),
     );
+    if (limit != null && limit > 0 && results.length > limit) {
+      results = results.take(limit).toList();
+    }
+    return results;
   }
 
   @override
@@ -191,6 +196,28 @@ class MockLeaveRepository implements LeaveRepository {
       _adjustUsedDays(approved.userId, approved.leaveType, daysWithPay);
     }
     return approved;
+  }
+
+  /// #15: Revoke an approved leave (mock: restores used_days).
+  @override
+  Future<LeaveRequest> revokeApproval(LeaveReviewDecisionInput input) async {
+    final old = _requireRequest(input.requestId);
+    final revoked = old.copyWith(
+      status: LeaveRequestStatus.returned,
+      reviewerId: input.reviewerId,
+      reviewerName: input.reviewerName,
+      hrRemarks: input.hrRemarks ?? 'Approval revoked.',
+      disapprovalReason: input.reason,
+      reviewedAt: input.reviewedAt ?? DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+    _upsertRequest(revoked);
+    // Restore used_days in mock balance.
+    final daysWithPay = old.approvedDaysWithPay ?? old.workingDaysApplied ?? 0;
+    if (daysWithPay > 0) {
+      _adjustUsedDays(revoked.userId, revoked.leaveType, -daysWithPay);
+    }
+    return revoked;
   }
 
   @override

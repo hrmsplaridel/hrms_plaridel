@@ -216,7 +216,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 router.put('/:id', protect, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { full_name, role, email, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address, avatar_path, employment_type, salary_grade, date_hired, employment_status } = req.body;
+    const { full_name, role, email, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address, avatar_path, employment_type, salary_grade, date_hired, employment_status, biometric_user_id } = req.body;
 
     const updates = [];
     const values = [];
@@ -238,6 +238,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       ['salary_grade', salary_grade],
       ['date_hired', date_hired],
       ['employment_status', employment_status],
+      ['biometric_user_id', biometric_user_id],
     ];
     for (const [col, val] of fields) {
       if (val !== undefined) {
@@ -260,7 +261,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
     const result = await pool.query(
       `UPDATE users SET ${updates.join(', ')} WHERE id = $${i}
-       RETURNING id, employee_number, email, role, full_name, avatar_path, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address`,
+       RETURNING id, employee_number, email, role, full_name, avatar_path, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address, biometric_user_id`,
       values
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Employee not found' });

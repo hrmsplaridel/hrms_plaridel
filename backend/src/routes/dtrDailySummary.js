@@ -232,7 +232,7 @@ async function computeLateMinutes(employeeId, dateStr, timeInIso, breakInIso, st
  * Returns 0 for holiday/on_leave or when no shift. For partial-day suspension (coverage am_only/pm_only),
  * only the non-suspended half is evaluated. Seconds ignored.
  */
-async function computeUndertimeMinutes(employeeId, dateStr, timeOutIso, breakOutIso, status, holidayId, coverage) {
+async function computeUndertimeMinutes(employeeId, dateStr, timeOutIso, breakOutIso, status, holidayId, coverage, timeInIso, breakInIso) {
   if (status === 'on_leave') return 0;
   const isHolidayOrSuspension = status === 'holiday' || holidayId != null;
   if (isHolidayOrSuspension && (!coverage || coverage === 'whole_day')) return 0;
@@ -247,7 +247,25 @@ async function computeUndertimeMinutes(employeeId, dateStr, timeOutIso, breakOut
   } else if (evalPm && timeOutIso) {
     clockOutMins = minutesFromMidnightInTimeZone(timeOutIso);
   }
-  if (clockOutMins == null) return 0;
+  if (clockOutMins == null) {
+    // Incomplete record: employee clocked in but never clocked out.
+    // Compute undertime as full shift duration only if:
+    //   - The date is in the past, OR
+    //   - Today but shift has already ended.
+    const hasClockIn = !!(timeInIso || breakInIso);
+    if (!hasClockIn) return 0;
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const isPast = dateStr < todayStr;
+    const isShiftOver = dateStr === todayStr && nowMinutes > shiftInfo.endMinutes;
+    if (isPast || isShiftOver) {
+      // Undertime = full shift duration (end - start)
+      const startMinutes = shiftInfo.startMinutes != null ? shiftInfo.startMinutes : 0;
+      return Math.max(0, shiftInfo.endMinutes - startMinutes);
+    }
+    return 0;
+  }
   const endMinutes = shiftInfo.endMinutes;
   if (clockOutMins >= endMinutes) return 0;
   return endMinutes - clockOutMins;
@@ -545,8 +563,8 @@ router.get('/', protect, async (req, res) => {
         if (lateMinutes === 0 && (r.time_in || r.break_in)) {
           lateMinutes = await computeLateMinutes(r.employee_id, dateStr, r.time_in, r.break_in, r.status, r.holiday_id, coverage);
         }
-        if (undertimeMinutes === 0 && (r.time_out || r.break_out)) {
-          undertimeMinutes = await computeUndertimeMinutes(r.employee_id, dateStr, r.time_out, r.break_out, r.status, r.holiday_id, coverage);
+        if (undertimeMinutes === 0 && (r.time_out || r.break_out || r.time_in || r.break_in)) {
+          undertimeMinutes = await computeUndertimeMinutes(r.employee_id, dateStr, r.time_out, r.break_out, r.status, r.holiday_id, coverage, r.time_in, r.break_in);
         }
       }
       const recordForRemark = {
@@ -935,7 +953,7 @@ router.post('/', protect, async (req, res) => {
     let undertimeMinutes = 0;
     if ((!holiday || coverage === 'am_only' || coverage === 'pm_only') && status !== 'on_leave') {
       lateMinutes = await computeLateMinutes(targetId, date, timeIn, break_in || null, status, holidayId, coverage);
-      undertimeMinutes = await computeUndertimeMinutes(targetId, date, time_out || null, break_out || null, status, holidayId, coverage);
+      undertimeMinutes = await computeUndertimeMinutes(targetId, date, time_out || null, break_out || null, status, holidayId, coverage, timeIn || null, break_in || null);
     }
 
     const sourceValue = (status === 'holiday' || holidayId) ? 'adjusted' : 'manual';
@@ -1054,7 +1072,7 @@ router.put('/:id', protect, async (req, res) => {
     if (anyTimeChanged && (!isHolidayOrLeave || isPartialSuspension)) {
       const bo = break_out !== undefined ? break_out : existing.break_out;
       const lateMin = await computeLateMinutes(employeeId, dateStr, ti, bi, finalStatus, existing.holiday_id, existingCoverage);
-      const underMin = await computeUndertimeMinutes(employeeId, dateStr, to, bo, finalStatus, existing.holiday_id, existingCoverage);
+      const underMin = await computeUndertimeMinutes(employeeId, dateStr, to, bo, finalStatus, existing.holiday_id, existingCoverage, ti, bi);
       updates.push(`late_minutes = $${i++}`);
       values.push(lateMin);
       updates.push(`undertime_minutes = $${i++}`);

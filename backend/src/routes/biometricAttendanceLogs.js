@@ -28,6 +28,23 @@ function toIsoDate(val) {
 }
 
 /**
+ * GET /api/biometric-attendance-logs/devices
+ * Fetch active biometric devices for the external sync service.
+ * Auth: X-Api-Key header
+ */
+router.get('/devices', pushAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, ip_address, device_id FROM biometric_devices WHERE (is_active IS NULL OR is_active = true)`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[biometric-attendance-logs GET devices]', err);
+    res.status(500).json({ error: 'Failed to fetch devices' });
+  }
+});
+
+/**
  * POST /api/biometric-attendance-logs/push
  * Push raw punches from a biometric device (e.g. ZKTeco sync service).
  * Auth: X-Api-Key header (BIO_SYNC_API_KEY) or JWT + admin.

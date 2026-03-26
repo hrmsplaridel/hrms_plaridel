@@ -14,6 +14,7 @@ class LeaveProvider extends ChangeNotifier {
     : _repository = repository;
 
   final LeaveRepository _repository;
+  LeaveRepository get repository => _repository;
 
   List<LeaveRequest> _requests = [];
   List<LeaveBalance> _balances = [];
@@ -308,6 +309,27 @@ class LeaveProvider extends ChangeNotifier {
     notifyListeners();
     try {
       final updated = await _repository.approveRequest(input);
+      _selectedRequest = updated;
+      _upsertRequest(updated);
+      return updated;
+    } catch (e) {
+      _error = e is Exception && e.toString().startsWith('Exception: ')
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
+      return null;
+    } finally {
+      _reviewing = false;
+      notifyListeners();
+    }
+  }
+
+  /// #15: Revoke approval — reverses balance deduction + clears DTR entries.
+  Future<LeaveRequest?> revokeApproval(LeaveReviewDecisionInput input) async {
+    _reviewing = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final updated = await _repository.revokeApproval(input);
       _selectedRequest = updated;
       _upsertRequest(updated);
       return updated;

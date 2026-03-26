@@ -19,7 +19,7 @@ if env_path.exists():
             k, _, v = line.partition("=")
             os.environ.setdefault(k.strip(), v.strip())
 
-DEVICE_IP = os.environ.get("ZK_DEVICE_IP", "192.168.254.201")
+DEVICE_IP = os.environ.get("ZK_DEVICE_IP", "192.168.1.201")
 DEVICE_PORT = int(os.environ.get("ZK_DEVICE_PORT", "4370"))
 TIMEOUT = 30
 

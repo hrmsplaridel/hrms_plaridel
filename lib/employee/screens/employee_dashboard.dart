@@ -993,11 +993,8 @@ class _ClockInCard extends StatelessWidget {
           onTap = null;
         }
 
-        final isPmInDisabled =
-            (nextAction == 'PM In') && dtr.isPmInPastShiftEnd;
-
-        // Block ALL clock actions when before shift start (with 30min grace)
-        final isShiftNotStarted = onTap != null && dtr.isBeforeShiftStart;
+        // Block ALL clock actions when outside shift window (before start or after end)
+        final isShiftDisabled = onTap != null && dtr.isOutsideShiftWindow;
 
         return Container(
           padding: const EdgeInsets.all(20),
@@ -1069,7 +1066,9 @@ class _ClockInCard extends StatelessWidget {
                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
               ),
               const SizedBox(height: 16),
-              if (isShiftNotStarted && dtr.myShiftStartFormatted != null)
+              if (isShiftDisabled &&
+                  dtr.isBeforeShiftStart &&
+                  dtr.myShiftStartFormatted != null)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Text(
@@ -1081,7 +1080,9 @@ class _ClockInCard extends StatelessWidget {
                     ),
                   ),
                 ),
-              if (isPmInDisabled && dtr.myShiftEndFormatted != null)
+              if (isShiftDisabled &&
+                  dtr.isPastShiftEnd &&
+                  dtr.myShiftEndFormatted != null)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Text(
@@ -1096,11 +1097,7 @@ class _ClockInCard extends StatelessWidget {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
-                  onPressed:
-                      dtr.loading ||
-                          onTap == null ||
-                          isPmInDisabled ||
-                          isShiftNotStarted
+                  onPressed: dtr.loading || onTap == null || isShiftDisabled
                       ? null
                       : () async {
                           final ok = await onTap!();

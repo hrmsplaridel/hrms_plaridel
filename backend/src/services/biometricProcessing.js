@@ -111,7 +111,7 @@ async function computeLateMinutes(employeeId, dateStr, timeInIso, breakInIso, st
   return total;
 }
 
-async function computeUndertimeMinutes(employeeId, dateStr, timeOutIso, breakOutIso, status, holidayId, coverage) {
+async function computeUndertimeMinutes(employeeId, dateStr, timeOutIso, breakOutIso, status, holidayId, coverage, timeInIso, breakInIso) {
   if (status === 'on_leave') return 0;
   const isHolidayOrSuspension = status === 'holiday' || holidayId != null;
   if (isHolidayOrSuspension && (!coverage || coverage === 'whole_day')) return 0;
@@ -126,7 +126,21 @@ async function computeUndertimeMinutes(employeeId, dateStr, timeOutIso, breakOut
   } else if (evalPm && timeOutIso) {
     clockOutMins = minutesFromMidnightInTimeZone(timeOutIso);
   }
-  if (clockOutMins == null) return 0;
+  if (clockOutMins == null) {
+    // Incomplete record: employee clocked in but never clocked out.
+    const hasClockIn = !!(timeInIso || breakInIso);
+    if (!hasClockIn) return 0;
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const isPast = dateStr < todayStr;
+    const isShiftOver = dateStr === todayStr && nowMinutes > shiftInfo.endMinutes;
+    if (isPast || isShiftOver) {
+      const startMinutes = shiftInfo.startMinutes != null ? shiftInfo.startMinutes : 0;
+      return Math.max(0, shiftInfo.endMinutes - startMinutes);
+    }
+    return 0;
+  }
   const endMinutes = shiftInfo.endMinutes;
   if (clockOutMins >= endMinutes) return 0;
   return endMinutes - clockOutMins;
@@ -409,7 +423,7 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
     let undertimeMinutes = 0;
     if (effectiveStatus !== 'on_leave') {
       lateMinutes = await computeLateMinutes(user_id, attendanceDateStr, timeIn, breakIn, effectiveStatus, holidayId, coverage);
-      undertimeMinutes = await computeUndertimeMinutes(user_id, attendanceDateStr, timeOut, breakOut, effectiveStatus, holidayId, coverage);
+      undertimeMinutes = await computeUndertimeMinutes(user_id, attendanceDateStr, timeOut, breakOut, effectiveStatus, holidayId, coverage, timeIn, breakIn);
     }
 
     let existing;

@@ -97,12 +97,14 @@ class ApiLeaveRepository implements LeaveRepository {
   Future<List<LeaveRequest>> listMyRequests(
     String userId, {
     LeaveRequestStatus? status,
+    int? limit,  // #13: pagination
   }) async {
     // userId is inferred from JWT on backend; we keep signature for compatibility.
     final res = await ApiClient.instance.get<List<dynamic>>(
       '/api/leave/my',
       queryParameters: {
         if (status != null) 'status': status.value,
+        if (limit != null) 'limit': limit,
       },
     );
     final data = res.data ?? const [];
@@ -113,15 +115,10 @@ class ApiLeaveRepository implements LeaveRepository {
   Future<List<LeaveRequest>> listRequests({
     LeaveRequestQuery query = const LeaveRequestQuery(),
   }) async {
+    // #11: use toQueryParams() to wire all filter fields including date ranges.
     final res = await ApiClient.instance.get<List<dynamic>>(
       '/api/leave',
-      queryParameters: {
-        if (query.status != null) 'status': query.status!.value,
-        if (query.leaveType != null) 'leave_type': query.leaveType!.value,
-        if (query.userId != null && query.userId!.isNotEmpty)
-          'user_id': query.userId,
-        if (query.limit != null) 'limit': query.limit,
-      },
+      queryParameters: query.toQueryParams(),
     );
     final data = res.data ?? const [];
     return data.map((e) => LeaveRequest.fromJson(_asMap(e))).toList();
@@ -168,6 +165,24 @@ class ApiLeaveRepository implements LeaveRepository {
         '/api/leave/${input.requestId}/approve',
         data: {
           'reviewer_remarks': input.hrRemarks,
+        },
+      );
+      final data = res.data;
+      if (data == null) throw Exception('No data returned');
+      return LeaveRequest.fromJson(data);
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  /// #15: Revoke an approved leave (admin only).
+  @override
+  Future<LeaveRequest> revokeApproval(LeaveReviewDecisionInput input) async {
+    try {
+      final res = await ApiClient.instance.patch<Map<String, dynamic>>(
+        '/api/leave/${input.requestId}/revoke',
+        data: {
+          'reviewer_remarks': input.reason ?? input.hrRemarks,
         },
       );
       final data = res.data;

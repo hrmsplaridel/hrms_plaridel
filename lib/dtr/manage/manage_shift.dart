@@ -494,14 +494,14 @@ class _ManageShiftState extends State<ManageShift> {
                         Expanded(
                           flex: 1,
                           child: Text(
-                            _timeStr(s.startTime, includeSeconds: false),
+                            s.startTime.format(context),
                             style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
                           ),
                         ),
                         Expanded(
                           flex: 1,
                           child: Text(
-                            _timeStr(s.endTime, includeSeconds: false),
+                            s.endTime.format(context),
                             style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
                           ),
                         ),
@@ -712,7 +712,7 @@ class _ManageShiftState extends State<ManageShift> {
                 suffixIcon: Icon(Icons.access_time_rounded, size: 20, color: AppTheme.textSecondary),
               ),
               child: Text(
-                value != null ? _timeStr(value, includeSeconds: false) : '',
+                value != null ? value.format(context) : '',
                 style: TextStyle(
                   fontSize: 14,
                   color: value != null ? AppTheme.textPrimary : AppTheme.textSecondary,

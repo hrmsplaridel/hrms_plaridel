@@ -281,9 +281,9 @@ ON CONFLICT (name) DO NOTHING;
 CREATE TABLE IF NOT EXISTS leave_requests (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  -- For forward compatibility with Flutter model + API payloads.
-  -- Keep employee_id as the canonical FK used across existing DTR queries.
-  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  -- user_id mirrors employee_id. Both are written on every INSERT.
+  -- NOT NULL enforced here so fresh installs match the Phase 3 migration constraint.
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   leave_type_id UUID REFERENCES leave_types(id) ON DELETE SET NULL,
 
   start_date DATE NOT NULL,
@@ -325,6 +325,8 @@ CREATE TABLE IF NOT EXISTS leave_requests (
 CREATE TABLE IF NOT EXISTS leave_balances (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  -- leave_type must match a value in leave_types(name).
+  -- FK enforces referential integrity; CHECK is a belt-and-suspenders guard.
   leave_type TEXT NOT NULL,
   earned_days NUMERIC(8,2) NOT NULL DEFAULT 0 CHECK (earned_days >= 0),
   used_days NUMERIC(8,2) NOT NULL DEFAULT 0 CHECK (used_days >= 0),
@@ -334,9 +336,49 @@ CREATE TABLE IF NOT EXISTS leave_balances (
   last_accrual_date DATE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE(user_id, leave_type)
+  UNIQUE(user_id, leave_type),
+  CONSTRAINT fk_leave_balances_leave_type
+    FOREIGN KEY (leave_type) REFERENCES leave_types(name)
+    ON UPDATE CASCADE
+    ON DELETE RESTRICT
+    DEFERRABLE INITIALLY DEFERRED,
+  CONSTRAINT chk_leave_balances_leave_type CHECK (
+    leave_type IN (
+      'vacationLeave',
+      'mandatoryForcedLeave',
+      'sickLeave',
+      'maternityLeave',
+      'paternityLeave',
+      'specialPrivilegeLeave',
+      'soloParentLeave',
+      'studyLeave',
+      'tenDayVawcLeave',
+      'rehabilitationPrivilege',
+      'specialLeaveBenefitsForWomen',
+      'specialEmergencyCalamityLeave',
+      'adoptionLeave',
+      'others'
+    )
+  )
 );
 CREATE INDEX IF NOT EXISTS idx_leave_balances_user_id ON leave_balances(user_id);
+
+-- =========================================
+-- LEAVE REQUEST HISTORY (AUDIT TRAIL)
+-- =========================================
+CREATE TABLE IF NOT EXISTS leave_request_history (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  leave_request_id UUID NOT NULL REFERENCES leave_requests(id) ON DELETE CASCADE,
+  action TEXT NOT NULL,
+  from_status TEXT,
+  to_status TEXT NOT NULL,
+  acted_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  acted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  remarks TEXT,
+  metadata_json JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_leave_request_history_leave_request_id
+  ON leave_request_history(leave_request_id);
 
 -- =========================================
 -- BIOMETRIC ATTENDANCE LOGS (raw import from .dat files)
@@ -527,8 +569,15 @@ CREATE INDEX IF NOT EXISTS idx_holidays_holiday_date ON holidays(holiday_date);
 CREATE INDEX IF NOT EXISTS idx_holidays_type ON holidays(holiday_type);
 
 CREATE INDEX IF NOT EXISTS idx_leave_requests_employee_id ON leave_requests(employee_id);
+CREATE INDEX IF NOT EXISTS idx_leave_requests_user_id ON leave_requests(user_id);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_status ON leave_requests(status);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_dates ON leave_requests(start_date, end_date);
+
+-- Phase 3 Fix #8: Prevent duplicate pending/approved requests on the same date range.
+-- PARTIAL so draft/returned/cancelled records are not affected.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_leave_requests_no_overlap
+ON leave_requests (user_id, start_date, end_date)
+WHERE status IN ('pending', 'approved');
 
 CREATE INDEX IF NOT EXISTS idx_biometric_attendance_logs_user_id ON biometric_attendance_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_biometric_attendance_logs_logged_at ON biometric_attendance_logs(logged_at);

@@ -24,8 +24,7 @@ if env_path.exists():
             k, _, v = line.partition("=")
             os.environ.setdefault(k.strip(), v.strip())
 
-DEVICE_IP = os.environ.get("ZK_DEVICE_IP", "192.168.254.201")
-DEVICE_PORT = int(os.environ.get("ZK_DEVICE_PORT", "4370"))
+# Removed fallback single IP from .env so we query the db instead.
 POLL_INTERVAL = int(os.environ.get("ZK_POLL_INTERVAL", "10"))
 API_URL = os.environ.get("HRMS_API_URL", "http://localhost:3000").rstrip("/")
 API_KEY = os.environ.get("BIO_SYNC_API_KEY")
@@ -34,29 +33,53 @@ TIMEOUT = 60
 # Device stores local time. Use same as HRMS (Asia/Manila = UTC+8). Do NOT use Z (UTC).
 TZ_OFFSET = os.environ.get("ZK_TIMEZONE_OFFSET", "+08:00")
 
-def load_last_sync():
+def load_last_sync(ip):
     if STATE_FILE.exists():
         try:
             d = json.loads(STATE_FILE.read_text())
-            return d.get("lastRecordTime")
+            ip_data = d.get(ip, {})
+            return ip_data.get("lastRecordTime")
         except Exception:
             pass
     return None
 
-def save_last_sync(iso_str):
+def save_last_sync(ip, iso_str):
     try:
-        STATE_FILE.write_text(json.dumps({
-            "lastRecordTime": iso_str,
-            "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
-        }))
+        d = {}
+        if STATE_FILE.exists():
+            try:
+                d = json.loads(STATE_FILE.read_text())
+            except Exception:
+                pass
+        
+        if ip not in d:
+            d[ip] = {}
+        
+        d[ip]["lastRecordTime"] = iso_str
+        d[ip]["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+        STATE_FILE.write_text(json.dumps(d, indent=2))
     except Exception as e:
-        print(f"[zkteco-sync-py] Could not save state: {e}")
+        print(f"[zkteco-sync-py] Could not save state for {ip}: {e}")
 
-def sync_once():
+def get_devices():
+    import requests
+    try:
+        r = requests.get(
+            f"{API_URL}/api/biometric-attendance-logs/devices",
+            headers={"X-Api-Key": API_KEY},
+            timeout=10,
+        )
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        print(f"[zkteco-sync-py] Failed to fetch devices: {e}")
+        return []
+
+def sync_once(ip, port=4370):
     import requests
     from zk import ZK
 
-    last = load_last_sync()
+    last = load_last_sync(ip)
     last_dt = None
     if last:
         try:
@@ -66,7 +89,7 @@ def sync_once():
             pass
 
     conn = None
-    zk = ZK(DEVICE_IP, port=DEVICE_PORT, timeout=TIMEOUT)
+    zk = ZK(ip, port=port, timeout=TIMEOUT)
 
     try:
         conn = zk.connect()
@@ -78,7 +101,7 @@ def sync_once():
         conn.disconnect()
         conn = None
     except Exception as e:
-        print(f"[zkteco-sync-py] Device error: {e}")
+        print(f"[zkteco-sync-py] Device error ({ip}): {e}")
         if conn:
             try:
                 conn.enable_device()
@@ -110,7 +133,7 @@ def sync_once():
     if not punches:
         return {"pushed": 0}
 
-    payload = {"punches": punches, "source_name": f"zkteco-sync-py-{DEVICE_IP}"}
+    payload = {"punches": punches, "source_name": f"zkteco-sync-py-{ip}"}
     try:
         r = requests.post(
             f"{API_URL}/api/biometric-attendance-logs/push",
@@ -121,10 +144,10 @@ def sync_once():
         r.raise_for_status()
         body = r.json()
         if latest_ts and hasattr(latest_ts, "strftime"):
-            save_last_sync(latest_ts.strftime(f"%Y-%m-%dT%H:%M:%S.000{TZ_OFFSET}"))
+            save_last_sync(ip, latest_ts.strftime(f"%Y-%m-%dT%H:%M:%S.000{TZ_OFFSET}"))
         return body
     except Exception as e:
-        print(f"[zkteco-sync-py] Push error: {e}")
+        print(f"[zkteco-sync-py] Push error ({ip}): {e}")
         return None
 
 def main():
@@ -139,17 +162,24 @@ def main():
         print(f"[zkteco-sync-py] Install deps: pip install pyzk requests")
         sys.exit(1)
 
-    print("[zkteco-sync-py] Starting sync service")
-    print(f"[zkteco-sync-py] Device: {DEVICE_IP}:{DEVICE_PORT}")
+    print("[zkteco-sync-py] Starting multi-device sync service")
     print(f"[zkteco-sync-py] API: {API_URL}")
     print(f"[zkteco-sync-py] Poll interval: {POLL_INTERVAL}s")
     print("---")
 
     try:
         while True:
-            result = sync_once()
-            if result and (result.get("inserted", 0) or result.get("duplicates_skipped", 0) or result.get("skipped_unmatched", 0)):
-                print(f"[zkteco-sync-py] Pushed: {result.get('inserted', 0)}, duplicates: {result.get('duplicates_skipped', 0)}, unmatched: {result.get('skipped_unmatched', 0)}")
+            devices = get_devices()
+            if not devices:
+                print("[zkteco-sync-py] No active devices found in database. Waiting...")
+            
+            for dev in devices:
+                ip = dev.get("ip_address")
+                if not ip: continue
+                # You can safely extract port if you prefer storing it in DB, default 4370
+                result = sync_once(ip)
+                if result and (result.get("inserted", 0) or result.get("duplicates_skipped", 0) or result.get("skipped_unmatched", 0)):
+                    print(f"[zkteco-sync-py] Sync {ip} -> Pushed: {result.get('inserted', 0)}, duplicates: {result.get('duplicates_skipped', 0)}, unmatched: {result.get('skipped_unmatched', 0)}")
             time.sleep(POLL_INTERVAL)
     except KeyboardInterrupt:
         print("\n[zkteco-sync-py] Stopped")

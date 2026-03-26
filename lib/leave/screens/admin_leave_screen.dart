@@ -11,6 +11,7 @@ import '../leave_repository.dart';
 import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
+import 'leave_request_print_layout.dart';
 import '../widgets/leave_request_card.dart';
 import '../widgets/leave_status_chip.dart';
 
@@ -43,6 +44,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
   LeaveRequest? _selectedRequest;
   LeaveRequestStatus? _statusFilter = LeaveRequestStatus.pending;
   LeaveType? _leaveTypeFilter;
+  // #11: Date range filters.
+  DateTime? _startDateFrom;
+  DateTime? _startDateTo;
 
   @override
   void didChangeDependencies() {
@@ -95,6 +99,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
         _FilterBar(
           status: _statusFilter,
           leaveType: _leaveTypeFilter,
+          startDateFrom: _startDateFrom,
+          startDateTo: _startDateTo,
           onStatusChanged: (value) {
             setState(() => _statusFilter = value);
             _loadRequests();
@@ -103,10 +109,20 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
             setState(() => _leaveTypeFilter = value);
             _loadRequests();
           },
+          onStartDateFromChanged: (value) {
+            setState(() => _startDateFrom = value);
+            _loadRequests();
+          },
+          onStartDateToChanged: (value) {
+            setState(() => _startDateTo = value);
+            _loadRequests();
+          },
           onReset: () {
             setState(() {
               _statusFilter = LeaveRequestStatus.pending;
               _leaveTypeFilter = null;
+              _startDateFrom = null;
+              _startDateTo = null;
             });
             _loadRequests();
           },
@@ -128,15 +144,22 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
                   _RequestDetailsPanel(
                     request: selected,
                     reviewing: provider.reviewing,
-                    onApprove: selected == null
+                    onApprove: selected == null ||
+                            selected.status != LeaveRequestStatus.pending
                         ? null
                         : () => _approve(selected),
-                    onReturn: selected == null
+                    onReturn: selected == null ||
+                            selected.status != LeaveRequestStatus.pending
                         ? null
                         : () => _returnRequest(selected),
-                    onReject: selected == null
+                    onReject: selected == null ||
+                            selected.status != LeaveRequestStatus.pending
                         ? null
                         : () => _rejectRequest(selected),
+                    onRevoke: selected == null ||
+                            selected.status != LeaveRequestStatus.approved
+                        ? null
+                        : () => _revokeApproval(selected),
                   ),
                 ],
               )
@@ -161,15 +184,22 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
                     child: _RequestDetailsPanel(
                       request: selected,
                       reviewing: provider.reviewing,
-                      onApprove: selected == null
+                      onApprove: selected == null ||
+                              selected.status != LeaveRequestStatus.pending
                           ? null
                           : () => _approve(selected),
-                      onReturn: selected == null
+                      onReturn: selected == null ||
+                              selected.status != LeaveRequestStatus.pending
                           ? null
                           : () => _returnRequest(selected),
-                      onReject: selected == null
+                      onReject: selected == null ||
+                              selected.status != LeaveRequestStatus.pending
                           ? null
                           : () => _rejectRequest(selected),
+                      onRevoke: selected == null ||
+                              selected.status != LeaveRequestStatus.approved
+                          ? null
+                          : () => _revokeApproval(selected),
                     ),
                   ),
                 ],
@@ -185,7 +215,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
       query: LeaveRequestQuery(
         status: _statusFilter,
         leaveType: _leaveTypeFilter,
-        limit: 100,
+        startDateFrom: _startDateFrom,    // #11
+        startDateTo: _startDateTo,        // #11
+        limit: 200,
       ),
     );
     if (!mounted) return;
@@ -362,6 +394,49 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
     }
   }
 
+  // #15: Revoke approval.
+  Future<void> _revokeApproval(LeaveRequest request) async {
+    final input = await showDialog<LeaveReviewDecisionInput>(
+      context: context,
+      builder: (_) => _DecisionDialog(
+        title: 'Revoke Approval',
+        subtitle:
+            'This will reverse the approval: balance will be restored and DTR leave entries removed. The request returns to the employee for correction.',
+        confirmLabel: 'Revoke Approval',
+        requireReason: false,
+        request: request,
+      ),
+    );
+    if (input == null) return;
+
+    final auth = context.read<AuthProvider>();
+    final reviewerId = auth.user?.id;
+    if (reviewerId == null || reviewerId.isEmpty) {
+      _showMessage('No logged-in reviewer found.');
+      return;
+    }
+
+    final finalInput = LeaveReviewDecisionInput(
+      requestId: request.id ?? '',
+      reviewerId: reviewerId,
+      reviewerName: auth.displayName,
+      hrRemarks: input.hrRemarks,
+      reason: input.reason,
+      reviewedAt: DateTime.now(),
+    );
+
+    final result = await context.read<LeaveProvider>().revokeApproval(finalInput);
+    final ok = result != null;
+    if (!mounted) return;
+    final provider = context.read<LeaveProvider>();
+    _showMessage(
+      ok
+          ? 'Approval revoked. Leave balance restored.'
+          : (provider.error ?? 'Revoke failed.'),
+    );
+    if (ok) await _loadRequests();
+  }
+
   void _showMessage(String message) {
     ScaffoldMessenger.of(
       context,
@@ -459,6 +534,10 @@ class _FilterBar extends StatelessWidget {
     required this.onStatusChanged,
     required this.onLeaveTypeChanged,
     required this.onReset,
+    this.startDateFrom,
+    this.startDateTo,
+    this.onStartDateFromChanged,
+    this.onStartDateToChanged,
   });
 
   final LeaveRequestStatus? status;
@@ -466,6 +545,11 @@ class _FilterBar extends StatelessWidget {
   final ValueChanged<LeaveRequestStatus?> onStatusChanged;
   final ValueChanged<LeaveType?> onLeaveTypeChanged;
   final VoidCallback onReset;
+  // #11: Date range filters.
+  final DateTime? startDateFrom;
+  final DateTime? startDateTo;
+  final ValueChanged<DateTime?>? onStartDateFromChanged;
+  final ValueChanged<DateTime?>? onStartDateToChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -528,6 +612,17 @@ class _FilterBar extends StatelessWidget {
                     onChanged: onLeaveTypeChanged,
                   ),
                 ),
+                // #11: Date range pickers.
+                _DateFilterChip(
+                  label: 'From',
+                  date: startDateFrom,
+                  onChanged: onStartDateFromChanged,
+                ),
+                _DateFilterChip(
+                  label: 'To',
+                  date: startDateTo,
+                  onChanged: onStartDateToChanged,
+                ),
                 TextButton.icon(
                   onPressed: onReset,
                   icon: const Icon(Icons.filter_alt_off_rounded),
@@ -538,6 +633,46 @@ class _FilterBar extends StatelessWidget {
           );
         },
       ),
+    );
+  }
+}
+
+/// Small chip-style date picker for filter bar.
+class _DateFilterChip extends StatelessWidget {
+  const _DateFilterChip({
+    required this.label,
+    required this.date,
+    required this.onChanged,
+  });
+
+  final String label;
+  final DateTime? date;
+  final ValueChanged<DateTime?>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasDate = date != null;
+    final text = hasDate
+        ? '$label: ${date!.year}-${date!.month.toString().padLeft(2, '0')}-${date!.day.toString().padLeft(2, '0')}'
+        : label;
+    return InputChip(
+      label: Text(text, style: const TextStyle(fontSize: 13)),
+      avatar: Icon(
+        hasDate ? Icons.event_available_rounded : Icons.calendar_today_rounded,
+        size: 16,
+      ),
+      deleteIcon: hasDate ? const Icon(Icons.close_rounded, size: 14) : null,
+      onDeleted: hasDate ? () => onChanged?.call(null) : null,
+      onPressed: () async {
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: date ?? DateTime.now(),
+          firstDate: DateTime(2020),
+          lastDate: DateTime(2030),
+          helpText: 'Select $label date',
+        );
+        if (picked != null) onChanged?.call(picked);
+      },
     );
   }
 }
@@ -593,6 +728,7 @@ class _RequestDetailsPanel extends StatelessWidget {
     this.onApprove,
     this.onReturn,
     this.onReject,
+    this.onRevoke,  // #15
   });
 
   final LeaveRequest? request;
@@ -600,6 +736,7 @@ class _RequestDetailsPanel extends StatelessWidget {
   final VoidCallback? onApprove;
   final VoidCallback? onReturn;
   final VoidCallback? onReject;
+  final VoidCallback? onRevoke;  // #15
 
   @override
   Widget build(BuildContext context) {
@@ -686,24 +823,50 @@ class _RequestDetailsPanel extends StatelessWidget {
             spacing: 12,
             runSpacing: 12,
             children: [
-              FilledButton.icon(
-                onPressed: reviewing ? null : onApprove,
-                icon: const Icon(Icons.check_circle_rounded),
-                label: const Text('Approve'),
-              ),
-              OutlinedButton.icon(
-                onPressed: reviewing ? null : onReturn,
-                icon: const Icon(Icons.reply_rounded),
-                label: const Text('Return'),
-              ),
-              OutlinedButton.icon(
-                onPressed: reviewing ? null : onReject,
-                icon: const Icon(Icons.cancel_rounded),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.red.shade700,
-                  side: BorderSide(color: Colors.red.shade300),
+              if (onApprove != null)
+                FilledButton.icon(
+                  onPressed: reviewing ? null : onApprove,
+                  icon: const Icon(Icons.check_circle_rounded),
+                  label: const Text('Approve'),
                 ),
-                label: const Text('Reject'),
+              if (onReturn != null)
+                OutlinedButton.icon(
+                  onPressed: reviewing ? null : onReturn,
+                  icon: const Icon(Icons.reply_rounded),
+                  label: const Text('Return'),
+                ),
+              if (onReject != null)
+                OutlinedButton.icon(
+                  onPressed: reviewing ? null : onReject,
+                  icon: const Icon(Icons.cancel_rounded),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red.shade700,
+                    side: BorderSide(color: Colors.red.shade300),
+                  ),
+                  label: const Text('Reject'),
+                ),
+              // #15: Revoke — shown only when status is approved.
+              if (onRevoke != null)
+                OutlinedButton.icon(
+                  onPressed: reviewing ? null : onRevoke,
+                  icon: const Icon(Icons.undo_rounded),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.orange.shade800,
+                    side: BorderSide(color: Colors.orange.shade300),
+                  ),
+                  label: const Text('Revoke Approval'),
+                ),
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          LeaveRequestPrintLayout(initialRequest: request),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.print_rounded),
+                label: const Text('Print Form'),
               ),
             ],
           ),
