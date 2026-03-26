@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:collection';
-
 import 'package:flutter/foundation.dart';
 import 'models/document.dart';
 import 'models/document_history.dart';
@@ -169,6 +168,7 @@ class DocuTrackerProvider extends ChangeNotifier {
     String? roleId,
     String? userId,
     String? documentType,
+    bool userOnly = false,
   }) async {
     _loading = true;
     _error = null;
@@ -178,6 +178,7 @@ class DocuTrackerProvider extends ChangeNotifier {
         roleId: roleId,
         userId: userId,
         documentType: documentType,
+        userOnly: userOnly,
       );
     } catch (e) {
       _permissions = [];
