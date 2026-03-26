@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:dio/dio.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../data/applicants_profile.dart';
@@ -7078,9 +7080,19 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
       }
     } catch (e) {
       if (mounted) {
+        String message = 'Failed to save: $e';
+        if (e is DioException) {
+          final data = e.response?.data;
+          if (data is Map) {
+            final details = data['details'] ?? data['error'];
+            if (details != null) {
+              message = 'Failed to save: ${details.toString()}';
+            }
+          }
+        }
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+        ).showSnackBar(SnackBar(content: Text(message)));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -7365,6 +7377,143 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   bool _syncing = false;
   final ScrollController _horizontalScrollController = ScrollController();
 
+  double? _scoreFromSelectedAndCorrect({
+    required Map<String, dynamic> section,
+  }) {
+    final correctRaw = section['correct'];
+    final selectedRaw = section['selected'];
+    if (correctRaw is! List || selectedRaw is! List) return null;
+    final correct = correctRaw
+        .map((e) => e is num ? e.toInt() : int.tryParse(e.toString()) ?? -1)
+        .toList();
+    final selected = selectedRaw
+        .map((e) => e is num ? e.toInt() : int.tryParse(e.toString()) ?? -1)
+        .toList();
+    if (correct.isEmpty) return null;
+
+    int total = correct.length;
+    int correctCount = 0;
+    for (int i = 0; i < total; i++) {
+      final chosen = i < selected.length ? selected[i] : -1;
+      if (chosen == correct[i]) correctCount++;
+    }
+    return (correctCount / total) * 100.0;
+  }
+
+  Future<void> _showApplicantScoreBreakdownDialog() async {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        final hasData = _applications.isNotEmpty;
+        return AlertDialog(
+          title: const Text('Applicant Score Breakdown'),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 980, maxHeight: 460),
+            child: hasData
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: Scrollbar(
+                      thumbVisibility: true,
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.vertical,
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: DataTable(
+                            columnSpacing: 28,
+                            headingRowHeight: 44,
+                            dataRowMinHeight: 46,
+                            dataRowMaxHeight: 54,
+                            headingRowColor: MaterialStateProperty.all(
+                              AppTheme.primaryNavy.withOpacity(0.06),
+                            ),
+                            headingTextStyle: TextStyle(
+                              color: AppTheme.primaryNavy,
+                              fontWeight: FontWeight.w800,
+                            ),
+                            columns: const [
+                              DataColumn(label: Text('Applicant')),
+                              DataColumn(label: Text('General %')),
+                              DataColumn(label: Text('Math %')),
+                              DataColumn(label: Text('General Info %')),
+                              DataColumn(label: Text('Passed')),
+                            ],
+                            rows: _applications.map((app) {
+                              final exam = _examResults[app.id];
+                              double? generalScore;
+                              double? mathScore;
+                              double? infoScore;
+                              final answersJson = exam?.answersJson;
+                              if (answersJson != null) {
+                                final generalSection = answersJson['general'];
+                                final mathSection = answersJson['math'];
+                                final infoSection = answersJson['general_info'];
+                                if (generalSection is Map<String, dynamic>) {
+                                  generalScore = _scoreFromSelectedAndCorrect(
+                                    section: generalSection,
+                                  );
+                                }
+                                if (mathSection is Map<String, dynamic>) {
+                                  mathScore = _scoreFromSelectedAndCorrect(
+                                    section: mathSection,
+                                  );
+                                }
+                                if (infoSection is Map<String, dynamic>) {
+                                  infoScore = _scoreFromSelectedAndCorrect(
+                                    section: infoSection,
+                                  );
+                                }
+                              }
+
+                              final passedText = exam == null
+                                  ? 'N/A'
+                                  : (exam.passed ? 'Passed' : 'Failed');
+                              String scoreText(double? v) => v == null
+                                  ? 'N/A'
+                                  : '${v.toStringAsFixed(0)}%';
+
+                              return DataRow(
+                                cells: [
+                                  DataCell(
+                                    Text(
+                                      app.fullName,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      softWrap: true,
+                                    ),
+                                  ),
+                                  DataCell(Text(scoreText(generalScore))),
+                                  DataCell(Text(scoreText(mathScore))),
+                                  DataCell(Text(scoreText(infoScore))),
+                                  DataCell(Text(passedText)),
+                                ],
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                : const Center(
+                    child: Text(
+                      'No applicants yet.',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -7407,6 +7556,32 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
       }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _deleteApplicant(String applicationId) async {
+    // Optimistic UI: remove the row immediately.
+    if (!mounted) return;
+    setState(() {
+      _applications.removeWhere((a) => a.id == applicationId);
+      _examResults.remove(applicationId);
+      _storageFilesByAppId.remove(applicationId);
+    });
+
+    try {
+      await RecruitmentRepo.instance.deleteApplication(applicationId);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Applicant deleted.')));
+    } catch (e) {
+      if (!mounted) return;
+      // Roll back by reloading from backend/Supabase.
+      setState(() => {});
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
+      await _load();
     }
   }
 
@@ -7520,6 +7695,23 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
               icon: const Icon(Icons.refresh_rounded),
               onPressed: _loading ? null : _load,
               tooltip: 'Refresh',
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: _loading ? null : _showApplicantScoreBreakdownDialog,
+              icon: const Icon(Icons.assessment_rounded, size: 18),
+              label: const Text('View Scores'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+                side: const BorderSide(color: AppTheme.primaryNavy, width: 2),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
             ),
             Tooltip(
               message:
@@ -7818,6 +8010,8 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                               child: _DocumentReviewCell(
                                                 app: app,
                                                 onUpdated: _load,
+                                                onDeleteApplicant:
+                                                    _deleteApplicant,
                                               ),
                                             ),
                                           ),
@@ -7964,7 +8158,7 @@ class _AttachmentRow extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Expanded(
-          child: _DownloadAttachmentButton(path: path, fileName: fileName),
+          child: _AttachmentActions(path: path, fileName: fileName),
         ),
         if (onRemove != null)
           IconButton(
@@ -7983,10 +8177,15 @@ class _AttachmentRow extends StatelessWidget {
 }
 
 class _DocumentReviewCell extends StatelessWidget {
-  const _DocumentReviewCell({required this.app, required this.onUpdated});
+  const _DocumentReviewCell({
+    required this.app,
+    required this.onUpdated,
+    required this.onDeleteApplicant,
+  });
 
   final RecruitmentApplication app;
   final VoidCallback onUpdated;
+  final Future<void> Function(String applicationId) onDeleteApplicant;
 
   Future<void> _approve(BuildContext context) async {
     try {
@@ -8034,6 +8233,45 @@ class _DocumentReviewCell extends StatelessWidget {
     }
   }
 
+  Future<void> _deleteApplicant(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Delete applicant?'),
+          content: Text(
+            'This will remove ${app.fullName} and their exam results.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFC62828),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await onDeleteApplicant(app.id);
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (app.status == 'submitted') {
@@ -8063,38 +8301,85 @@ class _DocumentReviewCell extends StatelessWidget {
               minimumSize: const Size(100, 38),
             ),
           ),
+          OutlinedButton.icon(
+            onPressed: () => _deleteApplicant(context),
+            icon: const Icon(Icons.delete_outline_rounded, size: 18),
+            label: const Text('Delete'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFFC62828),
+              side: const BorderSide(color: Color(0xFFC62828), width: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              minimumSize: const Size(100, 38),
+            ),
+          ),
         ],
       );
     }
     if (app.status == 'document_approved') {
-      return Row(
-        mainAxisSize: MainAxisSize.min,
+      return Wrap(
+        spacing: 8,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          Icon(Icons.check_circle, size: 20, color: Colors.green.shade700),
-          const SizedBox(width: 6),
-          Text(
-            'Approved',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: Colors.green.shade700,
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.check_circle, size: 20, color: Colors.green.shade700),
+              const SizedBox(width: 6),
+              Text(
+                'Approved',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.green.shade700,
+                ),
+              ),
+            ],
+          ),
+          OutlinedButton.icon(
+            onPressed: () => _deleteApplicant(context),
+            icon: const Icon(Icons.delete_outline_rounded, size: 18),
+            label: const Text('Delete'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFFC62828),
+              side: const BorderSide(color: Color(0xFFC62828), width: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              minimumSize: const Size(100, 38),
             ),
           ),
         ],
       );
     }
     if (app.status == 'document_declined') {
-      return Row(
-        mainAxisSize: MainAxisSize.min,
+      return Wrap(
+        spacing: 8,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          Icon(Icons.cancel, size: 20, color: Colors.red.shade700),
-          const SizedBox(width: 6),
-          Text(
-            'Declined',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: Colors.red.shade700,
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.cancel, size: 20, color: Colors.red.shade700),
+              const SizedBox(width: 6),
+              Text(
+                'Declined',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.red.shade700,
+                ),
+              ),
+            ],
+          ),
+          OutlinedButton.icon(
+            onPressed: () => _deleteApplicant(context),
+            icon: const Icon(Icons.delete_outline_rounded, size: 18),
+            label: const Text('Delete'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFFC62828),
+              side: const BorderSide(color: Color(0xFFC62828), width: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              minimumSize: const Size(100, 38),
             ),
           ),
         ],
@@ -8104,48 +8389,263 @@ class _DocumentReviewCell extends StatelessWidget {
   }
 }
 
-class _DownloadAttachmentButton extends StatelessWidget {
-  const _DownloadAttachmentButton({required this.path, required this.fileName});
+/// Preview (opens dialog on web) + explicit Download for applicant files.
+class _AttachmentActions extends StatelessWidget {
+  const _AttachmentActions({required this.path, required this.fileName});
 
   final String path;
   final String fileName;
 
-  Future<void> _onTap(BuildContext context) async {
-    final url = await RecruitmentRepo.instance.getAttachmentDownloadUrl(path);
+  Future<String?> _resolveUrl() => RecruitmentRepo.instance
+      .getAttachmentDownloadUrl(path, fileName: fileName);
+
+  Future<void> _preview(BuildContext context) async {
+    final url = await _resolveUrl();
     if (url != null && context.mounted) {
+      if (kIsWeb) {
+        _showAttachmentPreviewDialog(context, url: url, fileName: fileName);
+        return;
+      }
+
       final uri = Uri.parse(url);
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       }
     } else if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not get download link')),
+        const SnackBar(
+          content: Text(
+            'Could not create attachment link. Restart the API and set '
+            'SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY, and run rsp-storage-attachment-policy.sql.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _download(BuildContext context) async {
+    final url = await _resolveUrl();
+    if (url != null && context.mounted) {
+      final uri = Uri.parse(url).replace(
+        queryParameters: {
+          ...Uri.parse(url).queryParameters,
+          'download': '1',
+        },
+      );
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+    } else if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not get download link.')),
       );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: fileName,
-      child: TextButton.icon(
-        onPressed: () => _onTap(context),
-        icon: const Icon(Icons.download_rounded, size: 18),
-        label: SizedBox(
-          width: 240,
-          child: Text(
-            fileName,
-            overflow: TextOverflow.ellipsis,
-            maxLines: 1,
-            style: const TextStyle(fontSize: 13),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Expanded(
+          child: Tooltip(
+            message: 'Preview — $fileName',
+            child: TextButton.icon(
+              onPressed: () => _preview(context),
+              icon: const Icon(Icons.visibility_outlined, size: 18),
+              label: SizedBox(
+                width: 200,
+                child: Text(
+                  fileName,
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                  style: const TextStyle(fontSize: 13),
+                ),
+              ),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                alignment: Alignment.centerLeft,
+              ),
+            ),
           ),
         ),
-        style: TextButton.styleFrom(
-          foregroundColor: AppTheme.primaryNavy,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          alignment: Alignment.centerLeft,
+        IconButton(
+          tooltip: 'Download / open in new tab',
+          onPressed: () => _download(context),
+          icon: const Icon(Icons.download_rounded, size: 20),
+          style: IconButton.styleFrom(
+            foregroundColor: AppTheme.primaryNavy,
+            padding: const EdgeInsets.all(4),
+            minimumSize: const Size(32, 32),
+          ),
         ),
-      ),
+      ],
     );
   }
+}
+
+bool _isImageExt(String ext) {
+  return const <String>[
+    'png',
+    'jpg',
+    'jpeg',
+    'gif',
+    'webp',
+    'bmp',
+  ].contains(ext.toLowerCase());
+}
+
+String _extractExt(String fileName) {
+  final lower = fileName.toLowerCase();
+  final dot = lower.lastIndexOf('.');
+  if (dot == -1 || dot == lower.length - 1) return '';
+  return lower.substring(dot + 1);
+}
+
+/// Same UX as L&D Training Daily Report attachment preview (Image.network + actions).
+void _showAttachmentPreviewDialog(
+  BuildContext context, {
+  required String url,
+  required String fileName,
+}) {
+  final ext = _extractExt(fileName);
+  final isImage = _isImageExt(ext);
+  final downloadUri = Uri.parse(url).replace(
+    queryParameters: {
+      ...Uri.parse(url).queryParameters,
+      'download': '1',
+    },
+  );
+
+  showDialog<void>(
+    context: context,
+    builder: (ctx) {
+      return Dialog(
+        insetPadding: const EdgeInsets.all(24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 900, maxHeight: 700),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Attachment preview',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Close',
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: isImage
+                        ? InteractiveViewer(
+                            minScale: 0.5,
+                            maxScale: 4,
+                            child: Image.network(
+                              url,
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, __, ___) => Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Text(
+                                      'Preview for this file type is not supported.',
+                                      style: TextStyle(fontSize: 13),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    TextButton.icon(
+                                      onPressed: () async {
+                                        await launchUrl(
+                                          Uri.parse(url),
+                                          mode:
+                                              LaunchMode.externalApplication,
+                                        );
+                                      },
+                                      icon: const Icon(
+                                        Icons.open_in_new_rounded,
+                                        size: 18,
+                                      ),
+                                      label: const Text('Open in new tab'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          )
+                        : Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Text(
+                                  'Preview for this file type is not supported.',
+                                  style: TextStyle(fontSize: 13),
+                                ),
+                                const SizedBox(height: 8),
+                                TextButton.icon(
+                                  onPressed: () async {
+                                    await launchUrl(
+                                      Uri.parse(url),
+                                      mode: LaunchMode.externalApplication,
+                                    );
+                                  },
+                                  icon: const Icon(
+                                    Icons.open_in_new_rounded,
+                                    size: 18,
+                                  ),
+                                  label: const Text('Open in new tab'),
+                                ),
+                              ],
+                            ),
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton.icon(
+                      onPressed: () async {
+                        await launchUrl(
+                          downloadUri,
+                          mode: LaunchMode.externalApplication,
+                        );
+                      },
+                      icon: const Icon(Icons.download_rounded, size: 18),
+                      label: const Text('Download'),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton.icon(
+                      onPressed: () async {
+                        await launchUrl(
+                          Uri.parse(url),
+                          mode: LaunchMode.externalApplication,
+                        );
+                      },
+                      icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                      label: const Text('Open file'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+  );
 }

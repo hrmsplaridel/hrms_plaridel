@@ -20,6 +20,10 @@ const calendarRoutes = require('./routes/calendar');
 const dtrDailySummaryRoutes = require('./routes/dtrDailySummary');
 const docutrackerRoutes = require('./routes/docutracker');
 const trainingDailyReportsRoutes = require('./routes/trainingDailyReports');
+const rspJobVacanciesRoutes = require('./routes/rspJobVacancies');
+const rspExamQuestionsRoutes = require('./routes/rspExamQuestions');
+const rspApplicationsRoutes = require('./routes/rspApplications');
+const rspStorageRoutes = require('./routes/rspStorage');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -76,6 +80,10 @@ app.use('/api/calendar', calendarRoutes);
 app.use('/api/dtr-daily-summary', dtrDailySummaryRoutes);
 app.use('/api/docutracker', docutrackerRoutes);
 app.use('/api/training-daily-reports', trainingDailyReportsRoutes);
+app.use('/api/rsp/job-vacancies', rspJobVacanciesRoutes);
+app.use('/api/rsp/exam-questions', rspExamQuestionsRoutes);
+app.use('/api/rsp/applications', rspApplicationsRoutes);
+app.use('/api/rsp/storage', rspStorageRoutes);
 
 // --- Start server ---
 app.listen(PORT, HOST, () => {
@@ -88,4 +96,9 @@ app.listen(PORT, HOST, () => {
   console.log('  API  /api/departments  /api/positions  /api/shifts');
   console.log('  API  /api/assignments  /api/employees');
   console.log('  POST /api/upload/avatar  GET /api/files/avatar/:userId');
+  console.log('  PUT  /api/rsp/job-vacancies  - update landing page hirings');
+  console.log('  PUT  /api/rsp/exam-questions/:examType - admin save exam questions');
+  console.log('  DELETE /api/rsp/applications/:applicationId - admin delete applicant');
+  console.log('  GET  /api/rsp/storage/view-token - admin token for /api/files/recruitment-attachment');
+  console.log('  GET  /api/rsp/storage/signed-url - admin signed attachment URL (service role)');
 });

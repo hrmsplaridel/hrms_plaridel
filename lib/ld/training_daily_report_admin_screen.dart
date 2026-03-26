@@ -116,47 +116,67 @@ class _TrainingDailyReportAdminScreenState
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'Monitor daily reports from employees under training',
+                    'Training Daily Reports',
                     style: TextStyle(
                       color: AppTheme.textPrimary,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.3,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 6),
                   Text(
-                    'Search by employee name or report title, preview attachments, and mark reports as seen.',
+                    'Monitor daily reports from employees under training, review attachments, and mark them as seen.',
                     style: TextStyle(
                       color: AppTheme.textSecondary,
-                      fontSize: 13,
+                      fontSize: 14,
+                      height: 1.4,
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 20),
                   Row(
                     children: [
                       Expanded(
                         child: TextField(
                           controller: _searchController,
                           decoration: InputDecoration(
-                            labelText: 'Search',
-                            hintText: 'Employee name or report title',
-                            prefixIcon: const Icon(Icons.search_rounded),
+                            hintText: 'Search',
+                            prefixIcon: Icon(
+                              Icons.search_rounded,
+                              color: AppTheme.textSecondary.withOpacity(0.8),
+                              size: 22,
+                            ),
+                            filled: true,
+                            fillColor: Colors.white,
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(
+                                color: Colors.black.withOpacity(0.08),
+                              ),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(
+                                color: Colors.black.withOpacity(0.08),
+                              ),
                             ),
                             contentPadding: const EdgeInsets.symmetric(
                               horizontal: 16,
-                              vertical: 12,
+                              vertical: 14,
                             ),
                           ),
                           onSubmitted: (_) => _load(),
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      IconButton(
+                      const SizedBox(width: 12),
+                      IconButton.filled(
                         tooltip: 'Refresh',
                         onPressed: _load,
-                        icon: const Icon(Icons.refresh_rounded),
+                        style: IconButton.styleFrom(
+                          backgroundColor: Colors.grey.shade100,
+                          foregroundColor: AppTheme.textPrimary,
+                        ),
+                        icon: const Icon(Icons.refresh_rounded, size: 22),
                       ),
                     ],
                   ),
@@ -164,19 +184,30 @@ class _TrainingDailyReportAdminScreenState
                   Expanded(
                     child: _loading
                         ? const Center(child: CircularProgressIndicator())
-                        : _reports.isEmpty
+                            : _reports.isEmpty
                             ? Center(
-                                child: Text(
-                                  'No training daily reports found.',
-                                  style: TextStyle(
-                                    color: AppTheme.textSecondary,
-                                    fontSize: 13,
-                                  ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.assignment_outlined,
+                                      size: 48,
+                                      color: AppTheme.textSecondary
+                                          .withOpacity(0.5),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      'No training daily reports found.',
+                                      style: TextStyle(
+                                        color: AppTheme.textSecondary,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               )
-                            : _ReportsTable(
+                            : _ReportsList(
                                 reports: _reports,
-                                isWide: isWide,
                                 onMarkSeen: _markSeen,
                               ),
                   ),
@@ -190,304 +221,226 @@ class _TrainingDailyReportAdminScreenState
   }
 }
 
-class _ReportsTable extends StatelessWidget {
-  const _ReportsTable({
+void _showAttachmentPreview(BuildContext context, String url) {
+  showDialog<void>(
+    context: context,
+    builder: (ctx) {
+      return Dialog(
+        insetPadding: const EdgeInsets.all(24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 900, maxHeight: 700),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Attachment preview',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Close',
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: InteractiveViewer(
+                      minScale: 0.5,
+                      maxScale: 4,
+                      child: Image.network(
+                        url,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) => Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Text(
+                                'Preview for this file type is not supported.',
+                                style: TextStyle(fontSize: 13),
+                              ),
+                              const SizedBox(height: 8),
+                              TextButton.icon(
+                                onPressed: () async {
+                                  final uri = Uri.parse(url);
+                                  await launchUrl(
+                                    uri,
+                                    mode: LaunchMode.externalApplication,
+                                  );
+                                },
+                                icon: const Icon(
+                                  Icons.open_in_new_rounded,
+                                  size: 18,
+                                ),
+                                label: const Text('Open in new tab'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+  );
+}
+
+class _ReportsList extends StatelessWidget {
+  const _ReportsList({
     required this.reports,
-    required this.isWide,
     required this.onMarkSeen,
   });
 
   final List<TrainingDailyReport> reports;
-  final bool isWide;
   final void Function(TrainingDailyReport) onMarkSeen;
 
   @override
   Widget build(BuildContext context) {
-    Future<void> showAttachmentPreview(String url) async {
-      await showDialog<void>(
-        context: context,
-        builder: (ctx) {
-          return Dialog(
-            insetPadding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(
-                maxWidth: 900,
-                maxHeight: 700,
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          'Attachment preview',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: 'Close',
-                          onPressed: () => Navigator.of(ctx).pop(),
-                          icon: const Icon(Icons.close),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Expanded(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: InteractiveViewer(
-                          minScale: 0.5,
-                          maxScale: 4,
-                          child: Image.network(
-                            url,
-                            fit: BoxFit.contain,
-                            errorBuilder: (_, __, ___) => Center(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Text(
-                                    'Preview for this file type is not supported.',
-                                    style: TextStyle(fontSize: 13),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  TextButton.icon(
-                                    onPressed: () async {
-                                      final uri = Uri.parse(url);
-                                      await launchUrl(
-                                        uri,
-                                        mode: LaunchMode.externalApplication,
-                                      );
-                                    },
-                                    icon: const Icon(
-                                      Icons.open_in_new_rounded,
-                                      size: 18,
-                                    ),
-                                    label: const Text('Open in new tab'),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
-      );
-    }
+    return ListView.separated(
+      itemCount: reports.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 12),
+      itemBuilder: (context, index) {
+        final r = reports[index];
+        return _ReportCard(
+          report: r,
+          onViewFile: r.attachmentUrl != null
+              ? () => _showAttachmentPreview(context, r.attachmentUrl!)
+              : null,
+          onMarkSeen: () => onMarkSeen(r),
+        );
+      },
+    );
+  }
+}
 
-    if (!isWide) {
-      return ListView.builder(
-        itemCount: reports.length,
-        itemBuilder: (context, index) {
-          final r = reports[index];
-          return Card(
-            margin: const EdgeInsets.only(bottom: 10),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
-            elevation: 1.5,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              r.employeeName ?? 'Unknown employee',
-                              style: TextStyle(
-                                color: AppTheme.textPrimary,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 14,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              r.title,
-                              style: TextStyle(
-                                color: AppTheme.textSecondary,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      _StatusChip(status: r.status),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  if (r.description != null && r.description!.trim().isNotEmpty)
-                    Text(
-                      r.description!,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 12,
-                      ),
-                    )
-                  else
-                    Text(
-                      'No description provided.',
-                      style: TextStyle(
-                        color: AppTheme.textSecondary.withOpacity(0.8),
-                        fontSize: 12,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.schedule_rounded,
-                        size: 14,
-                        color: AppTheme.textSecondary,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Submitted ${r.submittedAt.toLocal()}',
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (r.attachmentUrl != null) ...[
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.attachment_rounded,
-                          size: 16,
-                          color: AppTheme.textSecondary,
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            r.attachmentName ?? 'Attachment uploaded',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      if (r.attachmentUrl != null)
-                        TextButton.icon(
-                          onPressed: () {
-                            final url = r.attachmentUrl;
-                            if (url == null) return;
-                            showAttachmentPreview(url);
-                          },
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 6,
-                            ),
-                          ),
-                          icon: const Icon(Icons.visibility_outlined, size: 18),
-                          label: const Text('View file'),
-                        ),
-                      const Spacer(),
-                      TextButton(
-                        onPressed: () => onMarkSeen(r),
-                        child: const Text('Mark as seen'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      );
-    }
+class _ReportCard extends StatelessWidget {
+  const _ReportCard({
+    required this.report,
+    this.onViewFile,
+    required this.onMarkSeen,
+  });
 
-    // Wide: table layout.
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        headingRowHeight: 40,
-        dataRowHeight: 56,
-        columns: const [
-          DataColumn(label: Text('Employee')),
-          DataColumn(label: Text('Report title')),
-          DataColumn(label: Text('Description')),
-          DataColumn(label: Text('Submitted at')),
-          DataColumn(label: Text('Attachment')),
-          DataColumn(label: Text('Status')),
-          DataColumn(label: Text('Actions')),
+  final TrainingDailyReport report;
+  final VoidCallback? onViewFile;
+  final VoidCallback onMarkSeen;
+
+  @override
+  Widget build(BuildContext context) {
+    final r = report;
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
         ],
-        rows: reports.map((r) {
-          return DataRow(
-            cells: [
-              DataCell(Text(r.employeeName ?? 'Unknown')),
-              DataCell(Text(r.title)),
-              DataCell(
-                Text(
-                  r.description ?? 'No description',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              DataCell(
-                Text(
-                  r.submittedAt.toLocal().toString(),
-                  style: const TextStyle(fontSize: 12),
-                ),
-              ),
-              DataCell(
-                r.attachmentUrl != null
-                    ? TextButton.icon(
-                        onPressed: () async {
-                          final url = r.attachmentUrl;
-                          if (url == null) return;
-                          await showAttachmentPreview(url);
-                        },
-                        icon: const Icon(Icons.visibility_outlined, size: 18),
-                        label: const Text('View file'),
-                      )
-                    : const Text(
-                        'None',
-                        style: TextStyle(fontSize: 12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      r.employeeName ?? 'Unknown employee',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
                       ),
-              ),
-              DataCell(_StatusChip(status: r.status)),
-              DataCell(
-                TextButton(
-                  onPressed: () => onMarkSeen(r),
-                  child: const Text('Mark as seen'),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      r.title,
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
                 ),
+              ),
+              const SizedBox(width: 12),
+              _StatusChip(status: r.status),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            r.description ?? 'No description provided.',
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 13,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Submitted ${r.submittedAt.toLocal()}',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              if (onViewFile != null)
+                TextButton.icon(
+                  onPressed: onViewFile,
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppTheme.primaryNavy,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                  ),
+                  icon: const Icon(Icons.visibility_outlined, size: 18),
+                  label: const Text('View file'),
+                ),
+              const Spacer(),
+              TextButton(
+                onPressed: onMarkSeen,
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.primaryNavy,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                ),
+                child: const Text('Mark as seen'),
               ),
             ],
-          );
-        }).toList(),
+          ),
+        ],
       ),
     );
   }
@@ -502,7 +455,7 @@ class _StatusChip extends StatelessWidget {
     Color color;
     switch (status.toLowerCase()) {
       case 'seen':
-        color = Colors.blueGrey;
+        color = const Color(0xFF0EA5E9);
         break;
       case 'reviewed':
         color = Colors.indigo;
@@ -518,16 +471,16 @@ class _StatusChip extends StatelessWidget {
         color = Colors.grey;
     }
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
-        color: color.withOpacity(0.12),
+        color: color.withOpacity(0.14),
       ),
       child: Text(
         status[0].toUpperCase() + status.substring(1),
         style: TextStyle(
           color: color,
-          fontSize: 11,
+          fontSize: 12,
           fontWeight: FontWeight.w600,
         ),
       ),

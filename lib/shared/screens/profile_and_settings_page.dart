@@ -15,11 +15,12 @@ class ProfileAndSettingsPage extends StatelessWidget {
     final padding = isWeb ? 32.0 : 16.0;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF0F2F5),
+      backgroundColor: const Color(0xFFF5F6FA),
       appBar: AppBar(
-        backgroundColor: AppTheme.white,
+        backgroundColor: Colors.white,
         elevation: 0,
-        scrolledUnderElevation: 1,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
           onPressed: () => Navigator.of(context).pop(),
@@ -29,8 +30,9 @@ class ProfileAndSettingsPage extends StatelessWidget {
           'Profile & Settings',
           style: TextStyle(
             color: AppTheme.textPrimary,
-            fontSize: isWeb ? 20 : 18,
-            fontWeight: FontWeight.w700,
+            fontSize: isWeb ? 22 : 20,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.3,
           ),
         ),
       ),

@@ -4,10 +4,8 @@ import '../../login/screens/login_page.dart';
 import '../../main.dart' as app;
 import '../../recruitment/screens/application_flow_page.dart';
 import '../../recruitment/screens/track_application_page.dart';
-import '../constants/app_theme.dart';
 import '../sections/header_section.dart';
 import '../sections/hero_section.dart';
-import '../sections/recruitment_process_section.dart';
 import '../sections/job_vacancies_section.dart';
 import '../sections/contact_section.dart';
 import '../sections/footer_section.dart';
@@ -27,15 +25,25 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
   final GlobalKey _headerKey = GlobalKey();
   final GlobalKey _heroKey = GlobalKey();
   final GlobalKey _jobVacanciesKey = GlobalKey();
-  final GlobalKey _recruitmentProcessKey = GlobalKey();
   final GlobalKey _contactKey = GlobalKey();
 
   late Future<JobVacancyAnnouncement> _announcementFuture;
+  final ScrollController _scrollController = ScrollController();
+  bool _didInitialScrollReset = false;
 
   @override
   void initState() {
     super.initState();
     _announcementFuture = JobVacancyAnnouncementRepo.instance.fetch();
+
+    // Ensure the landing page always opens at the hero (not scrolled down).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _didInitialScrollReset) return;
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(0);
+        _didInitialScrollReset = true;
+      }
+    });
   }
 
   @override
@@ -50,6 +58,7 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
   @override
   void dispose() {
     app.routeObserver.unsubscribe(this);
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -58,6 +67,13 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
     // User returned to this page (e.g. from admin). Refetch so job vacancy changes (toggle off, delete) are shown.
     setState(() {
       _announcementFuture = JobVacancyAnnouncementRepo.instance.fetch();
+    });
+
+    // Some platforms/browsers preserve scroll position when navigating back.
+    // Always reset to the top so the hero shows consistently.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_scrollController.hasClients) _scrollController.jumpTo(0);
     });
   }
 
@@ -73,8 +89,12 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
   }
 
   void _onApplyForJob() {
-    // Redirect to pre-application form (no registration; exam first)
-    _scrollTo(_recruitmentProcessKey);
+    // No specific vacancy selected; go directly to the recruitment form.
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const ApplicationFlowPage(),
+      ),
+    );
   }
 
   void _onTrackApplication() {
@@ -87,36 +107,47 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
     _scrollTo(_jobVacanciesKey);
   }
 
-  void _onStartApplication() {
+  void _onApplyForVacancy(JobVacancyItem vacancy) {
+    final selected = (vacancy.headline?.trim().isNotEmpty == true)
+        ? vacancy.headline!.trim()
+        : (vacancy.body?.trim().isNotEmpty == true ? vacancy.body!.trim() : null);
+
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (context) => const ApplicationFlowPage()),
+      MaterialPageRoute(
+        builder: (context) => ApplicationFlowPage(
+          selectedPositionHeadline: selected,
+        ),
+      ),
     );
   }
 
   void _onLogin() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => const LoginPage(),
-      ),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (context) => const LoginPage()));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.offWhite,
+      backgroundColor: const Color(0xFFF8FAFC),
       body: Column(
         children: [
           HeaderSection(
             key: _headerKey,
             onHomeTap: () => _scrollTo(_heroKey),
             onJobVacanciesTap: () => _scrollTo(_jobVacanciesKey),
-            onRecruitmentProcessTap: () => _scrollTo(_recruitmentProcessKey),
+            onRecruitmentProcessTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => const ApplicationFlowPage(),
+              ),
+            ),
             onContactTap: () => _scrollTo(_contactKey),
             onLoginTap: _onLogin,
           ),
           Expanded(
             child: SingleChildScrollView(
+              controller: _scrollController,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -126,9 +157,12 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
                     onTrackApplicationTap: _onTrackApplication,
                     onViewJobVacanciesTap: _onViewJobVacancies,
                   ),
+                  const SizedBox(height: 18),
                   FutureBuilder<JobVacancyAnnouncement>(
                     future: _announcementFuture,
-                    initialData: const JobVacancyAnnouncement(hasVacancies: true),
+                    initialData: const JobVacancyAnnouncement(
+                      hasVacancies: true,
+                    ),
                     builder: (context, snapshot) {
                       final a = snapshot.data ??
                           const JobVacancyAnnouncement(hasVacancies: true);
@@ -138,14 +172,13 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
                         headline: a.headline,
                         body: a.body,
                         vacancies: a.vacancies.isEmpty ? null : a.vacancies,
-                        onGoToRecruitmentTap: () =>
-                            _scrollTo(_recruitmentProcessKey),
+                        // Applicants should use the per-vacancy "Apply" buttons instead.
+                        onGoToRecruitmentTap: null,
+                        onApplyForVacancyTap: a.hasVacancies
+                            ? _onApplyForVacancy
+                            : null,
                       );
                     },
-                  ),
-                  RecruitmentProcessSection(
-                    key: _recruitmentProcessKey,
-                    onStartApplicationTap: _onStartApplication,
                   ),
                   ContactSection(key: _contactKey),
                   const FooterSection(),

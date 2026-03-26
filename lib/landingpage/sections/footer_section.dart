@@ -17,7 +17,7 @@ class FooterSection extends StatelessWidget {
         backgroundColor: AppTheme.primaryNavy,
         padding: EdgeInsets.symmetric(
           horizontal: isWide ? 80 : 24,
-          vertical: 20,
+          vertical: 28,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -27,19 +27,20 @@ class FooterSection extends StatelessWidget {
               'Municipality of Plaridel',
               style: TextStyle(
                 color: AppTheme.white,
-                fontSize: isWide ? 20 : 18,
-                fontWeight: FontWeight.w700,
+                fontSize: isWide ? 22 : 20,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.2,
               ),
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 4),
             Text(
               'Human Resource Management System (HRMS)',
               style: TextStyle(
                 color: AppTheme.white.withOpacity(0.9),
-                fontSize: 14,
+                fontSize: 15,
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 20),
             Wrap(
               alignment: WrapAlignment.center,
               spacing: 12,
@@ -86,12 +87,12 @@ class FooterSection extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 16),
             Text(
               '© ${DateTime.now().year} Municipality of Plaridel. All rights reserved.',
               style: TextStyle(
                 color: AppTheme.white.withOpacity(0.85),
-                fontSize: 12,
+                fontSize: 13,
               ),
             ),
           ],
