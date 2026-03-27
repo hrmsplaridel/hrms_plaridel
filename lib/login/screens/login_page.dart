@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'dart:ui';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/auth_provider.dart';
@@ -262,135 +263,156 @@ class _LoginFormSection extends StatelessWidget {
             child: SingleChildScrollView(
               padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 20),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 460),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.06),
-                    borderRadius: BorderRadius.circular(24),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF000000).withOpacity(0.12),
-                        blurRadius: 18,
-                        offset: const Offset(0, 8),
+                constraints: const BoxConstraints(
+                  maxWidth: 460,
+                  maxHeight: 500,
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(24),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF000000).withOpacity(0.12),
+                            blurRadius: 18,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const SizedBox(height: 0),
-                      const Text(
-                        'Welcome Back!',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 28,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Please login to your account',
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.9),
-                          fontSize: 14,
-                        ),
-                      ),
-                      const SizedBox(height: 26),
-                      _LoginTextField(
-                        controller: emailController,
-                        hint: 'Email',
-                        icon: Icons.mail_outline,
-                        nextFocusNode: passwordFocusNode,
-                      ),
-                      const SizedBox(height: 16),
-                      _PasswordTextField(
-                        controller: passwordController,
-                        focusNode: passwordFocusNode,
-                        onSubmitted: onLogin,
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          SizedBox(
-                            height: 24,
-                            width: 24,
-                            child: Checkbox(
-                              value: rememberMe,
-                              onChanged: onRememberMeChanged,
-                              activeColor: Colors.white,
-                              checkColor: const Color(0xFFD65A00),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          const Text(
-                            'Remember Me',
-                            style: TextStyle(color: Colors.white, fontSize: 14),
-                          ),
-                          const Spacer(),
-                          TextButton(
-                            onPressed: onForgotPassword,
-                            style: TextButton.styleFrom(
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
+                          const SizedBox(height: 25),
+                          Center(
+                            child: const Text(
+                              'Welcome Back!',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 28,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
-                            child: const Text('Forgot Password?'),
+                          ),
+                          const SizedBox(height: 10),
+                          Center(
+                            child: Text(
+                              'Please login to your account',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.9),
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 28),
+                          _LoginTextField(
+                            controller: emailController,
+                            hint: 'Email',
+                            icon: Icons.mail_outline,
+                            nextFocusNode: passwordFocusNode,
+                          ),
+                          const SizedBox(height: 20),
+                          _PasswordTextField(
+                            controller: passwordController,
+                            focusNode: passwordFocusNode,
+                            onSubmitted: onLogin,
+                          ),
+                          const SizedBox(height: 20),
+                          Row(
+                            children: [
+                              SizedBox(
+                                height: 24,
+                                width: 24,
+                                child: Checkbox(
+                                  value: rememberMe,
+                                  onChanged: onRememberMeChanged,
+                                  activeColor: Colors.white,
+                                  checkColor: const Color(0xFFD65A00),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              const Text(
+                                'Remember Me',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              const Spacer(),
+                              TextButton(
+                                onPressed: onForgotPassword,
+                                style: TextButton.styleFrom(
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                  ),
+                                ),
+                                child: const Text('Forgot Password?'),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 22),
+                          _LoginToHrmsButton(
+                            onPressed: isLoading ? null : onLogin,
+                            isLoading: isLoading,
+                          ),
+                          const SizedBox(height: 22),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: const [
+                              Text(
+                                '© 2026 HRMS',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                '|',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                'Privacy Policy',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                '|',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                'Terms of Use',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                      const SizedBox(height: 22),
-                      _LoginToHrmsButton(
-                        onPressed: isLoading ? null : onLogin,
-                        isLoading: isLoading,
-                      ),
-                      const SizedBox(height: 22),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: const [
-                          Text(
-                            '© 2026 HRMS',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
-                          SizedBox(width: 8),
-                          Text(
-                            '|',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
-                          SizedBox(width: 8),
-                          Text(
-                            'Privacy Policy',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
-                          SizedBox(width: 8),
-                          Text(
-                            '|',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
-                          SizedBox(width: 8),
-                          Text(
-                            'Terms of Use',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),

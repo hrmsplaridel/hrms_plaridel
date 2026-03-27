@@ -96,6 +96,8 @@ class LeaveRequest {
     this.approvedOtherDetails,
     this.reviewerId,
     this.reviewerName,
+    this.reviewerRole,
+    this.reviewerTitle,
     this.reviewedAt,
     this.createdAt,
     this.updatedAt,
@@ -144,6 +146,8 @@ class LeaveRequest {
   final String? approvedOtherDetails;
   final String? reviewerId;
   final String? reviewerName;
+  final String? reviewerRole;
+  final String? reviewerTitle;
   final DateTime? reviewedAt;
 
   final DateTime? createdAt;
@@ -198,6 +202,8 @@ class LeaveRequest {
       approvedOtherDetails: json['approved_other_details']?.toString(),
       reviewerId: json['reviewer_id']?.toString(),
       reviewerName: json['reviewer_name']?.toString(),
+      reviewerRole: json['reviewer_role']?.toString(),
+      reviewerTitle: json['reviewer_title']?.toString(),
       reviewedAt: _parseDateTime(json['reviewed_at']),
       createdAt: _parseDateTime(json['created_at']),
       updatedAt: _parseDateTime(json['updated_at']),
@@ -240,6 +246,8 @@ class LeaveRequest {
       'approved_other_details': _trimOrNull(approvedOtherDetails),
       'reviewer_id': reviewerId,
       'reviewer_name': _trimOrNull(reviewerName),
+      'reviewer_role': _trimOrNull(reviewerRole),
+      'reviewer_title': _trimOrNull(reviewerTitle),
       'reviewed_at': reviewedAt?.toIso8601String(),
       'updated_at': DateTime.now().toIso8601String(),
     };
@@ -280,6 +288,8 @@ class LeaveRequest {
     String? approvedOtherDetails,
     String? reviewerId,
     String? reviewerName,
+    String? reviewerRole,
+    String? reviewerTitle,
     DateTime? reviewedAt,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -321,6 +331,8 @@ class LeaveRequest {
       approvedOtherDetails: approvedOtherDetails ?? this.approvedOtherDetails,
       reviewerId: reviewerId ?? this.reviewerId,
       reviewerName: reviewerName ?? this.reviewerName,
+      reviewerRole: reviewerRole ?? this.reviewerRole,
+      reviewerTitle: reviewerTitle ?? this.reviewerTitle,
       reviewedAt: reviewedAt ?? this.reviewedAt,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,

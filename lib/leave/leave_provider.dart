@@ -309,9 +309,14 @@ class LeaveProvider extends ChangeNotifier {
     notifyListeners();
     try {
       final updated = await _repository.approveRequest(input);
-      _selectedRequest = updated;
-      _upsertRequest(updated);
-      return updated;
+      final merged = updated.copyWith(
+        reviewerName: updated.reviewerName ?? input.reviewerName,
+        reviewerRole: updated.reviewerRole ?? input.reviewerRole,
+        reviewerTitle: updated.reviewerTitle ?? input.reviewerTitle,
+      );
+      _selectedRequest = merged;
+      _upsertRequest(merged);
+      return merged;
     } catch (e) {
       _error = e is Exception && e.toString().startsWith('Exception: ')
           ? e.toString().replaceFirst('Exception: ', '')
@@ -330,9 +335,14 @@ class LeaveProvider extends ChangeNotifier {
     notifyListeners();
     try {
       final updated = await _repository.revokeApproval(input);
-      _selectedRequest = updated;
-      _upsertRequest(updated);
-      return updated;
+      final merged = updated.copyWith(
+        reviewerName: updated.reviewerName ?? input.reviewerName,
+        reviewerRole: updated.reviewerRole ?? input.reviewerRole,
+        reviewerTitle: updated.reviewerTitle ?? input.reviewerTitle,
+      );
+      _selectedRequest = merged;
+      _upsertRequest(merged);
+      return merged;
     } catch (e) {
       _error = e is Exception && e.toString().startsWith('Exception: ')
           ? e.toString().replaceFirst('Exception: ', '')
@@ -350,9 +360,14 @@ class LeaveProvider extends ChangeNotifier {
     notifyListeners();
     try {
       final updated = await _repository.returnRequest(input);
-      _selectedRequest = updated;
-      _upsertRequest(updated);
-      return updated;
+      final merged = updated.copyWith(
+        reviewerName: updated.reviewerName ?? input.reviewerName,
+        reviewerRole: updated.reviewerRole ?? input.reviewerRole,
+        reviewerTitle: updated.reviewerTitle ?? input.reviewerTitle,
+      );
+      _selectedRequest = merged;
+      _upsertRequest(merged);
+      return merged;
     } catch (e) {
       _error = e.toString();
       return null;
@@ -368,9 +383,14 @@ class LeaveProvider extends ChangeNotifier {
     notifyListeners();
     try {
       final updated = await _repository.rejectRequest(input);
-      _selectedRequest = updated;
-      _upsertRequest(updated);
-      return updated;
+      final merged = updated.copyWith(
+        reviewerName: updated.reviewerName ?? input.reviewerName,
+        reviewerRole: updated.reviewerRole ?? input.reviewerRole,
+        reviewerTitle: updated.reviewerTitle ?? input.reviewerTitle,
+      );
+      _selectedRequest = merged;
+      _upsertRequest(merged);
+      return merged;
     } catch (e) {
       _error = e.toString();
       return null;

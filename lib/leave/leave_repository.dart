@@ -47,6 +47,8 @@ class LeaveApprovalInput {
     required this.requestId,
     required this.reviewerId,
     this.reviewerName,
+    this.reviewerRole,
+    this.reviewerTitle,
     this.hrRemarks,
     this.recommendationRemarks,
     this.approvedDaysWithPay,
@@ -58,6 +60,8 @@ class LeaveApprovalInput {
   final String requestId;
   final String reviewerId;
   final String? reviewerName;
+  final String? reviewerRole;
+  final String? reviewerTitle;
   final String? hrRemarks;
   final String? recommendationRemarks;
   final double? approvedDaysWithPay;
@@ -72,6 +76,8 @@ class LeaveReviewDecisionInput {
     required this.requestId,
     required this.reviewerId,
     this.reviewerName,
+    this.reviewerRole,
+    this.reviewerTitle,
     this.hrRemarks,
     this.reason,
     this.reviewedAt,
@@ -80,6 +86,8 @@ class LeaveReviewDecisionInput {
   final String requestId;
   final String reviewerId;
   final String? reviewerName;
+  final String? reviewerRole;
+  final String? reviewerTitle;
   final String? hrRemarks;
   final String? reason;
   final DateTime? reviewedAt;

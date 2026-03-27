@@ -1024,6 +1024,13 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
             maxLines: 2,
             enabled: _leaveType == LeaveType.others,
           ),
+          const SizedBox(height: 12),
+          _paperSubheading('General reason/details:'),
+          _buildTextField(
+            controller: _reasonController,
+            label: 'Reason for leave application',
+            maxLines: 3,
+          ),
         ],
       ),
     );
@@ -1679,9 +1686,7 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
       final userId = request.userId;
       final balances = _employeeBalances.isNotEmpty
           ? _employeeBalances
-          : await context
-              .read<LeaveProvider>()
-              .fetchBalancesForUser(userId);
+          : await context.read<LeaveProvider>().fetchBalancesForUser(userId);
 
       await LeaveRequestPdf.printLeaveRequest(
         request: request,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../utils/open_attachment_io.dart'
     if (dart.library.html) '../utils/open_attachment_web.dart'
@@ -47,6 +48,70 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
   // #11: Date range filters.
   DateTime? _startDateFrom;
   DateTime? _startDateTo;
+
+  Future<({String name, String? title})> _loadReviewerSignatureInfo(
+    AuthProvider auth,
+  ) async {
+    final fallbackName = auth.displayName.trim().isNotEmpty
+        ? auth.displayName.trim()
+        : 'Authorized Officer';
+    final fallbackTitle = _reviewerTitleFromRole(auth.user?.role);
+    return _loadSignatureInfoByUserId(
+      userId: auth.user?.id,
+      fallbackName: fallbackName,
+      fallbackTitle: fallbackTitle,
+    );
+  }
+
+  Future<({String name, String? title})> _loadSignatureInfoByUserId({
+    required String? userId,
+    required String fallbackName,
+    String? fallbackTitle,
+  }) async {
+    if (userId == null || userId.isEmpty) {
+      return (name: fallbackName, title: fallbackTitle);
+    }
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/assignments?employee_id=$userId&status=Active',
+      );
+      final data = res.data;
+      if (data != null && data.isNotEmpty) {
+        final first = data.first as Map<String, dynamic>;
+        final assignmentName = (first['employee_name'] as String?)?.trim();
+        final assignmentTitle = (first['position_name'] as String?)?.trim();
+        return (
+          name: (assignmentName != null && assignmentName.isNotEmpty)
+              ? assignmentName
+              : fallbackName,
+          title: (assignmentTitle != null && assignmentTitle.isNotEmpty)
+              ? assignmentTitle
+              : fallbackTitle,
+        );
+      }
+    } catch (_) {
+      // Fallback to auth profile when assignment lookup is unavailable.
+    }
+    return (name: fallbackName, title: fallbackTitle);
+  }
+
+  String? _reviewerTitleFromRole(String? role) {
+    final raw = role?.trim();
+    if (raw == null || raw.isEmpty) return null;
+    final normalized = raw.toLowerCase();
+    if (normalized == 'admin' ||
+        normalized == 'hr' ||
+        normalized == 'hr_admin') {
+      return 'Authorized HR Officer';
+    }
+    if (normalized.contains('mayor')) return 'Municipal Mayor';
+    if (normalized.contains('super')) return 'Approving Authority';
+    final parts = raw.replaceAll('_', ' ').split(RegExp(r'\s+'));
+    return parts
+        .where((p) => p.isNotEmpty)
+        .map((p) => '${p[0].toUpperCase()}${p.substring(1).toLowerCase()}')
+        .join(' ');
+  }
 
   @override
   void didChangeDependencies() {
@@ -164,8 +229,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
                             selected.status != LeaveRequestStatus.approved
                         ? null
                         : () => _revokeApproval(selected),
-                    onPrint:
-                        selected == null ? null : () => _printLeaveForm(selected),
+                    onPrint: selected == null
+                        ? null
+                        : () => _printLeaveForm(selected),
                   ),
                 ],
               )
@@ -210,8 +276,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
                               selected.status != LeaveRequestStatus.approved
                           ? null
                           : () => _revokeApproval(selected),
-                      onPrint:
-                          selected == null ? null : () => _printLeaveForm(selected),
+                      onPrint: selected == null
+                          ? null
+                          : () => _printLeaveForm(selected),
                     ),
                   ),
                 ],
@@ -254,6 +321,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
 
   Future<void> _printLeaveForm(LeaveRequest request) async {
     final provider = context.read<LeaveProvider>();
+    final auth = context.read<AuthProvider>();
     if (!mounted) return;
 
     try {
@@ -270,12 +338,28 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
         }
       }
 
+      final signerInfo = await _loadSignatureInfoByUserId(
+        userId: target.reviewerId ?? auth.user?.id,
+        fallbackName: (target.reviewerName?.trim().isNotEmpty == true)
+            ? target.reviewerName!.trim()
+            : (auth.displayName.trim().isNotEmpty
+                  ? auth.displayName.trim()
+                  : 'Authorized Officer'),
+        fallbackTitle: (target.reviewerTitle?.trim().isNotEmpty == true)
+            ? target.reviewerTitle!.trim()
+            : _reviewerTitleFromRole(target.reviewerRole ?? auth.user?.role),
+      );
+      target = target.copyWith(
+        reviewerName: signerInfo.name,
+        reviewerTitle: signerInfo.title,
+      );
+
       final balances = await provider.fetchBalancesForUser(target.userId);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Preparing print...')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Preparing print...')));
       }
 
       await LeaveRequestPdf.printLeaveRequest(
@@ -285,9 +369,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Print failed: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
     }
   }
 
@@ -317,15 +401,19 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
 
     final auth = context.read<AuthProvider>();
     final reviewerId = auth.user?.id;
+    final reviewerRole = auth.user?.role;
     if (reviewerId == null || reviewerId.isEmpty) {
       _showMessage('No logged-in reviewer found.');
       return;
     }
+    final reviewerInfo = await _loadReviewerSignatureInfo(auth);
 
     final finalInput = LeaveApprovalInput(
       requestId: request.id ?? '',
       reviewerId: reviewerId,
-      reviewerName: auth.displayName,
+      reviewerName: reviewerInfo.name,
+      reviewerRole: reviewerRole,
+      reviewerTitle: reviewerInfo.title,
       hrRemarks: input.hrRemarks,
       approvedDaysWithPay: input.approvedDaysWithPay,
       approvedDaysWithoutPay: input.approvedDaysWithoutPay,
@@ -369,15 +457,19 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
 
     final auth = context.read<AuthProvider>();
     final reviewerId = auth.user?.id;
+    final reviewerRole = auth.user?.role;
     if (reviewerId == null || reviewerId.isEmpty) {
       _showMessage('No logged-in reviewer found.');
       return;
     }
+    final reviewerInfo = await _loadReviewerSignatureInfo(auth);
 
     final finalInput = LeaveReviewDecisionInput(
       requestId: request.id ?? '',
       reviewerId: reviewerId,
-      reviewerName: auth.displayName,
+      reviewerName: reviewerInfo.name,
+      reviewerRole: reviewerRole,
+      reviewerTitle: reviewerInfo.title,
       hrRemarks: input.hrRemarks,
       reason: input.reason,
       reviewedAt: DateTime.now(),
@@ -415,15 +507,19 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
 
     final auth = context.read<AuthProvider>();
     final reviewerId = auth.user?.id;
+    final reviewerRole = auth.user?.role;
     if (reviewerId == null || reviewerId.isEmpty) {
       _showMessage('No logged-in reviewer found.');
       return;
     }
+    final reviewerInfo = await _loadReviewerSignatureInfo(auth);
 
     final finalInput = LeaveReviewDecisionInput(
       requestId: request.id ?? '',
       reviewerId: reviewerId,
-      reviewerName: auth.displayName,
+      reviewerName: reviewerInfo.name,
+      reviewerRole: reviewerRole,
+      reviewerTitle: reviewerInfo.title,
       hrRemarks: input.hrRemarks,
       reason: input.reason,
       reviewedAt: DateTime.now(),
@@ -462,15 +558,19 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
 
     final auth = context.read<AuthProvider>();
     final reviewerId = auth.user?.id;
+    final reviewerRole = auth.user?.role;
     if (reviewerId == null || reviewerId.isEmpty) {
       _showMessage('No logged-in reviewer found.');
       return;
     }
+    final reviewerInfo = await _loadReviewerSignatureInfo(auth);
 
     final finalInput = LeaveReviewDecisionInput(
       requestId: request.id ?? '',
       reviewerId: reviewerId,
-      reviewerName: auth.displayName,
+      reviewerName: reviewerInfo.name,
+      reviewerRole: reviewerRole,
+      reviewerTitle: reviewerInfo.title,
       hrRemarks: input.hrRemarks,
       reason: input.reason,
       reviewedAt: DateTime.now(),
