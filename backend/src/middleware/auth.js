@@ -12,6 +12,10 @@ function authMiddleware(req, res, next) {
   const token = authHeader.replace('Bearer ', '').trim();
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
+    // Reject refresh tokens used as Bearer (access tokens use typ: 'access' or omit typ for legacy).
+    if (payload.typ === 'refresh') {
+      return res.status(401).json({ error: 'Invalid token type' });
+    }
     req.user = { id: payload.id, email: payload.email, role: payload.role };
     next();
   } catch (err) {

@@ -61,6 +61,20 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 -- =========================================
+-- AUTH REFRESH TOKENS (PERSISTENT SESSIONS)
+-- =========================================
+CREATE TABLE IF NOT EXISTS auth_refresh_tokens (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ,
+  device_info TEXT,
+  ip_address INET,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- =========================================
 -- DEPARTMENTS
 -- =========================================
 CREATE TABLE IF NOT EXISTS departments (
@@ -557,6 +571,9 @@ CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 CREATE INDEX IF NOT EXISTS idx_users_employee_number ON users(employee_number);
 CREATE INDEX IF NOT EXISTS idx_users_biometric_user_id ON users(biometric_user_id);
 CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
+CREATE INDEX IF NOT EXISTS idx_auth_refresh_tokens_user_id ON auth_refresh_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_auth_refresh_tokens_expires_at ON auth_refresh_tokens(expires_at);
+CREATE INDEX IF NOT EXISTS idx_auth_refresh_tokens_revoked_at ON auth_refresh_tokens(revoked_at);
 
 CREATE INDEX IF NOT EXISTS idx_departments_is_active ON departments(is_active);
 CREATE INDEX IF NOT EXISTS idx_departments_department_number ON departments(department_number);

@@ -32,7 +32,9 @@ class AuthProvider extends ChangeNotifier {
     final token = await TokenStorage.instance.getToken();
     if (token == null || token.isEmpty) return;
     try {
-      final res = await ApiClient.instance.get<Map<String, dynamic>>('/auth/me');
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/auth/me',
+      );
       final data = res.data;
       if (data != null) {
         _user = AppUser.fromJson(data);
@@ -40,14 +42,14 @@ class AuthProvider extends ChangeNotifier {
       }
     } on DioException catch (e) {
       if (e.response?.statusCode == 401 || e.response?.statusCode == 403) {
-        await TokenStorage.instance.clearToken();
+        await TokenStorage.instance.clearAllTokens();
       }
     } catch (_) {
-      await TokenStorage.instance.clearToken();
+      await TokenStorage.instance.clearAllTokens();
     }
   }
 
-  /// Login with email and password. Stores JWT and sets user.
+  /// Login with email and password. Stores access + refresh tokens and sets user.
   /// Returns `null` on success, or an error message String on failure.
   Future<String?> login(String email, String password) async {
     try {
@@ -61,7 +63,8 @@ class AuthProvider extends ChangeNotifier {
       final token = data['token'] as String?;
       if (token == null || token.isEmpty) return 'Invalid email or password';
 
-      await TokenStorage.instance.setToken(token);
+      final refresh = data['refreshToken'] as String?;
+      await TokenStorage.instance.setTokens(access: token, refresh: refresh);
 
       final userData = data['user'] as Map<String, dynamic>?;
       if (userData != null) {
@@ -92,7 +95,9 @@ class AuthProvider extends ChangeNotifier {
   /// Refetch current user from API (e.g. after updating profile or avatar).
   Future<void> refreshUser() async {
     try {
-      final res = await ApiClient.instance.get<Map<String, dynamic>>('/auth/me');
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/auth/me',
+      );
       final data = res.data;
       if (data != null) {
         final newUser = AppUser.fromJson(data);
@@ -109,7 +114,17 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> signOut() async {
-    await TokenStorage.instance.clearToken();
+    final refresh = await TokenStorage.instance.getRefreshToken();
+    if (refresh != null && refresh.isNotEmpty) {
+      try {
+        await ApiClient.instance.post<void>(
+          '/auth/logout',
+          data: {'refreshToken': refresh},
+          options: Options(extra: {'skipAuthRefresh': true}),
+        );
+      } catch (_) {}
+    }
+    await TokenStorage.instance.clearAllTokens();
     _user = null;
     notifyListeners();
   }

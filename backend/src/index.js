@@ -34,6 +34,11 @@ const HOST = process.env.HOST || '0.0.0.0'; // 0.0.0.0 = accessible from LAN
 if (!process.env.JWT_SECRET) {
   console.warn('[warn] JWT_SECRET not set; auth routes will fail. Add JWT_SECRET to .env');
 }
+if (!process.env.JWT_REFRESH_SECRET) {
+  console.warn(
+    '[warn] JWT_REFRESH_SECRET not set; login/register/refresh will fail. Add JWT_REFRESH_SECRET to .env',
+  );
+}
 
 if (
   !process.env.SUPABASE_URL?.trim() ||
@@ -115,6 +120,8 @@ app.listen(PORT, HOST, () => {
   console.log('  GET  /health/db        - database health');
   console.log('  POST /auth/login       - login');
   console.log('  POST /auth/register    - register');
+  console.log('  POST /auth/refresh     - new access token (refresh token body)');
+  console.log('  POST /auth/logout      - revoke refresh token');
   console.log('  GET  /auth/me          - current user (requires JWT)');
   console.log('  API  /api/departments  /api/positions  /api/shifts');
   console.log('  API  /api/assignments  /api/employees');
