@@ -240,12 +240,17 @@ class TimeRecordRepo {
   static final TimeRecordRepo instance = TimeRecordRepo._();
 
   /// List time records for admin (all users). Uses GET /api/dtr-daily-summary.
+  ///
+  /// With [startDate] and [endDate], omit [limit] to load the full merged list (all employees for
+  /// that range). Pass [limit] (+ optional [offset]) to page the *merged* result (server sets
+  /// `X-Total-Count` when [limit] is sent).
   Future<List<TimeRecord>> listForAdmin({
     DateTime? startDate,
     DateTime? endDate,
     String? userId,
     String? departmentId,
     int? limit,
+    int? offset,
   }) async {
     try {
       final params = <String, dynamic>{};
@@ -257,6 +262,7 @@ class TimeRecordRepo {
       if (departmentId != null && departmentId.isNotEmpty)
         params['department_id'] = departmentId;
       if (limit != null) params['limit'] = limit;
+      if (offset != null) params['offset'] = offset;
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/dtr-daily-summary',
         queryParameters: params,

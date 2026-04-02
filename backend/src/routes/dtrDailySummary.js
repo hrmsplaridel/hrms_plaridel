@@ -2,6 +2,11 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const {
+  expandNonRecurringToWindow,
+  expandRecurringToWindow,
+  dateInRecurringRange,
+} = require('../services/holidayRangeUtils');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -305,55 +310,71 @@ async function computeAttendanceRemark(record, shiftInfo, holidayId, leaveReques
   return 'On Time';
 }
 
+/** YYYY-MM-DD from pg date (avoid TZ shift). */
+function holidayDateToStr(v) {
+  if (v == null) return null;
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) return v.split('T')[0];
+  if (v instanceof Date) {
+    const y = v.getFullYear();
+    const m = String(v.getMonth() + 1).padStart(2, '0');
+    const d = String(v.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return String(v).split('T')[0];
+}
+
 /** Get all active holiday dates in [startStr, endStr]. Returns array of { dateStr, id, name, holiday_type, coverage }. Tolerates missing coverage column. */
 async function getHolidaysInRange(startStr, endStr) {
   if (!startStr || !endStr) return [];
   const hasCoverage = await _holidaysHasCoverageColumn();
-  const exactCols = hasCoverage ? 'id, name, holiday_type, coverage, holiday_date::text AS date_str' : 'id, name, holiday_type, holiday_date::text AS date_str';
-  const exact = await pool.query(
-    `SELECT ${exactCols} FROM holidays
-     WHERE (is_active IS NULL OR is_active = true)
-       AND holiday_date >= $1::date AND holiday_date <= $2::date`,
-    [startStr, endStr]
-  );
-  const results = exact.rows.map((r) => ({
-    dateStr: r.date_str?.slice(0, 10) || String(r.date_str),
-    id: r.id,
-    name: r.name,
-    holiday_type: r.holiday_type,
-    coverage: r.coverage || 'whole_day',
-  }));
-  const recurCols = hasCoverage ? 'id, name, holiday_type, coverage, holiday_date' : 'id, name, holiday_type, holiday_date';
-  const recurring = await pool.query(
-    `SELECT ${recurCols},
-            EXTRACT(YEAR FROM $1::date)::int AS start_year,
-            EXTRACT(YEAR FROM $2::date)::int AS end_year
+  const cov = hasCoverage ? ', coverage' : '';
+  const nonRecur = await pool.query(
+    `SELECT id, name, holiday_type, date_from, date_to, recurring${cov}
      FROM holidays
-     WHERE recurring = true AND (is_active IS NULL OR is_active = true)`,
+     WHERE (is_active IS NULL OR is_active = true)
+       AND recurring = false
+       AND date_from <= $2::date AND date_to >= $1::date`,
     [startStr, endStr]
   );
-  for (const r of recurring.rows) {
-    const month = r.holiday_date ? new Date(r.holiday_date).getMonth() + 1 : 0;
-    const day = r.holiday_date ? new Date(r.holiday_date).getDate() : 0;
-    if (!month || !day) continue;
-    const startYear = parseInt(r.start_year, 10) || new Date().getFullYear();
-    const endYear = parseInt(r.end_year, 10) || new Date().getFullYear();
-    for (let y = startYear; y <= endYear; y++) {
-      const dateStr = `${y}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      if (dateStr >= startStr && dateStr <= endStr) {
-        if (!results.some((x) => x.dateStr === dateStr)) {
-          results.push({
-            dateStr,
-            id: r.id,
-            name: r.name,
-            holiday_type: r.holiday_type,
-            coverage: r.coverage || 'whole_day',
-          });
-        }
-      }
-    }
+  const recur = await pool.query(
+    `SELECT id, name, holiday_type, date_from, date_to, recurring${cov}
+     FROM holidays
+     WHERE (is_active IS NULL OR is_active = true) AND recurring = true`
+  );
+  if (!hasCoverage) {
+    for (const r of nonRecur.rows) r.coverage = 'whole_day';
+    for (const r of recur.rows) r.coverage = 'whole_day';
   }
-  return results.sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+  const byDate = new Map();
+  function pushDate(ds, r) {
+    if (byDate.has(ds)) return;
+    byDate.set(ds, {
+      dateStr: ds,
+      id: r.id,
+      name: r.name,
+      holiday_type: r.holiday_type,
+      coverage: r.coverage || 'whole_day',
+    });
+  }
+  for (const r of nonRecur.rows) {
+    const dates = expandNonRecurringToWindow(
+      holidayDateToStr(r.date_from),
+      holidayDateToStr(r.date_to),
+      startStr,
+      endStr
+    );
+    for (const ds of dates) pushDate(ds, r);
+  }
+  for (const r of recur.rows) {
+    const dates = expandRecurringToWindow(
+      holidayDateToStr(r.date_from),
+      holidayDateToStr(r.date_to),
+      startStr,
+      endStr
+    );
+    for (const ds of dates) pushDate(ds, r);
+  }
+  return Array.from(byDate.values()).sort((a, b) => a.dateStr.localeCompare(b.dateStr));
 }
 
 /** Get approved leave dates in [startStr, endStr] for employees. Returns Set of "employeeId|YYYY-MM-DD". */
@@ -463,12 +484,16 @@ async function _holidaysHasCoverageColumn() {
   return _holidaysHasCoverageColumnCached;
 }
 
-/** Get active holiday for a date, if any. Exact date match first, then recurring (same month/day). Returns { id, name, holiday_type, coverage } or null. Tolerates missing coverage column. */
+/** Get active holiday for a date, if any. Non-recurring range match first, then recurring template. Returns { id, name, holiday_type, coverage } or null. Tolerates missing coverage column. */
 async function getHolidayByDate(dateStr) {
   const hasCoverage = await _holidaysHasCoverageColumn();
   const cols = hasCoverage ? 'id, name, holiday_type, coverage' : 'id, name, holiday_type';
   const exact = await pool.query(
-    `SELECT ${cols} FROM holidays WHERE holiday_date = $1::date AND (is_active IS NULL OR is_active = true) LIMIT 1`,
+    `SELECT ${cols} FROM holidays
+     WHERE (is_active IS NULL OR is_active = true) AND recurring = false
+       AND date_from <= $1::date AND date_to >= $1::date
+     ORDER BY date_from
+     LIMIT 1`,
     [dateStr]
   );
   if (exact.rows[0]) {
@@ -476,24 +501,25 @@ async function getHolidayByDate(dateStr) {
     return { ...r, coverage: r.coverage || 'whole_day' };
   }
   const recurring = await pool.query(
-    `SELECT ${cols} FROM holidays
-     WHERE recurring = true AND (is_active IS NULL OR is_active = true)
-       AND EXTRACT(MONTH FROM holiday_date) = EXTRACT(MONTH FROM $1::date)
-       AND EXTRACT(DAY FROM holiday_date) = EXTRACT(DAY FROM $1::date)
-     LIMIT 1`,
-    [dateStr]
+    `SELECT ${cols}, date_from, date_to FROM holidays
+     WHERE recurring = true AND (is_active IS NULL OR is_active = true)`
   );
-  if (recurring.rows[0]) {
-    const r = recurring.rows[0];
-    return { ...r, coverage: r.coverage || 'whole_day' };
+  for (const r of recurring.rows) {
+    if (dateInRecurringRange(dateStr, holidayDateToStr(r.date_from), holidayDateToStr(r.date_to))) {
+      return { id: r.id, name: r.name, holiday_type: r.holiday_type, coverage: r.coverage || 'whole_day' };
+    }
   }
   return null;
 }
 
-// GET /api/dtr-daily-summary - list for admin (filters: start_date, end_date, employee_id, department_id, limit)
+// GET /api/dtr-daily-summary - list for admin (filters: start_date, end_date, employee_id, department_id, limit, offset)
+// - No date range: `limit` applies to SQL only (default 500, max 1000), e.g. dashboard "recent" list.
+// - With start_date + end_date: SQL uses a high cap so merge/injection sees all dtr_daily_summary rows; optional
+//   `limit` + `offset` slice the *final* merged array (omit `limit` to return everyone for that range, e.g. Time Logs "all").
 router.get('/', protect, async (req, res) => {
   try {
-    const { start_date, end_date, employee_id, department_id, limit = 500 } = req.query;
+    const { start_date, end_date, employee_id, department_id, limit: limitRaw, offset: offsetRaw } = req.query;
+    const hasDateRange = !!(start_date && end_date);
     const params = [];
     const conditions = [];
     let i = 1;
@@ -524,8 +550,10 @@ router.get('/', protect, async (req, res) => {
       i += 3;
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-    const limitNum = Math.min(parseInt(limit, 10) || 500, 1000);
-    params.push(limitNum);
+    const sqlMaxRows = hasDateRange
+      ? Math.min(parseInt(req.query.sql_cap, 10) || 100000, 250000)
+      : Math.min(parseInt(limitRaw, 10) || 500, 1000);
+    params.push(sqlMaxRows);
 
     const hasCoverage = await _holidaysHasCoverageColumn();
     const joinCols = hasCoverage
@@ -634,36 +662,41 @@ router.get('/', protect, async (req, res) => {
           );
           if (u.rows[0]) userIdToName[employee_id] = u.rows[0].full_name;
         }
+      } else if (department_id && startStr && endStr) {
+        const deptEmps = await pool.query(
+          `SELECT DISTINCT u.id, u.full_name
+           FROM assignments a
+           JOIN users u ON u.id = a.employee_id AND u.is_active = true
+           WHERE a.department_id = $1
+             AND (a.is_active IS NULL OR a.is_active = true)
+             AND a.effective_from <= $2::date
+             AND (a.effective_to IS NULL OR a.effective_to >= $3::date)
+           ORDER BY u.full_name`,
+          [department_id, endStr, startStr]
+        );
+        employeeIds = deptEmps.rows.map((r) => r.id).filter(Boolean);
+        for (const r of deptEmps.rows) {
+          if (r.id && r.full_name) userIdToName[r.id] = r.full_name;
+        }
       } else {
-        const fromRows = [...new Set(rawRows.map((r) => r.employee_id).filter(Boolean))];
-        if (fromRows.length > 0) {
-          employeeIds = fromRows;
-        } else if (department_id && startStr && endStr) {
-          const deptEmps = await pool.query(
-            `SELECT DISTINCT u.id, u.full_name
-             FROM assignments a
-             JOIN users u ON u.id = a.employee_id AND u.is_active = true
-             WHERE a.department_id = $1
-               AND (a.is_active IS NULL OR a.is_active = true)
-               AND a.effective_from <= $2::date
-               AND (a.effective_to IS NULL OR a.effective_to >= $3::date)
-             ORDER BY u.full_name`,
-            [department_id, endStr, startStr]
-          );
-          employeeIds = deptEmps.rows.map((r) => r.id).filter(Boolean);
-          for (const r of deptEmps.rows) {
-            if (r.id && r.full_name) userIdToName[r.id] = r.full_name;
-          }
-        } else {
-          const allEmps = await pool.query(
-            'SELECT id, full_name FROM users WHERE is_active = true ORDER BY full_name'
-          );
-          employeeIds = allEmps.rows.map((r) => r.id).filter(Boolean);
-          for (const r of allEmps.rows) {
-            if (r.id && r.full_name) userIdToName[r.id] = r.full_name;
-          }
+        // Employees with at least one active assignment overlapping the date range (not all active users).
+        const assignedEmps = await pool.query(
+          `SELECT DISTINCT u.id, u.full_name
+           FROM assignments a
+           JOIN users u ON u.id = a.employee_id AND u.is_active = true
+           WHERE (a.is_active IS NULL OR a.is_active = true)
+             AND a.effective_from <= $1::date
+             AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
+           ORDER BY u.full_name`,
+          [endStr, startStr]
+        );
+        employeeIds = assignedEmps.rows.map((r) => r.id).filter(Boolean);
+        for (const r of assignedEmps.rows) {
+          if (r.id && r.full_name) userIdToName[r.id] = r.full_name;
         }
       }
+
+      const assignmentsByEmployee = await getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr);
 
       const holidaysInRange = await getHolidaysInRange(startStr, endStr);
       const holidayByDate = new Map();
@@ -715,7 +748,6 @@ router.get('/', protect, async (req, res) => {
       const nowMinutes = now.getHours() * 60 + now.getMinutes();
 
       const leaveKeys = await getApprovedLeaveKeysInRange(employeeIds, startStr, endStr);
-      const assignmentsByEmployee = await getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr);
 
       // Iterate by calendar date (YYYY-MM-DD) to avoid timezone shifting: e.g. "Day 14" must not show as March 13 in UTC+8.
       const startD = new Date(`${startStr}T12:00:00`); // noon avoids UTC date shift
@@ -787,11 +819,23 @@ router.get('/', protect, async (req, res) => {
         const dA = a.record_date;
         const dB = b.record_date;
         if (dA !== dB) return String(dB).localeCompare(String(dA));
-        return (b.time_in || '').localeCompare(a.time_in || '');
+        // pg may return timestamptz as Date objects; localeCompare needs strings.
+        const tInB = b.time_in != null ? String(b.time_in) : '';
+        const tInA = a.time_in != null ? String(a.time_in) : '';
+        return tInB.localeCompare(tInA);
       });
     }
 
-    res.json(rows);
+    let payload = rows;
+    if (hasDateRange && limitRaw != null && String(limitRaw).trim() !== '') {
+      const off = Math.max(0, parseInt(offsetRaw, 10) || 0);
+      const pageSize = Math.min(Math.max(1, parseInt(limitRaw, 10) || 500), 10000);
+      res.setHeader('Access-Control-Expose-Headers', 'X-Total-Count');
+      res.setHeader('X-Total-Count', String(rows.length));
+      payload = rows.slice(off, off + pageSize);
+    }
+
+    res.json(payload);
   } catch (err) {
     console.error('[dtr-daily-summary GET]', err);
     res.status(500).json({ error: 'Failed to fetch DTR summary' });
@@ -1123,7 +1167,7 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
   }
 });
 
-// POST /api/dtr-daily-summary/sync-holidays - admin only; set holiday_id and status='holiday' for existing rows whose attendance_date is a holiday (exact or recurring)
+// POST /api/dtr-daily-summary/sync-holidays - admin only; set holiday_id and status='holiday' for existing rows whose attendance_date falls in a holiday range (non-recurring or recurring template)
 router.post('/sync-holidays', protect, requireAdmin, async (req, res) => {
   try {
     const { start_date, end_date } = req.body;
@@ -1133,25 +1177,37 @@ router.post('/sync-holidays', protect, requireAdmin, async (req, res) => {
       `UPDATE dtr_daily_summary d
        SET holiday_id = h.id, status = 'holiday', source = 'adjusted', updated_at = now()
        FROM holidays h
-       WHERE d.attendance_date = h.holiday_date
+       WHERE h.recurring = false
          AND (h.is_active IS NULL OR h.is_active = true)
+         AND d.attendance_date >= h.date_from AND d.attendance_date <= h.date_to
          AND d.attendance_date >= $1::date AND d.attendance_date <= $2::date
        RETURNING d.id`,
       [start, end]
     );
-    const recurring = await pool.query(
-      `UPDATE dtr_daily_summary d
-       SET holiday_id = h.id, status = 'holiday', source = 'adjusted', updated_at = now()
-       FROM holidays h
-       WHERE h.recurring = true AND (h.is_active IS NULL OR h.is_active = true)
-         AND EXTRACT(MONTH FROM d.attendance_date) = EXTRACT(MONTH FROM h.holiday_date)
-         AND EXTRACT(DAY FROM d.attendance_date) = EXTRACT(DAY FROM h.holiday_date)
-         AND d.attendance_date >= $1::date AND d.attendance_date <= $2::date
-         AND d.holiday_id IS NULL
-       RETURNING d.id`,
-      [start, end]
+    let updated = exact.rowCount;
+    const recurringRows = await pool.query(
+      `SELECT id, date_from, date_to FROM holidays
+       WHERE recurring = true AND (is_active IS NULL OR is_active = true)`
     );
-    res.json({ updated: exact.rowCount + recurring.rowCount });
+    for (const h of recurringRows.rows) {
+      const dates = expandRecurringToWindow(
+        holidayDateToStr(h.date_from),
+        holidayDateToStr(h.date_to),
+        start,
+        end
+      );
+      if (dates.length === 0) continue;
+      const rUp = await pool.query(
+        `UPDATE dtr_daily_summary
+         SET holiday_id = $1, status = 'holiday', source = 'adjusted', updated_at = now()
+         WHERE attendance_date = ANY($2::date[])
+           AND attendance_date >= $3::date AND attendance_date <= $4::date
+           AND holiday_id IS NULL`,
+        [h.id, dates, start, end]
+      );
+      updated += rUp.rowCount;
+    }
+    res.json({ updated });
   } catch (err) {
     console.error('[dtr-daily-summary sync-holidays POST]', err);
     res.status(500).json({ error: 'Failed to sync holidays to DTR summary' });

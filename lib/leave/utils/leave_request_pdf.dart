@@ -1,5 +1,6 @@
 // ignore_for_file: unused_element
 
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -7,6 +8,54 @@ import 'package:printing/printing.dart';
 import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
+
+/// Loaded once; kept for the app lifetime. [pw.Page.build] runs **lazily** on
+/// `doc.save()` / print — must not rely on fonts that were cleared after
+/// `buildPdf` returned (that caused "Unexpected null value").
+pw.Font? _leavePdfFontBase;
+pw.Font? _leavePdfFontBold;
+
+/// Same approach as DTR export: Noto from assets; Open Sans if assets fail.
+/// Returns theme plus raw fonts so widgets can set [TextStyle.font] / [fontFallback]
+/// where needed; `const TextStyle` does not inherit theme fonts.
+Future<({pw.ThemeData theme, pw.Font base, pw.Font bold})>
+_leavePdfThemeAndFonts() async {
+  if (_leavePdfFontBase != null && _leavePdfFontBold != null) {
+    return (
+      theme: pw.ThemeData.withFont(
+        base: _leavePdfFontBase!,
+        bold: _leavePdfFontBold!,
+      ),
+      base: _leavePdfFontBase!,
+      bold: _leavePdfFontBold!,
+    );
+  }
+  try {
+    final base = pw.Font.ttf(
+      await rootBundle.load('assets/fonts/NotoSans-Regular.ttf'),
+    );
+    final bold = pw.Font.ttf(
+      await rootBundle.load('assets/fonts/NotoSans-Bold.ttf'),
+    );
+    _leavePdfFontBase = base;
+    _leavePdfFontBold = bold;
+    return (
+      theme: pw.ThemeData.withFont(base: base, bold: bold),
+      base: base,
+      bold: bold,
+    );
+  } catch (_) {
+    final base = await PdfGoogleFonts.openSansRegular();
+    final bold = await PdfGoogleFonts.openSansBold();
+    _leavePdfFontBase = base;
+    _leavePdfFontBold = bold;
+    return (
+      theme: pw.ThemeData.withFont(base: base, bold: bold),
+      base: base,
+      bold: bold,
+    );
+  }
+}
 
 /// Dedicated PDF builder for the CSC-style "Application for Leave" form.
 ///
@@ -113,6 +162,7 @@ class LeaveRequestPdf {
       ),
       child: checked
           ? pw.Center(
+              // Legacy layout only; fixed engine uses [_LeaveRequestPdfFixedEngine._box].
               child: pw.Text('X', style: const pw.TextStyle(fontSize: 9)),
             )
           : null,
@@ -179,11 +229,7 @@ class LeaveRequestPdf {
         pw.SizedBox(height: 8),
         pw.Text(
           '($label)',
-          style: pw.TextStyle(
-            fontSize: 10.5,
-            color: _textSecondary,
-            fontStyle: pw.FontStyle.italic,
-          ),
+          style: pw.TextStyle(fontSize: 10.5, color: _textSecondary),
         ),
       ],
     );
@@ -902,7 +948,6 @@ class LeaveRequestPdf {
                                   style: pw.TextStyle(
                                     fontSize: 10.2,
                                     color: _textSecondary,
-                                    fontStyle: pw.FontStyle.italic,
                                   ),
                                 ),
                                 if (reviewerTitleLabel != null)
@@ -1000,7 +1045,6 @@ class LeaveRequestPdf {
                                   style: pw.TextStyle(
                                     fontSize: 10.2,
                                     color: _textSecondary,
-                                    fontStyle: pw.FontStyle.italic,
                                   ),
                                 ),
                                 if (reviewerTitleLabel != null)
@@ -1171,7 +1215,6 @@ class LeaveRequestPdf {
                                   style: pw.TextStyle(
                                     fontSize: 10.2,
                                     color: _textSecondary,
-                                    fontStyle: pw.FontStyle.italic,
                                   ),
                                 ),
                                 if (reviewerTitleLabel != null)
@@ -1301,8 +1344,9 @@ class _LeaveRequestPdfFixedEngine {
     final end = DateTime(e.year, e.month, e.day);
     var count = 0;
     while (!c.isAfter(end)) {
-      if (c.weekday != DateTime.saturday && c.weekday != DateTime.sunday)
+      if (c.weekday != DateTime.saturday && c.weekday != DateTime.sunday) {
         count++;
+      }
       c = c.add(const Duration(days: 1));
     }
     return count.toDouble();
@@ -1316,7 +1360,15 @@ class _LeaveRequestPdfFixedEngine {
     ),
     alignment: pw.Alignment.center,
     child: checked
-        ? pw.Text('X', style: const pw.TextStyle(fontSize: 8))
+        ? pw.InkList(
+            // Vector strokes — no Unicode / font glyph lookup (avoids U+2713/U+2714 errors).
+            points: [
+              [PdfPoint(1.6, 5.4), PdfPoint(4.1, 8.1)],
+              [PdfPoint(4.1, 8.1), PdfPoint(8.9, 1.7)],
+            ],
+            strokeColor: _borderColor,
+            strokeWidth: 0.95,
+          )
         : null,
   );
 
@@ -1362,6 +1414,129 @@ class _LeaveRequestPdfFixedEngine {
     style: pw.TextStyle(fontSize: _small, fontWeight: pw.FontWeight.bold),
   );
 
+  /// Civil Service Form No. 6 header: form metadata, seal, locality lines, title.
+  ///
+  /// Top band matches CSC layout: left label + **page-centered** seal/locality
+  /// (via equal thirds) + right stamp; margins align with the bordered form.
+  static pw.Widget _cscTopHeader({
+    required pw.ImageProvider? logo,
+    required pw.Font baseFont,
+    required pw.Font boldFont,
+  }) {
+    const metaSize = 8.0;
+    const revisedSize = 7.2;
+    const stampSize = 7.0;
+    const locSize = 9.5;
+    final metaItalic = pw.TextStyle(
+      fontSize: metaSize,
+      fontStyle: pw.FontStyle.italic,
+      font: baseFont,
+      fontFallback: [boldFont],
+    );
+    final revisedItalic = pw.TextStyle(
+      fontSize: revisedSize,
+      fontStyle: pw.FontStyle.italic,
+      font: baseFont,
+      fontFallback: [boldFont],
+    );
+    final stamp = pw.TextStyle(
+      fontSize: stampSize,
+      font: baseFont,
+      fontFallback: [boldFont],
+    );
+    final localityItalic = pw.TextStyle(
+      fontSize: locSize,
+      fontStyle: pw.FontStyle.italic,
+      font: baseFont,
+      fontFallback: [boldFont],
+    );
+    final titleStyle = pw.TextStyle(
+      fontSize: 17,
+      fontWeight: pw.FontWeight.bold,
+      font: boldFont,
+      fontFallback: [baseFont],
+    );
+
+    final sealAndLocality = pw.Row(
+      mainAxisSize: pw.MainAxisSize.min,
+      crossAxisAlignment: pw.CrossAxisAlignment.center,
+      children: [
+        if (logo != null)
+          pw.Image(logo, width: 52, height: 52, fit: pw.BoxFit.contain)
+        else
+          pw.SizedBox(width: 52, height: 52),
+        pw.SizedBox(width: 8),
+        pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.center,
+          mainAxisSize: pw.MainAxisSize.min,
+          children: [
+            pw.Text(
+              'Republic of the Philippines',
+              style: localityItalic,
+              textAlign: pw.TextAlign.center,
+            ),
+            pw.Text(
+              'Province of Misamis Occidental',
+              style: localityItalic,
+              textAlign: pw.TextAlign.center,
+            ),
+            pw.Text(
+              'Municipality of Plaridel',
+              style: localityItalic,
+              textAlign: pw.TextAlign.center,
+            ),
+          ],
+        ),
+      ],
+    );
+
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        // One horizontal band: equal thirds so the seal block is truly centered.
+        pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Expanded(
+              flex: 1,
+              child: pw.Align(
+                alignment: pw.Alignment.topLeft,
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  mainAxisSize: pw.MainAxisSize.min,
+                  children: [
+                    pw.Text('Civil Service Form No. 6', style: metaItalic),
+                    pw.Text('Revised 2020', style: revisedItalic),
+                  ],
+                ),
+              ),
+            ),
+            pw.Expanded(flex: 1, child: pw.Center(child: sealAndLocality)),
+            pw.Expanded(
+              flex: 1,
+              child: pw.Align(
+                alignment: pw.Alignment.topRight,
+                child: pw.Text(
+                  'Stamp of Date of Receipt',
+                  style: stamp,
+                  textAlign: pw.TextAlign.right,
+                ),
+              ),
+            ),
+          ],
+        ),
+        pw.SizedBox(height: 10),
+        pw.Center(
+          child: pw.Text(
+            'APPLICATION FOR LEAVE',
+            textAlign: pw.TextAlign.center,
+            style: titleStyle,
+          ),
+        ),
+      ],
+    );
+  }
+
   static Future<pw.Document> buildPdf({
     required LeaveRequest request,
     List<LeaveBalance>? balances,
@@ -1392,24 +1567,35 @@ class _LeaveRequestPdfFixedEngine {
     final slDed = request.leaveType == LeaveType.sickLeave ? (wd ?? 0.0) : 0.0;
     String d3(double v) => v == 0 ? '' : v.toStringAsFixed(3);
 
-    final doc = pw.Document();
+    final fonts = await _leavePdfThemeAndFonts();
+    pw.ImageProvider? logoProvider;
+    try {
+      final logoBytes = await rootBundle.load(
+        'assets/images/Plaridel Logo.jpg',
+      );
+      logoProvider = pw.MemoryImage(logoBytes.buffer.asUint8List());
+    } catch (_) {
+      logoProvider = null;
+    }
+
+    final doc = pw.Document(theme: fonts.theme);
     doc.addPage(
       pw.Page(
         pageFormat: PdfPageFormat(612, 1008, marginAll: 16), // Legal size
         build: (_) {
           return pw.DefaultTextStyle(
-            style: const pw.TextStyle(fontSize: _fontSize),
+            style: pw.TextStyle(
+              fontSize: _fontSize,
+              font: fonts.base,
+              fontFallback: [fonts.bold],
+            ),
             child: pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.stretch,
               children: [
-                pw.Center(
-                  child: pw.Text(
-                    'APPLICATION FOR LEAVE',
-                    style: pw.TextStyle(
-                      fontSize: 17,
-                      fontWeight: pw.FontWeight.bold,
-                    ),
-                  ),
+                _cscTopHeader(
+                  logo: logoProvider,
+                  baseFont: fonts.base,
+                  boldFont: fonts.bold,
                 ),
                 pw.SizedBox(height: 5),
                 // Step 1: top header grid as one fixed table-like block.
@@ -1733,7 +1919,6 @@ class _LeaveRequestPdfFixedEngine {
                                       style: pw.TextStyle(
                                         fontSize: _small,
                                         fontWeight: pw.FontWeight.bold,
-                                        fontStyle: pw.FontStyle.italic,
                                       ),
                                     ),
                                     _checkLine(
@@ -1755,7 +1940,6 @@ class _LeaveRequestPdfFixedEngine {
                                       style: pw.TextStyle(
                                         fontSize: _small,
                                         fontWeight: pw.FontWeight.bold,
-                                        fontStyle: pw.FontStyle.italic,
                                       ),
                                     ),
                                     _checkLine(
@@ -1777,7 +1961,6 @@ class _LeaveRequestPdfFixedEngine {
                                       style: pw.TextStyle(
                                         fontSize: _small,
                                         fontWeight: pw.FontWeight.bold,
-                                        fontStyle: pw.FontStyle.italic,
                                       ),
                                     ),
                                     _underlineValue(
@@ -1789,7 +1972,6 @@ class _LeaveRequestPdfFixedEngine {
                                       style: pw.TextStyle(
                                         fontSize: _small,
                                         fontWeight: pw.FontWeight.bold,
-                                        fontStyle: pw.FontStyle.italic,
                                       ),
                                     ),
                                     _checkLine(
@@ -1938,10 +2120,7 @@ class _LeaveRequestPdfFixedEngine {
                                     pw.Center(
                                       child: pw.Text(
                                         '(Signature of Applicant)',
-                                        style: pw.TextStyle(
-                                          fontSize: _small,
-                                          fontStyle: pw.FontStyle.italic,
-                                        ),
+                                        style: pw.TextStyle(fontSize: _small),
                                       ),
                                     ),
                                   ],
@@ -2214,7 +2393,7 @@ class _LeaveRequestPdfFixedEngine {
                                         ),
                                       ),
                                     ),
-                                    pw.SizedBox(height: 14),
+                                    pw.SizedBox(height: 30),
                                     pw.Container(
                                       height: 1,
                                       color: _borderColor,
@@ -2302,7 +2481,7 @@ class _LeaveRequestPdfFixedEngine {
                                         ),
                                       ),
                                     ),
-                                    pw.SizedBox(height: 19),
+                                    pw.SizedBox(height: 35),
                                     pw.Container(
                                       height: 1,
                                       color: _borderColor,
@@ -2311,10 +2490,7 @@ class _LeaveRequestPdfFixedEngine {
                                     pw.Center(
                                       child: pw.Text(
                                         '(Authorized Officer)',
-                                        style: pw.TextStyle(
-                                          fontSize: _small,
-                                          fontStyle: pw.FontStyle.italic,
-                                        ),
+                                        style: pw.TextStyle(fontSize: _small),
                                       ),
                                     ),
                                   ],
@@ -2332,139 +2508,150 @@ class _LeaveRequestPdfFixedEngine {
                             width: 0.8,
                           ),
                         ),
-                        child: pw.Table(
-                          border: const pw.TableBorder(),
-                          columnWidths: const {
-                            0: pw.FlexColumnWidth(1),
-                            1: pw.FlexColumnWidth(1),
-                          },
+                        child: pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
                           children: [
-                            pw.TableRow(
+                            pw.Table(
+                              border: const pw.TableBorder(),
+                              columnWidths: const {
+                                0: pw.FlexColumnWidth(1),
+                                1: pw.FlexColumnWidth(1),
+                              },
                               children: [
-                                pw.Padding(
-                                  padding: const pw.EdgeInsets.all(4),
-                                  child: pw.Column(
-                                    crossAxisAlignment:
-                                        pw.CrossAxisAlignment.start,
-                                    children: [
-                                      _sectionHeader('7.C APPROVED FOR'),
-                                      pw.SizedBox(height: 2),
-                                      pw.Text(
-                                        request.approvedDaysWithPay != null
-                                            ? '_____ ${request.approvedDaysWithPay!.toStringAsFixed(1)} days with pay'
-                                            : '_____ days with pay',
-                                        style: const pw.TextStyle(
-                                          fontSize: _small,
-                                        ),
-                                      ),
-                                      pw.SizedBox(height: 2),
-                                      pw.Text(
-                                        request.approvedDaysWithoutPay != null
-                                            ? '_____ ${request.approvedDaysWithoutPay!.toStringAsFixed(1)} days without pay'
-                                            : '_____ days without pay',
-                                        style: const pw.TextStyle(
-                                          fontSize: _small,
-                                        ),
-                                      ),
-                                      pw.SizedBox(height: 2),
-                                      pw.Text(
-                                        _s(
-                                              request.approvedOtherDetails,
-                                            ).isNotEmpty
-                                            ? '_____ ${_s(request.approvedOtherDetails)}'
-                                            : '_____ others (Specify)',
-                                        style: const pw.TextStyle(
-                                          fontSize: _small,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                pw.Padding(
-                                  padding: const pw.EdgeInsets.all(4),
-                                  child: pw.Column(
-                                    crossAxisAlignment:
-                                        pw.CrossAxisAlignment.start,
-                                    children: [
-                                      _sectionHeader('7.D DISAPPROVED DUE TO'),
-                                      pw.SizedBox(height: 2),
-                                      pw.Container(
-                                        height: 10,
-                                        decoration: const pw.BoxDecoration(
-                                          border: pw.Border(
-                                            bottom: pw.BorderSide(
-                                              color: _borderColor,
-                                              width: 0.8,
+                                pw.TableRow(
+                                  children: [
+                                    pw.Padding(
+                                      padding: const pw.EdgeInsets.all(4),
+                                      child: pw.Column(
+                                        crossAxisAlignment:
+                                            pw.CrossAxisAlignment.start,
+                                        children: [
+                                          _sectionHeader('7.C APPROVED FOR'),
+                                          pw.SizedBox(height: 2),
+                                          pw.Text(
+                                            request.approvedDaysWithPay != null
+                                                ? '_____ ${request.approvedDaysWithPay!.toStringAsFixed(1)} days with pay'
+                                                : '_____ days with pay',
+                                            style: const pw.TextStyle(
+                                              fontSize: _small,
                                             ),
                                           ),
-                                        ),
-                                        alignment: pw.Alignment.bottomLeft,
-                                        child: pw.Text(
-                                          _s(request.disapprovalReason),
-                                          style: const pw.TextStyle(
-                                            fontSize: _small,
-                                          ),
-                                        ),
-                                      ),
-                                      pw.SizedBox(height: 6),
-                                      pw.Container(
-                                        height: 10,
-                                        decoration: const pw.BoxDecoration(
-                                          border: pw.Border(
-                                            bottom: pw.BorderSide(
-                                              color: _borderColor,
-                                              width: 0.8,
+                                          pw.SizedBox(height: 2),
+                                          pw.Text(
+                                            request.approvedDaysWithoutPay !=
+                                                    null
+                                                ? '_____ ${request.approvedDaysWithoutPay!.toStringAsFixed(1)} days without pay'
+                                                : '_____ days without pay',
+                                            style: const pw.TextStyle(
+                                              fontSize: _small,
                                             ),
                                           ),
-                                        ),
-                                      ),
-                                      pw.SizedBox(height: 6),
-                                      pw.Container(
-                                        height: 10,
-                                        decoration: const pw.BoxDecoration(
-                                          border: pw.Border(
-                                            bottom: pw.BorderSide(
-                                              color: _borderColor,
-                                              width: 0.8,
+                                          pw.SizedBox(height: 2),
+                                          pw.Text(
+                                            _s(
+                                                  request.approvedOtherDetails,
+                                                ).isNotEmpty
+                                                ? '_____ ${_s(request.approvedOtherDetails)}'
+                                                : '_____ others (Specify)',
+                                            style: const pw.TextStyle(
+                                              fontSize: _small,
                                             ),
                                           ),
-                                        ),
+                                        ],
                                       ),
-                                    ],
-                                  ),
+                                    ),
+                                    pw.Padding(
+                                      padding: const pw.EdgeInsets.all(4),
+                                      child: pw.Column(
+                                        crossAxisAlignment:
+                                            pw.CrossAxisAlignment.start,
+                                        children: [
+                                          _sectionHeader(
+                                            '7.D DISAPPROVED DUE TO',
+                                          ),
+                                          pw.SizedBox(height: 2),
+                                          pw.Container(
+                                            height: 10,
+                                            decoration: const pw.BoxDecoration(
+                                              border: pw.Border(
+                                                bottom: pw.BorderSide(
+                                                  color: _borderColor,
+                                                  width: 0.8,
+                                                ),
+                                              ),
+                                            ),
+                                            alignment: pw.Alignment.bottomLeft,
+                                            child: pw.Text(
+                                              _s(request.disapprovalReason),
+                                              style: const pw.TextStyle(
+                                                fontSize: _small,
+                                              ),
+                                            ),
+                                          ),
+                                          pw.SizedBox(height: 6),
+                                          pw.Container(
+                                            height: 10,
+                                            decoration: const pw.BoxDecoration(
+                                              border: pw.Border(
+                                                bottom: pw.BorderSide(
+                                                  color: _borderColor,
+                                                  width: 0.8,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          pw.SizedBox(height: 6),
+                                          pw.Container(
+                                            height: 10,
+                                            decoration: const pw.BoxDecoration(
+                                              border: pw.Border(
+                                                bottom: pw.BorderSide(
+                                                  color: _borderColor,
+                                                  width: 0.8,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),
-                          ],
-                        ),
-                      ),
-                      pw.Padding(
-                        padding: const pw.EdgeInsets.fromLTRB(8, 6, 8, 8),
-                        child: pw.Column(
-                          children: [
-                            pw.Container(
-                              height: 1,
-                              color: _borderColor,
-                              margin: const pw.EdgeInsets.symmetric(
-                                horizontal: 180,
+                            pw.Padding(
+                              padding: const pw.EdgeInsets.fromLTRB(8, 6, 8, 8),
+                              child: pw.Column(
+                                children: [
+                                  pw.SizedBox(height: 20),
+                                  pw.Container(
+                                    height: 1,
+                                    color: _borderColor,
+                                    margin: const pw.EdgeInsets.symmetric(
+                                      horizontal: 180,
+                                    ),
+                                  ),
+                                  pw.SizedBox(height: 3),
+                                  if (reviewerName.isNotEmpty)
+                                    pw.Text(
+                                      reviewerName,
+                                      style: pw.TextStyle(
+                                        fontSize: _small,
+                                        fontWeight: pw.FontWeight.bold,
+                                      ),
+                                      textAlign: pw.TextAlign.center,
+                                    ),
+                                  if (reviewerTitle.isNotEmpty)
+                                    pw.Text(
+                                      reviewerTitle,
+                                      style: const pw.TextStyle(
+                                        fontSize: _small,
+                                      ),
+                                      textAlign: pw.TextAlign.center,
+                                    ),
+                                ],
                               ),
                             ),
-                            pw.SizedBox(height: 3),
-                            if (reviewerName.isNotEmpty)
-                              pw.Text(
-                                reviewerName,
-                                style: pw.TextStyle(
-                                  fontSize: _small,
-                                  fontWeight: pw.FontWeight.bold,
-                                ),
-                                textAlign: pw.TextAlign.center,
-                              ),
-                            if (reviewerTitle.isNotEmpty)
-                              pw.Text(
-                                reviewerTitle,
-                                style: const pw.TextStyle(fontSize: _small),
-                                textAlign: pw.TextAlign.center,
-                              ),
                           ],
                         ),
                       ),

@@ -173,6 +173,37 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
     return end.day;
   }
 
+  /// Latest day the user can pick for the selected month/year. Past months: full month.
+  /// Current month/year: cannot pick future days (no time logs yet). Future months: full month (usually empty).
+  int get _maxSelectableCalendarDay {
+    final now = DateTime.now();
+    final last = _lastDayOfSelectedMonth;
+    if (_selectedYear < now.year ||
+        (_selectedYear == now.year && _selectedMonth < now.month)) {
+      return last;
+    }
+    if (_selectedYear > now.year ||
+        (_selectedYear == now.year && _selectedMonth > now.month)) {
+      return last;
+    }
+    final today = now.day;
+    return today < last ? today : last;
+  }
+
+  /// Keeps [_selectedDay] within the month and not beyond today when viewing current month/year.
+  void _clampSelectedDayIfNeeded() {
+    if (_selectedDay == null) return;
+    final last = _lastDayOfSelectedMonth;
+    final maxD = _maxSelectableCalendarDay;
+    if (_selectedDay! > last) {
+      _selectedDay = null;
+      return;
+    }
+    if (_selectedDay! > maxD) {
+      _selectedDay = maxD;
+    }
+  }
+
   /// Intended filter range based on current month/year/day selection.
   (DateTime, DateTime) _getIntendedFilterRange() {
     final lastDay = _lastDayOfSelectedMonth;
@@ -235,6 +266,11 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
 
   Future<void> _applyFilters({bool silent = false}) async {
     if (!mounted) return;
+    final dayBefore = _selectedDay;
+    _clampSelectedDayIfNeeded();
+    if (dayBefore != _selectedDay && mounted) {
+      setState(() {});
+    }
     final dtr = context.read<DtrProvider>();
     final lastDay = _lastDayOfSelectedMonth;
     final int day =
@@ -541,6 +577,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                                   _selectedDay! > _lastDayOfSelectedMonth) {
                                 _selectedDay = null;
                               }
+                              _clampSelectedDayIfNeeded();
                             });
                           }
                           _applyFilters();
@@ -568,6 +605,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                                   _selectedDay! > _lastDayOfSelectedMonth) {
                                 _selectedDay = null;
                               }
+                              _clampSelectedDayIfNeeded();
                             });
                           }
                           _applyFilters();
@@ -582,7 +620,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                             child: Text('All days'),
                           ),
                           ...List.generate(
-                            _lastDayOfSelectedMonth,
+                            _maxSelectableCalendarDay,
                             (i) => i + 1,
                           ).map(
                             (d) => DropdownMenuItem<int?>(

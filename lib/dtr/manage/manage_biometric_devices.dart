@@ -3,6 +3,61 @@ import 'package:flutter/material.dart';
 import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
 
+/// If [last_sync_at] is older than this, show "Stale" (adjust to match your ingest interval).
+const Duration _kBiometricStaleAfter = Duration(hours: 1);
+
+enum _BiometricSyncHealth { neverSynced, ok, stale }
+
+_BiometricSyncHealth _biometricSyncHealth(DateTime? lastSync, DateTime now) {
+  if (lastSync == null) return _BiometricSyncHealth.neverSynced;
+  if (now.difference(lastSync) <= _kBiometricStaleAfter) {
+    return _BiometricSyncHealth.ok;
+  }
+  return _BiometricSyncHealth.stale;
+}
+
+String _formatRelativeSync(DateTime past, DateTime now) {
+  final diff = now.difference(past);
+  if (diff.isNegative) return 'Just now';
+  if (diff.inSeconds < 60) return 'Just now';
+  if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
+  if (diff.inHours < 24) return '${diff.inHours} hr ago';
+  if (diff.inDays < 7) return '${diff.inDays} days ago';
+  return '${past.year}-${past.month.toString().padLeft(2, '0')}-${past.day.toString().padLeft(2, '0')}';
+}
+
+Widget _buildSyncBadge(_BiometricSyncHealth health) {
+  final (label, bg, fg) = switch (health) {
+    _BiometricSyncHealth.neverSynced => (
+      'Never synced',
+      const Color(0xFFEEEEEE),
+      const Color(0xFF616161),
+    ),
+    _BiometricSyncHealth.ok => (
+      'Sync OK',
+      const Color(0xFFE8F5E9),
+      const Color(0xFF2E7D32),
+    ),
+    _BiometricSyncHealth.stale => (
+      'Stale',
+      const Color(0xFFFFEBEE),
+      const Color(0xFFE65100),
+    ),
+  };
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: bg,
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: fg.withOpacity(0.35)),
+    ),
+    child: Text(
+      label,
+      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: fg),
+    ),
+  );
+}
+
 class _DeviceRecord {
   const _DeviceRecord({
     required this.id,
@@ -385,6 +440,8 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
               itemBuilder: (_, i) {
                 final d = filtered[i];
                 final isSelected = _selectedDevice?.id == d.id;
+                final now = DateTime.now();
+                final health = _biometricSyncHealth(d.lastSyncAt, now);
                 return ListTile(
                   selected: isSelected,
                   selectedTileColor: AppTheme.primaryNavy.withOpacity(0.08),
@@ -399,13 +456,39 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
                       color: AppTheme.textPrimary,
                     ),
                   ),
-                  subtitle: Text(
-                    '${d.deviceId ?? '—'} · ${d.location ?? '—'}${d.ipAddress != null && d.ipAddress!.isNotEmpty ? ' · ${d.ipAddress}' : ''}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppTheme.textSecondary,
-                    ),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '${d.deviceId ?? '—'} · ${d.location ?? '—'}${d.ipAddress != null && d.ipAddress!.isNotEmpty ? ' · ${d.ipAddress}' : ''}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          _buildSyncBadge(health),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              d.lastSyncAt != null
+                                  ? 'Last sync · ${_formatRelativeSync(d.lastSyncAt!, now)}'
+                                  : 'No sync recorded yet',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
+                  isThreeLine: true,
                   onTap: () => _selectDevice(d),
                 );
               },
@@ -433,6 +516,64 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (_selectedDevice != null) ...[
+            Text(
+              'Sync status',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Builder(
+              builder: (context) {
+                final d = _selectedDevice!;
+                final now = DateTime.now();
+                final health = _biometricSyncHealth(d.lastSyncAt, now);
+                return Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppTheme.lightGray.withOpacity(0.4),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.black.withOpacity(0.06)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          _buildSyncBadge(health),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              d.lastSyncAt != null
+                                  ? 'Last sync · ${_formatRelativeSync(d.lastSyncAt!, now)}'
+                                  : 'No sync recorded yet — device has not posted logs to the server.',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: AppTheme.textPrimary,
+                                height: 1.35,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Sync OK = last sync within ${_kBiometricStaleAfter.inHours} hour(s). Reload list to refresh.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 20),
+          ],
           Text(
             'Device name',
             style: TextStyle(

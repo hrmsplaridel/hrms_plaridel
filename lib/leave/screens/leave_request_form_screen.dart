@@ -2,6 +2,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../leave_provider.dart';
@@ -153,7 +154,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       if (entered > computed) {
         _showMessage(
           'Working days ($entered) cannot exceed the computed '
-          'Mon–Fri days for the selected range ($computed).'
+          'Mon–Fri days for the selected range ($computed).',
         );
         return;
       }
@@ -195,6 +196,84 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     return (current?.attachmentName ?? '').trim().isNotEmpty;
   }
 
+  /// Fills CSC header fields (name, office, position, salary, date filed) from
+  /// auth + active assignment + employee profile when the request does not
+  /// already have them (e.g. first save).
+  Future<
+    ({
+      String employeeName,
+      String? officeDepartment,
+      String? positionTitle,
+      double? salary,
+      DateTime dateFiled,
+    })
+  >
+  _loadEmployeeHeaderSnapshot({
+    required String userId,
+    required AuthProvider auth,
+  }) async {
+    final authName = auth.user?.fullName?.trim();
+    final display = auth.displayName.trim();
+    var employeeName = (authName != null && authName.isNotEmpty)
+        ? authName
+        : display;
+
+    String? officeDepartment;
+    String? positionTitle;
+    double? salary;
+
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/assignments?employee_id=$userId&status=Active',
+      );
+      final data = res.data;
+      if (data != null && data.isNotEmpty) {
+        final first = data.first as Map<String, dynamic>;
+        officeDepartment = (first['department_name'] as String?)?.trim();
+        positionTitle = (first['position_name'] as String?)?.trim();
+      }
+    } catch (_) {
+      // Best-effort; fields stay from auth or empty.
+    }
+
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/employees/$userId',
+      );
+      final data = res.data;
+      if (data != null) {
+        final full = data['full_name']?.toString().trim();
+        if (full != null && full.isNotEmpty) {
+          employeeName = full;
+        }
+        final sg = data['salary_grade']?.toString().trim();
+        if (sg != null && sg.isNotEmpty) {
+          final parsed = double.tryParse(sg);
+          if (parsed != null) {
+            salary = parsed;
+          }
+        }
+      }
+    } catch (_) {
+      // Salary / name refinement optional.
+    }
+
+    final initial = widget.initialRequest;
+    final existingFiled = _savedRequest?.dateFiled ?? initial?.dateFiled;
+    final today = DateTime.now();
+    final dateFiled = existingFiled != null
+        ? DateTime(existingFiled.year, existingFiled.month, existingFiled.day)
+        : DateTime(today.year, today.month, today.day);
+
+    return (
+      employeeName: employeeName,
+      officeDepartment: officeDepartment,
+      positionTitle: positionTitle,
+      salary: salary,
+      dateFiled: dateFiled,
+    );
+  }
+
   void _showAttachmentRequiredDialog() {
     showDialog<void>(
       context: context,
@@ -225,15 +304,36 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     setState(() => _busy = true);
     try {
       final initial = widget.initialRequest;
-      final userId = context.read<AuthProvider>().user!.id;
+      final auth = context.read<AuthProvider>();
+      final userId = auth.user!.id;
 
       // FIX #4: prefer the ID from _savedRequest (set on first save) so that
       // subsequent "Save Draft" clicks do a PUT (update) rather than another POST.
       final existingId = _savedRequest?.id ?? initial?.id;
 
+      final header = await _loadEmployeeHeaderSnapshot(
+        userId: userId,
+        auth: auth,
+      );
+      final prior = _savedRequest ?? initial;
+      String? coalesceStr(String? saved, String? incoming) {
+        final a = (saved ?? '').trim();
+        if (a.isNotEmpty) return a;
+        final b = (incoming ?? '').trim();
+        return b.isEmpty ? null : b;
+      }
+
       final req = LeaveRequest(
         id: existingId,
         userId: userId,
+        employeeName: coalesceStr(prior?.employeeName, header.employeeName),
+        officeDepartment: coalesceStr(
+          prior?.officeDepartment,
+          header.officeDepartment,
+        ),
+        positionTitle: coalesceStr(prior?.positionTitle, header.positionTitle),
+        salary: prior?.salary ?? header.salary,
+        dateFiled: header.dateFiled,
         leaveType: _leaveType,
         customLeaveTypeText: _leaveType == LeaveType.others
             ? _customLeaveTypeController.text.trim()
@@ -432,34 +532,38 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                                 keyboardType: TextInputType.numberWithOptions(
                                   decimal: true,
                                 ),
-                                decoration: _inputDecoration(
-                                  'Number of Working Days Applied For',
-                                ).copyWith(
-                                  suffixIcon:  computed != null
-                                      ? Tooltip(
-                                          message:
-                                              'Auto-computed: $computed Mon–Fri day(s)',
-                                          child: IconButton(
-                                            icon: const Icon(
-                                              Icons.auto_fix_high,
-                                              size: 18,
-                                            ),
-                                            onPressed: () => setState(
-                                              () => _workingDaysController.text =
-                                                  computed.toString(),
-                                            ),
-                                          ),
-                                        )
-                                      : null,
-                                  helperText: computed != null
-                                      ? 'Mon–Fri days for selected range: $computed'
-                                      : 'Select dates to auto-compute',
-                                ),
+                                decoration:
+                                    _inputDecoration(
+                                      'Number of Working Days Applied For',
+                                    ).copyWith(
+                                      suffixIcon: computed != null
+                                          ? Tooltip(
+                                              message:
+                                                  'Auto-computed: $computed Mon–Fri day(s)',
+                                              child: IconButton(
+                                                icon: const Icon(
+                                                  Icons.auto_fix_high,
+                                                  size: 18,
+                                                ),
+                                                onPressed: () => setState(
+                                                  () =>
+                                                      _workingDaysController
+                                                          .text = computed
+                                                          .toString(),
+                                                ),
+                                              ),
+                                            )
+                                          : null,
+                                      helperText: computed != null
+                                          ? 'Mon–Fri days for selected range: $computed'
+                                          : 'Select dates to auto-compute',
+                                    ),
                                 validator: (val) {
                                   if (val == null || val.trim().isEmpty)
                                     return 'Required';
                                   final entered = double.tryParse(val.trim());
-                                  if (entered == null) return 'Must be a number';
+                                  if (entered == null)
+                                    return 'Must be a number';
                                   if (entered <= 0)
                                     return 'Must be greater than 0';
                                   // FIX #7: Hard-block if entered > computed.

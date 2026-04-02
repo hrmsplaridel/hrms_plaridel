@@ -314,6 +314,55 @@ class MockLeaveRepository implements LeaveRepository {
   @override
   Future<List<int>?> getAttachmentBytes(String requestId) async => null;
 
+  // ---- Department Head stubs (mock) ----
+
+  @override
+  Future<Map<String, dynamic>> checkIsDepartmentHead() async =>
+      {'isDeptHead': false, 'departmentId': null, 'departmentName': null};
+
+  @override
+  Future<List<LeaveRequest>> listDepartmentHeadRequests() async =>
+      const <LeaveRequest>[];
+
+  @override
+  Future<LeaveRequest> departmentHeadApprove(LeaveReviewDecisionInput input) async =>
+      _requireRequest(input.requestId).copyWith(status: LeaveRequestStatus.pendingHr);
+
+  @override
+  Future<LeaveRequest> departmentHeadReject(LeaveReviewDecisionInput input) async =>
+      _requireRequest(input.requestId).copyWith(status: LeaveRequestStatus.rejectedByDepartmentHead);
+
+  @override
+  Future<LeaveRequest> departmentHeadReturn(LeaveReviewDecisionInput input) async =>
+      _requireRequest(input.requestId).copyWith(status: LeaveRequestStatus.returned);
+
+  @override
+  Future<LeaveRequest> assignMandatoryForcedLeave(
+    AdminMandatoryLeaveAssignmentInput input,
+  ) async {
+    final now = DateTime.now();
+    final days = input.endDate
+            .difference(input.startDate)
+            .inDays
+            .toDouble() +
+        1;
+    final req = LeaveRequest(
+      id: _nextRequestId(),
+      userId: input.userId,
+      leaveType: LeaveType.mandatoryForcedLeave,
+      startDate: input.startDate,
+      endDate: input.endDate,
+      workingDaysApplied: days < 0 ? 0 : days,
+      reason: input.reason,
+      status: LeaveRequestStatus.approved,
+      dateFiled: now,
+      createdAt: now,
+      updatedAt: now,
+    );
+    _upsertRequest(req);
+    return req;
+  }
+
   String _nextRequestId() {
     _requestCounter += 1;
     return 'leave_${DateTime.now().millisecondsSinceEpoch}_$_requestCounter';
@@ -386,10 +435,10 @@ class MockLeaveRepository implements LeaveRepository {
     required LeaveRequest? old,
     required LeaveRequest updated,
   }) {
-    final oldPending = old?.status == LeaveRequestStatus.pending
+    final oldPending = (old?.status.isPending ?? false)
         ? (old?.workingDaysApplied ?? 0)
         : 0.0;
-    final newPending = updated.status == LeaveRequestStatus.pending
+    final newPending = updated.status.isPending
         ? (updated.workingDaysApplied ?? 0)
         : 0.0;
 

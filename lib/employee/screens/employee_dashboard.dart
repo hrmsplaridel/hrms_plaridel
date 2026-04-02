@@ -114,14 +114,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                         : _selectedNavIndex == 1
                         ? const _EmployeeAttendanceContent()
                         : _selectedNavIndex == 2
-                            ? const LeaveMain(isAdmin: false)
-                            : _selectedNavIndex == 3
-                                ? const TrainingDailyReportEmployeeScreen()
-                                : _selectedNavIndex == 4
-                                    ? const DocuTrackerMain(isAdmin: false)
-                                    : _EmployeePlaceholderContent(
-                                        title: _navItems[_selectedNavIndex],
-                                      ),
+                        ? const _EmployeeLeaveMainEntry()
+                        : _selectedNavIndex == 3
+                        ? const TrainingDailyReportEmployeeScreen()
+                        : _selectedNavIndex == 4
+                        ? const DocuTrackerMain(isAdmin: false)
+                        : _EmployeePlaceholderContent(
+                            title: _navItems[_selectedNavIndex],
+                          ),
                   ),
                 ),
               ],
@@ -129,6 +129,43 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _EmployeeLeaveMainEntry extends StatefulWidget {
+  const _EmployeeLeaveMainEntry();
+
+  @override
+  State<_EmployeeLeaveMainEntry> createState() =>
+      _EmployeeLeaveMainEntryState();
+}
+
+class _EmployeeLeaveMainEntryState extends State<_EmployeeLeaveMainEntry> {
+  Future<bool>? _deptHeadFuture;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _deptHeadFuture ??= context.read<LeaveProvider>().checkIsDepartmentHead();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<bool>(
+      future: _deptHeadFuture,
+      builder: (context, snapshot) {
+        final isDeptHead = snapshot.data ?? false;
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+        return LeaveMain(isAdmin: false, isDepartmentHead: isDeptHead);
+      },
     );
   }
 }
@@ -1781,6 +1818,39 @@ class _EmployeeAttendanceContentState
     return end.day;
   }
 
+  /// Latest day selectable in the current month/year (no future day picker values).
+  int get _maxSelectableCalendarDay {
+    final now = DateTime.now();
+    final last = _lastDayOfSelectedMonth;
+    if (_selectedYear < now.year ||
+        (_selectedYear == now.year && _selectedMonth < now.month)) {
+      return last;
+    }
+    if (_selectedYear > now.year ||
+        (_selectedYear == now.year && _selectedMonth > now.month)) {
+      return last;
+    }
+    return now.day < last ? now.day : last;
+  }
+
+  DateTime get _todayDateOnly {
+    final t = DateTime.now();
+    return DateTime(t.year, t.month, t.day);
+  }
+
+  void _clampSelectedDayIfNeeded() {
+    if (_selectedDay == null) return;
+    final last = _lastDayOfSelectedMonth;
+    final maxD = _maxSelectableCalendarDay;
+    if (_selectedDay! > last) {
+      _selectedDay = null;
+      return;
+    }
+    if (_selectedDay! > maxD) {
+      _selectedDay = maxD;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1788,6 +1858,7 @@ class _EmployeeAttendanceContentState
   }
 
   Future<void> _load() async {
+    _clampSelectedDayIfNeeded();
     final dtr = context.read<DtrProvider>();
     final lastDay = _lastDayOfSelectedMonth;
     final day =
@@ -1801,7 +1872,9 @@ class _EmployeeAttendanceContentState
       end = start;
     } else {
       start = DateTime(_selectedYear, _selectedMonth, 1);
-      end = DateTime(_selectedYear, _selectedMonth + 1, 0);
+      final monthEnd = DateTime(_selectedYear, _selectedMonth + 1, 0);
+      // For current month, don't fetch future days.
+      end = monthEnd.isAfter(_todayDateOnly) ? _todayDateOnly : monthEnd;
     }
     await dtr.loadTimeRecordsForUser(startDate: start, endDate: end);
   }
@@ -1834,6 +1907,19 @@ class _EmployeeAttendanceContentState
   @override
   Widget build(BuildContext context) {
     final dtr = context.watch<DtrProvider>();
+    final today = _todayDateOnly;
+    final visibleRecords = List.of(dtr.timeRecords)
+      ..removeWhere((r) {
+        final rd = DateTime(
+          r.recordDate.year,
+          r.recordDate.month,
+          r.recordDate.day,
+        );
+        return rd.isAfter(today);
+      })
+      ..sort(
+        (a, b) => a.recordDate.compareTo(b.recordDate),
+      ); // Day 1..N ascending
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1905,6 +1991,7 @@ class _EmployeeAttendanceContentState
                               _selectedDay! > _lastDayOfSelectedMonth) {
                             _selectedDay = null;
                           }
+                          _clampSelectedDayIfNeeded();
                         });
                         _load();
                       }
@@ -1949,6 +2036,7 @@ class _EmployeeAttendanceContentState
                               _selectedDay! > _lastDayOfSelectedMonth) {
                             _selectedDay = null;
                           }
+                          _clampSelectedDayIfNeeded();
                         });
                         _load();
                       }
@@ -1984,7 +2072,7 @@ class _EmployeeAttendanceContentState
                         style: TextStyle(fontSize: 14),
                       ),
                       ...List.generate(
-                        _lastDayOfSelectedMonth,
+                        _maxSelectableCalendarDay,
                         (i) => Text(
                           'Day ${i + 1}',
                           overflow: TextOverflow.ellipsis,
@@ -1998,7 +2086,7 @@ class _EmployeeAttendanceContentState
                         child: Text('All days'),
                       ),
                       ...List.generate(
-                        _lastDayOfSelectedMonth,
+                        _maxSelectableCalendarDay,
                         (i) => i + 1,
                       ).map(
                         (d) => DropdownMenuItem<int?>(
@@ -2048,7 +2136,7 @@ class _EmployeeAttendanceContentState
               child: CircularProgressIndicator(),
             ),
           ),
-        if (!dtr.loading && dtr.timeRecords.isEmpty)
+        if (!dtr.loading && visibleRecords.isEmpty)
           Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
@@ -2063,7 +2151,7 @@ class _EmployeeAttendanceContentState
               ),
             ),
           ),
-        if (!dtr.loading && dtr.timeRecords.isNotEmpty)
+        if (!dtr.loading && visibleRecords.isNotEmpty)
           LayoutBuilder(
             builder: (context, constraints) {
               const minTableWidth = 760.0;
@@ -2222,7 +2310,7 @@ class _EmployeeAttendanceContentState
                             ],
                           ),
                         ),
-                        ...dtr.timeRecords.asMap().entries.map((entry) {
+                        ...visibleRecords.asMap().entries.map((entry) {
                           final i = entry.key;
                           final r = entry.value;
                           final timeIn = r.timeIn?.toLocal();

@@ -113,15 +113,15 @@ class _LoginPageState extends State<LoginPage> {
       if (errorMessage == null) {
         final auth = context.read<AuthProvider>();
         final role = auth.user?.role ?? 'employee';
-        final isAdmin = role == 'admin';
+        final isPrivileged = role == 'admin' || role == 'hr';
 
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(kLoginAsKey, isAdmin ? 'Admin' : 'Employee');
+        await prefs.setString(kLoginAsKey, isPrivileged ? 'Admin' : 'Employee');
 
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
             builder: (context) =>
-                isAdmin ? const AdminDashboard() : const EmployeeDashboard(),
+                isPrivileged ? const AdminDashboard() : const EmployeeDashboard(),
           ),
         );
       } else {

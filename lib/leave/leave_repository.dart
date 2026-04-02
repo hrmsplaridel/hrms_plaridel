@@ -93,6 +93,21 @@ class LeaveReviewDecisionInput {
   final DateTime? reviewedAt;
 }
 
+/// Admin payload for assigning Mandatory/Forced Leave to an employee.
+class AdminMandatoryLeaveAssignmentInput {
+  const AdminMandatoryLeaveAssignmentInput({
+    required this.userId,
+    required this.startDate,
+    required this.endDate,
+    this.reason,
+  });
+
+  final String userId;
+  final DateTime startDate;
+  final DateTime endDate;
+  final String? reason;
+}
+
 /// Backend-neutral contract for leave data access.
 ///
 /// Implement this with:
@@ -175,4 +190,26 @@ abstract class LeaveRepository {
 
   /// Fetch attachment bytes for viewing/downloading. Returns null if none or not supported.
   Future<List<int>?> getAttachmentBytes(String requestId) => Future.value(null);
+
+  // ---- Department Head workflow ----
+
+  /// Check if the current authenticated user is a department head.
+  Future<Map<String, dynamic>> checkIsDepartmentHead();
+
+  /// List leave requests pending department head approval for the user's department.
+  Future<List<LeaveRequest>> listDepartmentHeadRequests();
+
+  /// Department head approves a request (moves to pending_hr).
+  Future<LeaveRequest> departmentHeadApprove(LeaveReviewDecisionInput input);
+
+  /// Department head rejects a request.
+  Future<LeaveRequest> departmentHeadReject(LeaveReviewDecisionInput input);
+
+  /// Department head returns a request to the employee.
+  Future<LeaveRequest> departmentHeadReturn(LeaveReviewDecisionInput input);
+
+  /// Admin assigns Mandatory/Forced Leave to an employee.
+  Future<LeaveRequest> assignMandatoryForcedLeave(
+    AdminMandatoryLeaveAssignmentInput input,
+  );
 }

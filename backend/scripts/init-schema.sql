@@ -231,7 +231,8 @@ CREATE TABLE IF NOT EXISTS policy_assignments (
 -- =========================================
 CREATE TABLE IF NOT EXISTS holidays (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  holiday_date DATE NOT NULL,
+  date_from DATE NOT NULL,
+  date_to DATE NOT NULL,
   name TEXT NOT NULL,
   holiday_type TEXT NOT NULL DEFAULT 'regular'
     CHECK (holiday_type IN ('regular', 'special', 'local', 'work_suspension')),
@@ -242,7 +243,8 @@ CREATE TABLE IF NOT EXISTS holidays (
     CHECK (coverage IN ('whole_day', 'am_only', 'pm_only')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-  CONSTRAINT uq_holiday_date_name UNIQUE (holiday_date, name)
+  CONSTRAINT chk_holidays_date_range CHECK (date_to >= date_from),
+  CONSTRAINT uq_holidays_name_range UNIQUE (name, date_from, date_to)
 );
 
 -- =========================================
@@ -300,7 +302,18 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   -- Flexible payload for form fields (office_department, position_title, commutation, etc.)
   details JSONB,
   status TEXT NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('draft', 'pending', 'returned', 'approved', 'rejected', 'cancelled')),
+    CHECK (status IN (
+      'draft',
+      'pending',                       -- legacy alias for pending_hr
+      'pending_department_head',       -- awaiting department head approval
+      'pending_hr',                    -- awaiting HR/admin final approval
+      'rejected_by_department_head',   -- department head rejected
+      'rejected_by_hr',                -- HR/admin rejected
+      'returned',                      -- sent back to employee for correction
+      'approved',                      -- final approval by HR/admin
+      'rejected',                      -- legacy single-stage rejection
+      'cancelled'                      -- employee cancelled
+    )),
 
   reviewer_id UUID REFERENCES users(id) ON DELETE SET NULL,
   reviewer_remarks TEXT,
@@ -565,7 +578,7 @@ CREATE INDEX IF NOT EXISTS idx_policy_assignments_department_id ON policy_assign
 CREATE INDEX IF NOT EXISTS idx_policy_assignments_shift_id ON policy_assignments(shift_id);
 CREATE INDEX IF NOT EXISTS idx_policy_assignments_policy_id ON policy_assignments(attendance_policy_id);
 
-CREATE INDEX IF NOT EXISTS idx_holidays_holiday_date ON holidays(holiday_date);
+CREATE INDEX IF NOT EXISTS idx_holidays_date_range ON holidays(date_from, date_to);
 CREATE INDEX IF NOT EXISTS idx_holidays_type ON holidays(holiday_type);
 
 CREATE INDEX IF NOT EXISTS idx_leave_requests_employee_id ON leave_requests(employee_id);
@@ -573,11 +586,11 @@ CREATE INDEX IF NOT EXISTS idx_leave_requests_user_id ON leave_requests(user_id)
 CREATE INDEX IF NOT EXISTS idx_leave_requests_status ON leave_requests(status);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_dates ON leave_requests(start_date, end_date);
 
--- Phase 3 Fix #8: Prevent duplicate pending/approved requests on the same date range.
--- PARTIAL so draft/returned/cancelled records are not affected.
+-- Prevent duplicate pending/approved requests on the same date range.
+-- PARTIAL so draft/returned/cancelled/rejected records are not affected.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_leave_requests_no_overlap
 ON leave_requests (user_id, start_date, end_date)
-WHERE status IN ('pending', 'approved');
+WHERE status IN ('pending', 'pending_department_head', 'pending_hr', 'approved');
 
 CREATE INDEX IF NOT EXISTS idx_biometric_attendance_logs_user_id ON biometric_attendance_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_biometric_attendance_logs_logged_at ON biometric_attendance_logs(logged_at);

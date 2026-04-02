@@ -28,6 +28,7 @@ import '../../../dtr/manage/manage_shift.dart';
 import '../../../dtr/manage/manage_holiday.dart';
 import '../../../dtr/manage/manage_attendance_policy.dart';
 import '../../../dtr/manage/manage_attendance_adjustment.dart';
+import '../../../dtr/manage/manage_biometric_devices.dart';
 import '../../../docutracker/docutracker_main.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
@@ -560,6 +561,7 @@ class _TopBar extends StatelessWidget {
   final String displayName;
   final String? avatarPath;
   final bool showMenuButton;
+
   /// Dashboard tab only — search filters overview sections.
   final bool searchEnabled;
   final TextEditingController searchController;
@@ -986,6 +988,8 @@ class _DashboardContent extends StatelessWidget {
       'clock',
       'daily',
       'employee',
+      'biometric',
+      'device',
     ]);
     final showAnnouncements = _sectionVisible(q, [
       'announcement',
@@ -1010,7 +1014,8 @@ class _DashboardContent extends StatelessWidget {
       'applicant',
     ]);
 
-    final anySection = showWelcome ||
+    final anySection =
+        showWelcome ||
         showSummary ||
         showDocu ||
         showDtr ||
@@ -1056,154 +1061,155 @@ class _DashboardContent extends StatelessWidget {
           ),
         if (showWelcome)
           Container(
-          padding: EdgeInsets.all(isNarrow ? 20 : 28),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                AppTheme.primaryNavy.withOpacity(0.1),
-                AppTheme.primaryNavy.withOpacity(0.04),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: AppTheme.primaryNavy.withOpacity(0.15),
-              width: 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: AppTheme.primaryNavy.withOpacity(0.06),
-                blurRadius: 24,
-                offset: const Offset(0, 8),
+            padding: EdgeInsets.all(isNarrow ? 20 : 28),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  AppTheme.primaryNavy.withOpacity(0.1),
+                  AppTheme.primaryNavy.withOpacity(0.04),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
-              BoxShadow(
-                color: Colors.black.withOpacity(0.03),
-                blurRadius: 12,
-                offset: const Offset(0, 2),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: AppTheme.primaryNavy.withOpacity(0.15),
+                width: 1,
               ),
-            ],
-          ),
-          child: isNarrow
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _formatDate(now),
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primaryNavy.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Icon(
-                            Icons.waving_hand_rounded,
-                            color: AppTheme.primaryNavy,
-                            size: 26,
-                          ),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Welcome back, Admin!- Hello Boi Paldooooooooooo',
-                                style: TextStyle(
-                                  color: AppTheme.textPrimary,
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: -0.3,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                "Here's the latest overview of the HR activities.",
-                                style: TextStyle(
-                                  color: AppTheme.textSecondary,
-                                  fontSize: 14,
-                                  height: 1.4,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                )
-              : Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primaryNavy.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppTheme.primaryNavy.withOpacity(0.08),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: Icon(
-                        Icons.waving_hand_rounded,
-                        color: AppTheme.primaryNavy,
-                        size: 32,
-                      ),
-                    ),
-                    const SizedBox(width: 24),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _formatDate(now),
-                            style: TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Welcome back, Admin!',
-                            style: TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: 28,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -0.5,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            "Here's the latest overview of the HR activities.",
-                            style: TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 15,
-                              height: 1.5,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.primaryNavy.withOpacity(0.06),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
                 ),
-        ),
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.03),
+                  blurRadius: 12,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: isNarrow
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _formatDate(now),
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryNavy.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Icon(
+                              Icons.waving_hand_rounded,
+                              color: AppTheme.primaryNavy,
+                              size: 26,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Welcome back, Admin!- Hello Boi Paldooooooooooo',
+                                  style: TextStyle(
+                                    color: AppTheme.textPrimary,
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -0.3,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  "Here's the latest overview of the HR activities.",
+                                  style: TextStyle(
+                                    color: AppTheme.textSecondary,
+                                    fontSize: 14,
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  )
+                : Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryNavy.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppTheme.primaryNavy.withOpacity(0.08),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          Icons.waving_hand_rounded,
+                          color: AppTheme.primaryNavy,
+                          size: 32,
+                        ),
+                      ),
+                      const SizedBox(width: 24),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _formatDate(now),
+                              style: TextStyle(
+                                color: AppTheme.textSecondary,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Welcome back, Admin!',
+                              style: TextStyle(
+                                color: AppTheme.textPrimary,
+                                fontSize: 28,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.5,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              "Here's the latest overview of the HR activities.",
+                              style: TextStyle(
+                                color: AppTheme.textSecondary,
+                                fontSize: 15,
+                                height: 1.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
         if (showWelcome && showSummary) const SizedBox(height: 32),
         if (showSummary) const _SummaryCards(),
-        if ((showWelcome || showSummary) && showDocu) const SizedBox(height: 28),
+        if ((showWelcome || showSummary) && showDocu)
+          const SizedBox(height: 28),
         if (showDocu) ...[
           Text(
             'DocuTracker',
@@ -2144,7 +2150,8 @@ class _DtrContent extends StatefulWidget {
 
 class _DtrContentState extends State<_DtrContent> {
   /// 0 = menu, 1 = Time Logs, 2 = Reports, 3 = Employees, 4 = Assignment,
-  /// 5 = Department, 6 = Position, 7 = Shift, 8 = Leave Management
+  /// 5 = Department, 6 = Position, 7 = Shift, 8 = Leave Management,
+  /// 9–11 = Holiday / Policy / Adjustment via [_ManageContent], 12 = Biometric Devices
   int _dtrSectionIndex = 0;
 
   @override
@@ -2279,6 +2286,13 @@ class _DtrContentState extends State<_DtrContent> {
                       icon: Icons.edit_calendar_rounded,
                       onTap: () => setState(() => _dtrSectionIndex = 11),
                     ),
+                    FeatureCard(
+                      title: 'Biometric Devices',
+                      subtitle:
+                          'Register and manage biometric time clocks linked to your database.',
+                      icon: Icons.fingerprint_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 12),
+                    ),
                   ],
                 ),
               ] else if (_dtrSectionIndex == 1)
@@ -2287,6 +2301,8 @@ class _DtrContentState extends State<_DtrContent> {
                 DtrMain(section: DtrSection.reports)
               else if (_dtrSectionIndex == 8)
                 const LeaveMain(isAdmin: true)
+              else if (_dtrSectionIndex == 12)
+                const ManageBiometricDevices()
               else
                 _ManageContent(subIndex: _dtrSectionIndex - 3),
             ],
@@ -2691,21 +2707,22 @@ class _LdTrainingReportsSectionState extends State<_LdTrainingReportsSection> {
 
   Future<void> _markSeen(TrainingDailyReport report) async {
     try {
-      final updated =
-          await TrainingDailyReportRepo.instance.markAsSeen(report.id);
+      final updated = await TrainingDailyReportRepo.instance.markAsSeen(
+        report.id,
+      );
       if (!mounted) return;
       setState(() {
         final idx = _reports.indexWhere((r) => r.id == report.id);
         if (idx != -1) _reports[idx] = updated;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Marked report as seen.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Marked report as seen.')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to mark as seen: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to mark as seen: $e')));
     }
   }
 
@@ -2994,10 +3011,7 @@ class _LdReportCard extends StatelessWidget {
           const SizedBox(height: 10),
           Text(
             'Submitted ${r.submittedAt.toLocal()}',
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 12,
-            ),
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
           ),
           const SizedBox(height: 16),
           Row(

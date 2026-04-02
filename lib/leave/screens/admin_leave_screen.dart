@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -13,7 +15,8 @@ import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
 import '../utils/leave_request_pdf.dart';
-import '../widgets/leave_request_card.dart';
+import '../widgets/admin_row.dart';
+import '../widgets/history_timeline.dart';
 import '../widgets/leave_status_chip.dart';
 
 typedef LeaveApproveAction = Future<bool> Function(LeaveApprovalInput input);
@@ -27,11 +30,13 @@ typedef LeaveDecisionAction =
 class AdminLeaveScreen extends StatefulWidget {
   const AdminLeaveScreen({
     super.key,
+    this.isDepartmentHead = false,
     this.onApprove,
     this.onReturnRequest,
     this.onRejectRequest,
   });
 
+  final bool isDepartmentHead;
   final LeaveApproveAction? onApprove;
   final LeaveDecisionAction? onReturnRequest;
   final LeaveDecisionAction? onRejectRequest;
@@ -40,14 +45,18 @@ class AdminLeaveScreen extends StatefulWidget {
   State<AdminLeaveScreen> createState() => _AdminLeaveScreenState();
 }
 
-class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
+class _AdminLeaveScreenState extends State<AdminLeaveScreen>
+    with WidgetsBindingObserver {
   bool _initialized = false;
   LeaveRequest? _selectedRequest;
-  LeaveRequestStatus? _statusFilter = LeaveRequestStatus.pending;
+  LeaveRequestStatus? _statusFilter;
   LeaveType? _leaveTypeFilter;
+  String? _departmentFilter;
+  String? _employeeFilter;
   // #11: Date range filters.
   DateTime? _startDateFrom;
   DateTime? _startDateTo;
+  Timer? _autoRefreshTimer;
 
   Future<({String name, String? title})> _loadReviewerSignatureInfo(
     AuthProvider auth,
@@ -119,6 +128,36 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
     if (_initialized) return;
     _initialized = true;
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadRequests());
+    WidgetsBinding.instance.addObserver(this);
+    _startAutoRefresh();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _autoRefreshTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _safeAutoRefresh();
+    }
+  }
+
+  void _startAutoRefresh() {
+    _autoRefreshTimer?.cancel();
+    _autoRefreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      _safeAutoRefresh();
+    });
+  }
+
+  Future<void> _safeAutoRefresh() async {
+    if (!mounted) return;
+    final provider = context.read<LeaveProvider>();
+    if (provider.reviewing || provider.submitting) return;
+    await _loadRequests();
   }
 
   @override
@@ -127,14 +166,86 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
     final width = MediaQuery.of(context).size.width;
     final compact = width < 1080;
     final requests = provider.requests;
+    final departmentMap = <String, String>{};
+    for (final request in requests) {
+      final raw = (request.officeDepartment ?? '').trim();
+      if (raw.isEmpty) continue;
+      final normalized = raw
+          .toLowerCase()
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .replaceAll('\u00A0', ' ')
+          .replaceAll('\u200B', '');
+      departmentMap.putIfAbsent(normalized, () => raw);
+    }
+    final departments = departmentMap.values.toList()..sort();
+    final employeeDirectory = <String, String>{};
+    for (final r in requests) {
+      final name = (r.employeeName ?? '').trim();
+      if (name.isEmpty) continue;
+      employeeDirectory[r.userId] = name;
+    }
+    final employees =
+        employeeDirectory.entries.map((e) => (id: e.key, name: e.value)).where((
+          e,
+        ) {
+          if (_departmentFilter == null) return true;
+          final req = requests.where((r) => r.userId == e.id);
+          return req.any(
+            (r) => (r.officeDepartment ?? '').trim() == _departmentFilter,
+          );
+        }).toList()..sort((a, b) => a.name.compareTo(b.name));
+
+    final filteredRequests = requests.where((r) {
+      if (!widget.isDepartmentHead &&
+          r.status == LeaveRequestStatus.pendingDepartmentHead) {
+        return false;
+      }
+      final statusOk = _statusFilter == null || r.status == _statusFilter;
+      if (!statusOk) return false;
+      final leaveTypeOk =
+          _leaveTypeFilter == null || r.leaveType == _leaveTypeFilter;
+      if (!leaveTypeOk) return false;
+      final fromOk =
+          _startDateFrom == null ||
+          (r.startDate != null &&
+              !r.startDate!.isBefore(
+                DateTime(
+                  _startDateFrom!.year,
+                  _startDateFrom!.month,
+                  _startDateFrom!.day,
+                ),
+              ));
+      if (!fromOk) return false;
+      final toOk =
+          _startDateTo == null ||
+          (r.startDate != null &&
+              !r.startDate!.isAfter(
+                DateTime(
+                  _startDateTo!.year,
+                  _startDateTo!.month,
+                  _startDateTo!.day,
+                  23,
+                  59,
+                  59,
+                ),
+              ));
+      if (!toOk) return false;
+      final deptOk =
+          _departmentFilter == null ||
+          (r.officeDepartment ?? '').trim() == _departmentFilter;
+      if (!deptOk) return false;
+      final employeeOk = _employeeFilter == null || r.userId == _employeeFilter;
+      if (!employeeOk) return false;
+      return true;
+    }).toList();
     // Clear selection when the selected request is no longer in the list
     // (e.g. employee cancelled it, or filters changed).
     final selectionStillValid =
         _selectedRequest != null &&
-        requests.any((r) => r.id == _selectedRequest!.id);
+        filteredRequests.any((r) => r.id == _selectedRequest!.id);
     final selected = selectionStillValid
         ? _selectedRequest
-        : (requests.isNotEmpty ? requests.first : null);
+        : (filteredRequests.isNotEmpty ? filteredRequests.first : null);
     if (selected != _selectedRequest) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -146,12 +257,15 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _AdminHeaderCard(
-          totalRequests: requests.length,
-          pendingCount: requests
-              .where((r) => r.status == LeaveRequestStatus.pending)
+          totalRequests: filteredRequests.length,
+          pendingCount: filteredRequests
+              .where((r) => r.status.isPending)
               .length,
           reviewing: provider.reviewing,
           onRefresh: _loadRequests,
+          onAssignMandatoryLeave: widget.isDepartmentHead
+              ? null
+              : _assignMandatoryForcedLeave,
         ),
         if (provider.error != null) ...[
           const SizedBox(height: 16),
@@ -162,8 +276,15 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
         ],
         const SizedBox(height: 24),
         _FilterBar(
+          isDepartmentHead: widget.isDepartmentHead,
           status: _statusFilter,
           leaveType: _leaveTypeFilter,
+          department: _departmentFilter,
+          departments: departments,
+          employee: _employeeFilter,
+          employees: employees
+              .map((e) => _EmployeeFilterOption(id: e.id, name: e.name))
+              .toList(),
           startDateFrom: _startDateFrom,
           startDateTo: _startDateTo,
           onStatusChanged: (value) {
@@ -174,6 +295,11 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
             setState(() => _leaveTypeFilter = value);
             _loadRequests();
           },
+          onDepartmentChanged: (value) => setState(() {
+            _departmentFilter = value;
+            _employeeFilter = null;
+          }),
+          onEmployeeChanged: (value) => setState(() => _employeeFilter = value),
           onStartDateFromChanged: (value) {
             setState(() => _startDateFrom = value);
             _loadRequests();
@@ -184,8 +310,10 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
           },
           onReset: () {
             setState(() {
-              _statusFilter = LeaveRequestStatus.pending;
+              _statusFilter = null;
               _leaveTypeFilter = null;
+              _departmentFilter = null;
+              _employeeFilter = null;
               _startDateFrom = null;
               _startDateTo = null;
             });
@@ -197,7 +325,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
             ? Column(
                 children: [
                   _RequestQueuePanel(
-                    requests: requests,
+                    requests: filteredRequests,
+                    isDepartmentHead: widget.isDepartmentHead,
                     loading: provider.loading,
                     selectedRequest: selected,
                     onSelect: (request) {
@@ -208,22 +337,23 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
                   const SizedBox(height: 16),
                   _RequestDetailsPanel(
                     request: selected,
+                    isDepartmentHead: widget.isDepartmentHead,
                     reviewing: provider.reviewing,
-                    onApprove:
-                        selected == null ||
-                            selected.status != LeaveRequestStatus.pending
+                    onApprove: selected == null || (!selected.status.isPending)
                         ? null
-                        : () => _approve(selected),
-                    onReturn:
-                        selected == null ||
-                            selected.status != LeaveRequestStatus.pending
+                        : () => widget.isDepartmentHead
+                              ? _deptHeadApprove(selected)
+                              : _approve(selected),
+                    onReturn: selected == null || (!selected.status.isPending)
                         ? null
-                        : () => _returnRequest(selected),
-                    onReject:
-                        selected == null ||
-                            selected.status != LeaveRequestStatus.pending
+                        : () => widget.isDepartmentHead
+                              ? _deptHeadReturn(selected)
+                              : _returnRequest(selected),
+                    onReject: selected == null || (!selected.status.isPending)
                         ? null
-                        : () => _rejectRequest(selected),
+                        : () => widget.isDepartmentHead
+                              ? _deptHeadReject(selected)
+                              : _rejectRequest(selected),
                     onRevoke:
                         selected == null ||
                             selected.status != LeaveRequestStatus.approved
@@ -241,7 +371,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
                   Expanded(
                     flex: 5,
                     child: _RequestQueuePanel(
-                      requests: requests,
+                      requests: filteredRequests,
+                      isDepartmentHead: widget.isDepartmentHead,
                       loading: provider.loading,
                       selectedRequest: selected,
                       onSelect: (request) {
@@ -255,22 +386,24 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
                     flex: 7,
                     child: _RequestDetailsPanel(
                       request: selected,
+                      isDepartmentHead: widget.isDepartmentHead,
                       reviewing: provider.reviewing,
                       onApprove:
-                          selected == null ||
-                              selected.status != LeaveRequestStatus.pending
+                          selected == null || (!selected.status.isPending)
                           ? null
-                          : () => _approve(selected),
-                      onReturn:
-                          selected == null ||
-                              selected.status != LeaveRequestStatus.pending
+                          : () => widget.isDepartmentHead
+                                ? _deptHeadApprove(selected)
+                                : _approve(selected),
+                      onReturn: selected == null || (!selected.status.isPending)
                           ? null
-                          : () => _returnRequest(selected),
-                      onReject:
-                          selected == null ||
-                              selected.status != LeaveRequestStatus.pending
+                          : () => widget.isDepartmentHead
+                                ? _deptHeadReturn(selected)
+                                : _returnRequest(selected),
+                      onReject: selected == null || (!selected.status.isPending)
                           ? null
-                          : () => _rejectRequest(selected),
+                          : () => widget.isDepartmentHead
+                                ? _deptHeadReject(selected)
+                                : _rejectRequest(selected),
                       onRevoke:
                           selected == null ||
                               selected.status != LeaveRequestStatus.approved
@@ -290,15 +423,19 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
   Future<void> _loadRequests() async {
     if (!mounted) return;
     final provider = context.read<LeaveProvider>();
-    await provider.loadRequests(
-      query: LeaveRequestQuery(
-        status: _statusFilter,
-        leaveType: _leaveTypeFilter,
-        startDateFrom: _startDateFrom, // #11
-        startDateTo: _startDateTo, // #11
-        limit: 200,
-      ),
-    );
+    if (widget.isDepartmentHead) {
+      await provider.loadDepartmentHeadRequests();
+    } else {
+      await provider.loadRequests(
+        query: LeaveRequestQuery(
+          status: _statusFilter,
+          leaveType: _leaveTypeFilter,
+          startDateFrom: _startDateFrom,
+          startDateTo: _startDateTo,
+          limit: 200,
+        ),
+      );
+    }
     if (!mounted) return;
     if (_selectedRequest == null && provider.requests.isNotEmpty) {
       final first = provider.requests.first;
@@ -595,6 +732,133 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen> {
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
   }
+
+  Future<void> _assignMandatoryForcedLeave() async {
+    final input = await showDialog<_AssignMandatoryForcedLeaveInput>(
+      context: context,
+      builder: (_) => const _AssignMandatoryForcedLeaveDialog(),
+    );
+    if (input == null) return;
+
+    final result = await context
+        .read<LeaveProvider>()
+        .assignMandatoryForcedLeave(
+          AdminMandatoryLeaveAssignmentInput(
+            userId: input.userId,
+            startDate: input.startDate,
+            endDate: input.endDate,
+            reason: input.reason,
+          ),
+        );
+    if (!mounted) return;
+    final ok = result != null;
+    final provider = context.read<LeaveProvider>();
+    _showMessage(
+      ok
+          ? 'Mandatory/Forced Leave assigned.'
+          : (provider.error ?? 'Assign action failed.'),
+    );
+    if (ok) await _loadRequests();
+  }
+
+  // ---- Department Head actions ----
+
+  Future<void> _deptHeadApprove(LeaveRequest request) async {
+    final auth = context.read<AuthProvider>();
+    final reviewerId = auth.user?.id;
+    if (reviewerId == null || reviewerId.isEmpty) {
+      _showMessage('No logged-in reviewer found.');
+      return;
+    }
+    final input = LeaveReviewDecisionInput(
+      requestId: request.id ?? '',
+      reviewerId: reviewerId,
+      reviewerName: auth.displayName,
+      reviewerRole: auth.user?.role,
+    );
+    final result = await context.read<LeaveProvider>().departmentHeadApprove(
+      input,
+    );
+    final ok = result != null;
+    if (!mounted) return;
+    _showMessage(
+      ok
+          ? 'Forwarded to HR for final approval.'
+          : (context.read<LeaveProvider>().error ??
+                'Department head approval failed.'),
+    );
+    if (ok) await _loadRequests();
+  }
+
+  Future<void> _deptHeadReject(LeaveRequest request) async {
+    final dialogResult = await showDialog<LeaveReviewDecisionInput>(
+      context: context,
+      builder: (_) => _DecisionDialog(
+        title: 'Reject Request',
+        subtitle: 'Reject this request as department head.',
+        confirmLabel: 'Reject',
+        requireReason: true,
+        request: request,
+      ),
+    );
+    if (dialogResult == null) return;
+    final auth = context.read<AuthProvider>();
+    final reviewerId = auth.user?.id;
+    if (reviewerId == null || reviewerId.isEmpty) {
+      _showMessage('No logged-in reviewer found.');
+      return;
+    }
+    final input = LeaveReviewDecisionInput(
+      requestId: request.id ?? '',
+      reviewerId: reviewerId,
+      reviewerName: auth.displayName,
+      reviewerRole: auth.user?.role,
+      reason: dialogResult.reason,
+      hrRemarks: dialogResult.hrRemarks,
+    );
+    final result = await context.read<LeaveProvider>().departmentHeadReject(
+      input,
+    );
+    final ok = result != null;
+    if (!mounted) return;
+    _showMessage(ok ? 'Request rejected.' : 'Reject action failed.');
+    if (ok) await _loadRequests();
+  }
+
+  Future<void> _deptHeadReturn(LeaveRequest request) async {
+    final dialogResult = await showDialog<LeaveReviewDecisionInput>(
+      context: context,
+      builder: (_) => _DecisionDialog(
+        title: 'Return Request',
+        subtitle: 'Return this to the employee for corrections.',
+        confirmLabel: 'Return',
+        requireReason: true,
+        request: request,
+      ),
+    );
+    if (dialogResult == null) return;
+    final auth = context.read<AuthProvider>();
+    final reviewerId = auth.user?.id;
+    if (reviewerId == null || reviewerId.isEmpty) {
+      _showMessage('No logged-in reviewer found.');
+      return;
+    }
+    final input = LeaveReviewDecisionInput(
+      requestId: request.id ?? '',
+      reviewerId: reviewerId,
+      reviewerName: auth.displayName,
+      reviewerRole: auth.user?.role,
+      reason: dialogResult.reason,
+      hrRemarks: dialogResult.hrRemarks,
+    );
+    final result = await context.read<LeaveProvider>().departmentHeadReturn(
+      input,
+    );
+    final ok = result != null;
+    if (!mounted) return;
+    _showMessage(ok ? 'Request returned.' : 'Return action failed.');
+    if (ok) await _loadRequests();
+  }
 }
 
 class _AdminHeaderCard extends StatelessWidget {
@@ -603,12 +867,14 @@ class _AdminHeaderCard extends StatelessWidget {
     required this.pendingCount,
     required this.reviewing,
     required this.onRefresh,
+    this.onAssignMandatoryLeave,
   });
 
   final int totalRequests;
   final int pendingCount;
   final bool reviewing;
   final Future<void> Function() onRefresh;
+  final Future<void> Function()? onAssignMandatoryLeave;
 
   @override
   Widget build(BuildContext context) {
@@ -669,10 +935,22 @@ class _AdminHeaderCard extends StatelessWidget {
               ],
             ),
           ),
-          FilledButton.icon(
-            onPressed: reviewing ? null : onRefresh,
-            icon: const Icon(Icons.refresh_rounded),
-            label: Text(reviewing ? 'Reviewing...' : 'Refresh'),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              if (onAssignMandatoryLeave != null)
+                OutlinedButton.icon(
+                  onPressed: reviewing ? null : onAssignMandatoryLeave,
+                  icon: const Icon(Icons.assignment_turned_in_rounded),
+                  label: const Text('Assign Mandatory/Forced'),
+                ),
+              FilledButton.icon(
+                onPressed: reviewing ? null : onRefresh,
+                icon: const Icon(Icons.refresh_rounded),
+                label: Text(reviewing ? 'Reviewing...' : 'Refresh'),
+              ),
+            ],
           ),
         ],
       ),
@@ -680,12 +958,247 @@ class _AdminHeaderCard extends StatelessWidget {
   }
 }
 
+class _AssignMandatoryForcedLeaveInput {
+  const _AssignMandatoryForcedLeaveInput({
+    required this.userId,
+    required this.startDate,
+    required this.endDate,
+    this.reason,
+  });
+
+  final String userId;
+  final DateTime startDate;
+  final DateTime endDate;
+  final String? reason;
+}
+
+class _AssignMandatoryForcedLeaveDialog extends StatefulWidget {
+  const _AssignMandatoryForcedLeaveDialog();
+
+  @override
+  State<_AssignMandatoryForcedLeaveDialog> createState() =>
+      _AssignMandatoryForcedLeaveDialogState();
+}
+
+class _AssignMandatoryForcedLeaveDialogState
+    extends State<_AssignMandatoryForcedLeaveDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _reasonController = TextEditingController();
+  bool _loadingEmployees = true;
+  String? _employeesError;
+  List<Map<String, String>> _employees = const [];
+  String? _selectedUserId;
+  DateTime? _startDate;
+  DateTime? _endDate;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadEmployees();
+  }
+
+  @override
+  void dispose() {
+    _reasonController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadEmployees() async {
+    setState(() {
+      _loadingEmployees = true;
+      _employeesError = null;
+    });
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/employees?status=Active',
+      );
+      final rows =
+          (res.data ?? const [])
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .map(
+                (e) => {
+                  'id': e['id']?.toString() ?? '',
+                  'name': e['full_name']?.toString() ?? 'Unnamed',
+                },
+              )
+              .where((e) => (e['id'] ?? '').isNotEmpty)
+              .toList()
+            ..sort((a, b) => (a['name']!).compareTo(b['name']!));
+      setState(() {
+        _employees = rows;
+        _selectedUserId = rows.isNotEmpty ? rows.first['id'] : null;
+        _loadingEmployees = false;
+      });
+    } catch (e) {
+      setState(() {
+        _employeesError = e.toString();
+        _loadingEmployees = false;
+      });
+    }
+  }
+
+  int? _computeWeekdays() {
+    final s = _startDate;
+    final e = _endDate;
+    if (s == null || e == null || e.isBefore(s)) return null;
+    int count = 0;
+    DateTime d = s;
+    while (!d.isAfter(e)) {
+      if (d.weekday != DateTime.saturday && d.weekday != DateTime.sunday) {
+        count++;
+      }
+      d = d.add(const Duration(days: 1));
+    }
+    return count;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final weekdays = _computeWeekdays();
+    return AlertDialog(
+      title: const Text('Assign Mandatory/Forced Leave'),
+      content: SizedBox(
+        width: 520,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_loadingEmployees)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                else if (_employeesError != null)
+                  Text(
+                    'Failed to load employees: $_employeesError',
+                    style: TextStyle(color: Colors.red.shade700),
+                  )
+                else
+                  DropdownButtonFormField<String>(
+                    value: _selectedUserId,
+                    decoration: _inputDecoration('Employee'),
+                    items: _employees
+                        .map(
+                          (e) => DropdownMenuItem<String>(
+                            value: e['id'],
+                            child: Text(e['name']!),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (v) => setState(() => _selectedUserId = v),
+                    validator: (v) =>
+                        (v == null || v.isEmpty) ? 'Select an employee' : null,
+                  ),
+                const SizedBox(height: 12),
+                _dateField(
+                  label: 'Start Date',
+                  value: _startDate,
+                  onChanged: (v) => setState(() => _startDate = v),
+                ),
+                const SizedBox(height: 12),
+                _dateField(
+                  label: 'End Date',
+                  value: _endDate,
+                  onChanged: (v) => setState(() => _endDate = v),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _reasonController,
+                  minLines: 2,
+                  maxLines: null,
+                  decoration: _inputDecoration('Reason / Notes (Optional)'),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  weekdays == null
+                      ? 'Select a valid date range.'
+                      : 'Computed weekdays: $weekdays (max 5 for Mandatory/Forced Leave)',
+                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () {
+            if (!(_formKey.currentState?.validate() ?? false)) return;
+            if (_startDate == null || _endDate == null) return;
+            final days = _computeWeekdays();
+            if (days == null || days <= 0) return;
+            if (days > 5) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'Mandatory/Forced Leave allows a maximum of 5 working days.',
+                  ),
+                ),
+              );
+              return;
+            }
+            Navigator.of(context).pop(
+              _AssignMandatoryForcedLeaveInput(
+                userId: _selectedUserId!,
+                startDate: _startDate!,
+                endDate: _endDate!,
+                reason: _trimOrNull(_reasonController.text),
+              ),
+            );
+          },
+          child: const Text('Assign'),
+        ),
+      ],
+    );
+  }
+
+  Widget _dateField({
+    required String label,
+    required DateTime? value,
+    required ValueChanged<DateTime?> onChanged,
+  }) {
+    return InkWell(
+      onTap: () async {
+        final d = await showDatePicker(
+          context: context,
+          initialDate: value ?? DateTime.now(),
+          firstDate: DateTime(2020),
+          lastDate: DateTime(2100),
+        );
+        if (d != null) onChanged(d);
+      },
+      child: InputDecorator(
+        decoration: _inputDecoration(label),
+        child: Text(
+          value == null
+              ? 'Select Date'
+              : '${value.year}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}',
+        ),
+      ),
+    );
+  }
+}
+
 class _FilterBar extends StatelessWidget {
   const _FilterBar({
+    required this.isDepartmentHead,
     required this.status,
     required this.leaveType,
+    required this.department,
+    required this.departments,
+    required this.employee,
+    required this.employees,
     required this.onStatusChanged,
     required this.onLeaveTypeChanged,
+    required this.onDepartmentChanged,
+    required this.onEmployeeChanged,
     required this.onReset,
     this.startDateFrom,
     this.startDateTo,
@@ -693,10 +1206,17 @@ class _FilterBar extends StatelessWidget {
     this.onStartDateToChanged,
   });
 
+  final bool isDepartmentHead;
   final LeaveRequestStatus? status;
   final LeaveType? leaveType;
+  final String? department;
+  final List<String> departments;
+  final String? employee;
+  final List<_EmployeeFilterOption> employees;
   final ValueChanged<LeaveRequestStatus?> onStatusChanged;
   final ValueChanged<LeaveType?> onLeaveTypeChanged;
+  final ValueChanged<String?> onDepartmentChanged;
+  final ValueChanged<String?> onEmployeeChanged;
   final VoidCallback onReset;
   // #11: Date range filters.
   final DateTime? startDateFrom;
@@ -706,6 +1226,22 @@ class _FilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final statusOptions = isDepartmentHead
+        ? const <LeaveRequestStatus?>[
+            null,
+            LeaveRequestStatus.pendingDepartmentHead,
+            LeaveRequestStatus.returned,
+            LeaveRequestStatus.rejectedByDepartmentHead,
+          ]
+        : const <LeaveRequestStatus?>[
+            null,
+            LeaveRequestStatus.pendingHr,
+            LeaveRequestStatus.returned,
+            LeaveRequestStatus.approved,
+            LeaveRequestStatus.rejectedByHr,
+            LeaveRequestStatus.cancelled,
+          ];
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
@@ -730,14 +1266,10 @@ class _FilterBar extends StatelessWidget {
                     initialValue: status,
                     decoration: _inputDecoration('Status'),
                     items: [
-                      const DropdownMenuItem<LeaveRequestStatus?>(
-                        value: null,
-                        child: Text('All statuses'),
-                      ),
-                      ...LeaveRequestStatus.values.map(
+                      ...statusOptions.map(
                         (value) => DropdownMenuItem<LeaveRequestStatus?>(
                           value: value,
-                          child: Text(value.displayName),
+                          child: Text(_statusLabel(value)),
                         ),
                       ),
                     ],
@@ -765,6 +1297,56 @@ class _FilterBar extends StatelessWidget {
                     onChanged: onLeaveTypeChanged,
                   ),
                 ),
+                if (!isDepartmentHead)
+                  SizedBox(
+                    width: 180,
+                    child: DropdownButtonFormField<String?>(
+                      isExpanded: true,
+                      initialValue: department,
+                      decoration: _inputDecoration('Department'),
+                      items: [
+                        const DropdownMenuItem<String?>(
+                          value: null,
+                          child: Text('All departments'),
+                        ),
+                        ...departments.map(
+                          (value) => DropdownMenuItem<String?>(
+                            value: value,
+                            child: Text(value),
+                          ),
+                        ),
+                      ],
+                      onChanged: onDepartmentChanged,
+                    ),
+                  ),
+                SizedBox(
+                  width: 220,
+                  child: DropdownButtonFormField<String?>(
+                    isExpanded: true,
+                    initialValue: employee,
+                    decoration: _inputDecoration(
+                      isDepartmentHead ? 'Employee' : 'Employee',
+                    ),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('All employees'),
+                      ),
+                      ...employees.map(
+                        (e) => DropdownMenuItem<String?>(
+                          value: e.id,
+                          child: Text(e.name),
+                        ),
+                      ),
+                    ],
+                    onChanged: (!isDepartmentHead && department == null)
+                        ? null
+                        : onEmployeeChanged,
+                    hint: (!isDepartmentHead && department == null)
+                        ? const Text('Select department first')
+                        : null,
+                  ),
+                ),
                 // #11: Date range pickers.
                 _DateFilterChip(
                   label: 'From',
@@ -788,6 +1370,24 @@ class _FilterBar extends StatelessWidget {
       ),
     );
   }
+
+  String _statusLabel(LeaveRequestStatus? value) {
+    if (value == null) return 'All statuses';
+    if (!isDepartmentHead) return value.displayName;
+    return switch (value) {
+      LeaveRequestStatus.pendingDepartmentHead => 'Pending',
+      LeaveRequestStatus.rejectedByDepartmentHead => 'Rejected',
+      LeaveRequestStatus.returned => 'Returned',
+      _ => value.displayName,
+    };
+  }
+}
+
+class _EmployeeFilterOption {
+  const _EmployeeFilterOption({required this.id, required this.name});
+
+  final String id;
+  final String name;
 }
 
 /// Small chip-style date picker for filter bar.
@@ -833,12 +1433,14 @@ class _DateFilterChip extends StatelessWidget {
 class _RequestQueuePanel extends StatelessWidget {
   const _RequestQueuePanel({
     required this.requests,
+    required this.isDepartmentHead,
     required this.loading,
     required this.selectedRequest,
     required this.onSelect,
   });
 
   final List<LeaveRequest> requests;
+  final bool isDepartmentHead;
   final bool loading;
   final LeaveRequest? selectedRequest;
   final ValueChanged<LeaveRequest> onSelect;
@@ -847,28 +1449,47 @@ class _RequestQueuePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return _SectionCard(
       title: 'Request Queue',
-      subtitle: 'Choose a leave request to inspect full details.',
+      subtitle: 'Table-like review list with quick actions.',
       child: loading && requests.isEmpty
           ? const _CenteredState(message: 'Loading leave requests...')
           : requests.isEmpty
           ? const _CenteredState(
               message: 'No leave requests matched the filters.',
             )
-          : Column(
-              children: requests
-                  .map(
-                    (request) => Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: LeaveRequestCard(
-                        request: request,
-                        selected: request.id == selectedRequest?.id,
-                        onTap: () => onSelect(request),
-                        variant: LeaveRequestCardVariant.adminQueue,
-                        showReason: false,
+          : Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.black.withOpacity(0.08)),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
+                  width: kAdminTableMinWidth,
+                  child: Column(
+                    children: [
+                      const AdminTableHeader(),
+                      ...requests.map(
+                        (request) => AdminRow(
+                          request: request,
+                          statusLabel: _statusLabel(
+                            request.status,
+                            isDepartmentHead: isDepartmentHead,
+                          ),
+                          highlighted: request.id == selectedRequest?.id,
+                          onView: () => onSelect(request),
+                          onApprove: request.status.isPending
+                              ? () => onSelect(request)
+                              : null,
+                          onReject: request.status.isPending
+                              ? () => onSelect(request)
+                              : null,
+                        ),
                       ),
-                    ),
-                  )
-                  .toList(),
+                    ],
+                  ),
+                ),
+              ),
             ),
     );
   }
@@ -877,6 +1498,7 @@ class _RequestQueuePanel extends StatelessWidget {
 class _RequestDetailsPanel extends StatelessWidget {
   const _RequestDetailsPanel({
     required this.request,
+    required this.isDepartmentHead,
     required this.reviewing,
     this.onApprove,
     this.onReturn,
@@ -886,6 +1508,7 @@ class _RequestDetailsPanel extends StatelessWidget {
   });
 
   final LeaveRequest? request;
+  final bool isDepartmentHead;
   final bool reviewing;
   final VoidCallback? onApprove;
   final VoidCallback? onReturn;
@@ -936,7 +1559,13 @@ class _RequestDetailsPanel extends StatelessWidget {
                   ],
                 ),
               ),
-              LeaveStatusChip(status: request!.status),
+              LeaveStatusChip(
+                status: request!.status,
+                label: _statusLabel(
+                  request!.status,
+                  isDepartmentHead: isDepartmentHead,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 18),
@@ -972,6 +1601,10 @@ class _RequestDetailsPanel extends StatelessWidget {
             _BodyCard(content: request!.reason!.trim()),
             const SizedBox(height: 16),
           ],
+          _SubsectionTitle(title: 'Approval History'),
+          const SizedBox(height: 8),
+          HistoryTimeline(events: _buildHistoryEvents(request!)),
+          const SizedBox(height: 10),
           _SubsectionTitle(title: 'Review Actions'),
           const SizedBox(height: 10),
           Wrap(
@@ -1027,6 +1660,56 @@ class _RequestDetailsPanel extends StatelessWidget {
   String _formatRange(LeaveRequest request) {
     if (request.startDate == null || request.endDate == null) return '—';
     return '${_formatDate(request.startDate!)} to ${_formatDate(request.endDate!)}';
+  }
+
+  List<LeaveHistoryEvent> _buildHistoryEvents(LeaveRequest request) {
+    final reviewer = (request.reviewerName ?? '').trim().isNotEmpty
+        ? request.reviewerName!.trim()
+        : 'Approver';
+    final submittedAt = request.dateFiled ?? request.createdAt;
+    final reviewedAt = request.reviewedAt;
+
+    return [
+      LeaveHistoryEvent(
+        label: 'Submitted',
+        dateTime: submittedAt,
+        actor: request.employeeName ?? 'Employee',
+        remarks: request.reason,
+      ),
+      LeaveHistoryEvent(
+        label: 'Approved by Department Head',
+        dateTime:
+            request.status == LeaveRequestStatus.pendingHr ||
+                request.status == LeaveRequestStatus.approved
+            ? reviewedAt
+            : null,
+        actor: reviewer,
+        completed:
+            request.status == LeaveRequestStatus.pendingHr ||
+            request.status == LeaveRequestStatus.approved,
+      ),
+      LeaveHistoryEvent(
+        label: 'Forwarded to HR',
+        dateTime:
+            request.status == LeaveRequestStatus.pendingHr ||
+                request.status == LeaveRequestStatus.approved
+            ? reviewedAt
+            : null,
+        actor: reviewer,
+        completed:
+            request.status == LeaveRequestStatus.pendingHr ||
+            request.status == LeaveRequestStatus.approved,
+      ),
+      LeaveHistoryEvent(
+        label: 'Approved by HR',
+        dateTime: request.status == LeaveRequestStatus.approved
+            ? reviewedAt
+            : null,
+        actor: reviewer,
+        remarks: request.hrRemarks,
+        completed: request.status == LeaveRequestStatus.approved,
+      ),
+    ];
   }
 }
 
@@ -1831,4 +2514,16 @@ String _formatDate(DateTime value) {
     'Dec',
   ];
   return '${months[value.month - 1]} ${value.day}, ${value.year}';
+}
+
+String _statusLabel(
+  LeaveRequestStatus status, {
+  required bool isDepartmentHead,
+}) {
+  if (!isDepartmentHead) return status.displayName;
+  return switch (status) {
+    LeaveRequestStatus.pendingDepartmentHead => 'Pending',
+    LeaveRequestStatus.rejectedByDepartmentHead => 'Rejected',
+    _ => status.displayName,
+  };
 }

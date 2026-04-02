@@ -97,7 +97,7 @@ class ApiLeaveRepository implements LeaveRepository {
   Future<List<LeaveRequest>> listMyRequests(
     String userId, {
     LeaveRequestStatus? status,
-    int? limit,  // #13: pagination
+    int? limit, // #13: pagination
   }) async {
     // userId is inferred from JWT on backend; we keep signature for compatibility.
     final res = await ApiClient.instance.get<List<dynamic>>(
@@ -126,7 +126,9 @@ class ApiLeaveRepository implements LeaveRepository {
 
   @override
   Future<List<LeaveRequest>> listPendingRequests() async {
-    final res = await ApiClient.instance.get<List<dynamic>>('/api/leave/pending');
+    final res = await ApiClient.instance.get<List<dynamic>>(
+      '/api/leave/pending',
+    );
     final data = res.data ?? const [];
     return data.map((e) => LeaveRequest.fromJson(_asMap(e))).toList();
   }
@@ -165,6 +167,10 @@ class ApiLeaveRepository implements LeaveRepository {
         '/api/leave/${input.requestId}/approve',
         data: {
           'reviewer_remarks': input.hrRemarks,
+          'recommendation_remarks': input.recommendationRemarks,
+          'approved_days_with_pay': input.approvedDaysWithPay,
+          'approved_days_without_pay': input.approvedDaysWithoutPay,
+          'approved_other_details': input.approvedOtherDetails,
         },
       );
       final data = res.data;
@@ -181,9 +187,7 @@ class ApiLeaveRepository implements LeaveRepository {
     try {
       final res = await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/leave/${input.requestId}/revoke',
-        data: {
-          'reviewer_remarks': input.reason ?? input.hrRemarks,
-        },
+        data: {'reviewer_remarks': input.reason ?? input.hrRemarks},
       );
       final data = res.data;
       if (data == null) throw Exception('No data returned');
@@ -197,9 +201,7 @@ class ApiLeaveRepository implements LeaveRepository {
   Future<LeaveRequest> returnRequest(LeaveReviewDecisionInput input) async {
     final res = await ApiClient.instance.patch<Map<String, dynamic>>(
       '/api/leave/${input.requestId}/return',
-      data: {
-        'reviewer_remarks': input.reason ?? input.hrRemarks,
-      },
+      data: {'reviewer_remarks': input.reason ?? input.hrRemarks},
     );
     final data = res.data;
     if (data == null) throw Exception('No data returned');
@@ -212,6 +214,7 @@ class ApiLeaveRepository implements LeaveRepository {
       '/api/leave/${input.requestId}/reject',
       data: {
         'reviewer_remarks': input.reason ?? input.hrRemarks,
+        'disapproval_reason': input.reason ?? input.hrRemarks,
       },
     );
     final data = res.data;
@@ -228,9 +231,7 @@ class ApiLeaveRepository implements LeaveRepository {
     try {
       final res = await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/leave/$requestId/cancel',
-        data: {
-          if (reason != null) 'reason': reason,
-        },
+        data: {if (reason != null) 'reason': reason},
       );
       final data = res.data;
       if (data == null) throw Exception('No data returned');
@@ -288,5 +289,113 @@ class ApiLeaveRepository implements LeaveRepository {
       rethrow;
     }
   }
-}
 
+  // ---- Department Head workflow ----
+
+  @override
+  Future<Map<String, dynamic>> checkIsDepartmentHead() async {
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/leave/department-head/check',
+      );
+      return res.data ?? {'isDeptHead': false};
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
+  Future<List<LeaveRequest>> listDepartmentHeadRequests() async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/leave/department-head',
+      );
+      return (res.data ?? [])
+          .map((j) => LeaveRequest.fromJson(j as Map<String, dynamic>))
+          .toList();
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
+  Future<LeaveRequest> departmentHeadApprove(
+    LeaveReviewDecisionInput input,
+  ) async {
+    try {
+      final res = await ApiClient.instance.patch<Map<String, dynamic>>(
+        '/api/leave/${input.requestId}/department-head-approve',
+        data: {'reviewer_remarks': input.hrRemarks ?? input.reason ?? ''},
+      );
+      final data = res.data;
+      if (data == null) throw Exception('No data returned');
+      return LeaveRequest.fromJson(data);
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
+  Future<LeaveRequest> departmentHeadReject(
+    LeaveReviewDecisionInput input,
+  ) async {
+    try {
+      final res = await ApiClient.instance.patch<Map<String, dynamic>>(
+        '/api/leave/${input.requestId}/department-head-reject',
+        data: {
+          'reviewer_remarks': input.hrRemarks ?? '',
+          'reason': input.reason ?? '',
+        },
+      );
+      final data = res.data;
+      if (data == null) throw Exception('No data returned');
+      return LeaveRequest.fromJson(data);
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
+  Future<LeaveRequest> departmentHeadReturn(
+    LeaveReviewDecisionInput input,
+  ) async {
+    try {
+      final res = await ApiClient.instance.patch<Map<String, dynamic>>(
+        '/api/leave/${input.requestId}/department-head-return',
+        data: {
+          'reviewer_remarks': input.hrRemarks ?? '',
+          'reason': input.reason ?? '',
+        },
+      );
+      final data = res.data;
+      if (data == null) throw Exception('No data returned');
+      return LeaveRequest.fromJson(data);
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
+  Future<LeaveRequest> assignMandatoryForcedLeave(
+    AdminMandatoryLeaveAssignmentInput input,
+  ) async {
+    try {
+      final res = await ApiClient.instance.post<Map<String, dynamic>>(
+        '/api/leave/admin/mandatory-forced',
+        data: {
+          'user_id': input.userId,
+          'start_date':
+              '${input.startDate.year}-${input.startDate.month.toString().padLeft(2, '0')}-${input.startDate.day.toString().padLeft(2, '0')}',
+          'end_date':
+              '${input.endDate.year}-${input.endDate.month.toString().padLeft(2, '0')}-${input.endDate.day.toString().padLeft(2, '0')}',
+          'reason': input.reason,
+        },
+      );
+      final data = res.data;
+      if (data == null) throw Exception('No data returned');
+      return LeaveRequest.fromJson(data);
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+}

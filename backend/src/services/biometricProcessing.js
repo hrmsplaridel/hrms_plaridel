@@ -1,4 +1,5 @@
 const { pool } = require('../config/db');
+const { dateInRecurringRange } = require('./holidayRangeUtils');
 
 const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
 const NOON_MINUTES = 12 * 60;
@@ -64,22 +65,39 @@ function minutesFromMidnightInTimeZone(val, timeZone = HRMS_TIMEZONE) {
   return hh * 60 + mm;
 }
 
+function holidayDateToStr(v) {
+  if (v == null) return null;
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) return v.split('T')[0];
+  if (v instanceof Date) {
+    const y = v.getFullYear();
+    const m = String(v.getMonth() + 1).padStart(2, '0');
+    const d = String(v.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return String(v).split('T')[0];
+}
+
 async function getHolidayForDate(dateStr) {
   const exact = await pool.query(
     `SELECT id, COALESCE(coverage, 'whole_day') AS coverage
-     FROM holidays WHERE holiday_date = $1::date AND (is_active IS NULL OR is_active = true) LIMIT 1`,
+     FROM holidays
+     WHERE (is_active IS NULL OR is_active = true) AND recurring = false
+       AND date_from <= $1::date AND date_to >= $1::date
+     ORDER BY date_from
+     LIMIT 1`,
     [dateStr]
   );
   if (exact.rows[0]) return exact.rows[0];
   const recurring = await pool.query(
-    `SELECT id, COALESCE(coverage, 'whole_day') AS coverage FROM holidays
-     WHERE recurring = true AND (is_active IS NULL OR is_active = true)
-       AND EXTRACT(MONTH FROM holiday_date) = EXTRACT(MONTH FROM $1::date)
-       AND EXTRACT(DAY FROM holiday_date) = EXTRACT(DAY FROM $1::date)
-     LIMIT 1`,
-    [dateStr]
+    `SELECT id, COALESCE(coverage, 'whole_day') AS coverage, date_from, date_to FROM holidays
+     WHERE recurring = true AND (is_active IS NULL OR is_active = true)`
   );
-  return recurring.rows[0] || null;
+  for (const r of recurring.rows) {
+    if (dateInRecurringRange(dateStr, holidayDateToStr(r.date_from), holidayDateToStr(r.date_to))) {
+      return { id: r.id, coverage: r.coverage };
+    }
+  }
+  return null;
 }
 
 async function computeLateMinutes(employeeId, dateStr, timeInIso, breakInIso, status, holidayId, coverage) {

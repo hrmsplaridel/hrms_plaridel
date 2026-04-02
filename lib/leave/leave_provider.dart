@@ -41,7 +41,7 @@ class LeaveProvider extends ChangeNotifier {
   LeaveType? get filterLeaveType => _filterLeaveType;
 
   List<LeaveRequest> get pendingRequests =>
-      _requests.where((r) => r.status == LeaveRequestStatus.pending).toList();
+      _requests.where((r) => r.status.isPending).toList();
 
   List<LeaveRequest> get approvedRequests =>
       _requests.where((r) => r.status == LeaveRequestStatus.approved).toList();
@@ -400,6 +400,28 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
+  Future<LeaveRequest?> assignMandatoryForcedLeave(
+    AdminMandatoryLeaveAssignmentInput input,
+  ) async {
+    _reviewing = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final created = await _repository.assignMandatoryForcedLeave(input);
+      _selectedRequest = created;
+      _upsertRequest(created);
+      return created;
+    } catch (e) {
+      _error = e is Exception && e.toString().startsWith('Exception: ')
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
+      return null;
+    } finally {
+      _reviewing = false;
+      notifyListeners();
+    }
+  }
+
   Future<LeaveRequest?> attachFile({
     required String requestId,
     required List<int> fileBytes,
@@ -458,6 +480,101 @@ class LeaveProvider extends ChangeNotifier {
       _requests[index] = request;
     } else {
       _requests = [request, ..._requests];
+    }
+  }
+
+  // ---- Department Head workflow ----
+
+  /// Cache for the department-head check result.
+  Map<String, dynamic>? _deptHeadCheck;
+  Map<String, dynamic>? get deptHeadCheck => _deptHeadCheck;
+  bool get isDeptHead => _deptHeadCheck?['isDeptHead'] == true;
+
+  /// Check if the current user is a department head.
+  Future<bool> checkIsDepartmentHead() async {
+    try {
+      _deptHeadCheck = await _repository.checkIsDepartmentHead();
+      notifyListeners();
+      return isDeptHead;
+    } catch (_) {
+      _deptHeadCheck = null;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Load leave requests pending department head approval.
+  Future<void> loadDepartmentHeadRequests() async {
+    _loading = true;
+    _error = null;
+    notifyListeners();
+    try {
+      _requests = await _repository.listDepartmentHeadRequests();
+    } catch (e) {
+      _requests = [];
+      _error = e.toString();
+    }
+    _loading = false;
+    notifyListeners();
+  }
+
+  Future<LeaveRequest?> departmentHeadApprove(LeaveReviewDecisionInput input) async {
+    _reviewing = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final updated = await _repository.departmentHeadApprove(input);
+      _selectedRequest = updated;
+      _upsertRequest(updated);
+      return updated;
+    } catch (e) {
+      _error = e is Exception && e.toString().startsWith('Exception: ')
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
+      return null;
+    } finally {
+      _reviewing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<LeaveRequest?> departmentHeadReject(LeaveReviewDecisionInput input) async {
+    _reviewing = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final updated = await _repository.departmentHeadReject(input);
+      _selectedRequest = updated;
+      _upsertRequest(updated);
+      return updated;
+    } catch (e) {
+      _error = e is Exception && e.toString().startsWith('Exception: ')
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
+      return null;
+    } finally {
+      _reviewing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<LeaveRequest?> departmentHeadReturn(LeaveReviewDecisionInput input) async {
+    _reviewing = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final updated = await _repository.departmentHeadReturn(input);
+      _selectedRequest = updated;
+      _upsertRequest(updated);
+      return updated;
+    } catch (e) {
+      _error = e is Exception && e.toString().startsWith('Exception: ')
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
+      return null;
+    } finally {
+      _reviewing = false;
+      notifyListeners();
     }
   }
 }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -8,9 +10,11 @@ import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
 import 'leave_request_form_screen.dart';
-import 'leave_request_print_layout.dart';
+import '../utils/leave_request_pdf.dart';
+import '../utils/responsive_leave_form_host.dart';
 import '../widgets/leave_balance_card.dart';
-import '../widgets/leave_request_card.dart';
+import '../widgets/history_timeline.dart';
+import '../widgets/leave_card.dart';
 
 /// Employee-facing leave screen.
 ///
@@ -27,8 +31,10 @@ class EmployeeLeaveScreen extends StatefulWidget {
   State<EmployeeLeaveScreen> createState() => _EmployeeLeaveScreenState();
 }
 
-class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen> {
+class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
+    with WidgetsBindingObserver {
   bool _initialized = false;
+  Timer? _autoRefreshTimer;
 
   @override
   void didChangeDependencies() {
@@ -41,6 +47,36 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen> {
       if (userId == null || userId.isEmpty) return;
       context.read<LeaveProvider>().loadMyLeaveData(userId);
     });
+    WidgetsBinding.instance.addObserver(this);
+    _startAutoRefresh();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _autoRefreshTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshMyLeaveData();
+    }
+  }
+
+  void _startAutoRefresh() {
+    _autoRefreshTimer?.cancel();
+    _autoRefreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      _refreshMyLeaveData();
+    });
+  }
+
+  Future<void> _refreshMyLeaveData() async {
+    if (!mounted) return;
+    final userId = context.read<AuthProvider>().user?.id;
+    if (userId == null || userId.isEmpty) return;
+    await context.read<LeaveProvider>().loadMyLeaveData(userId);
   }
 
   @override
@@ -151,6 +187,7 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen> {
               loading: provider.loading,
               onEdit: (request) => _editRequest(context, request),
               onCancel: (request) => _cancelRequest(context, request),
+              onPrint: _printLeaveForm,
             ),
           ],
         ),
@@ -169,40 +206,79 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen> {
 
   Future<void> _editRequest(BuildContext context, LeaveRequest request) async {
     final provider = context.read<LeaveProvider>();
-    final result = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => LeaveRequestFormScreen(
-          initialRequest: request,
-          onSaveDraft: (updated) async {
-            final saved = updated.id == null || updated.id!.isEmpty
-                ? await provider.saveDraft(updated)
-                : await provider.updateRequest(
-                    updated.copyWith(
-                      // Backend does NOT allow returned -> draft.
-                      // Keep status as returned when editing a returned request.
-                      status: request.status == LeaveRequestStatus.returned
-                          ? LeaveRequestStatus.returned
-                          : LeaveRequestStatus.draft,
-                    ),
-                  );
-            return saved != null;
-          },
-          onSubmitRequest: (updated) async {
-            // For draft/returned edits, resubmission updates the same request to pending.
-            final saved = updated.id == null || updated.id!.isEmpty
-                ? await provider.submitRequest(updated)
-                : await provider.updateRequest(
-                    updated.copyWith(status: LeaveRequestStatus.pending),
-                  );
-            return saved != null;
-          },
-        ),
-      ),
+    final result = await openResponsiveLeaveFormHost<bool>(
+      context: context,
+      builder: (_) =>
+          _buildEditLeaveRequestForm(provider: provider, request: request),
     );
     if (!mounted || result != true) return;
     final userId = context.read<AuthProvider>().user?.id;
     if (userId != null && userId.isNotEmpty) {
       await context.read<LeaveProvider>().loadMyLeaveData(userId);
+    }
+  }
+
+  Widget _buildEditLeaveRequestForm({
+    required LeaveProvider provider,
+    required LeaveRequest request,
+  }) {
+    return LeaveRequestFormScreen(
+      initialRequest: request,
+      onSaveDraft: (updated) async {
+        final saved = updated.id == null || updated.id!.isEmpty
+            ? await provider.saveDraft(updated)
+            : await provider.updateRequest(
+                updated.copyWith(
+                  // Backend does NOT allow returned -> draft.
+                  // Keep status as returned when editing a returned request.
+                  status: request.status == LeaveRequestStatus.returned
+                      ? LeaveRequestStatus.returned
+                      : LeaveRequestStatus.draft,
+                ),
+              );
+        return saved != null;
+      },
+      onSubmitRequest: (updated) async {
+        // For draft/returned edits, resubmission updates the same request to pending.
+        final saved = updated.id == null || updated.id!.isEmpty
+            ? await provider.submitRequest(updated)
+            : await provider.updateRequest(
+                updated.copyWith(status: LeaveRequestStatus.pending),
+              );
+        return saved != null;
+      },
+    );
+  }
+
+  /// Opens the system print / save-PDF dialog with the official leave form PDF.
+  Future<void> _printLeaveForm(LeaveRequest request) async {
+    final provider = context.read<LeaveProvider>();
+    if (!mounted) return;
+    try {
+      LeaveRequest target = request;
+      final id = request.id;
+      if (id != null && id.isNotEmpty) {
+        final fresh = await provider.refreshRequestById(id);
+        if (fresh != null) target = fresh;
+      }
+
+      final balances = await provider.fetchBalancesForUser(target.userId);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Preparing print...')));
+
+      await LeaveRequestPdf.printLeaveRequest(
+        request: target,
+        balances: balances,
+        name: 'Leave_Application_${target.id ?? target.userId}.pdf',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
     }
   }
 
@@ -451,12 +527,14 @@ class _RequestsPanel extends StatelessWidget {
     required this.loading,
     required this.onEdit,
     required this.onCancel,
+    required this.onPrint,
   });
 
   final List<LeaveRequest> requests;
   final bool loading;
   final ValueChanged<LeaveRequest> onEdit;
   final ValueChanged<LeaveRequest> onCancel;
+  final ValueChanged<LeaveRequest> onPrint;
 
   @override
   Widget build(BuildContext context) {
@@ -480,6 +558,7 @@ class _RequestsPanel extends StatelessWidget {
                         request: request,
                         onEdit: () => onEdit(request),
                         onCancel: () => onCancel(request),
+                        onPrint: () => onPrint(request),
                       ),
                     ),
                   )
@@ -494,61 +573,163 @@ class _EmployeeRequestItem extends StatelessWidget {
     required this.request,
     required this.onEdit,
     required this.onCancel,
+    required this.onPrint,
   });
 
   final LeaveRequest request;
   final VoidCallback onEdit;
   final VoidCallback onCancel;
+  final VoidCallback onPrint;
 
   bool get _canEdit =>
       request.status == LeaveRequestStatus.draft ||
-      request.status == LeaveRequestStatus.returned;
+      request.status == LeaveRequestStatus.returned ||
+      request.status == LeaveRequestStatus.rejectedByDepartmentHead ||
+      request.status == LeaveRequestStatus.rejectedByHr;
 
   bool get _canCancel =>
       request.status == LeaveRequestStatus.draft ||
-      request.status == LeaveRequestStatus.pending ||
+      request.status.isPending ||
       request.status == LeaveRequestStatus.returned;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        LeaveRequestCard(request: request),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          alignment: WrapAlignment.end,
+    return LeaveCard(
+      request: request,
+      onViewDetails: () => _showDetails(context),
+      onViewHistory: () => _showHistory(context),
+      onCancel: _canCancel ? onCancel : null,
+    );
+  }
+
+  void _showDetails(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Leave Details'),
+        content: SizedBox(
+          width: 520,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _detailLine('Leave Type', request.leaveType.displayName),
+              _detailLine('Date Range', _formatRange(request)),
+              _detailLine(
+                'Number of Days',
+                request.workingDaysApplied?.toStringAsFixed(1) ?? '—',
+              ),
+              _detailLine('Status', request.status.displayName),
+              _detailLine(
+                'Submitted Date',
+                request.dateFiled != null
+                    ? _formatDate(request.dateFiled!)
+                    : '—',
+              ),
+              if ((request.reason ?? '').trim().isNotEmpty)
+                _detailLine('Reason', request.reason!.trim()),
+            ],
+          ),
+        ),
+        actions: [
+          if (_canEdit)
+            OutlinedButton(onPressed: onEdit, child: const Text('Edit')),
+          OutlinedButton(onPressed: onPrint, child: const Text('Print Form')),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showHistory(BuildContext context) {
+    final events = _buildHistoryEvents(request);
+    showDialog<void>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Leave Request History'),
+        content: SizedBox(width: 560, child: HistoryTimeline(events: events)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<LeaveHistoryEvent> _buildHistoryEvents(LeaveRequest request) {
+    final reviewed = request.reviewedAt;
+    final reviewer = (request.reviewerName ?? '').trim().isNotEmpty
+        ? request.reviewerName!.trim()
+        : 'Approver';
+    return [
+      LeaveHistoryEvent(
+        label: 'Submitted',
+        dateTime: request.dateFiled ?? request.createdAt,
+        actor: request.employeeName ?? 'Employee',
+        remarks: request.reason,
+      ),
+      LeaveHistoryEvent(
+        label: 'Approved by Department Head',
+        dateTime:
+            request.status == LeaveRequestStatus.pendingHr ||
+                request.status == LeaveRequestStatus.approved
+            ? reviewed
+            : null,
+        actor: reviewer,
+        completed:
+            request.status == LeaveRequestStatus.pendingHr ||
+            request.status == LeaveRequestStatus.approved,
+      ),
+      LeaveHistoryEvent(
+        label: 'Forwarded to HR',
+        dateTime:
+            request.status == LeaveRequestStatus.pendingHr ||
+                request.status == LeaveRequestStatus.approved
+            ? reviewed
+            : null,
+        actor: reviewer,
+        completed:
+            request.status == LeaveRequestStatus.pendingHr ||
+            request.status == LeaveRequestStatus.approved,
+      ),
+      LeaveHistoryEvent(
+        label: 'Approved by HR',
+        dateTime: request.status == LeaveRequestStatus.approved
+            ? reviewed
+            : null,
+        actor: reviewer,
+        remarks: request.hrRemarks,
+        completed: request.status == LeaveRequestStatus.approved,
+      ),
+    ];
+  }
+
+  Widget _detailLine(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: RichText(
+        text: TextSpan(
+          style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
           children: [
-            OutlinedButton.icon(
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        LeaveRequestPrintLayout(initialRequest: request),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.print_rounded),
-              label: const Text('Print Form'),
+            TextSpan(
+              text: '$label: ',
+              style: const TextStyle(fontWeight: FontWeight.w700),
             ),
-            if (_canEdit)
-              OutlinedButton.icon(
-                onPressed: onEdit,
-                icon: const Icon(Icons.edit_rounded),
-                label: const Text('Edit'),
-              ),
-            if (_canCancel)
-              OutlinedButton.icon(
-                onPressed: onCancel,
-                icon: const Icon(Icons.close_rounded),
-                label: const Text('Cancel'),
-              ),
+            TextSpan(text: value),
           ],
         ),
-      ],
+      ),
     );
+  }
+
+  String _formatRange(LeaveRequest request) {
+    if (request.startDate == null || request.endDate == null) return '—';
+    return '${_formatDate(request.startDate!)} – ${_formatDate(request.endDate!)}';
   }
 }
 

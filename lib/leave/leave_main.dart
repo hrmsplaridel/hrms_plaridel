@@ -2,27 +2,24 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../landingpage/constants/app_theme.dart';
+import '../providers/auth_provider.dart';
 import 'leave_provider.dart';
 import 'models/leave_request.dart';
 import 'screens/admin_leave_screen.dart';
 import 'screens/employee_leave_screen.dart';
 import 'screens/leave_request_form_screen.dart';
+import 'utils/responsive_leave_form_host.dart';
 
 /// High-level sections for the leave module.
-enum LeaveSection {
-  dashboard,
-  requests,
-  approvals,
-  balances,
-}
+enum LeaveSection { dashboard, requests, approvals, balances }
 
 extension LeaveSectionExtension on LeaveSection {
   String get title => switch (this) {
-        LeaveSection.dashboard => 'Dashboard',
-        LeaveSection.requests => 'My Requests',
-        LeaveSection.approvals => 'Approvals',
-        LeaveSection.balances => 'Balances',
-      };
+    LeaveSection.dashboard => 'Dashboard',
+    LeaveSection.requests => 'My Requests',
+    LeaveSection.approvals => 'Approvals',
+    LeaveSection.balances => 'Balances',
+  };
 }
 
 /// Main leave module entry.
@@ -34,6 +31,7 @@ class LeaveMain extends StatefulWidget {
     super.key,
     this.section,
     this.isAdmin = false,
+    this.isDepartmentHead = false,
     this.employeeRequestsContent,
     this.employeeBalancesContent,
     this.adminApprovalsContent,
@@ -44,6 +42,9 @@ class LeaveMain extends StatefulWidget {
 
   /// Whether current user is HR/admin.
   final bool isAdmin;
+
+  /// Whether current user is a department head (non-admin reviewer).
+  final bool isDepartmentHead;
 
   /// Optional injected content for employee requests.
   final Widget? employeeRequestsContent;
@@ -60,6 +61,16 @@ class LeaveMain extends StatefulWidget {
 
 class _LeaveMainState extends State<LeaveMain> {
   LeaveSection _currentSection = LeaveSection.requests;
+
+  @override
+  void initState() {
+    super.initState();
+    // Dept heads should default to Approvals (but still be able to file their
+    // own leave via the Requests tab).
+    if (widget.isDepartmentHead) {
+      _currentSection = LeaveSection.approvals;
+    }
+  }
 
   LeaveSection get _activeSection {
     if (widget.section != null) return widget.section!;
@@ -84,15 +95,12 @@ class _LeaveMainState extends State<LeaveMain> {
         ),
         const SizedBox(height: 8),
         Text(
-          widget.isAdmin
+          (widget.isAdmin || widget.isDepartmentHead)
               ? 'Review employee leave requests, balances, and approvals.'
               : 'View leave balances, file requests, and track approvals.',
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
         ),
-        if (!useSidebarNav) ...[
-          const SizedBox(height: 24),
-          _buildSectionNav(),
-        ],
+        if (!useSidebarNav) ...[const SizedBox(height: 24), _buildSectionNav()],
         const SizedBox(height: 24),
         _buildContent(),
       ],
@@ -102,6 +110,8 @@ class _LeaveMainState extends State<LeaveMain> {
   Widget _buildSectionNav() {
     final sections = widget.isAdmin
         ? [LeaveSection.approvals]
+        : widget.isDepartmentHead
+        ? [LeaveSection.requests, LeaveSection.approvals]
         : [LeaveSection.requests];
 
     if (sections.length <= 1) return const SizedBox.shrink();
@@ -154,11 +164,11 @@ class _LeaveMainState extends State<LeaveMain> {
   }
 
   static IconData _iconForSection(LeaveSection section) => switch (section) {
-        LeaveSection.dashboard => Icons.dashboard_rounded,
-        LeaveSection.requests => Icons.event_note_rounded,
-        LeaveSection.approvals => Icons.fact_check_rounded,
-        LeaveSection.balances => Icons.account_balance_wallet_rounded,
-      };
+    LeaveSection.dashboard => Icons.dashboard_rounded,
+    LeaveSection.requests => Icons.event_note_rounded,
+    LeaveSection.approvals => Icons.fact_check_rounded,
+    LeaveSection.balances => Icons.account_balance_wallet_rounded,
+  };
 
   Widget _buildContent() {
     return ConstrainedBox(
@@ -166,55 +176,55 @@ class _LeaveMainState extends State<LeaveMain> {
       child: switch (_activeSection) {
         LeaveSection.requests =>
           widget.employeeRequestsContent ??
-              EmployeeLeaveScreen(
-                onFileLeavePressed: _openLeaveRequestForm,
-              ),
+              EmployeeLeaveScreen(onFileLeavePressed: _openLeaveRequestForm),
         LeaveSection.approvals =>
           widget.adminApprovalsContent ??
-              const AdminLeaveScreen(),
+              AdminLeaveScreen(isDepartmentHead: widget.isDepartmentHead),
         LeaveSection.balances =>
           widget.employeeBalancesContent ??
-              EmployeeLeaveScreen(
-                onFileLeavePressed: _openLeaveRequestForm,
-              ),
+              EmployeeLeaveScreen(onFileLeavePressed: _openLeaveRequestForm),
         LeaveSection.dashboard => _LeavePlaceholderCard(
-            title: 'Leave Dashboard',
-            subtitle:
-                'This section can later summarize balances, upcoming leave, and pending approvals.',
-            icon: Icons.dashboard_rounded,
-          ),
+          title: 'Leave Dashboard',
+          subtitle:
+              'This section can later summarize balances, upcoming leave, and pending approvals.',
+          icon: Icons.dashboard_rounded,
+        ),
       },
     );
   }
 
   Future<void> _openLeaveRequestForm() async {
-    final result = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => LeaveRequestFormScreen(
-          onSaveDraft: (LeaveRequest request) async {
-            // FIX #4: If the request already has an ID it was previously saved.
-            // Route to updateRequest (PUT) to avoid creating a duplicate draft.
-            final provider = context.read<LeaveProvider>();
-            if (request.id != null && request.id!.isNotEmpty) {
-              final updated = await provider.updateRequest(request);
-              return updated != null;
-            }
-            final saved = await provider.saveDraft(request);
-            return saved != null;
-          },
-          onSubmitRequest: (LeaveRequest request) async {
-            final saved =
-                await context.read<LeaveProvider>().submitRequest(request);
-            return saved != null;
-          },
-        ),
-      ),
+    final result = await openResponsiveLeaveFormHost<bool>(
+      context: context,
+      builder: (_) => _buildLeaveRequestForm(),
     );
     if (!mounted || result != true) return;
-    final userId = context.read<LeaveProvider>().selectedRequest?.userId;
+    final userId = context.read<AuthProvider>().user?.id;
     if (userId != null && userId.isNotEmpty) {
       await context.read<LeaveProvider>().loadMyLeaveData(userId);
     }
+  }
+
+  Widget _buildLeaveRequestForm() {
+    return LeaveRequestFormScreen(
+      onSaveDraft: (LeaveRequest request) async {
+        // FIX #4: If the request already has an ID it was previously saved.
+        // Route to updateRequest (PUT) to avoid creating a duplicate draft.
+        final provider = context.read<LeaveProvider>();
+        if (request.id != null && request.id!.isNotEmpty) {
+          final updated = await provider.updateRequest(request);
+          return updated != null;
+        }
+        final saved = await provider.saveDraft(request);
+        return saved != null;
+      },
+      onSubmitRequest: (LeaveRequest request) async {
+        final saved = await context.read<LeaveProvider>().submitRequest(
+          request,
+        );
+        return saved != null;
+      },
+    );
   }
 }
 

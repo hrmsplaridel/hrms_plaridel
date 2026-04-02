@@ -6,7 +6,8 @@ import '../../landingpage/constants/app_theme.dart';
 class _HolidayRecord {
   const _HolidayRecord({
     required this.id,
-    required this.holidayDate,
+    required this.dateFrom,
+    required this.dateTo,
     required this.name,
     required this.holidayType,
     this.description,
@@ -15,13 +16,19 @@ class _HolidayRecord {
     this.coverage = 'whole_day',
   });
   final String id;
-  final DateTime holidayDate;
+  final DateTime dateFrom;
+  final DateTime dateTo;
   final String name;
   final String holidayType;
   final String? description;
   final bool isActive;
   final bool isRecurring;
   final String coverage;
+
+  bool get isSingleDay =>
+      dateFrom.year == dateTo.year &&
+      dateFrom.month == dateTo.month &&
+      dateFrom.day == dateTo.day;
 }
 
 class ManageHoliday extends StatefulWidget {
@@ -35,7 +42,8 @@ class _ManageHolidayState extends State<ManageHoliday> {
   final _searchController = TextEditingController();
   final _nameController = TextEditingController();
   final _descriptionController = TextEditingController();
-  DateTime? _selectedDate;
+  DateTime? _dateFrom;
+  DateTime? _dateTo;
   String _holidayType = 'regular';
   String _coverage = 'whole_day';
   bool _isActive = true;
@@ -66,10 +74,12 @@ class _ManageHolidayState extends State<ManageHoliday> {
       final data = res.data ?? [];
       _holidays = (data).map((e) {
         final m = e as Map<String, dynamic>;
-        final d = m['holiday_date'];
+        final fromRaw = m['date_from'] ?? m['holiday_date'];
+        final toRaw = m['date_to'] ?? m['holiday_date'];
         return _HolidayRecord(
           id: m['id'] as String,
-          holidayDate: _parseDateSafe(d),
+          dateFrom: _parseDateSafe(fromRaw),
+          dateTo: _parseDateSafe(toRaw),
           name: m['name'] as String? ?? '',
           holidayType: m['holiday_type'] as String? ?? 'regular',
           description: m['description'] as String?,
@@ -90,7 +100,8 @@ class _ManageHolidayState extends State<ManageHoliday> {
       _selectedHoliday = h;
       _nameController.text = h.name;
       _descriptionController.text = h.description ?? '';
-      _selectedDate = h.holidayDate;
+      _dateFrom = h.dateFrom;
+      _dateTo = h.dateTo;
       _holidayType = h.holidayType;
       _coverage = h.coverage;
       _isActive = h.isActive;
@@ -103,12 +114,30 @@ class _ManageHolidayState extends State<ManageHoliday> {
       _selectedHoliday = null;
       _nameController.clear();
       _descriptionController.clear();
-      _selectedDate = null;
+      _dateFrom = null;
+      _dateTo = null;
       _holidayType = 'regular';
       _coverage = 'whole_day';
       _isActive = true;
       _isRecurring = false;
     });
+  }
+
+  String _holidayListSubtitle(_HolidayRecord h) {
+    String mmdd(DateTime d) =>
+        '${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+    final typeExtra =
+        h.holidayType == 'work_suspension' && h.coverage != 'whole_day'
+        ? ' · ${h.coverage}'
+        : '';
+    final recur = h.isRecurring ? ' (every year)' : '';
+    if (h.isSingleDay) {
+      return '${mmdd(h.dateFrom)}${h.isRecurring ? recur : ' · ${h.dateFrom.year}'} · ${h.holidayType}$typeExtra';
+    }
+    final years = h.dateFrom.year == h.dateTo.year
+        ? (h.isRecurring ? '' : ' · ${h.dateFrom.year}')
+        : ' · ${h.dateFrom.year}–${h.dateTo.year}';
+    return '${mmdd(h.dateFrom)}–${mmdd(h.dateTo)}${h.isRecurring ? recur : years} · ${h.holidayType}$typeExtra';
   }
 
   /// Format date as YYYY-MM-DD using local calendar date (avoids UTC off-by-one).
@@ -139,17 +168,26 @@ class _ManageHolidayState extends State<ManageHoliday> {
       );
       return;
     }
-    if (_selectedDate == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Please select a date.')));
+    if (_dateFrom == null || _dateTo == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select start and end dates.')),
+      );
+      return;
+    }
+    if (_dateTo!.isBefore(_dateFrom!)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('End date must be on or after start date.'),
+        ),
+      );
       return;
     }
     try {
       await ApiClient.instance.post(
         '/api/holidays',
         data: {
-          'holiday_date': _dateToYyyyMmDd(_selectedDate!),
+          'date_from': _dateToYyyyMmDd(_dateFrom!),
+          'date_to': _dateToYyyyMmDd(_dateTo!),
           'name': name,
           'holiday_type': _holidayType,
           'description': _descriptionController.text.trim().isEmpty
@@ -157,6 +195,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
               : _descriptionController.text.trim(),
           'is_active': _isActive,
           'recurring': _isRecurring,
+          if (_holidayType == 'work_suspension') 'coverage': _coverage,
         },
       );
       if (mounted) {
@@ -194,20 +233,31 @@ class _ManageHolidayState extends State<ManageHoliday> {
       );
       return;
     }
-    if (_selectedDate == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Please select a date.')));
+    if (_dateFrom == null || _dateTo == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select start and end dates.')),
+      );
+      return;
+    }
+    if (_dateTo!.isBefore(_dateFrom!)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('End date must be on or after start date.'),
+        ),
+      );
       return;
     }
     try {
       await ApiClient.instance.put(
         '/api/holidays/${h.id}',
         data: {
-          'holiday_date': _dateToYyyyMmDd(_selectedDate!),
+          'date_from': _dateToYyyyMmDd(_dateFrom!),
+          'date_to': _dateToYyyyMmDd(_dateTo!),
           'name': name,
           'holiday_type': _holidayType,
-          'coverage': _holidayType == 'work_suspension' ? _coverage : 'whole_day',
+          'coverage': _holidayType == 'work_suspension'
+              ? _coverage
+              : 'whole_day',
           'description': _descriptionController.text.trim().isEmpty
               ? null
               : _descriptionController.text.trim(),
@@ -284,13 +334,11 @@ class _ManageHolidayState extends State<ManageHoliday> {
     final w = MediaQuery.of(context).size.width;
     final isNarrow = w < 700;
     final search = _searchController.text.toLowerCase();
-    final filtered = _holidays
-        .where(
-          (h) =>
-              h.name.toLowerCase().contains(search) ||
-              h.holidayDate.toString().contains(search),
-        )
-        .toList();
+    final filtered = _holidays.where((h) {
+      if (h.name.toLowerCase().contains(search)) return true;
+      final rf = '${_dateToYyyyMmDd(h.dateFrom)} ${_dateToYyyyMmDd(h.dateTo)}';
+      return rf.contains(search);
+    }).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -407,7 +455,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
                     ),
                   ),
                   subtitle: Text(
-                    '${h.holidayDate.month.toString().padLeft(2, '0')}-${h.holidayDate.day.toString().padLeft(2, '0')}${h.isRecurring ? ' (every year)' : ' · ${h.holidayDate.year}'} · ${h.holidayType}${h.holidayType == 'work_suspension' && h.coverage != 'whole_day' ? ' · ${h.coverage}' : ''}',
+                    _holidayListSubtitle(h),
                     style: TextStyle(
                       fontSize: 12,
                       color: AppTheme.textSecondary,
@@ -465,7 +513,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
           ),
           const SizedBox(height: 16),
           Text(
-            'Date',
+            'Date range',
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
@@ -476,43 +524,119 @@ class _ManageHolidayState extends State<ManageHoliday> {
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: Text(
-                'Month and day used for every year.',
+                'Same month/day range repeats every year (e.g. Holy Week).',
                 style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
               ),
             ),
           const SizedBox(height: 6),
-          InkWell(
-            onTap: () async {
-              final d = await showDatePicker(
-                context: context,
-                initialDate: _selectedDate ?? DateTime.now(),
-                firstDate: DateTime(2020),
-                lastDate: DateTime(2030),
-              );
-              if (d != null) setState(() => _selectedDate = d);
-            },
-            child: InputDecorator(
-              decoration: InputDecoration(
-                filled: true,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 12,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Start',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    InkWell(
+                      onTap: () async {
+                        final d = await showDatePicker(
+                          context: context,
+                          initialDate: _dateFrom ?? DateTime.now(),
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime(2035),
+                        );
+                        if (d != null) {
+                          setState(() {
+                            _dateFrom = d;
+                            if (_dateTo != null && _dateTo!.isBefore(d)) {
+                              _dateTo = d;
+                            }
+                          });
+                        }
+                      },
+                      child: InputDecorator(
+                        decoration: InputDecoration(
+                          filled: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: Text(
+                          _dateFrom != null
+                              ? _dateToYyyyMmDd(_dateFrom!)
+                              : 'Select',
+                          style: TextStyle(
+                            color: _dateFrom != null
+                                ? AppTheme.textPrimary
+                                : AppTheme.textSecondary,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              child: Text(
-                _selectedDate != null
-                    ? '${_selectedDate!.year}-${_selectedDate!.month.toString().padLeft(2, '0')}-${_selectedDate!.day.toString().padLeft(2, '0')}'
-                    : 'Select date',
-                style: TextStyle(
-                  color: _selectedDate != null
-                      ? AppTheme.textPrimary
-                      : AppTheme.textSecondary,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'End',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    InkWell(
+                      onTap: () async {
+                        final d = await showDatePicker(
+                          context: context,
+                          initialDate: _dateTo ?? _dateFrom ?? DateTime.now(),
+                          firstDate: _dateFrom ?? DateTime(2020),
+                          lastDate: DateTime(2035),
+                        );
+                        if (d != null) setState(() => _dateTo = d);
+                      },
+                      child: InputDecorator(
+                        decoration: InputDecoration(
+                          filled: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: Text(
+                          _dateTo != null
+                              ? _dateToYyyyMmDd(_dateTo!)
+                              : 'Select',
+                          style: TextStyle(
+                            color: _dateTo != null
+                                ? AppTheme.textPrimary
+                                : AppTheme.textSecondary,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
+            ],
           ),
           const SizedBox(height: 16),
           Row(
@@ -551,7 +675,10 @@ class _ManageHolidayState extends State<ManageHoliday> {
               DropdownMenuItem(value: 'regular', child: Text('Regular')),
               DropdownMenuItem(value: 'special', child: Text('Special')),
               DropdownMenuItem(value: 'local', child: Text('Local')),
-              DropdownMenuItem(value: 'work_suspension', child: Text('Work suspension')),
+              DropdownMenuItem(
+                value: 'work_suspension',
+                child: Text('Work suspension'),
+              ),
             ],
             onChanged: (v) {
               setState(() {

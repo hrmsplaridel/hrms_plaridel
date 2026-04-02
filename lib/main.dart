@@ -30,8 +30,8 @@ final RouteObserver<ModalRoute<void>> routeObserver =
 Widget _initialHome(AuthProvider auth, String storedLoginAs) {
   if (auth.user != null) {
     final role = auth.user!.role ?? 'employee';
-    final isAdmin = role == 'admin';
-    return isAdmin ? const AdminDashboard() : const EmployeeDashboard();
+    final isPrivileged = role == 'admin' || role == 'hr';
+    return isPrivileged ? const AdminDashboard() : const EmployeeDashboard();
   }
 
   if (kIsWeb) {

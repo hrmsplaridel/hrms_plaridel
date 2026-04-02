@@ -54,6 +54,10 @@ class _DtrReportsState extends State<DtrReports> {
   /// Official hours string from assigned shift, e.g. "8:00AM-12:00PM 01:00PM-5:00PM".
   String? _shiftOfficialHours;
 
+  /// Active assignment window (calendar dates) for the selected employee; drives export + summary.
+  DateTime? _assignmentEffectiveFrom;
+  DateTime? _assignmentEffectiveTo;
+
   @override
   void initState() {
     super.initState();
@@ -163,6 +167,14 @@ class _DtrReportsState extends State<DtrReports> {
           setState(() {
             _shiftWorkingDays = (days != null && days.isNotEmpty) ? days : null;
             _shiftOfficialHours = officialHours;
+            _assignmentEffectiveFrom = DateTime(
+              from.year,
+              from.month,
+              from.day,
+            );
+            _assignmentEffectiveTo = to != null
+                ? DateTime(to.year, to.month, to.day)
+                : null;
           });
           return;
         }
@@ -171,10 +183,85 @@ class _DtrReportsState extends State<DtrReports> {
         setState(() {
           _shiftWorkingDays = null;
           _shiftOfficialHours = null;
+          _assignmentEffectiveFrom = null;
+          _assignmentEffectiveTo = null;
         });
     } catch (_) {
-      if (mounted) setState(() => _shiftWorkingDays = null);
+      if (mounted) {
+        setState(() {
+          _shiftWorkingDays = null;
+          _assignmentEffectiveFrom = null;
+          _assignmentEffectiveTo = null;
+        });
+      }
     }
+  }
+
+  /// Shift weekday and within assignment effective dates when loaded.
+  bool _isScheduledWorkDay(DateTime dt) {
+    final shiftWd = _shiftWorkingDays != null && _shiftWorkingDays!.isNotEmpty
+        ? _shiftWorkingDays!.toSet()
+        : {1, 2, 3, 4, 5};
+    if (!shiftWd.contains(dt.weekday)) return false;
+    if (_assignmentEffectiveFrom != null) {
+      if (dt.isBefore(_assignmentEffectiveFrom!)) return false;
+    }
+    if (_assignmentEffectiveTo != null) {
+      if (dt.isAfter(_assignmentEffectiveTo!)) return false;
+    }
+    return true;
+  }
+
+  /// Holiday rows from the API are omitted when they are not meaningful for tardiness:
+  /// no assignment overlapping the month, or the date is not a scheduled work day for this employee.
+  Map<DateTime, TimeRecord> _filterRecordsForTardinessReport(
+    Map<DateTime, TimeRecord> raw,
+  ) {
+    final hasAssignment = _assignmentEffectiveFrom != null;
+    final out = <DateTime, TimeRecord>{};
+    for (final e in raw.entries) {
+      final dt = e.key;
+      final r = e.value;
+      final isHoliday = r.status == 'holiday' || (r.holidayId != null);
+      if (isHoliday) {
+        if (!hasAssignment) continue;
+        if (!_isScheduledWorkDay(dt)) continue;
+      }
+      out[dt] = r;
+    }
+    return out;
+  }
+
+  /// Last date in the selected month included in tardiness/absent/late stats. Days after "today"
+  /// are not treated as absent (no attendance record exists yet).
+  DateTime _tardinessStatsInclusiveEnd() {
+    final monthStart = DateTime(_selectedYear, _selectedMonth, 1);
+    final lastDay = DateTime(_selectedYear, _selectedMonth + 1, 0).day;
+    final monthEnd = DateTime(_selectedYear, _selectedMonth, lastDay);
+    final t = DateTime(
+      DateTime.now().year,
+      DateTime.now().month,
+      DateTime.now().day,
+    );
+    if (monthEnd.isBefore(t)) {
+      return monthEnd;
+    }
+    if (t.isBefore(monthStart)) {
+      return monthStart.subtract(const Duration(days: 1));
+    }
+    return t.isAfter(monthEnd) ? monthEnd : t;
+  }
+
+  /// Scheduled work days in the month on or before [inclusiveEnd].
+  int _countScheduledWorkDaysThrough(DateTime inclusiveEnd) {
+    final lastDay = DateTime(_selectedYear, _selectedMonth + 1, 0).day;
+    var n = 0;
+    for (var d = 1; d <= lastDay; d++) {
+      final dt = DateTime(_selectedYear, _selectedMonth, d);
+      if (dt.isAfter(inclusiveEnd)) continue;
+      if (_isScheduledWorkDay(dt)) n++;
+    }
+    return n;
   }
 
   void _reset() {
@@ -269,6 +356,8 @@ class _DtrReportsState extends State<DtrReports> {
             recordsByDate: recordsByDate,
             officialHours: _shiftOfficialHours,
             workingDays: _shiftWorkingDays,
+            assignmentEffectiveFrom: _assignmentEffectiveFrom,
+            assignmentEffectiveTo: _assignmentEffectiveTo,
           );
           if (!context.mounted) return;
           await shareOrDownloadPdf(bytes, '$baseName.pdf');
@@ -282,6 +371,8 @@ class _DtrReportsState extends State<DtrReports> {
             recordsByDate: recordsByDate,
             officialHours: _shiftOfficialHours,
             workingDays: _shiftWorkingDays,
+            assignmentEffectiveFrom: _assignmentEffectiveFrom,
+            assignmentEffectiveTo: _assignmentEffectiveTo,
           );
           if (!context.mounted) return;
           await shareOrDownloadFile(
@@ -299,6 +390,8 @@ class _DtrReportsState extends State<DtrReports> {
             recordsByDate: recordsByDate,
             officialHours: _shiftOfficialHours,
             workingDays: _shiftWorkingDays,
+            assignmentEffectiveFrom: _assignmentEffectiveFrom,
+            assignmentEffectiveTo: _assignmentEffectiveTo,
           );
           final bytes = Uint8List.fromList(utf8.encode(html));
           if (!context.mounted) return;
@@ -351,6 +444,8 @@ class _DtrReportsState extends State<DtrReports> {
         position: position,
         officialHours: _shiftOfficialHours,
         workingDays: _shiftWorkingDays,
+        assignmentEffectiveFrom: _assignmentEffectiveFrom,
+        assignmentEffectiveTo: _assignmentEffectiveTo,
       );
       if (!context.mounted) return;
       await Printing.layoutPdf(
@@ -375,6 +470,8 @@ class _DtrReportsState extends State<DtrReports> {
           position: position,
           officialHours: _shiftOfficialHours,
           workingDays: _shiftWorkingDays,
+          assignmentEffectiveFrom: _assignmentEffectiveFrom,
+          assignmentEffectiveTo: _assignmentEffectiveTo,
         );
         await shareOrDownloadPdf(bytes, '$baseName.pdf');
         if (!context.mounted) return;
@@ -395,22 +492,6 @@ class _DtrReportsState extends State<DtrReports> {
         );
       }
     }
-  }
-
-  /// Count days in month that fall on shift working days (ISO 1=Mon..7=Sun).
-  /// If workingDays is null or empty, defaults to Mon–Fri [1,2,3,4,5].
-  static int _countWorkingDays(int year, int month, {List<int>? workingDays}) {
-    final wd = workingDays != null && workingDays.isNotEmpty
-        ? workingDays.toSet()
-        : {1, 2, 3, 4, 5};
-    int count = 0;
-    final end = DateTime(year, month + 1, 0);
-    for (var d = 1; d <= end.day; d++) {
-      final dt = DateTime(year, month, d);
-      // Dart: DateTime.weekday 1=Mon..7=Sun, matches ISO
-      if (wd.contains(dt.weekday)) count++;
-    }
-    return count;
   }
 
   @override
@@ -444,44 +525,38 @@ class _DtrReportsState extends State<DtrReports> {
       );
       recordsByDate[key] = r;
     }
-    // Show all dates that have DTR records (real or synthetic) for the selected employee/month
-    final sortedDates = recordsByDate.keys.toList()
+    final reportRecordsByDate = _filterRecordsForTardinessReport(recordsByDate);
+    // Dates to show: same as tardiness-relevant records (excludes irrelevant holiday-only rows).
+    final sortedDates = reportRecordsByDate.keys.toList()
       ..sort((a, b) => a.compareTo(b)); // ordered by date ascending
 
-    // Compute summary from real API records, using shift working_days when available.
-    final shiftWd = _shiftWorkingDays != null && _shiftWorkingDays!.isNotEmpty
-        ? _shiftWorkingDays!.toSet()
-        : {1, 2, 3, 4, 5};
-    final totalWeekdays = _countWorkingDays(
-      _selectedYear,
-      _selectedMonth,
-      workingDays: _shiftWorkingDays,
-    );
+    // Compute summary from real API records, using shift + assignment window when available.
+    // Only count days up to today (elapsed) — future days in the month are not "absent" yet.
+    final statsEnd = _tardinessStatsInclusiveEnd();
+    final totalWeekdays = _countScheduledWorkDaysThrough(statsEnd);
     var lateCount = 0;
     var absentCount = 0;
     var holidaysCount = 0;
-    var hasAnyScheduledDayPunch = false;
     for (var d = 1; d <= end.day; d++) {
       final dt = DateTime(_selectedYear, _selectedMonth, d);
-      if (!shiftWd.contains(dt.weekday)) continue;
-      final rec = recordsByDate[dt];
-      if (rec?.status == 'holiday') {
+      if (!_isScheduledWorkDay(dt)) continue;
+      if (dt.isAfter(statsEnd)) continue;
+      final rec = reportRecordsByDate[dt];
+      if (rec?.status == 'holiday' || (rec?.holidayId != null)) {
         holidaysCount++;
       } else if (rec?.status == 'on_leave') {
         // On leave: not absent for tardiness
       } else if (rec == null || (rec.timeIn == null && rec.breakIn == null)) {
         absentCount++;
       } else {
-        hasAnyScheduledDayPunch = true;
         if (rec.status == 'late' || (rec.lateMinutes ?? 0) > 0) {
           lateCount++;
         }
       }
     }
-    // Show summary when we have any attendance (timeIn or breakIn), including pm_only and weekend
-    final hasRecords =
-        hasAnyScheduledDayPunch ||
-        recordsByDate.values.any((r) => r.timeIn != null || r.breakIn != null);
+    // Show summary whenever this month has any report rows — not only days with punches.
+    // (Absent / undertime-only days have no timeIn/breakIn but must still roll up to totals.)
+    final hasRecords = reportRecordsByDate.isNotEmpty;
     final workingDays = hasRecords ? totalWeekdays - holidaysCount : 0;
     final displayLateCount = hasRecords ? lateCount : 0;
     final displayAbsentCount = hasRecords ? absentCount : 0;
@@ -490,10 +565,12 @@ class _DtrReportsState extends State<DtrReports> {
         ? ((tardyCount / workingDays) * 100).round()
         : 0;
 
-    // Total late and undertime minutes for the month (from all records)
+    // Total late and undertime minutes (elapsed days only, same window as counts)
     var totalLateMinutes = 0;
     var totalUndertimeMinutes = 0;
-    for (final rec in recordsByDate.values) {
+    for (final e in reportRecordsByDate.entries) {
+      if (e.key.isAfter(statsEnd)) continue;
+      final rec = e.value;
       totalLateMinutes += rec.lateMinutes ?? 0;
       totalUndertimeMinutes += rec.undertimeMinutes ?? 0;
     }
@@ -534,7 +611,7 @@ class _DtrReportsState extends State<DtrReports> {
                     ? _buildMobileLayout(
                         employees: employees,
                         end: end,
-                        recordsByDate: recordsByDate,
+                        recordsByDate: reportRecordsByDate,
                         sortedDates: sortedDates,
                         selectedName: selectedName,
                         workingDays: workingDays,
@@ -551,7 +628,7 @@ class _DtrReportsState extends State<DtrReports> {
                     ? _buildCompactLayout(
                         employees: employees,
                         end: end,
-                        recordsByDate: recordsByDate,
+                        recordsByDate: reportRecordsByDate,
                         sortedDates: sortedDates,
                         selectedName: selectedName,
                         workingDays: workingDays,
@@ -583,7 +660,7 @@ class _DtrReportsState extends State<DtrReports> {
                                       Expanded(
                                         child: _buildDtrTable(
                                           end: end,
-                                          recordsByDate: recordsByDate,
+                                          recordsByDate: reportRecordsByDate,
                                           sortedDates: sortedDates,
                                           dtr: dtr,
                                           availableWidth: tableAvailableWidth,
@@ -602,7 +679,7 @@ class _DtrReportsState extends State<DtrReports> {
                                         totalUndertimeMinutes:
                                             displayTotalUndertimeMinutes,
                                         hasRecords: hasRecords,
-                                        recordsByDate: recordsByDate,
+                                        recordsByDate: reportRecordsByDate,
                                         end: end,
                                       ),
                                     ],
