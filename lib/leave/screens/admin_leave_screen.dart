@@ -238,15 +238,23 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       if (!employeeOk) return false;
       return true;
     }).toList();
-    // Clear selection when the selected request is no longer in the list
-    // (e.g. employee cancelled it, or filters changed).
-    final selectionStillValid =
-        _selectedRequest != null &&
-        filteredRequests.any((r) => r.id == _selectedRequest!.id);
-    final selected = selectionStillValid
-        ? _selectedRequest
-        : (filteredRequests.isNotEmpty ? filteredRequests.first : null);
-    if (selected != _selectedRequest) {
+    // Sync the selected request to the latest instance from `filteredRequests`
+    // so actions like Reject immediately reflect in the details panel history.
+    LeaveRequest? selected;
+    final selectedId = _selectedRequest?.id;
+    if (selectedId != null && selectedId.isNotEmpty) {
+      final matches = filteredRequests.where((r) => r.id == selectedId);
+      selected = matches.isNotEmpty ? matches.first : null;
+    } else {
+      selected = filteredRequests.isNotEmpty ? filteredRequests.first : null;
+    }
+
+    final shouldSyncSelected =
+        _selectedRequest?.id != selected?.id ||
+        _selectedRequest?.status != selected?.status ||
+        _selectedRequest?.updatedAt != selected?.updatedAt ||
+        _selectedRequest?.reviewedAt != selected?.reviewedAt;
+    if (shouldSyncSelected) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         setState(() => _selectedRequest = selected);
@@ -342,26 +350,26 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
                     onApprove: selected == null || (!selected.status.isPending)
                         ? null
                         : () => widget.isDepartmentHead
-                              ? _deptHeadApprove(selected)
-                              : _approve(selected),
+                              ? _deptHeadApprove(selected!)
+                              : _approve(selected!),
                     onReturn: selected == null || (!selected.status.isPending)
                         ? null
                         : () => widget.isDepartmentHead
-                              ? _deptHeadReturn(selected)
-                              : _returnRequest(selected),
+                              ? _deptHeadReturn(selected!)
+                              : _returnRequest(selected!),
                     onReject: selected == null || (!selected.status.isPending)
                         ? null
                         : () => widget.isDepartmentHead
-                              ? _deptHeadReject(selected)
-                              : _rejectRequest(selected),
+                              ? _deptHeadReject(selected!)
+                              : _rejectRequest(selected!),
                     onRevoke:
                         selected == null ||
                             selected.status != LeaveRequestStatus.approved
                         ? null
-                        : () => _revokeApproval(selected),
+                        : () => _revokeApproval(selected!),
                     onPrint: selected == null
                         ? null
-                        : () => _printLeaveForm(selected),
+                        : () => _printLeaveForm(selected!),
                   ),
                 ],
               )
@@ -392,26 +400,26 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
                           selected == null || (!selected.status.isPending)
                           ? null
                           : () => widget.isDepartmentHead
-                                ? _deptHeadApprove(selected)
-                                : _approve(selected),
+                                ? _deptHeadApprove(selected!)
+                                : _approve(selected!),
                       onReturn: selected == null || (!selected.status.isPending)
                           ? null
                           : () => widget.isDepartmentHead
-                                ? _deptHeadReturn(selected)
-                                : _returnRequest(selected),
+                                ? _deptHeadReturn(selected!)
+                                : _returnRequest(selected!),
                       onReject: selected == null || (!selected.status.isPending)
                           ? null
                           : () => widget.isDepartmentHead
-                                ? _deptHeadReject(selected)
-                                : _rejectRequest(selected),
+                                ? _deptHeadReject(selected!)
+                                : _rejectRequest(selected!),
                       onRevoke:
                           selected == null ||
                               selected.status != LeaveRequestStatus.approved
                           ? null
-                          : () => _revokeApproval(selected),
+                          : () => _revokeApproval(selected!),
                       onPrint: selected == null
                           ? null
-                          : () => _printLeaveForm(selected),
+                          : () => _printLeaveForm(selected!),
                     ),
                   ),
                 ],
@@ -522,9 +530,10 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       userId,
     );
     LeaveBalance? leaveBalance;
+    final ledgerType = request.leaveType.balanceLedgerType;
     try {
       leaveBalance = balances.firstWhere(
-        (b) => b.leaveType == request.leaveType,
+        (b) => b.leaveType == ledgerType,
       );
     } catch (_) {}
 
@@ -1668,6 +1677,20 @@ class _RequestDetailsPanel extends StatelessWidget {
         : 'Approver';
     final submittedAt = request.dateFiled ?? request.createdAt;
     final reviewedAt = request.reviewedAt;
+    final status = request.status;
+
+    final deptHeadApprovedStage =
+        status == LeaveRequestStatus.pendingHr ||
+        status == LeaveRequestStatus.approved ||
+        status == LeaveRequestStatus.rejected ||
+        status == LeaveRequestStatus.rejectedByHr;
+
+    final deptHeadRejected =
+        status == LeaveRequestStatus.rejectedByDepartmentHead;
+    final hrApproved = status == LeaveRequestStatus.approved;
+    final hrRejected =
+        status == LeaveRequestStatus.rejected ||
+        status == LeaveRequestStatus.rejectedByHr;
 
     return [
       LeaveHistoryEvent(
@@ -1676,39 +1699,63 @@ class _RequestDetailsPanel extends StatelessWidget {
         actor: request.employeeName ?? 'Employee',
         remarks: request.reason,
       ),
-      LeaveHistoryEvent(
-        label: 'Approved by Department Head',
-        dateTime:
-            request.status == LeaveRequestStatus.pendingHr ||
-                request.status == LeaveRequestStatus.approved
-            ? reviewedAt
-            : null,
-        actor: reviewer,
-        completed:
-            request.status == LeaveRequestStatus.pendingHr ||
-            request.status == LeaveRequestStatus.approved,
-      ),
-      LeaveHistoryEvent(
-        label: 'Forwarded to HR',
-        dateTime:
-            request.status == LeaveRequestStatus.pendingHr ||
-                request.status == LeaveRequestStatus.approved
-            ? reviewedAt
-            : null,
-        actor: reviewer,
-        completed:
-            request.status == LeaveRequestStatus.pendingHr ||
-            request.status == LeaveRequestStatus.approved,
-      ),
-      LeaveHistoryEvent(
-        label: 'Approved by HR',
-        dateTime: request.status == LeaveRequestStatus.approved
-            ? reviewedAt
-            : null,
-        actor: reviewer,
-        remarks: request.hrRemarks,
-        completed: request.status == LeaveRequestStatus.approved,
-      ),
+      if (deptHeadApprovedStage)
+        LeaveHistoryEvent(
+          label: 'Approved by Department Head',
+          dateTime: reviewedAt,
+          actor: reviewer,
+          completed: true,
+        ),
+      if (deptHeadApprovedStage)
+        LeaveHistoryEvent(
+          label: 'Forwarded to HR',
+          dateTime: reviewedAt,
+          actor: reviewer,
+          completed: true,
+        ),
+      if (deptHeadRejected)
+        LeaveHistoryEvent(
+          label: 'Rejected by Department Head',
+          dateTime: reviewedAt,
+          actor: reviewer,
+          remarks:
+              (request.disapprovalReason ?? request.hrRemarks)
+                      ?.trim()
+                      .isNotEmpty ==
+                  true
+              ? (request.disapprovalReason ?? request.hrRemarks)
+              : null,
+          completed: true,
+        ),
+      if (status == LeaveRequestStatus.pendingHr)
+        LeaveHistoryEvent(
+          label: 'Approved by HR',
+          dateTime: null,
+          actor: reviewer,
+          completed: false,
+        ),
+      if (hrApproved)
+        LeaveHistoryEvent(
+          label: 'Approved by HR',
+          dateTime: reviewedAt,
+          actor: reviewer,
+          remarks: request.hrRemarks,
+          completed: true,
+        ),
+      if (hrRejected)
+        LeaveHistoryEvent(
+          label: 'Rejected by HR',
+          dateTime: reviewedAt,
+          actor: reviewer,
+          remarks:
+              (request.disapprovalReason ?? request.hrRemarks)
+                      ?.trim()
+                      .isNotEmpty ==
+                  true
+              ? (request.disapprovalReason ?? request.hrRemarks)
+              : null,
+          completed: true,
+        ),
     ];
   }
 }

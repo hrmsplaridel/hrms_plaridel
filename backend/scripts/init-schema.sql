@@ -408,6 +408,27 @@ CREATE INDEX IF NOT EXISTS idx_leave_request_history_leave_request_id
   ON leave_request_history(leave_request_id);
 
 -- =========================================
+-- IN-APP NOTIFICATIONS (DTR / leave / future modules)
+-- =========================================
+CREATE TABLE IF NOT EXISTS user_notifications (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  category TEXT NOT NULL DEFAULT 'general',
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT,
+  read_at TIMESTAMPTZ,
+  reference_type TEXT,
+  reference_id UUID,
+  metadata JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_notifications_user_id ON user_notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_notifications_read_at ON user_notifications(user_id, read_at);
+CREATE INDEX IF NOT EXISTS idx_user_notifications_created_at ON user_notifications(user_id, created_at DESC);
+
+-- =========================================
 -- BIOMETRIC ATTENDANCE LOGS (raw import from .dat files)
 -- =========================================
 CREATE TABLE IF NOT EXISTS biometric_attendance_logs (

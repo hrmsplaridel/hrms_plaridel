@@ -27,7 +27,10 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    final isWide = MediaQuery.of(context).size.width > 800;
+    final screenW = MediaQuery.sizeOf(context).width;
+    final isWide = screenW > 800;
+    // Keep branding within the viewport on narrow phones (fixed 420 caused overflow).
+    final brandingWidth = isWide ? 460.0 : (screenW - 32).clamp(260.0, 420.0);
 
     return Scaffold(
       body: Stack(
@@ -58,7 +61,7 @@ class _LoginPageState extends State<LoginPage> {
                   Align(
                     alignment: Alignment.topCenter,
                     child: SizedBox(
-                      width: isWide ? 460 : 420,
+                      width: brandingWidth,
                       child: _BrandingSection(),
                     ),
                   ),
@@ -120,8 +123,9 @@ class _LoginPageState extends State<LoginPage> {
 
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
-            builder: (context) =>
-                isPrivileged ? const AdminDashboard() : const EmployeeDashboard(),
+            builder: (context) => isPrivileged
+                ? const AdminDashboard()
+                : const EmployeeDashboard(),
           ),
         );
       } else {
@@ -167,6 +171,10 @@ class _LoginBackButton extends StatelessWidget {
 class _BrandingSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
+    final w = MediaQuery.sizeOf(context).width;
+    final titleSize = w < 360 ? 24.0 : (w < 400 ? 28.0 : 34.0);
+    final subtitleSize = w < 360 ? 12.0 : 16.0;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 24),
       child: Column(
@@ -175,7 +183,7 @@ class _BrandingSection extends StatelessWidget {
         children: [
           const SizedBox(height: 56),
           Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(12),
@@ -194,32 +202,37 @@ class _BrandingSection extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 16),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Municipality of Plaridel',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 34,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.3,
-                      height: 1.2,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Municipality of Plaridel',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: titleSize,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.3,
+                        height: 1.2,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'HUMAN RESOURCE MANAGEMENT SYSTEM',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.95),
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.8,
-                      height: 1.2,
+                    const SizedBox(height: 4),
+                    Text(
+                      'HUMAN RESOURCE MANAGEMENT SYSTEM',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.95),
+                        fontSize: subtitleSize,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: w < 360 ? 0.4 : 0.8,
+                        height: 1.2,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.fade,
+                      softWrap: true,
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ],
           ),

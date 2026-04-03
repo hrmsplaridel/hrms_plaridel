@@ -297,15 +297,13 @@ class LeaveRequestPdf {
     );
 
     final leaveType = request.leaveType;
-    final deductionDays =
-        (leaveType == LeaveType.vacationLeave ||
-            leaveType == LeaveType.sickLeave)
-        ? (computedWorkingDays ?? 0.0)
+    final wdCert = computedWorkingDays ?? 0.0;
+    final vlDeduction = (leaveType == LeaveType.vacationLeave ||
+            leaveType == LeaveType.mandatoryForcedLeave)
+        ? wdCert
         : 0.0;
-    final vlDeduction = leaveType == LeaveType.vacationLeave
-        ? deductionDays
-        : 0.0;
-    final slDeduction = leaveType == LeaveType.sickLeave ? deductionDays : 0.0;
+    final slDeduction =
+        leaveType == LeaveType.sickLeave ? wdCert : 0.0;
 
     String formatDays(double d) => d == 0 ? '—' : d.toStringAsFixed(3);
 
@@ -1561,7 +1559,8 @@ class _LeaveRequestPdfFixedEngine {
         ? _s(request.reviewerTitle)
         : _s(request.reviewerRole);
 
-    final vlDed = request.leaveType == LeaveType.vacationLeave
+    final vlDed = (request.leaveType == LeaveType.vacationLeave ||
+            request.leaveType == LeaveType.mandatoryForcedLeave)
         ? (wd ?? 0.0)
         : 0.0;
     final slDed = request.leaveType == LeaveType.sickLeave ? (wd ?? 0.0) : 0.0;

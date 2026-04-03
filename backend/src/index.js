@@ -26,6 +26,7 @@ const rspExamQuestionsRoutes = require('./routes/rspExamQuestions');
 const rspApplicationsRoutes = require('./routes/rspApplications');
 const rspStorageRoutes = require('./routes/rspStorage');
 const leaveRoutes = require('./routes/leaveRoutes');
+const notificationsRoutes = require('./routes/notifications');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -112,6 +113,7 @@ app.use('/api/rsp/exam-questions', rspExamQuestionsRoutes);
 app.use('/api/rsp/applications', rspApplicationsRoutes);
 app.use('/api/rsp/storage', rspStorageRoutes);
 app.use('/api/leave', leaveRoutes);
+app.use('/api/notifications', notificationsRoutes);
 
 // --- Start server ---
 app.listen(PORT, HOST, () => {

@@ -12,6 +12,7 @@ import 'dtr/dtr_provider.dart';
 import 'docutracker/docutracker_provider.dart';
 import 'leave/leave_provider.dart';
 import 'leave/api_leave_repository.dart';
+import 'notifications/notification_provider.dart';
 import 'supabase/supabase_config.dart';
 import 'admin/screens/admin_dashboard.dart';
 import 'employee/screens/employee_dashboard.dart';
@@ -82,8 +83,14 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider<AuthProvider>.value(value: auth),
         ChangeNotifierProvider(create: (_) => DtrProvider()),
         ChangeNotifierProvider(create: (_) => DocuTrackerProvider()),
+        ChangeNotifierProvider(create: (_) => NotificationProvider()),
         ChangeNotifierProvider(
-          create: (_) => LeaveProvider(repository: ApiLeaveRepository()),
+          create: (context) => LeaveProvider(
+            repository: ApiLeaveRepository(),
+            onMutation: () {
+              context.read<NotificationProvider>().refreshUnreadCount();
+            },
+          ),
         ),
       ],
       child: MaterialApp(

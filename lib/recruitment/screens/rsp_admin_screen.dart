@@ -1,9 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
-// ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html;
-// ignore: avoid_web_libraries_in_flutter
-import 'dart:ui_web' as ui_web;
 import 'package:dio/dio.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -21,6 +17,7 @@ import '../../landingpage/constants/app_theme.dart';
 import '../../utils/form_pdf.dart';
 import '../../widgets/feature_card.dart';
 import '../../widgets/rsp_form_header_footer.dart';
+import '../widgets/rsp_iframe_preview.dart';
 
 /// RSP module: hub with buttons for each RSP feature (Job Vacancies, Applications & Exam Results).
 class RspAdminContent extends StatefulWidget {
@@ -8608,7 +8605,7 @@ void _showAttachmentPreviewDialog(
                           )
                         : kIsWeb
                         ? (isPdf || isWord)
-                              ? _WebIframePreview(
+                              ? RspIframePreview(
                                   url: isWord ? _withPreviewParam(url) : url,
                                 )
                               : Center(
@@ -8731,43 +8728,4 @@ bool _isPrivateHost(String host) {
   }
   if (h.endsWith('.local') || h.endsWith('.lan')) return true;
   return false;
-}
-
-/// Minimal web-only inline preview for PDFs/docs using an `<iframe>`.
-/// Works best for `application/pdf` and many browsers will render it inline.
-class _WebIframePreview extends StatefulWidget {
-  const _WebIframePreview({required this.url});
-  final String url;
-
-  @override
-  State<_WebIframePreview> createState() => _WebIframePreviewState();
-}
-
-class _WebIframePreviewState extends State<_WebIframePreview> {
-  static int _counter = 0;
-  late final String _viewType;
-
-  @override
-  void initState() {
-    super.initState();
-    _viewType = 'rsp-attachment-iframe-${_counter++}';
-
-    // Register a one-off platform view factory.
-    // ignore: avoid_web_libraries_in_flutter
-    ui_web.platformViewRegistry.registerViewFactory(_viewType, (int viewId) {
-      final iframe = html.IFrameElement()
-        ..src = widget.url
-        ..style.border = '0'
-        ..style.width = '100%'
-        ..style.height = '100%';
-      return iframe;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // HtmlElementView sometimes ignores parent constraints; `SizedBox.expand`
-    // ensures the iframe gets a non-zero height/width.
-    return SizedBox.expand(child: HtmlElementView(viewType: _viewType));
-  }
 }

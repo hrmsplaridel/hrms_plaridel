@@ -25,8 +25,16 @@ const {
   expandNonRecurringToWindow,
   expandRecurringToWindow,
 } = require('../services/holidayRangeUtils');
+const leaveNotifications = require('../services/leaveNotifications');
 
 const router = express.Router();
+
+/** Fire-and-forget in-app notifications; never fails the HTTP handler. */
+function notifySafe(fn) {
+  Promise.resolve()
+    .then(() => fn())
+    .catch((e) => console.error('[leave notification]', e));
+}
 const protect = [authMiddleware];
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
@@ -286,10 +294,21 @@ function canModifyAttachment(status) {
   );
 }
 
+/**
+ * CSC practice: mandatory/forced leave is charged against vacation leave credits.
+ * Maps a leave_requests.leave type name to the leave_balances row key.
+ */
+function balanceLedgerLeaveType(leaveTypeName) {
+  if (!leaveTypeName) return leaveTypeName;
+  return leaveTypeName === 'mandatoryForcedLeave' ? 'vacationLeave' : leaveTypeName;
+}
+
 async function upsertLeaveBalanceDeduction(client, userId, leaveTypeName, daysToDeduct) {
   if (!userId || !leaveTypeName) return;
   const days = daysToDeduct != null ? parseFloat(daysToDeduct) : 0;
   if (!Number.isFinite(days) || days <= 0) return;
+
+  const ledgerType = balanceLedgerLeaveType(leaveTypeName);
 
   // Balance protection: ensure sufficient remaining credits (earned - used + adjusted).
   const bal = await client.query(
@@ -298,16 +317,18 @@ async function upsertLeaveBalanceDeduction(client, userId, leaveTypeName, daysTo
      WHERE user_id = $1::uuid AND leave_type = $2::text
      LIMIT 1
      FOR UPDATE`,
-    [userId, leaveTypeName]
+    [userId, ledgerType]
   );
   const earned = bal.rows.length > 0 ? parseFloat(bal.rows[0].earned_days ?? 0) : 0;
   const used = bal.rows.length > 0 ? parseFloat(bal.rows[0].used_days ?? 0) : 0;
   const adjusted = bal.rows.length > 0 ? parseFloat(bal.rows[0].adjusted_days ?? 0) : 0;
   const remaining = earned - used + adjusted;
   if (days > remaining) {
-    const msg = `Insufficient leave balance for ${leaveTypeName}. Remaining ${remaining.toFixed(
-      2
-    )}, requested ${days.toFixed(2)}.`;
+    const prefix =
+      leaveTypeName === 'mandatoryForcedLeave'
+        ? 'Insufficient vacation leave balance (mandatory/forced leave uses vacation credits)'
+        : `Insufficient leave balance for ${leaveTypeName}`;
+    const msg = `${prefix}. Remaining ${remaining.toFixed(2)}, requested ${days.toFixed(2)}.`;
     const err = new Error(msg);
     err.statusCode = 400;
     throw err;
@@ -319,7 +340,7 @@ async function upsertLeaveBalanceDeduction(client, userId, leaveTypeName, daysTo
      ON CONFLICT (user_id, leave_type)
      DO UPDATE SET used_days = COALESCE(leave_balances.used_days, 0) + EXCLUDED.used_days,
                    updated_at = now()`,
-    [userId, leaveTypeName, days]
+    [userId, ledgerType, days]
   );
 }
 
@@ -618,18 +639,33 @@ router.post('/submit', protect, async (req, res) => {
       if (days != null && days > 0) {
         const leaveTypeName = leave_type ? String(leave_type) : null;
         if (leaveTypeName) {
+          const ledgerType = balanceLedgerLeaveType(leaveTypeName);
           await client.query(
             `INSERT INTO leave_balances (user_id, leave_type, earned_days, used_days, pending_days, adjusted_days, as_of_date, last_accrual_date, created_at, updated_at)
              VALUES ($1::uuid, $2::text, 0, 0, $3::numeric, 0, now()::date, now()::date, now(), now())
              ON CONFLICT (user_id, leave_type)
              DO UPDATE SET pending_days = COALESCE(leave_balances.pending_days, 0) + EXCLUDED.pending_days,
                            updated_at = now()`,
-            [userId, leaveTypeName, days]
+            [userId, ledgerType, days]
           );
         }
       }
       const typeName = leave_type ? String(leave_type) : null;
       await client.query('COMMIT');
+      const nameRow = await pool.query('SELECT full_name FROM users WHERE id = $1', [userId]);
+      const submitEmpName = nameRow.rows[0]?.full_name || 'Employee';
+      notifySafe(() =>
+        leaveNotifications.notifyAfterSubmit(pool, {
+          leaveRequestId: row.id,
+          status: row.status,
+          employeeUserId: userId,
+          employeeName: submitEmpName,
+          leaveTypeName: typeName,
+          startDateStr: startStr,
+          endDateStr: endStr,
+          departmentHeadUserId: deptHeadInfo?.departmentHeadUserId ?? null,
+        })
+      );
       res.status(201).json(mapLeaveRowToApi({ ...row, leave_type_name: typeName }));
     } catch (e) {
       await client.query('ROLLBACK');
@@ -783,17 +819,39 @@ router.put('/:id', protect, async (req, res) => {
       if (leaveTypeName && days != null && days > 0) {
         if (isPendingTarget && !wasPending) {
           // Moving INTO a pending status: increment pending_days.
+          const ledgerType = balanceLedgerLeaveType(leaveTypeName);
           await client.query(
             `INSERT INTO leave_balances (user_id, leave_type, earned_days, used_days, pending_days, adjusted_days, as_of_date, last_accrual_date, created_at, updated_at)
              VALUES ($1::uuid, $2::text, 0, 0, $3::numeric, 0, now()::date, now()::date, now(), now())
              ON CONFLICT (user_id, leave_type)
              DO UPDATE SET pending_days = COALESCE(leave_balances.pending_days, 0) + EXCLUDED.pending_days,
                            updated_at = now()`,
-            [userId, leaveTypeName, days]
+            [userId, ledgerType, days]
           );
         }
       }
       await client.query('COMMIT');
+      if (
+        (historyAction === 'submitted' || historyAction === 'resubmitted') &&
+        ['pending', 'pending_department_head', 'pending_hr'].includes(row.status)
+      ) {
+        const dhPut = await getDepartmentHeadForEmployee(pool, userId);
+        const namePut = await pool.query('SELECT full_name FROM users WHERE id = $1', [userId]);
+        const putEmpName = namePut.rows[0]?.full_name || 'Employee';
+        notifySafe(() =>
+          leaveNotifications.notifyAfterSubmit(pool, {
+            leaveRequestId: row.id,
+            status: row.status,
+            employeeUserId: userId,
+            employeeName: putEmpName,
+            leaveTypeName: leaveTypeName,
+            startDateStr: startStr,
+            endDateStr: endStr,
+            departmentHeadUserId:
+              row.status === 'pending_department_head' ? dhPut?.departmentHeadUserId ?? null : null,
+          })
+        );
+      }
       res.json(mapLeaveRowToApi({ ...row, leave_type_name: leaveTypeName }));
     } catch (e) {
       await client.query('ROLLBACK');
@@ -864,12 +922,13 @@ router.patch('/:id/cancel', protect, async (req, res) => {
         );
         const ltName = ltRow.rows[0]?.name || null;
         if (ltName) {
+          const ledgerType = balanceLedgerLeaveType(ltName);
           await client.query(
             `UPDATE leave_balances
              SET pending_days = GREATEST(0, COALESCE(pending_days, 0) - $3::numeric),
                  updated_at = now()
              WHERE user_id = $1::uuid AND leave_type = $2::text`,
-            [cancelUserId, ltName, cancelDays]
+            [cancelUserId, ledgerType, cancelDays]
           );
         }
       }
@@ -885,7 +944,25 @@ router.patch('/:id/cancel', protect, async (req, res) => {
     );
 
     await client.query('COMMIT');
-    res.json(mapLeaveRowToApi(out.rows[0]));
+    const mappedCancel = mapLeaveRowToApi(out.rows[0]);
+    if (status === 'pending' || status === 'pending_department_head' || status === 'pending_hr') {
+      notifySafe(async () => {
+        const dhCancel = await getDepartmentHeadForEmployee(pool, userId);
+        await leaveNotifications.notifyStakeholdersLeaveCancelled(pool, {
+          leaveRequestId: id,
+          employeeUserId: userId,
+          employeeName: mappedCancel.employee_name,
+          previousStatus: status,
+          leaveTypeName: mappedCancel.leave_type_name || mappedCancel.leave_type,
+          startDateStr: mappedCancel.start_date,
+          endDateStr: mappedCancel.end_date,
+          cancelReason: reason,
+          departmentHeadUserId:
+            status === 'pending_department_head' ? dhCancel?.departmentHeadUserId ?? null : null,
+        });
+      });
+    }
+    res.json(mappedCancel);
   } catch (err) {
     try {
       await client.query('ROLLBACK');
@@ -1028,7 +1105,18 @@ router.post('/admin/mandatory-forced', protect, requireAdminOrHr, async (req, re
        WHERE lr.id = $1`,
       [row.id]
     );
-    res.status(201).json(mapLeaveRowToApi(out.rows[0]));
+    const mappedMf = mapLeaveRowToApi(out.rows[0]);
+    notifySafe(() =>
+      leaveNotifications.notifyMandatoryForcedAssigned(pool, {
+        leaveRequestId: row.id,
+        employeeUserId: userId,
+        employeeName: mappedMf.employee_name,
+        startDateStr: startStr,
+        endDateStr: endStr,
+        reason,
+      })
+    );
+    res.status(201).json(mappedMf);
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { }
     console.error('[leave POST /admin/mandatory-forced]', err);
@@ -1208,7 +1296,17 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
        WHERE lr.id = $1`,
       [id]
     );
-    res.json(mapLeaveRowToApi(out.rows[0]));
+    const mappedDhApprove = mapLeaveRowToApi(out.rows[0]);
+    notifySafe(() =>
+      leaveNotifications.notifyDepartmentHeadApprovedForHr(pool, {
+        leaveRequestId: id,
+        employeeName: mappedDhApprove.employee_name,
+        leaveTypeName: mappedDhApprove.leave_type_name || mappedDhApprove.leave_type,
+        startDateStr: mappedDhApprove.start_date,
+        endDateStr: mappedDhApprove.end_date,
+      })
+    );
+    res.json(mappedDhApprove);
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { }
     console.error('[leave PATCH /:id/department-head-approve]', err);
@@ -1273,11 +1371,12 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
     const rejectUserId = r.user_id || r.employee_id;
     const rejectLtName = r.leave_type_name || null;
     if (rejectDays && rejectDays > 0 && rejectUserId && rejectLtName) {
+      const ledgerType = balanceLedgerLeaveType(rejectLtName);
       await client.query(
         `UPDATE leave_balances
          SET pending_days = GREATEST(0, COALESCE(pending_days, 0) - $3::numeric), updated_at = now()
          WHERE user_id = $1::uuid AND leave_type = $2::text`,
-        [rejectUserId, rejectLtName, rejectDays]
+        [rejectUserId, ledgerType, rejectDays]
       );
     }
     await client.query('COMMIT');
@@ -1288,7 +1387,20 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
        WHERE lr.id = $1`,
       [id]
     );
-    res.json(mapLeaveRowToApi(out.rows[0]));
+    const mappedDhReject = mapLeaveRowToApi(out.rows[0]);
+    notifySafe(() =>
+      leaveNotifications.notifyEmployee(pool, {
+        employeeUserId: r.user_id || r.employee_id,
+        leaveRequestId: id,
+        type: 'leave_rejected_department_head',
+        title: 'Leave request not approved by department head',
+        body: remarks
+          ? `Your request was not approved. ${remarks}`
+          : 'Your leave request was not approved by your department head.',
+        metadata: { reviewer_remarks: remarks },
+      })
+    );
+    res.json(mappedDhReject);
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { }
     console.error('[leave PATCH /:id/department-head-reject]', err);
@@ -1353,11 +1465,12 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
     const returnUserId = r.user_id || r.employee_id;
     const returnLtName = r.leave_type_name || null;
     if (returnDays && returnDays > 0 && returnUserId && returnLtName) {
+      const ledgerType = balanceLedgerLeaveType(returnLtName);
       await client.query(
         `UPDATE leave_balances
          SET pending_days = GREATEST(0, COALESCE(pending_days, 0) - $3::numeric), updated_at = now()
          WHERE user_id = $1::uuid AND leave_type = $2::text`,
-        [returnUserId, returnLtName, returnDays]
+        [returnUserId, ledgerType, returnDays]
       );
     }
     await client.query('COMMIT');
@@ -1368,7 +1481,20 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
        WHERE lr.id = $1`,
       [id]
     );
-    res.json(mapLeaveRowToApi(out.rows[0]));
+    const mappedDhReturn = mapLeaveRowToApi(out.rows[0]);
+    notifySafe(() =>
+      leaveNotifications.notifyEmployee(pool, {
+        employeeUserId: r.user_id || r.employee_id,
+        leaveRequestId: id,
+        type: 'leave_returned_department_head',
+        title: 'Leave request returned for correction',
+        body: remarks
+          ? `Your department head returned this request for correction. ${remarks}`
+          : 'Your department head returned this leave request for correction.',
+        metadata: { reviewer_remarks: remarks },
+      })
+    );
+    res.json(mappedDhReturn);
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { }
     console.error('[leave PATCH /:id/department-head-return]', err);
@@ -1491,6 +1617,23 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
       });
 
       await client.query('COMMIT');
+      notifySafe(() =>
+        leaveNotifications.notifyEmployee(pool, {
+          employeeUserId: targetUserId,
+          leaveRequestId: id,
+          type: 'leave_approved',
+          title: 'Leave request approved',
+          body: remarks
+            ? `Your leave request was approved. ${remarks}`
+            : 'Your leave request was approved.',
+          metadata: {
+            reviewer_remarks: remarks,
+            leave_type: leaveTypeName,
+            start_date: startStr,
+            end_date: endStr,
+          },
+        })
+      );
       res.json(mapLeaveRowToApi({ ...row, leave_type_name: leaveTypeName }));
     } catch (e) {
       await client.query('ROLLBACK');
@@ -1571,12 +1714,13 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
     const rejectUserId = currentRow.user_id || currentRow.employee_id;
     const rejectLtName = currentRow.leave_type_name || null;
     if (rejectDays && rejectDays > 0 && rejectUserId && rejectLtName) {
+      const ledgerType = balanceLedgerLeaveType(rejectLtName);
       await client.query(
         `UPDATE leave_balances
          SET pending_days = GREATEST(0, COALESCE(pending_days, 0) - $3::numeric),
              updated_at = now()
          WHERE user_id = $1::uuid AND leave_type = $2::text`,
-        [rejectUserId, rejectLtName, rejectDays]
+        [rejectUserId, ledgerType, rejectDays]
       );
     }
 
@@ -1590,7 +1734,26 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
        WHERE lr.id = $1`,
       [id]
     );
-    res.json(mapLeaveRowToApi(out.rows[0]));
+    const mappedReject = mapLeaveRowToApi(out.rows[0]);
+    const empRejectId = currentRow.user_id || currentRow.employee_id;
+    const disapproval =
+      disapprovalReason ||
+      remarks ||
+      mappedReject.disapproval_reason ||
+      null;
+    notifySafe(() =>
+      leaveNotifications.notifyEmployee(pool, {
+        employeeUserId: empRejectId,
+        leaveRequestId: id,
+        type: 'leave_rejected_hr',
+        title: 'Leave request not approved',
+        body: disapproval
+          ? `HR did not approve this leave request. ${disapproval}`
+          : 'HR did not approve this leave request.',
+        metadata: { reviewer_remarks: remarks, disapproval_reason: disapprovalReason },
+      })
+    );
+    res.json(mappedReject);
   } catch (err) {
     try {
       await client.query('ROLLBACK');
@@ -1659,13 +1822,14 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
 
     // 2. Restore used_days balance (reverse the deduction from approval).
     if (revokeDays && revokeDays > 0 && targetUserId && ltName) {
+      const ledgerType = balanceLedgerLeaveType(ltName);
       await client.query(
         `UPDATE leave_balances
          SET used_days  = GREATEST(0, COALESCE(used_days, 0)  - $3::numeric),
              pending_days = COALESCE(pending_days, 0) + $3::numeric,
              updated_at = now()
          WHERE user_id = $1::uuid AND leave_type = $2::text`,
-        [targetUserId, ltName, revokeDays]
+        [targetUserId, ledgerType, revokeDays]
       );
     }
 
@@ -1705,7 +1869,20 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
        WHERE lr.id = $1`,
       [id]
     );
-    res.json(mapLeaveRowToApi(out.rows[0]));
+    const mappedRevoke = mapLeaveRowToApi(out.rows[0]);
+    notifySafe(() =>
+      leaveNotifications.notifyEmployee(pool, {
+        employeeUserId: targetUserId,
+        leaveRequestId: id,
+        type: 'leave_revoked',
+        title: 'Approved leave was revoked',
+        body:
+          remarks ||
+          'HR revoked the approval for this leave request. Please review your record and contact HR if needed.',
+        metadata: { reviewer_remarks: remarks },
+      })
+    );
+    res.json(mappedRevoke);
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { }
     console.error('[leave PATCH /:id/revoke]', err);
@@ -1772,12 +1949,13 @@ router.patch('/:id/return', protect, requireAdminOrHr, async (req, res) => {
     const returnUserId = currentRow.user_id || currentRow.employee_id;
     const returnLtName = currentRow.leave_type_name || null;
     if (returnDays && returnDays > 0 && returnUserId && returnLtName) {
+      const ledgerType = balanceLedgerLeaveType(returnLtName);
       await client.query(
         `UPDATE leave_balances
          SET pending_days = GREATEST(0, COALESCE(pending_days, 0) - $3::numeric),
              updated_at = now()
          WHERE user_id = $1::uuid AND leave_type = $2::text`,
-        [returnUserId, returnLtName, returnDays]
+        [returnUserId, ledgerType, returnDays]
       );
     }
 
@@ -1791,7 +1969,21 @@ router.patch('/:id/return', protect, requireAdminOrHr, async (req, res) => {
        WHERE lr.id = $1`,
       [id]
     );
-    res.json(mapLeaveRowToApi(out.rows[0]));
+    const mappedHrReturn = mapLeaveRowToApi(out.rows[0]);
+    const empReturnId = currentRow.user_id || currentRow.employee_id;
+    notifySafe(() =>
+      leaveNotifications.notifyEmployee(pool, {
+        employeeUserId: empReturnId,
+        leaveRequestId: id,
+        type: 'leave_returned_hr',
+        title: 'Leave request returned for correction',
+        body: remarks
+          ? `HR returned this request for correction. ${remarks}`
+          : 'HR returned this leave request for correction.',
+        metadata: { reviewer_remarks: remarks },
+      })
+    );
+    res.json(mappedHrReturn);
   } catch (err) {
     try {
       await client.query('ROLLBACK');

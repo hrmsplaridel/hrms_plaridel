@@ -1143,7 +1143,9 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
     );
 
     final currentRequest = widget.initialRequest;
-    final vlDeduction = currentRequest?.leaveType == LeaveType.vacationLeave
+    final vlDeduction =
+        (currentRequest?.leaveType == LeaveType.vacationLeave ||
+            currentRequest?.leaveType == LeaveType.mandatoryForcedLeave)
         ? (currentRequest?.workingDaysApplied ?? 0.0)
         : 0.0;
     final slDeduction = currentRequest?.leaveType == LeaveType.sickLeave

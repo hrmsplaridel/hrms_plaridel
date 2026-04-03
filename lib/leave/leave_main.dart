@@ -30,6 +30,7 @@ class LeaveMain extends StatefulWidget {
   const LeaveMain({
     super.key,
     this.section,
+    this.initialSection,
     this.isAdmin = false,
     this.isDepartmentHead = false,
     this.employeeRequestsContent,
@@ -39,6 +40,9 @@ class LeaveMain extends StatefulWidget {
 
   /// Active section when controlled by sidebar navigation.
   final LeaveSection? section;
+
+  /// One-time tab selection for employees (e.g. after opening a notification). Ignored if [section] is set.
+  final LeaveSection? initialSection;
 
   /// Whether current user is HR/admin.
   final bool isAdmin;
@@ -69,6 +73,9 @@ class _LeaveMainState extends State<LeaveMain> {
     // own leave via the Requests tab).
     if (widget.isDepartmentHead) {
       _currentSection = LeaveSection.approvals;
+    }
+    if (widget.initialSection != null) {
+      _currentSection = widget.initialSection!;
     }
   }
 

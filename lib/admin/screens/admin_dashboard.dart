@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -34,6 +36,9 @@ import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
 import '../../../recruitment/screens/rsp_admin_screen.dart';
 import '../../../widgets/feature_card.dart';
+import '../../../notifications/notification_provider.dart';
+import '../../../notifications/notification_tap_result.dart';
+import '../../../notifications/open_notifications_panel.dart';
 
 /// Dashboard accent colors for summary cards and accents (orange theme).
 class _DashboardColors {
@@ -54,11 +59,16 @@ class AdminDashboard extends StatefulWidget {
   State<AdminDashboard> createState() => _AdminDashboardState();
 }
 
-class _AdminDashboardState extends State<AdminDashboard> {
+class _AdminDashboardState extends State<AdminDashboard>
+    with WidgetsBindingObserver {
   int _selectedNavIndex = 0;
+  final GlobalKey<_DtrContentState> _dtrContentKey =
+      GlobalKey<_DtrContentState>();
   final TextEditingController _dashboardSearchController =
       TextEditingController();
   String _dashboardSearchQuery = '';
+
+  Timer? _notificationPollTimer;
 
   static const _navItems = [
     'Dashboard',
@@ -70,9 +80,55 @@ class _AdminDashboardState extends State<AdminDashboard> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<NotificationProvider>().refreshUnreadCount();
+      _notificationPollTimer?.cancel();
+      _notificationPollTimer = Timer.periodic(
+        const Duration(seconds: 30),
+        (_) {
+          if (!mounted) return;
+          context.read<NotificationProvider>().refreshUnreadCount();
+        },
+      );
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      context.read<NotificationProvider>().refreshUnreadCount();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _notificationPollTimer?.cancel();
     _dashboardSearchController.dispose();
     super.dispose();
+  }
+
+  Future<void> _handleOpenNotifications() async {
+    final result = await openNotificationsPanel(context);
+    if (!mounted) return;
+    await context.read<NotificationProvider>().refreshUnreadCount();
+    if (!mounted) return;
+    _applyNotificationTapResult(result);
+  }
+
+  void _applyNotificationTapResult(NotificationTapResult? result) {
+    if (result == null ||
+        result.kind != NotificationTapKind.adminDtrLeaveManagement) {
+      return;
+    }
+    setState(() => _selectedNavIndex = 3);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _dtrContentKey.currentState?.openLeaveManagement();
+    });
   }
 
   @override
@@ -161,6 +217,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     onSearchChanged: (value) {
                       setState(() => _dashboardSearchQuery = value);
                     },
+                    onOpenNotifications: _handleOpenNotifications,
                   ),
                   Expanded(
                     child: SingleChildScrollView(
@@ -174,7 +231,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           : _selectedNavIndex == 2
                           ? const _LdContent()
                           : _selectedNavIndex == 3
-                          ? const _DtrContent()
+                          ? _DtrContent(key: _dtrContentKey)
                           : _selectedNavIndex == 4
                           ? const DocuTrackerMain(isAdmin: true)
                           : _selectedNavIndex == 5
@@ -555,6 +612,7 @@ class _TopBar extends StatelessWidget {
     required this.searchController,
     required this.searchQuery,
     required this.onSearchChanged,
+    required this.onOpenNotifications,
   });
 
   final String email;
@@ -567,6 +625,7 @@ class _TopBar extends StatelessWidget {
   final TextEditingController searchController;
   final String searchQuery;
   final ValueChanged<String> onSearchChanged;
+  final Future<void> Function() onOpenNotifications;
 
   @override
   Widget build(BuildContext context) {
@@ -674,37 +733,58 @@ class _TopBar extends StatelessWidget {
                   ),
           ),
           if (!searchEnabled) const Spacer(),
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              IconButton(
-                icon: Icon(
-                  Icons.notifications_outlined,
-                  color: AppTheme.textPrimary,
-                  size: isCompact ? 24 : 26,
-                ),
-                onPressed: () {},
-                style: IconButton.styleFrom(
-                  backgroundColor: AppTheme.offWhite,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+          Consumer<NotificationProvider>(
+            builder: (context, np, _) {
+              final c = np.unreadCount;
+              return Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      Icons.notifications_outlined,
+                      color: AppTheme.textPrimary,
+                      size: isCompact ? 24 : 26,
+                    ),
+                    tooltip: 'Notifications',
+                    onPressed: () {
+                      onOpenNotifications();
+                    },
+                    style: IconButton.styleFrom(
+                      backgroundColor: AppTheme.offWhite,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              Positioned(
-                right: 6,
-                top: 6,
-                child: Container(
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE53935),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 1.5),
-                  ),
-                ),
-              ),
-            ],
+                  if (c > 0)
+                    Positioned(
+                      right: -2,
+                      top: -2,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 1,
+                        ),
+                        constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE53935),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.white, width: 1),
+                        ),
+                        child: Text(
+                          c > 99 ? '99+' : '$c',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
           SizedBox(width: isCompact ? 6 : 12),
           _AdminDropdown(
@@ -2142,7 +2222,7 @@ class _TableHeader extends StatelessWidget {
 
 /// DTR module: hub with feature cards (like RSP). Choose a feature below.
 class _DtrContent extends StatefulWidget {
-  const _DtrContent();
+  const _DtrContent({super.key});
 
   @override
   State<_DtrContent> createState() => _DtrContentState();
@@ -2153,6 +2233,12 @@ class _DtrContentState extends State<_DtrContent> {
   /// 5 = Department, 6 = Position, 7 = Shift, 8 = Leave Management,
   /// 9–11 = Holiday / Policy / Adjustment via [_ManageContent], 12 = Biometric Devices
   int _dtrSectionIndex = 0;
+
+  /// Opens **Leave Management** (same as tapping the DTR hub card). Used after notification taps.
+  void openLeaveManagement() {
+    if (!mounted) return;
+    setState(() => _dtrSectionIndex = 8);
+  }
 
   @override
   Widget build(BuildContext context) {

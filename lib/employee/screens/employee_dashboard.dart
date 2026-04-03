@@ -14,10 +14,32 @@ import '../../../docutracker/docutracker_main.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
 import '../../../leave/leave_provider.dart';
+import '../../../notifications/notification_provider.dart';
+import '../../../notifications/notification_tap_result.dart';
+import '../../../notifications/open_notifications_panel.dart';
 import '../../../leave/models/leave_type.dart';
 import '../../../widgets/user_avatar.dart';
 import '../../../ld/training_daily_report_employee_screen.dart';
+import '../widgets/attendance_overview/attendance_overview.dart';
 import '../../shared/screens/profile_and_settings_page.dart';
+
+/// Main scroll padding: comfortable insets on phones (narrower gutters still breathe).
+EdgeInsets _employeeMainScrollPadding(BuildContext context) {
+  final mq = MediaQuery.of(context);
+  final w = mq.size.width;
+  final horizontal = w > 900 ? 24.0 : (w > 600 ? 20.0 : 18.0);
+  final top = w < 600 ? 4.0 : 8.0;
+  final bottom = 28.0 + (w < 600 ? mq.padding.bottom * 0.5 : 0.0);
+  return EdgeInsets.fromLTRB(horizontal, top, horizontal, bottom);
+}
+
+double _employeeCardPadding(BuildContext context) {
+  return MediaQuery.sizeOf(context).width < 600 ? 16.0 : 20.0;
+}
+
+double _employeeSectionCardPadding(BuildContext context) {
+  return MediaQuery.sizeOf(context).width < 600 ? 16.0 : 24.0;
+}
 
 /// Employee dashboard reference: dark blue sidebar (HR branding), nav items,
 /// welcome + Clock In, Attendance, Leave Balance, Payslip cards, Announcements,
@@ -29,8 +51,48 @@ class EmployeeDashboard extends StatefulWidget {
   State<EmployeeDashboard> createState() => _EmployeeDashboardState();
 }
 
-class _EmployeeDashboardState extends State<EmployeeDashboard> {
+class _EmployeeDashboardState extends State<EmployeeDashboard>
+    with WidgetsBindingObserver {
   int _selectedNavIndex = 0;
+
+  /// One frame: open My Leave on the tab chosen from a notification tap.
+  LeaveSection? _leaveInitialSection;
+
+  /// Bumps when routing from a notification so [LeaveMain] remounts with [initialSection].
+  int _leaveNavKey = 0;
+
+  /// Polls unread count so badges update when other users trigger notifications (e.g. HR after dept head approval).
+  Timer? _notificationPollTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<NotificationProvider>().refreshUnreadCount();
+      _notificationPollTimer?.cancel();
+      _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+        if (!mounted) return;
+        context.read<NotificationProvider>().refreshUnreadCount();
+      });
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      context.read<NotificationProvider>().refreshUnreadCount();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _notificationPollTimer?.cancel();
+    super.dispose();
+  }
+
   static const _navItems = [
     'Dashboard',
     'My Attendance',
@@ -39,6 +101,38 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     'DocuTracker',
     'Announcements',
   ];
+
+  Future<void> _handleOpenNotifications() async {
+    final result = await openNotificationsPanel(context);
+    if (!mounted) return;
+    await context.read<NotificationProvider>().refreshUnreadCount();
+    if (!mounted) return;
+    _applyNotificationTapResult(result);
+  }
+
+  void _applyNotificationTapResult(NotificationTapResult? result) {
+    if (result == null || result.kind == NotificationTapKind.none) return;
+    switch (result.kind) {
+      case NotificationTapKind.employeeLeaveApprovals:
+      case NotificationTapKind.employeeLeaveRequests:
+        final section = result.employeeLeaveSection;
+        if (section == null) return;
+        setState(() {
+          _selectedNavIndex = 2;
+          _leaveInitialSection = section;
+          _leaveNavKey++;
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() => _leaveInitialSection = null);
+          }
+        });
+        break;
+      case NotificationTapKind.adminDtrLeaveManagement:
+      case NotificationTapKind.none:
+        break;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -58,7 +152,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     final avatarPath = auth.avatarPath;
     final width = MediaQuery.of(context).size.width;
     final isWide = width > 900;
-    final contentPadding = width > 900 ? 24.0 : (width > 600 ? 20.0 : 16.0);
 
     return Scaffold(
       backgroundColor: AppTheme.offWhite,
@@ -77,64 +170,72 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                 ),
               ),
             ),
-      body: Row(
-        children: [
-          if (isWide)
-            _EmployeeSidebar(
-              displayName: displayName,
-              avatarPath: avatarPath,
-              selectedIndex: _selectedNavIndex,
-              onTap: (i) => setState(() => _selectedNavIndex = i),
-            ),
-          Expanded(
-            child: Column(
-              children: [
-                _EmployeeTopBar(
-                  displayName: displayName,
-                  email: email,
-                  avatarPath: avatarPath,
-                  showMenuButton: !isWide,
-                  onProfileTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const ProfileAndSettingsPage(),
-                      ),
-                    );
-                  },
-                ),
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: EdgeInsets.all(contentPadding),
-                    child: _selectedNavIndex == 0
-                        ? _EmployeeDashboardContent(
-                            displayName: displayName,
-                            onViewAttendance: () =>
-                                setState(() => _selectedNavIndex = 1),
-                          )
-                        : _selectedNavIndex == 1
-                        ? const _EmployeeAttendanceContent()
-                        : _selectedNavIndex == 2
-                        ? const _EmployeeLeaveMainEntry()
-                        : _selectedNavIndex == 3
-                        ? const TrainingDailyReportEmployeeScreen()
-                        : _selectedNavIndex == 4
-                        ? const DocuTrackerMain(isAdmin: false)
-                        : _EmployeePlaceholderContent(
-                            title: _navItems[_selectedNavIndex],
-                          ),
+      body: SafeArea(
+        child: Row(
+          children: [
+            if (isWide)
+              _EmployeeSidebar(
+                displayName: displayName,
+                avatarPath: avatarPath,
+                selectedIndex: _selectedNavIndex,
+                onTap: (i) => setState(() => _selectedNavIndex = i),
+              ),
+            Expanded(
+              child: Column(
+                children: [
+                  _EmployeeTopBar(
+                    displayName: displayName,
+                    email: email,
+                    avatarPath: avatarPath,
+                    showMenuButton: !isWide,
+                    onOpenNotifications: _handleOpenNotifications,
+                    onProfileTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const ProfileAndSettingsPage(),
+                        ),
+                      );
+                    },
                   ),
-                ),
-              ],
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: _employeeMainScrollPadding(context),
+                      child: _selectedNavIndex == 0
+                          ? _EmployeeDashboardContent(
+                              displayName: displayName,
+                              onViewAttendance: () =>
+                                  setState(() => _selectedNavIndex = 1),
+                            )
+                          : _selectedNavIndex == 1
+                          ? const _EmployeeAttendanceContent()
+                          : _selectedNavIndex == 2
+                          ? _EmployeeLeaveMainEntry(
+                              key: ValueKey(_leaveNavKey),
+                              initialSection: _leaveInitialSection,
+                            )
+                          : _selectedNavIndex == 3
+                          ? const TrainingDailyReportEmployeeScreen()
+                          : _selectedNavIndex == 4
+                          ? const DocuTrackerMain(isAdmin: false)
+                          : _EmployeePlaceholderContent(
+                              title: _navItems[_selectedNavIndex],
+                            ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
 class _EmployeeLeaveMainEntry extends StatefulWidget {
-  const _EmployeeLeaveMainEntry();
+  const _EmployeeLeaveMainEntry({super.key, this.initialSection});
+
+  final LeaveSection? initialSection;
 
   @override
   State<_EmployeeLeaveMainEntry> createState() =>
@@ -164,7 +265,11 @@ class _EmployeeLeaveMainEntryState extends State<_EmployeeLeaveMainEntry> {
             ),
           );
         }
-        return LeaveMain(isAdmin: false, isDepartmentHead: isDeptHead);
+        return LeaveMain(
+          isAdmin: false,
+          isDepartmentHead: isDeptHead,
+          initialSection: widget.initialSection,
+        );
       },
     );
   }
@@ -485,6 +590,7 @@ class _EmployeeTopBar extends StatelessWidget {
     required this.email,
     this.avatarPath,
     this.showMenuButton = false,
+    required this.onOpenNotifications,
     this.onProfileTap,
   });
 
@@ -492,6 +598,7 @@ class _EmployeeTopBar extends StatelessWidget {
   final String email;
   final String? avatarPath;
   final bool showMenuButton;
+  final Future<void> Function() onOpenNotifications;
   final VoidCallback? onProfileTap;
 
   @override
@@ -499,7 +606,10 @@ class _EmployeeTopBar extends StatelessWidget {
     final isCompact = MediaQuery.of(context).size.width < 600;
     return Container(
       height: isCompact ? 56 : 64,
-      padding: EdgeInsets.symmetric(horizontal: isCompact ? 12 : 24),
+      padding: EdgeInsets.symmetric(
+        horizontal: isCompact ? 16 : 24,
+        vertical: isCompact ? 6 : 8,
+      ),
       decoration: BoxDecoration(
         color: AppTheme.lightGray,
         border: Border(
@@ -553,40 +663,55 @@ class _EmployeeTopBar extends StatelessWidget {
                   ),
           ),
           if (isCompact) const Spacer(),
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              IconButton(
-                icon: Icon(
-                  Icons.notifications_outlined,
-                  color: AppTheme.textPrimary,
-                  size: isCompact ? 22 : 24,
-                ),
-                onPressed: () {},
-              ),
-              Positioned(
-                right: 10,
-                top: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 5,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE53935),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Text(
-                    '1',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
+          Consumer<NotificationProvider>(
+            builder: (context, np, _) {
+              final c = np.unreadCount;
+              return Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      Icons.notifications_outlined,
+                      color: AppTheme.textPrimary,
+                      size: isCompact ? 22 : 24,
                     ),
+                    tooltip: 'Notifications',
+                    onPressed: () {
+                      onOpenNotifications();
+                    },
                   ),
-                ),
-              ),
-            ],
+                  if (c > 0)
+                    Positioned(
+                      right: -2,
+                      top: -2,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 1,
+                        ),
+                        constraints: const BoxConstraints(
+                          minWidth: 18,
+                          minHeight: 18,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE53935),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.white, width: 1.2),
+                        ),
+                        child: Text(
+                          c > 99 ? '99+' : '$c',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
           const SizedBox(width: 8),
           _EmployeeUserMenu(
@@ -824,7 +949,12 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
 
   @override
   Widget build(BuildContext context) {
-    final isNarrow = MediaQuery.of(context).size.width < 600;
+    final w = MediaQuery.sizeOf(context).width;
+    final isNarrow = w < 600;
+    final isTiny = w < 360;
+    final welcomeSize = isTiny ? 18.0 : (isNarrow ? 20.0 : 26.0);
+    final subtitleSize = isNarrow ? 13.5 : 15.0;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -832,19 +962,23 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
           'Welcome back, ${widget.displayName}!',
           style: TextStyle(
             color: AppTheme.textPrimary,
-            fontSize: isNarrow ? 22 : 26,
+            fontSize: welcomeSize,
             fontWeight: FontWeight.w800,
+            height: 1.25,
           ),
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
         ),
         const SizedBox(height: 6),
         Text(
           "Here's your latest information and updates.",
           style: TextStyle(
             color: AppTheme.textSecondary,
-            fontSize: isNarrow ? 14 : 15,
+            fontSize: subtitleSize,
+            height: 1.35,
           ),
         ),
-        const SizedBox(height: 24),
+        SizedBox(height: isNarrow ? 18 : 24),
         _EmployeeSummaryCards(
           isNarrow: isNarrow,
           onViewAttendance: widget.onViewAttendance,
@@ -861,7 +995,7 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
         ),
         const SizedBox(height: 12),
         Container(
-          padding: const EdgeInsets.all(24),
+          padding: EdgeInsets.all(_employeeSectionCardPadding(context)),
           decoration: BoxDecoration(
             color: AppTheme.white,
             borderRadius: BorderRadius.circular(20),
@@ -889,7 +1023,7 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
         const SizedBox(height: 24),
         _EmployeeUpcomingLeaveCard(),
         const SizedBox(height: 24),
-        _EmployeeAttendanceOverviewCard(),
+        EmployeeAttendanceOverviewCard(onViewMore: widget.onViewAttendance),
         const SizedBox(height: 32),
       ],
     );
@@ -907,6 +1041,7 @@ class _EmployeeSummaryCards extends StatelessWidget {
     final w = MediaQuery.of(context).size.width;
     final singleColumn = w < 500;
     final twoRows = w < 800 && !singleColumn;
+    final cardGap = w < 600 ? 12.0 : 16.0;
 
     Widget clockIn = _ClockInCard();
     Widget attendance = _AttendanceCard(onViewAttendance: onViewAttendance);
@@ -917,11 +1052,11 @@ class _EmployeeSummaryCards extends StatelessWidget {
       return Column(
         children: [
           clockIn,
-          const SizedBox(height: 16),
+          SizedBox(height: cardGap),
           attendance,
-          const SizedBox(height: 16),
+          SizedBox(height: cardGap),
           leaveBalance,
-          const SizedBox(height: 16),
+          SizedBox(height: cardGap),
           payslip,
         ],
       );
@@ -932,15 +1067,15 @@ class _EmployeeSummaryCards extends StatelessWidget {
           Row(
             children: [
               Expanded(child: clockIn),
-              const SizedBox(width: 16),
+              SizedBox(width: cardGap),
               Expanded(child: attendance),
             ],
           ),
-          const SizedBox(height: 16),
+          SizedBox(height: cardGap),
           Row(
             children: [
               Expanded(child: leaveBalance),
-              const SizedBox(width: 16),
+              SizedBox(width: cardGap),
               Expanded(child: payslip),
             ],
           ),
@@ -950,11 +1085,11 @@ class _EmployeeSummaryCards extends StatelessWidget {
     return Row(
       children: [
         Expanded(child: clockIn),
-        const SizedBox(width: 16),
+        SizedBox(width: cardGap),
         Expanded(child: attendance),
-        const SizedBox(width: 16),
+        SizedBox(width: cardGap),
         Expanded(child: leaveBalance),
-        const SizedBox(width: 16),
+        SizedBox(width: cardGap),
         Expanded(child: payslip),
       ],
     );
@@ -1045,8 +1180,11 @@ class _ClockInCard extends StatelessWidget {
         // Block ALL clock actions when outside shift window (before start or after end)
         final isShiftDisabled = onTap != null && dtr.isOutsideShiftWindow;
 
+        final narrow = MediaQuery.sizeOf(context).width < 600;
+        final detailFontSize = narrow ? 10.0 : 11.0;
+
         return Container(
-          padding: const EdgeInsets.all(20),
+          padding: EdgeInsets.all(_employeeCardPadding(context)),
           decoration: BoxDecoration(
             color: AppTheme.white,
             borderRadius: BorderRadius.circular(16),
@@ -1102,7 +1240,12 @@ class _ClockInCard extends StatelessWidget {
                   record.timeIn != null
                       ? 'AM In: ${_formatTime(record.timeIn)}  AM Out: ${_formatTime(record.breakOut)}  PM In: ${_formatTime(record.breakIn)}  PM Out: ${_formatTime(record.timeOut)}'
                       : 'AM: Absent  PM In: ${_formatTime(record.breakIn)}  PM Out: ${_formatTime(record.timeOut)}',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: detailFontSize,
+                    height: 1.35,
+                  ),
+                  softWrap: true,
                 ),
                 if (record.source != null && record.source!.isNotEmpty) ...[
                   const SizedBox(height: 6),
@@ -1238,7 +1381,7 @@ class _AttendanceCard extends StatelessWidget {
             '${now.year}-${now.month.toString().padLeft(2, '0')}';
 
         return Container(
-          padding: const EdgeInsets.all(20),
+          padding: EdgeInsets.all(_employeeCardPadding(context)),
           decoration: BoxDecoration(
             color: AppTheme.white,
             borderRadius: BorderRadius.circular(16),
@@ -1337,7 +1480,7 @@ class _LeaveBalanceCard extends StatelessWidget {
 
         final hasData = leave.balances.isNotEmpty;
         return Container(
-          padding: const EdgeInsets.all(20),
+          padding: EdgeInsets.all(_employeeCardPadding(context)),
           decoration: BoxDecoration(
             color: AppTheme.white,
             borderRadius: BorderRadius.circular(16),
@@ -1417,7 +1560,7 @@ class _PayslipCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(_employeeCardPadding(context)),
       decoration: BoxDecoration(
         color: AppTheme.white,
         borderRadius: BorderRadius.circular(16),
@@ -1485,83 +1628,106 @@ class _PayslipCard extends StatelessWidget {
 class _EmployeeAnnouncementsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
+    final pad = _employeeSectionCardPadding(context);
+    final innerPad = MediaQuery.sizeOf(context).width < 600 ? 12.0 : 16.0;
+
+    Widget titleRow() {
+      return Row(
+        children: [
+          Icon(Icons.campaign_rounded, color: AppTheme.primaryNavy, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Announcements',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontWeight: FontWeight.w700,
+                fontSize: 17,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, c) {
+        final stackHeader = c.maxWidth < 400;
+        return Container(
+          padding: EdgeInsets.all(pad),
+          decoration: BoxDecoration(
+            color: AppTheme.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.campaign_rounded,
-                      color: AppTheme.primaryNavy,
-                      size: 22,
+              if (stackHeader) ...[
+                titleRow(),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () {},
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppTheme.primaryNavy,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
                     ),
-                    const SizedBox(width: 10),
-                    Flexible(
-                      child: Text(
-                        'Announcements',
-                        style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 17,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                    child: const Text('View All >'),
+                  ),
+                ),
+              ] else
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: titleRow()),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () {},
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppTheme.primaryNavy,
+                      ),
+                      child: const Text('View All >'),
+                    ),
+                  ],
+                ),
+              SizedBox(height: stackHeader ? 12 : 16),
+              Container(
+                padding: EdgeInsets.all(innerPad),
+                decoration: BoxDecoration(
+                  color: AppTheme.offWhite,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.black.withOpacity(0.06)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'No announcements yet.',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 14,
+                        height: 1.4,
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              TextButton(
-                onPressed: () {},
-                style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.primaryNavy,
-                ),
-                child: const Text('View All >'),
-              ),
             ],
           ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppTheme.offWhite,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.black.withOpacity(0.06)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'No announcements yet.',
-                  style: TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 14,
-                    height: 1.4,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -1569,216 +1735,111 @@ class _EmployeeAnnouncementsCard extends StatelessWidget {
 class _EmployeeUpcomingLeaveCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
+    final pad = _employeeSectionCardPadding(context);
+    final innerPad = MediaQuery.sizeOf(context).width < 600 ? 12.0 : 16.0;
+
+    Widget titleRow() {
+      return Row(
+        children: [
+          Icon(Icons.event_rounded, color: AppTheme.primaryNavy, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Upcoming Leave',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontWeight: FontWeight.w700,
+                fontSize: 17,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, c) {
+        final stackHeader = c.maxWidth < 400;
+        return Container(
+          padding: EdgeInsets.all(pad),
+          decoration: BoxDecoration(
+            color: AppTheme.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
+              if (stackHeader) ...[
+                titleRow(),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () {},
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppTheme.primaryNavy,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                    ),
+                    child: const Text('View More >'),
+                  ),
+                ),
+              ] else
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: titleRow()),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () {},
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppTheme.primaryNavy,
+                      ),
+                      child: const Text('View More >'),
+                    ),
+                  ],
+                ),
+              SizedBox(height: stackHeader ? 12 : 16),
+              Container(
+                padding: EdgeInsets.all(innerPad),
+                decoration: BoxDecoration(
+                  color: AppTheme.offWhite,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.black.withOpacity(0.06)),
+                ),
                 child: Row(
                   children: [
+                    Expanded(
+                      child: Text(
+                        'No upcoming leave.',
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
                     Icon(
                       Icons.event_rounded,
-                      color: AppTheme.primaryNavy,
-                      size: 22,
-                    ),
-                    const SizedBox(width: 10),
-                    Flexible(
-                      child: Text(
-                        'Upcoming Leave',
-                        style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 17,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                      color: AppTheme.textSecondary.withOpacity(0.5),
+                      size: 40,
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              TextButton(
-                onPressed: () {},
-                style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.primaryNavy,
-                ),
-                child: const Text('View More >'),
-              ),
             ],
           ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppTheme.offWhite,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.black.withOpacity(0.06)),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'No upcoming leave.',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 14,
-                    ),
-                  ),
-                ),
-                Icon(
-                  Icons.event_rounded,
-                  color: AppTheme.textSecondary.withOpacity(0.5),
-                  size: 40,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _EmployeeAttendanceOverviewCard extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Text(
-                  'Attendance Overview',
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 17,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(width: 8),
-              TextButton(
-                onPressed: () {},
-                style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.primaryNavy,
-                ),
-                child: const Text('View More >'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Container(
-            height: 200,
-            decoration: BoxDecoration(
-              color: AppTheme.offWhite.withOpacity(0.5),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.black.withOpacity(0.06)),
-            ),
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.show_chart_rounded,
-                    size: 48,
-                    color: AppTheme.textSecondary.withOpacity(0.4),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Attendance chart (April 14 – April 29)',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 14,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _ChartLegend(
-                        color: const Color(0xFFE85D04),
-                        label: 'Present',
-                      ),
-                      const SizedBox(width: 20),
-                      _ChartLegend(
-                        color: const Color(0xFF81C784),
-                        label: 'Absent',
-                      ),
-                      const SizedBox(width: 20),
-                      _ChartLegend(
-                        color: const Color(0xFFFFB74D),
-                        label: 'Late',
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ChartLegend extends StatelessWidget {
-  const _ChartLegend({required this.color, required this.label});
-
-  final Color color;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(4),
-          ),
-        ),
-        const SizedBox(width: 6),
-        Text(
-          label,
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-        ),
-      ],
+        );
+      },
     );
   }
 }
