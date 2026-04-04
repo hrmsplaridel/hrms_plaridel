@@ -167,6 +167,12 @@ async function ensureLeaveTypeIdByName(client, name) {
   return null;
 }
 
+/** Active assignment → department (employee-filed requests store office in details; admin-assigned MFL often does not). */
+const SQL_LEAVE_ASSIGNMENT_DEPT_JOIN = `
+LEFT JOIN assignments a ON a.employee_id = COALESCE(lr.user_id, lr.employee_id)
+  AND (a.is_active IS NULL OR a.is_active = true)
+LEFT JOIN departments d ON d.id = a.department_id`;
+
 function mapLeaveRowToApi(row) {
   // Keep response aligned with Flutter LeaveRequest.fromJson keys.
   // Spread details FIRST so canonical DB fields (status, etc.) take precedence and are not overwritten.
@@ -224,6 +230,11 @@ function mapLeaveRowToApi(row) {
     attachment_path: row.attachment_path || null,
     attachment_mime_type: row.attachment_mime_type || null,
     attachment_uploaded_at: row.attachment_uploaded_at || null,
+    office_department:
+      details.office_department ||
+      details.officeDepartment ||
+      row.assignment_department_name ||
+      null,
   };
 }
 
@@ -1098,10 +1109,12 @@ router.post('/admin/mandatory-forced', protect, requireAdminOrHr, async (req, re
 
     await client.query('COMMIT');
     const out = await pool.query(
-      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
+      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
+              d.name AS assignment_department_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
        LEFT JOIN users u ON u.id = COALESCE(lr.user_id, lr.employee_id)
+       ${SQL_LEAVE_ASSIGNMENT_DEPT_JOIN}
        WHERE lr.id = $1`,
       [row.id]
     );
@@ -1145,10 +1158,12 @@ router.get('/', protect, requireAdminOrHr, async (req, res) => {
     const createdTo = (req.query?.created_to || '').toString().trim() || null;
 
     const rows = await pool.query(
-      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
+      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
+              d.name AS assignment_department_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
        LEFT JOIN users u ON u.id = COALESCE(lr.user_id, lr.employee_id)
+       ${SQL_LEAVE_ASSIGNMENT_DEPT_JOIN}
        WHERE ($1::text IS NULL OR lr.status = $1)
          AND ($2::text IS NULL OR lt.name = $2)
          AND ($3::uuid IS NULL OR lr.user_id = $3 OR lr.employee_id = $3)
@@ -1171,10 +1186,12 @@ router.get('/', protect, requireAdminOrHr, async (req, res) => {
 router.get('/pending', protect, requireAdminOrHr, async (_req, res) => {
   try {
     const rows = await pool.query(
-      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
+      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
+              d.name AS assignment_department_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
        LEFT JOIN users u ON u.id = COALESCE(lr.employee_id, lr.user_id)
+       ${SQL_LEAVE_ASSIGNMENT_DEPT_JOIN}
        WHERE lr.status IN ('pending', 'pending_hr')
        ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC
        LIMIT 200`
@@ -2166,10 +2183,12 @@ router.get('/:id', protect, async (req, res) => {
   try {
     const isAdmin = role === 'admin' || role === 'hr';
     const rows = await pool.query(
-      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
+      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
+              d.name AS assignment_department_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
        LEFT JOIN users u ON u.id = COALESCE(lr.employee_id, lr.user_id)
+       ${SQL_LEAVE_ASSIGNMENT_DEPT_JOIN}
        WHERE lr.id = $1
          AND ($2::boolean = true OR (lr.user_id = $3 OR lr.employee_id = $3))
        LIMIT 1`,

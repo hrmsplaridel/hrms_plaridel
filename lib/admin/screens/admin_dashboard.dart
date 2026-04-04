@@ -2234,10 +2234,21 @@ class _DtrContentState extends State<_DtrContent> {
   /// 9–11 = Holiday / Policy / Adjustment via [_ManageContent], 12 = Biometric Devices
   int _dtrSectionIndex = 0;
 
+  /// When opening **Assignment** from Employees, pre-select this employee once.
+  String? _prefillAssignmentEmployeeId;
+
   /// Opens **Leave Management** (same as tapping the DTR hub card). Used after notification taps.
   void openLeaveManagement() {
     if (!mounted) return;
     setState(() => _dtrSectionIndex = 8);
+  }
+
+  void _goToAssignmentWithEmployee(String employeeId) {
+    if (!mounted) return;
+    setState(() {
+      _prefillAssignmentEmployeeId = employeeId;
+      _dtrSectionIndex = 4;
+    });
   }
 
   @override
@@ -2390,7 +2401,17 @@ class _DtrContentState extends State<_DtrContent> {
               else if (_dtrSectionIndex == 12)
                 const ManageBiometricDevices()
               else
-                _ManageContent(subIndex: _dtrSectionIndex - 3),
+                _ManageContent(
+                  subIndex: _dtrSectionIndex - 3,
+                  onOpenAssignmentForEmployee: _goToAssignmentWithEmployee,
+                  prefillAssignmentEmployeeId:
+                      _dtrSectionIndex == 4 ? _prefillAssignmentEmployeeId : null,
+                  onPrefillAssignmentConsumed: () {
+                    if (_prefillAssignmentEmployeeId != null) {
+                      setState(() => _prefillAssignmentEmployeeId = null);
+                    }
+                  },
+                ),
             ],
           );
         },
@@ -4281,9 +4302,17 @@ class _ActionBrainstormingList extends StatelessWidget {
 }
 
 class _ManageContent extends StatelessWidget {
-  const _ManageContent({required this.subIndex});
+  const _ManageContent({
+    required this.subIndex,
+    this.onOpenAssignmentForEmployee,
+    this.prefillAssignmentEmployeeId,
+    this.onPrefillAssignmentConsumed,
+  });
 
   final int subIndex;
+  final void Function(String employeeId)? onOpenAssignmentForEmployee;
+  final String? prefillAssignmentEmployeeId;
+  final VoidCallback? onPrefillAssignmentConsumed;
 
   static const _titles = [
     'Employees',
@@ -4299,10 +4328,15 @@ class _ManageContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (subIndex == 0) {
-      return const ManageEmployee();
+      return ManageEmployee(
+        onOpenAssignmentForEmployee: onOpenAssignmentForEmployee,
+      );
     }
     if (subIndex == 1) {
-      return const ManageAssignment();
+      return ManageAssignment(
+        initialEmployeeId: prefillAssignmentEmployeeId,
+        onInitialEmployeeConsumed: onPrefillAssignmentConsumed,
+      );
     }
     if (subIndex == 2) {
       return const ManageDepartment();

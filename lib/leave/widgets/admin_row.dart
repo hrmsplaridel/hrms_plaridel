@@ -10,16 +10,12 @@ class AdminRow extends StatelessWidget {
     super.key,
     required this.request,
     required this.onView,
-    this.onApprove,
-    this.onReject,
     this.highlighted = false,
     this.statusLabel,
   });
 
   final LeaveRequest request;
   final VoidCallback onView;
-  final VoidCallback? onApprove;
-  final VoidCallback? onReject;
   final bool highlighted;
   final String? statusLabel;
 
@@ -41,22 +37,22 @@ class AdminRow extends StatelessWidget {
           ),
           child: Row(
             children: [
-              _fixedCell(
-                _kColEmployee,
+              _flexCell(
+                _kFlexEmployee,
                 _cell(request.employeeName ?? 'Unknown'),
               ),
-              _fixedCell(
-                _kColDepartment,
+              _flexCell(
+                _kFlexDepartment,
                 _cell(request.officeDepartment ?? '—'),
               ),
-              _fixedCell(_kColLeaveType, _cell(request.leaveType.displayName)),
-              _fixedCell(_kColDateRange, _cell(_rangeText(request))),
-              _fixedCell(
-                _kColDays,
+              _flexCell(_kFlexLeaveType, _cell(request.leaveType.displayName)),
+              _flexCell(_kFlexDateRange, _cell(_rangeText(request))),
+              _flexCell(
+                _kFlexDays,
                 _cell(request.workingDaysApplied?.toStringAsFixed(1) ?? '—'),
               ),
-              _fixedCell(
-                _kColStatus,
+              _flexCell(
+                _kFlexStatus,
                 Align(
                   alignment: Alignment.centerLeft,
                   child: LeaveStatusChip(
@@ -65,15 +61,14 @@ class AdminRow extends StatelessWidget {
                   ),
                 ),
               ),
-              _fixedCell(
-                _kColSubmitted,
+              _flexCell(
+                _kFlexSubmitted,
                 _cell(
                   request.dateFiled != null
                       ? _formatDate(request.dateFiled!)
                       : '—',
                 ),
               ),
-              _fixedCell(_kColActions, _actions()),
             ],
           ),
         ),
@@ -81,42 +76,8 @@ class AdminRow extends StatelessWidget {
     );
   }
 
-  Widget _actions() {
-    return Row(
-      children: [
-        if (onApprove != null)
-          Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: FilledButton.tonal(
-              onPressed: onApprove,
-              style: FilledButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-              ),
-              child: const Text('Approve'),
-            ),
-          ),
-        if (onReject != null)
-          Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: OutlinedButton(
-              onPressed: onReject,
-              style: OutlinedButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-              ),
-              child: const Text('Reject'),
-            ),
-          ),
-        OutlinedButton(
-          onPressed: onView,
-          style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
-          child: const Text('View'),
-        ),
-      ],
-    );
-  }
-
-  Widget _fixedCell(double width, Widget child) {
-    return SizedBox(width: width, child: child);
+  Widget _flexCell(int flex, Widget child) {
+    return Expanded(flex: flex, child: child);
   }
 
   Widget _cell(String text) {
@@ -155,37 +116,38 @@ class AdminTableHeader extends StatelessWidget {
       ),
       child: Row(
         children: [
-          SizedBox(width: _kColEmployee, child: cell('Employee Name')),
-          SizedBox(width: _kColDepartment, child: cell('Department')),
-          SizedBox(width: _kColLeaveType, child: cell('Leave Type')),
-          SizedBox(width: _kColDateRange, child: cell('Date Range')),
-          SizedBox(width: _kColDays, child: cell('Days')),
-          SizedBox(width: _kColStatus, child: cell('Status')),
-          SizedBox(width: _kColSubmitted, child: cell('Submitted')),
-          SizedBox(width: _kColActions, child: cell('Actions')),
+          Expanded(flex: _kFlexEmployee, child: cell('Employee Name')),
+          Expanded(flex: _kFlexDepartment, child: cell('Department')),
+          Expanded(flex: _kFlexLeaveType, child: cell('Leave Type')),
+          Expanded(flex: _kFlexDateRange, child: cell('Date Range')),
+          Expanded(flex: _kFlexDays, child: cell('Days')),
+          Expanded(flex: _kFlexStatus, child: cell('Status')),
+          Expanded(flex: _kFlexSubmitted, child: cell('Submitted')),
         ],
       ),
     );
   }
 }
 
-const double _kColEmployee = 170;
-const double _kColDepartment = 140;
-const double _kColLeaveType = 130;
-const double _kColDateRange = 170;
-const double _kColDays = 70;
-const double _kColStatus = 150;
-const double _kColSubmitted = 120;
-const double _kColActions = 220;
+/// Target column proportions (flex). Same totals as legacy fixed widths (~1170).
+const int _kFlexEmployee = 170;
+const int _kFlexDepartment = 140;
+const int _kFlexLeaveType = 130;
+const int _kFlexDateRange = 170;
+const int _kFlexDays = 70;
+const int _kFlexStatus = 150;
+const int _kFlexSubmitted = 120;
+
+/// Horizontal scroll minimum; equals sum of flex weights.
 const double kAdminTableMinWidth =
-    _kColEmployee +
-    _kColDepartment +
-    _kColLeaveType +
-    _kColDateRange +
-    _kColDays +
-    _kColStatus +
-    _kColSubmitted +
-    _kColActions;
+    1.0 *
+    (_kFlexEmployee +
+        _kFlexDepartment +
+        _kFlexLeaveType +
+        _kFlexDateRange +
+        _kFlexDays +
+        _kFlexStatus +
+        _kFlexSubmitted);
 
 String _formatDate(DateTime value) {
   const months = [

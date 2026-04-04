@@ -1,7 +1,23 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
 import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
+
+/// Backend JSON often uses `{ "error": "..." }`; avoid showing raw [DioException] in UI.
+String _userFacingApiError(Object e) {
+  if (e is DioException) {
+    final data = e.response?.data;
+    if (data is Map && data['error'] != null) {
+      return data['error'].toString();
+    }
+    if (e.message != null && e.message!.isNotEmpty) {
+      return e.message!;
+    }
+    return 'Request failed';
+  }
+  return e.toString();
+}
 
 /// Employee summary for assignment list.
 class _EmployeeSummary {
@@ -53,7 +69,15 @@ class _AssignmentRecord {
 
 /// Assignment management screen: employee list + assignment CRUD.
 class ManageAssignment extends StatefulWidget {
-  const ManageAssignment({super.key});
+  const ManageAssignment({
+    super.key,
+    this.initialEmployeeId,
+    this.onInitialEmployeeConsumed,
+  });
+
+  /// Pre-select after first employee load (e.g. deep-link from Employees).
+  final String? initialEmployeeId;
+  final VoidCallback? onInitialEmployeeConsumed;
 
   @override
   State<ManageAssignment> createState() => _ManageAssignmentState();
@@ -83,9 +107,15 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   final _remarksController = TextEditingController();
   _AssignmentRecord? _selectedAssignment;
 
+  bool _initialPrefillApplied = false;
+
   @override
   void initState() {
     super.initState();
+    final pre = widget.initialEmployeeId?.trim();
+    if (pre != null && pre.isNotEmpty) {
+      _employeeStatusFilter = 'All';
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadEmployees();
       _loadLookups();
@@ -128,6 +158,26 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       _employees = [];
     }
     if (mounted) setState(() => _loadingEmployees = false);
+    if (!_initialPrefillApplied && widget.initialEmployeeId != null) {
+      _initialPrefillApplied = true;
+      await _applyInitialEmployeePrefill();
+    }
+  }
+
+  Future<void> _applyInitialEmployeePrefill() async {
+    final id = widget.initialEmployeeId?.trim();
+    if (id == null || id.isEmpty) {
+      widget.onInitialEmployeeConsumed?.call();
+      return;
+    }
+    if (!_employees.any((e) => e.id == id)) {
+      widget.onInitialEmployeeConsumed?.call();
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _selectedEmployeeId = id);
+    await _loadAssignments();
+    widget.onInitialEmployeeConsumed?.call();
   }
 
   Future<void> _loadLookups() async {
@@ -238,6 +288,14 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   String _timeStr(TimeOfDay t) =>
       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
+  /// Calendar-day comparison (ignores time) so picker values stay valid across timezones.
+  bool _isEffectiveRangeValid(DateTime from, DateTime? to) {
+    if (to == null) return true;
+    final a = DateTime(from.year, from.month, from.day);
+    final b = DateTime(to.year, to.month, to.day);
+    return !b.isBefore(a);
+  }
+
   void _selectAssignment(_AssignmentRecord a) {
     setState(() {
       _selectedAssignment = a;
@@ -280,6 +338,14 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       );
       return;
     }
+    if (!_isEffectiveRangeValid(_effectiveFrom!, _effectiveTo)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Effective to must be on or after effective from.'),
+        ),
+      );
+      return;
+    }
     try {
       final data = <String, dynamic>{
         'employee_id': _selectedEmployeeId,
@@ -290,6 +356,9 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         if (_effectiveTo != null)
           'effective_to': _effectiveTo!.toIso8601String().split('T')[0],
         'is_active': true,
+        'remarks': _remarksController.text.trim().isEmpty
+            ? null
+            : _remarksController.text.trim(),
       };
       await ApiClient.instance.post('/api/assignments', data: data);
       if (mounted) {
@@ -303,7 +372,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to add: $e')));
+        ).showSnackBar(SnackBar(content: Text(_userFacingApiError(e))));
       }
     }
   }
@@ -332,6 +401,14 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       );
       return;
     }
+    if (!_isEffectiveRangeValid(_effectiveFrom!, _effectiveTo)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Effective to must be on or after effective from.'),
+        ),
+      );
+      return;
+    }
     try {
       final data = <String, dynamic>{
         'department_id': _selectedDeptId,
@@ -357,7 +434,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
+        ).showSnackBar(SnackBar(content: Text(_userFacingApiError(e))));
       }
     }
   }
@@ -407,7 +484,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to deactivate: $e')));
+        ).showSnackBar(SnackBar(content: Text(_userFacingApiError(e))));
       }
     }
   }

@@ -9,12 +9,140 @@ const protect = [authMiddleware];
 
 const SALT_ROUNDS = 10;
 
+const MAX_PAGE_SIZE = 100;
+const MAX_EXPORT_ROWS = 10000;
+const MAX_BULK_STATUS_IDS = 200;
+
+function mapEmployeeListRow(r) {
+  return {
+    id: r.id,
+    employee_number: r.employee_number,
+    full_name: r.full_name ?? 'Unknown',
+    role: r.role ?? 'employee',
+    email: r.email,
+    biometric_user_id: r.biometric_user_id ?? null,
+    is_active: r.is_active ?? true,
+    avatar_path: r.avatar_path,
+    middle_name: r.middle_name,
+    suffix: r.suffix,
+    sex: r.sex,
+    date_of_birth: r.date_of_birth,
+    contact_number: r.contact_number,
+    address: r.address,
+    employment_type: r.employment_type,
+    salary_grade: r.salary_grade,
+    date_hired: r.date_hired,
+    employment_status: r.employment_status ?? 'active',
+    current_department_name: r.current_department_name ?? null,
+    current_position_name: r.current_position_name ?? null,
+  };
+}
+
+function employeeListLateralCurSql() {
+  return `
+       LEFT JOIN LATERAL (
+         SELECT d.name AS current_department_name, p.name AS current_position_name
+         FROM assignments a
+         LEFT JOIN departments d ON d.id = a.department_id
+         LEFT JOIN positions p ON p.id = a.position_id
+         WHERE a.employee_id = u.id
+           AND (a.is_active IS NULL OR a.is_active = true)
+           AND a.effective_from <= CURRENT_DATE
+           AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
+         ORDER BY a.effective_from DESC
+         LIMIT 1
+       ) cur ON true`;
+}
+
+/** Shared FROM + filters for employee list / export (excludes biometric_user_ids shortcut). */
+function buildEmployeeListFromSql(req) {
+  const conditions = [];
+  const params = [];
+  let i = 1;
+  const status = req.query.status || 'Active';
+  const roleFilter = req.query.role || 'All';
+  const departmentId = req.query.department_id || null;
+  const tbl = 'u';
+
+  if (status === 'Active') {
+    conditions.push(`(${tbl}.is_active IS NULL OR ${tbl}.is_active = true)`);
+  } else if (status === 'Inactive') {
+    conditions.push(`${tbl}.is_active = false`);
+  }
+  if (roleFilter === 'Admin') {
+    conditions.push(`${tbl}.role = $${i++}`);
+    params.push('admin');
+  } else if (roleFilter === 'User' || roleFilter === 'Employee') {
+    conditions.push(`${tbl}.role = $${i++}`);
+    params.push('employee');
+  }
+  if (departmentId) {
+    conditions.push(`${tbl}.id IN (
+      SELECT DISTINCT a.employee_id FROM assignments a
+      WHERE a.department_id = $${i}
+        AND (a.is_active IS NULL OR a.is_active = true)
+        AND a.effective_from <= CURRENT_DATE
+        AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
+    )`);
+    params.push(departmentId);
+    i++;
+  }
+
+  const qRaw = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (qRaw.length > 0) {
+    const pattern = `%${qRaw}%`;
+    conditions.push(`(
+      u.full_name ILIKE $${i} OR
+      u.email ILIKE $${i} OR
+      CAST(u.employee_number AS TEXT) ILIKE $${i} OR
+      COALESCE(cur.current_department_name, '') ILIKE $${i} OR
+      COALESCE(cur.current_position_name, '') ILIKE $${i} OR
+      COALESCE(u.employment_status, '') ILIKE $${i} OR
+      COALESCE(u.biometric_user_id, '') ILIKE $${i}
+    )`);
+    params.push(pattern);
+    i++;
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const fromSql = `
+       FROM users u
+       ${employeeListLateralCurSql()}
+       ${where}`;
+
+  return { fromSql, params, nextParamIndex: i };
+}
+
+const EMPLOYEE_SORT_COLUMNS = {
+  full_name: 'u.full_name',
+  employee_number: 'u.employee_number',
+  role: 'u.role',
+  email: 'u.email',
+  department: 'cur.current_department_name',
+  position: 'cur.current_position_name',
+  employment_status: 'u.employment_status',
+  is_active: 'u.is_active',
+};
+
+function resolveEmployeeOrderBy(sortRaw, orderRaw) {
+  const key = typeof sortRaw === 'string' ? sortRaw.trim().toLowerCase() : '';
+  const col = EMPLOYEE_SORT_COLUMNS[key] || EMPLOYEE_SORT_COLUMNS.full_name;
+  const dir = String(orderRaw || 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+  return `${col} ${dir} NULLS LAST, u.id ASC`;
+}
+
+function csvEscape(val) {
+  if (val == null) return '';
+  const s = String(val);
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
 // GET /api/employees - list all (?status=Active|Inactive|All, ?role=admin|employee|All, ?department_id=uuid, ?biometric_user_ids=id1,id2,id3)
+// Optional: ?q= search; ?sort= & ?order=asc|desc (sort whitelist: full_name, employee_number, role, email, department, position, employment_status, is_active)
+// Optional: ?limit=&offset= — when limit is set, response is { employees, total } instead of a raw array.
 router.get('/', protect, async (req, res) => {
   try {
-    const status = req.query.status || 'Active';
-    const roleFilter = req.query.role || 'All';
-    const departmentId = req.query.department_id || null;
     const biometricUserIdsRaw = req.query.biometric_user_ids;
 
     // When biometric_user_ids is provided, return only matching users (exact match).
@@ -22,102 +150,151 @@ router.get('/', protect, async (req, res) => {
       const ids = biometricUserIdsRaw.split(',').map((s) => s.trim()).filter(Boolean);
       if (ids.length > 0) {
         const result = await pool.query(
-          `SELECT id, employee_number, full_name, role, email, biometric_user_id, is_active, avatar_path,
-                  middle_name, suffix, sex, date_of_birth, contact_number, address,
-                  employment_type, salary_grade, date_hired, employment_status
-           FROM users
-           WHERE biometric_user_id = ANY($1::text[])
-           ORDER BY full_name`,
+          `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.biometric_user_id, u.is_active, u.avatar_path,
+                  u.middle_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
+                  u.employment_type, u.salary_grade, u.date_hired, u.employment_status,
+                  cur.current_department_name, cur.current_position_name
+           FROM users u
+           ${employeeListLateralCurSql()}
+           WHERE u.biometric_user_id = ANY($1::text[])
+           ORDER BY u.full_name`,
           [ids]
         );
-        const rows = result.rows.map((r) => ({
-          id: r.id,
-          employee_number: r.employee_number,
-          full_name: r.full_name ?? 'Unknown',
-          role: r.role ?? 'employee',
-          email: r.email,
-          biometric_user_id: r.biometric_user_id ?? null,
-          is_active: r.is_active ?? true,
-          avatar_path: r.avatar_path,
-          middle_name: r.middle_name,
-          suffix: r.suffix,
-          sex: r.sex,
-          date_of_birth: r.date_of_birth,
-          contact_number: r.contact_number,
-          address: r.address,
-          employment_type: r.employment_type,
-          salary_grade: r.salary_grade,
-          date_hired: r.date_hired,
-          employment_status: r.employment_status ?? 'active',
-        }));
+        const rows = result.rows.map(mapEmployeeListRow);
         return res.json(rows);
       }
     }
 
-    const conditions = [];
-    const params = [];
-    let i = 1;
+    const { fromSql, params, nextParamIndex } = buildEmployeeListFromSql(req);
+    const orderBy = resolveEmployeeOrderBy(req.query.sort, req.query.order);
+    let i = nextParamIndex;
 
-    const tbl = departmentId ? 'u' : 'users';
-    if (status === 'Active') {
-      conditions.push(`(${tbl}.is_active IS NULL OR ${tbl}.is_active = true)`);
-    } else if (status === 'Inactive') {
-      conditions.push(`${tbl}.is_active = false`);
-    }
-    if (roleFilter === 'Admin') {
-      conditions.push(`${tbl}.role = $${i++}`);
-      params.push('admin');
-    } else if (roleFilter === 'User' || roleFilter === 'Employee') {
-      conditions.push(`${tbl}.role = $${i++}`);
-      params.push('employee');
-    }
-    if (departmentId) {
-      conditions.push(`${tbl}.id IN (
-        SELECT DISTINCT a.employee_id FROM assignments a
-        WHERE a.department_id = $${i}
-          AND (a.is_active IS NULL OR a.is_active = true)
-          AND a.effective_from <= CURRENT_DATE
-          AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
-      )`);
-      params.push(departmentId);
-      i++;
+    const limitRaw = req.query.limit;
+    const usePaging = limitRaw !== undefined && limitRaw !== null && String(limitRaw).length > 0;
+    let limit = 25;
+    let offset = 0;
+    if (usePaging) {
+      const parsed = parseInt(String(limitRaw), 10);
+      limit = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), MAX_PAGE_SIZE) : 25;
+      const offParsed = parseInt(String(req.query.offset ?? '0'), 10);
+      offset = Number.isFinite(offParsed) && offParsed > 0 ? offParsed : 0;
     }
 
-    const fromClause = departmentId ? 'FROM users u' : 'FROM users';
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    let total = null;
+    if (usePaging) {
+      const countRes = await pool.query(`SELECT COUNT(*)::int AS c ${fromSql}`, params);
+      total = countRes.rows[0]?.c ?? 0;
+    }
+
+    const limitIdx = i;
+    const dataParams = usePaging ? [...params, limit, offset] : params;
+    const limitSql = usePaging ? ` LIMIT $${limitIdx} OFFSET $${limitIdx + 1}` : '';
 
     const result = await pool.query(
-      `SELECT ${tbl}.id, ${tbl}.employee_number, ${tbl}.full_name, ${tbl}.role, ${tbl}.email, ${tbl}.is_active, ${tbl}.avatar_path, ${tbl}.middle_name, ${tbl}.suffix, ${tbl}.sex, ${tbl}.date_of_birth, ${tbl}.contact_number, ${tbl}.address,
-              ${tbl}.employment_type, ${tbl}.salary_grade, ${tbl}.date_hired, ${tbl}.employment_status
-       ${fromClause}
-       ${where}
-       ORDER BY ${tbl}.full_name`,
-      params
+      `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.biometric_user_id, u.is_active, u.avatar_path, u.middle_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
+              u.employment_type, u.salary_grade, u.date_hired, u.employment_status,
+              cur.current_department_name, cur.current_position_name
+       ${fromSql}
+       ORDER BY ${orderBy}${limitSql}`,
+      dataParams
     );
 
-    const rows = result.rows.map((r) => ({
-      id: r.id,
-      employee_number: r.employee_number,
-      full_name: r.full_name ?? 'Unknown',
-      role: r.role ?? 'employee',
-      email: r.email,
-      is_active: r.is_active ?? true,
-      avatar_path: r.avatar_path,
-      middle_name: r.middle_name,
-      suffix: r.suffix,
-      sex: r.sex,
-      date_of_birth: r.date_of_birth,
-      contact_number: r.contact_number,
-      address: r.address,
-      employment_type: r.employment_type,
-      salary_grade: r.salary_grade,
-      date_hired: r.date_hired,
-      employment_status: r.employment_status ?? 'active',
-    }));
+    const rows = result.rows.map(mapEmployeeListRow);
+    if (usePaging) {
+      return res.json({ employees: rows, total });
+    }
     res.json(rows);
   } catch (err) {
     console.error('[employees GET]', err);
     res.status(500).json({ error: 'Failed to fetch employees' });
+  }
+});
+
+// GET /api/employees/export/csv — same filters/search/sort as list; max MAX_EXPORT_ROWS rows (413 if exceeded).
+router.get('/export/csv', protect, async (req, res) => {
+  try {
+    const { fromSql, params } = buildEmployeeListFromSql(req);
+    const orderBy = resolveEmployeeOrderBy(req.query.sort, req.query.order);
+    const result = await pool.query(
+      `SELECT u.employee_number, u.full_name, u.email, u.role, u.is_active, u.employment_status,
+              u.biometric_user_id, cur.current_department_name, cur.current_position_name
+       ${fromSql}
+       ORDER BY ${orderBy}
+       LIMIT ${MAX_EXPORT_ROWS + 1}`,
+      params
+    );
+    if (result.rows.length > MAX_EXPORT_ROWS) {
+      return res.status(413).json({
+        error: `Too many rows for one export (max ${MAX_EXPORT_ROWS}). Narrow filters or search.`,
+      });
+    }
+
+    const header = [
+      'Employee No',
+      'Full Name',
+      'Email',
+      'Department',
+      'Position',
+      'Privilege',
+      'Account Active',
+      'Employment Status',
+      'Biometric ID',
+    ];
+    const lines = [header.map(csvEscape).join(',')];
+    for (const r of result.rows) {
+      const empNo = r.employee_number != null
+        ? `EMP-${String(r.employee_number).padStart(3, '0')}`
+        : '';
+      const priv = r.role === 'admin' ? 'Admin' : 'Employee';
+      const acct = (r.is_active !== false && r.is_active != null) ? 'Active' : 'Inactive';
+      lines.push([
+        csvEscape(empNo),
+        csvEscape(r.full_name ?? ''),
+        csvEscape(r.email ?? ''),
+        csvEscape(r.current_department_name ?? ''),
+        csvEscape(r.current_position_name ?? ''),
+        csvEscape(priv),
+        csvEscape(acct),
+        csvEscape(r.employment_status ?? ''),
+        csvEscape(r.biometric_user_id ?? ''),
+      ].join(','));
+    }
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="employees_export.csv"');
+    res.send(`\uFEFF${lines.join('\n')}`);
+  } catch (err) {
+    console.error('[employees GET /export/csv]', err);
+    res.status(500).json({ error: 'Failed to export employees' });
+  }
+});
+
+// POST /api/employees/bulk-status — set is_active for many users (admin only).
+router.post('/bulk-status', protect, requireAdmin, async (req, res) => {
+  try {
+    const { employee_ids: idsRaw, is_active: isActive } = req.body;
+    if (!Array.isArray(idsRaw) || idsRaw.length === 0) {
+      return res.status(400).json({ error: 'employee_ids non-empty array required' });
+    }
+    if (typeof isActive !== 'boolean') {
+      return res.status(400).json({ error: 'is_active boolean required' });
+    }
+    if (idsRaw.length > MAX_BULK_STATUS_IDS) {
+      return res.status(400).json({ error: `Maximum ${MAX_BULK_STATUS_IDS} employees per request` });
+    }
+    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const ids = [...new Set(idsRaw.map((x) => String(x).trim()).filter((x) => uuidRe.test(x)))];
+    if (ids.length === 0) {
+      return res.status(400).json({ error: 'No valid employee IDs' });
+    }
+    const result = await pool.query(
+      'UPDATE users SET is_active = $2, updated_at = now() WHERE id = ANY($1::uuid[]) RETURNING id',
+      [ids, isActive],
+    );
+    res.json({ updated: result.rowCount });
+  } catch (err) {
+    console.error('[employees POST /bulk-status]', err);
+    res.status(500).json({ error: 'Failed to update employees' });
   }
 });
 

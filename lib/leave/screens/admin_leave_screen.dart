@@ -15,6 +15,7 @@ import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
 import '../utils/leave_request_pdf.dart';
+import '../../utils/responsive_right_side_panel.dart';
 import '../widgets/admin_row.dart';
 import '../widgets/history_timeline.dart';
 import '../widgets/leave_status_chip.dart';
@@ -163,8 +164,6 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<LeaveProvider>();
-    final width = MediaQuery.of(context).size.width;
-    final compact = width < 1080;
     final requests = provider.requests;
     final departmentMap = <String, String>{};
     for (final request in requests) {
@@ -246,7 +245,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       final matches = filteredRequests.where((r) => r.id == selectedId);
       selected = matches.isNotEmpty ? matches.first : null;
     } else {
-      selected = filteredRequests.isNotEmpty ? filteredRequests.first : null;
+      selected = null;
     }
 
     final shouldSyncSelected =
@@ -329,101 +328,16 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
           },
         ),
         const SizedBox(height: 20),
-        compact
-            ? Column(
-                children: [
-                  _RequestQueuePanel(
-                    requests: filteredRequests,
-                    isDepartmentHead: widget.isDepartmentHead,
-                    loading: provider.loading,
-                    selectedRequest: selected,
-                    onSelect: (request) {
-                      setState(() => _selectedRequest = request);
-                      _refetchSelectedRequest(request);
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  _RequestDetailsPanel(
-                    request: selected,
-                    isDepartmentHead: widget.isDepartmentHead,
-                    reviewing: provider.reviewing,
-                    onApprove: selected == null || (!selected.status.isPending)
-                        ? null
-                        : () => widget.isDepartmentHead
-                              ? _deptHeadApprove(selected!)
-                              : _approve(selected!),
-                    onReturn: selected == null || (!selected.status.isPending)
-                        ? null
-                        : () => widget.isDepartmentHead
-                              ? _deptHeadReturn(selected!)
-                              : _returnRequest(selected!),
-                    onReject: selected == null || (!selected.status.isPending)
-                        ? null
-                        : () => widget.isDepartmentHead
-                              ? _deptHeadReject(selected!)
-                              : _rejectRequest(selected!),
-                    onRevoke:
-                        selected == null ||
-                            selected.status != LeaveRequestStatus.approved
-                        ? null
-                        : () => _revokeApproval(selected!),
-                    onPrint: selected == null
-                        ? null
-                        : () => _printLeaveForm(selected!),
-                  ),
-                ],
-              )
-            : Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    flex: 5,
-                    child: _RequestQueuePanel(
-                      requests: filteredRequests,
-                      isDepartmentHead: widget.isDepartmentHead,
-                      loading: provider.loading,
-                      selectedRequest: selected,
-                      onSelect: (request) {
-                        setState(() => _selectedRequest = request);
-                        _refetchSelectedRequest(request);
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    flex: 7,
-                    child: _RequestDetailsPanel(
-                      request: selected,
-                      isDepartmentHead: widget.isDepartmentHead,
-                      reviewing: provider.reviewing,
-                      onApprove:
-                          selected == null || (!selected.status.isPending)
-                          ? null
-                          : () => widget.isDepartmentHead
-                                ? _deptHeadApprove(selected!)
-                                : _approve(selected!),
-                      onReturn: selected == null || (!selected.status.isPending)
-                          ? null
-                          : () => widget.isDepartmentHead
-                                ? _deptHeadReturn(selected!)
-                                : _returnRequest(selected!),
-                      onReject: selected == null || (!selected.status.isPending)
-                          ? null
-                          : () => widget.isDepartmentHead
-                                ? _deptHeadReject(selected!)
-                                : _rejectRequest(selected!),
-                      onRevoke:
-                          selected == null ||
-                              selected.status != LeaveRequestStatus.approved
-                          ? null
-                          : () => _revokeApproval(selected!),
-                      onPrint: selected == null
-                          ? null
-                          : () => _printLeaveForm(selected!),
-                    ),
-                  ),
-                ],
-              ),
+        _RequestQueuePanel(
+          requests: filteredRequests,
+          isDepartmentHead: widget.isDepartmentHead,
+          loading: provider.loading,
+          selectedRequest: selected,
+          onSelect: (request) {
+            setState(() => _selectedRequest = request);
+            _openRequestDetailsPanel(request);
+          },
+        ),
       ],
     );
   }
@@ -445,23 +359,33 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       );
     }
     if (!mounted) return;
-    if (_selectedRequest == null && provider.requests.isNotEmpty) {
-      final first = provider.requests.first;
-      setState(() => _selectedRequest = first);
-      await _refetchSelectedRequest(first);
-    }
   }
 
-  /// Refetches the selected request by ID to ensure we have the latest data
-  /// (e.g. attachment) that may have been added after the list was loaded.
-  Future<void> _refetchSelectedRequest(LeaveRequest request) async {
+  /// Same UX as filing leave: wide = resizable right sheet; narrow = full-screen route.
+  /// Opens immediately; refresh runs in background so tap is not blocked on the network.
+  void _openRequestDetailsPanel(LeaveRequest request) {
     final id = request.id;
-    if (id == null || id.isEmpty) return;
-    final provider = context.read<LeaveProvider>();
-    final fresh = await provider.refreshRequestById(id);
-    if (mounted && fresh != null && _selectedRequest?.id == id) {
-      setState(() => _selectedRequest = fresh);
+    if (id != null && id.isNotEmpty) {
+      unawaited(context.read<LeaveProvider>().refreshRequestById(id));
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      openResponsiveRightSidePanel<void>(
+        context: context,
+        barrierLabel: 'Close request details',
+        minWidth: 400,
+        initialWidthFraction: 0.46,
+        builder: (ctx) => _AdminLeaveDetailsSideSheet(
+          initial: request,
+          isDepartmentHead: widget.isDepartmentHead,
+          onApprove: widget.isDepartmentHead ? _deptHeadApprove : _approve,
+          onReturn: widget.isDepartmentHead ? _deptHeadReturn : _returnRequest,
+          onReject: widget.isDepartmentHead ? _deptHeadReject : _rejectRequest,
+          onRevoke: _revokeApproval,
+          onPrint: _printLeaveForm,
+        ),
+      );
+    });
   }
 
   Future<void> _printLeaveForm(LeaveRequest request) async {
@@ -532,9 +456,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     LeaveBalance? leaveBalance;
     final ledgerType = request.leaveType.balanceLedgerType;
     try {
-      leaveBalance = balances.firstWhere(
-        (b) => b.leaveType == ledgerType,
-      );
+      leaveBalance = balances.firstWhere((b) => b.leaveType == ledgerType);
     } catch (_) {}
 
     if (!mounted) return;
@@ -1458,7 +1380,8 @@ class _RequestQueuePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return _SectionCard(
       title: 'Request Queue',
-      subtitle: 'Table-like review list with quick actions.',
+      subtitle:
+          'Tap a row to open details (side panel on wide screens, full screen on small).',
       child: loading && requests.isEmpty
           ? const _CenteredState(message: 'Loading leave requests...')
           : requests.isEmpty
@@ -1466,40 +1389,133 @@ class _RequestQueuePanel extends StatelessWidget {
               message: 'No leave requests matched the filters.',
             )
           : Container(
+              width: double.infinity,
               decoration: BoxDecoration(
                 border: Border.all(color: Colors.black.withOpacity(0.08)),
                 borderRadius: BorderRadius.circular(12),
               ),
               clipBehavior: Clip.antiAlias,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: SizedBox(
-                  width: kAdminTableMinWidth,
-                  child: Column(
-                    children: [
-                      const AdminTableHeader(),
-                      ...requests.map(
-                        (request) => AdminRow(
-                          request: request,
-                          statusLabel: _statusLabel(
-                            request.status,
-                            isDepartmentHead: isDepartmentHead,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final maxW = constraints.maxWidth;
+                  final tableWidth = !maxW.isFinite || maxW <= 0
+                      ? kAdminTableMinWidth
+                      : (maxW < kAdminTableMinWidth
+                            ? kAdminTableMinWidth
+                            : maxW);
+                  return SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: SizedBox(
+                      width: tableWidth,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const AdminTableHeader(),
+                          ...requests.map(
+                            (request) => AdminRow(
+                              request: request,
+                              statusLabel: _statusLabel(
+                                request.status,
+                                isDepartmentHead: isDepartmentHead,
+                              ),
+                              highlighted: request.id == selectedRequest?.id,
+                              onView: () => onSelect(request),
+                            ),
                           ),
-                          highlighted: request.id == selectedRequest?.id,
-                          onView: () => onSelect(request),
-                          onApprove: request.status.isPending
-                              ? () => onSelect(request)
-                              : null,
-                          onReject: request.status.isPending
-                              ? () => onSelect(request)
-                              : null,
-                        ),
+                        ],
                       ),
-                    ],
-                  ),
-                ),
+                    ),
+                  );
+                },
               ),
             ),
+    );
+  }
+}
+
+/// Leave review details shown over the queue (matches [openResponsiveLeaveFormHost] behavior).
+class _AdminLeaveDetailsSideSheet extends StatelessWidget {
+  const _AdminLeaveDetailsSideSheet({
+    required this.initial,
+    required this.isDepartmentHead,
+    required this.onApprove,
+    required this.onReturn,
+    required this.onReject,
+    required this.onRevoke,
+    required this.onPrint,
+  });
+
+  final LeaveRequest initial;
+  final bool isDepartmentHead;
+  final Future<void> Function(LeaveRequest) onApprove;
+  final Future<void> Function(LeaveRequest) onReturn;
+  final Future<void> Function(LeaveRequest) onReject;
+  final Future<void> Function(LeaveRequest) onRevoke;
+  final Future<void> Function(LeaveRequest) onPrint;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Material(
+            elevation: 1,
+            color: AppTheme.offWhite,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Request details',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Expanded(
+            child: Consumer<LeaveProvider>(
+              builder: (context, provider, _) {
+                var req = initial;
+                final id = initial.id;
+                if (id != null && id.isNotEmpty) {
+                  final hit = provider.requests
+                      .where((r) => r.id == id)
+                      .toList();
+                  if (hit.isNotEmpty) req = hit.first;
+                }
+                final pending = req.status.isPending;
+                final approved = req.status == LeaveRequestStatus.approved;
+                return SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                  child: _RequestDetailsPanel(
+                    request: req,
+                    isDepartmentHead: isDepartmentHead,
+                    reviewing: provider.reviewing,
+                    onApprove: pending ? () => onApprove(req) : null,
+                    onReturn: pending ? () => onReturn(req) : null,
+                    onReject: pending ? () => onReject(req) : null,
+                    onRevoke: approved ? () => onRevoke(req) : null,
+                    onPrint: () => onPrint(req),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
