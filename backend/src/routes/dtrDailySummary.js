@@ -702,7 +702,8 @@ router.get('/', protect, async (req, res) => {
       const holidayByDate = new Map();
       for (const h of holidaysInRange) holidayByDate.set(h.dateStr, h);
 
-      // 1) Inject synthetic holiday rows for dates with no record (existing behavior)
+      // 1) Inject synthetic holiday rows for dates with no record — only for employees
+      //    scheduled that calendar day (same working-day + assignment rules as absent injection).
       if (holidaysInRange.length > 0) {
         for (const h of holidaysInRange) {
           const cov = h.coverage || 'whole_day';
@@ -712,6 +713,16 @@ router.get('/', protect, async (req, res) => {
           for (const empId of employeeIds) {
             const key = `${empId}|${h.dateStr}`;
             if (existingKeys.has(key)) continue;
+            const shiftInfo = getShiftInfoForDateFromAssignments(
+              assignmentsByEmployee,
+              empId,
+              h.dateStr
+            );
+            if (!shiftInfo) continue;
+            const workingDays = shiftInfo.workingDays;
+            if (!Array.isArray(workingDays) || workingDays.length === 0) continue;
+            const isoDow = isoWeekdayFromDateStr(h.dateStr);
+            if (!workingDays.includes(isoDow)) continue;
             existingKeys.add(key);
             rows.push({
               id: null,
@@ -1214,4 +1225,168 @@ router.post('/sync-holidays', protect, requireAdmin, async (req, res) => {
   }
 });
 
+/**
+ * Apply an approved DTR correction to `dtr_daily_summary` (insert or update).
+ * Merges requested times with any existing row; recomputes hours/late/undertime like manual entry.
+ * @param {import('pg').PoolClient} client
+ * @param {object} correctionRow - Row from `dtr_corrections` (snake_case columns)
+ * @returns {Promise<{ error?: string }>}
+ */
+async function applyApprovedCorrectionToSummary(client, correctionRow) {
+  const employeeId = correctionRow.employee_id;
+  const dateStr = toIsoDateStr(correctionRow.attendance_date);
+  if (!dateStr) return { error: 'Invalid attendance date' };
+
+  const reqIn = correctionRow.requested_time_in;
+  const reqOut = correctionRow.requested_time_out;
+  const reqBi = correctionRow.requested_break_in;
+  const reqBo = correctionRow.requested_break_out;
+
+  const hasAnyRequested =
+    reqIn != null || reqOut != null || reqBi != null || reqBo != null;
+  if (!hasAnyRequested) {
+    return { error: 'Correction must include at least one requested time' };
+  }
+
+  const existingRes = await client.query(
+    `SELECT id, time_in, break_out, break_in, time_out, holiday_id, status, leave_request_id, remarks
+     FROM dtr_daily_summary
+     WHERE employee_id = $1::uuid AND attendance_date = $2::date`,
+    [employeeId, dateStr]
+  );
+  const existing = existingRes.rows[0] || null;
+
+  const ti = reqIn != null ? reqIn : existing?.time_in;
+  const bo = reqBo != null ? reqBo : existing?.break_out;
+  const bi = reqBi != null ? reqBi : existing?.break_in;
+  const to = reqOut != null ? reqOut : existing?.time_out;
+
+  const hasAnyTime = ti || bo || bi || to;
+  if (!hasAnyTime) {
+    return {
+      error: 'No time values to apply after merging with the existing record',
+    };
+  }
+
+  const holiday = await getHolidayByDate(dateStr);
+  const coverage = holiday ? (holiday.coverage || 'whole_day') : null;
+  const isAfternoonOnly = Boolean(bi) && !ti;
+  const timeIn = isAfternoonOnly ? null : ti;
+
+  let status;
+  let pmStatus = null;
+  if (holiday && (!coverage || coverage === 'whole_day')) {
+    status = 'holiday';
+  } else {
+    status = isAfternoonOnly
+      ? 'absent'
+      : await computeStatusFromShift(employeeId, dateStr, timeIn);
+    if (bi && !holiday) {
+      pmStatus = await computePmLateStatus(employeeId, dateStr, bi);
+    }
+  }
+
+  const holidayId = holiday ? holiday.id : null;
+
+  const total = computeTotalHours(timeIn, bo, bi, to);
+  let lateMinutes = 0;
+  let undertimeMinutes = 0;
+  if (
+    (!holiday || coverage === 'am_only' || coverage === 'pm_only') &&
+    status !== 'on_leave'
+  ) {
+    lateMinutes = await computeLateMinutes(
+      employeeId,
+      dateStr,
+      timeIn,
+      bi,
+      status,
+      holidayId,
+      coverage
+    );
+    undertimeMinutes = await computeUndertimeMinutes(
+      employeeId,
+      dateStr,
+      to,
+      bo,
+      status,
+      holidayId,
+      coverage,
+      timeIn,
+      bi
+    );
+  }
+
+  const remarkLine = `[DTR correction ${correctionRow.id}] applied.`;
+  const newRemarks = existing?.remarks
+    ? `${String(existing.remarks).trim()}\n${remarkLine}`
+    : remarkLine;
+
+  if (existing) {
+    await client.query(
+      `UPDATE dtr_daily_summary SET
+         time_in = $1::timestamptz,
+         break_out = $2::timestamptz,
+         break_in = $3::timestamptz,
+         time_out = $4::timestamptz,
+         total_hours = $5::numeric,
+         late_minutes = $6,
+         undertime_minutes = $7,
+         status = $8,
+         pm_status = $9,
+         source = 'adjusted',
+         holiday_id = $10::uuid,
+         leave_request_id = NULL,
+         remarks = $11,
+         overtime_minutes = 0,
+         updated_at = now()
+       WHERE id = $12::uuid`,
+      [
+        timeIn,
+        bo,
+        bi,
+        to,
+        total,
+        lateMinutes,
+        undertimeMinutes,
+        status,
+        pmStatus,
+        holidayId,
+        newRemarks,
+        existing.id,
+      ]
+    );
+  } else {
+    await client.query(
+      `INSERT INTO dtr_daily_summary (
+         employee_id, attendance_date, time_in, break_out, break_in, time_out,
+         total_hours, late_minutes, undertime_minutes, overtime_minutes,
+         status, pm_status, source, holiday_id, remarks
+       ) VALUES (
+         $1::uuid, $2::date, $3::timestamptz, $4::timestamptz, $5::timestamptz, $6::timestamptz,
+         $7::numeric, $8, $9, 0,
+         $10, $11, 'adjusted', $12::uuid, $13
+       )`,
+      [
+        employeeId,
+        dateStr,
+        timeIn,
+        bo,
+        bi,
+        to,
+        total,
+        lateMinutes,
+        undertimeMinutes,
+        status,
+        pmStatus,
+        holidayId,
+        newRemarks,
+      ]
+    );
+  }
+
+  return {};
+}
+
 module.exports = router;
+module.exports.applyApprovedCorrectionToSummary = applyApprovedCorrectionToSummary;

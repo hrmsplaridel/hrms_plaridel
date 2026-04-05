@@ -55,7 +55,8 @@ function employeeListLateralCurSql() {
 }
 
 /** Shared FROM + filters for employee list / export (excludes biometric_user_ids shortcut). */
-function buildEmployeeListFromSql(req) {
+function buildEmployeeListFromSql(req, options = {}) {
+  const { deviceBiometricIds = null } = options;
   const conditions = [];
   const params = [];
   let i = 1;
@@ -86,6 +87,24 @@ function buildEmployeeListFromSql(req) {
     )`);
     params.push(departmentId);
     i++;
+  }
+
+  const bioFilterRaw =
+    typeof req.query.biometric_filter === 'string' ? req.query.biometric_filter.trim().toLowerCase() : '';
+  if (bioFilterRaw === 'set' || bioFilterRaw === 'has') {
+    conditions.push(`(COALESCE(TRIM(${tbl}.biometric_user_id), '') <> '')`);
+  } else if (bioFilterRaw === 'missing' || bioFilterRaw === 'none') {
+    conditions.push(`(${tbl}.biometric_user_id IS NULL OR TRIM(${tbl}.biometric_user_id) = '')`);
+  }
+
+  if (deviceBiometricIds != null) {
+    if (deviceBiometricIds.length === 0) {
+      conditions.push('FALSE');
+    } else {
+      conditions.push(`${tbl}.biometric_user_id = ANY($${i}::text[])`);
+      params.push(deviceBiometricIds);
+      i++;
+    }
   }
 
   const qRaw = typeof req.query.q === 'string' ? req.query.q.trim() : '';
@@ -139,6 +158,8 @@ function csvEscape(val) {
 }
 
 // GET /api/employees - list all (?status=Active|Inactive|All, ?role=admin|employee|All, ?department_id=uuid, ?biometric_user_ids=id1,id2,id3)
+// Optional: ?biometric_device_id=<uuid> — admin only; restrict to employees whose biometric_user_id is enrolled on that ZKTeco (reads device; cached ~60s)
+// Optional: ?biometric_filter=set|has|missing|none — filter by whether biometric_user_id is set (set/has = non-empty; missing/none = empty)
 // Optional: ?q= search; ?sort= & ?order=asc|desc (sort whitelist: full_name, employee_number, role, email, department, position, employment_status, is_active)
 // Optional: ?limit=&offset= — when limit is set, response is { employees, total } instead of a raw array.
 router.get('/', protect, async (req, res) => {
@@ -165,7 +186,22 @@ router.get('/', protect, async (req, res) => {
       }
     }
 
-    const { fromSql, params, nextParamIndex } = buildEmployeeListFromSql(req);
+    let deviceBiometricIds = null;
+    const bioDeviceRaw =
+      typeof req.query.biometric_device_id === 'string' ? req.query.biometric_device_id.trim() : '';
+    if (bioDeviceRaw) {
+      if (req.user?.role !== 'admin') {
+        return res.status(403).json({ error: 'Admin access required' });
+      }
+      const { getDeviceUserBiometricIds } = require('../services/biometricDeviceUsers');
+      const devRes = await getDeviceUserBiometricIds(bioDeviceRaw);
+      if (!devRes.ok) {
+        return res.status(devRes.statusCode).json({ error: devRes.message });
+      }
+      deviceBiometricIds = devRes.ids;
+    }
+
+    const { fromSql, params, nextParamIndex } = buildEmployeeListFromSql(req, { deviceBiometricIds });
     const orderBy = resolveEmployeeOrderBy(req.query.sort, req.query.order);
     let i = nextParamIndex;
 
@@ -213,7 +249,22 @@ router.get('/', protect, async (req, res) => {
 // GET /api/employees/export/csv — same filters/search/sort as list; max MAX_EXPORT_ROWS rows (413 if exceeded).
 router.get('/export/csv', protect, async (req, res) => {
   try {
-    const { fromSql, params } = buildEmployeeListFromSql(req);
+    let deviceBiometricIds = null;
+    const bioDeviceRaw =
+      typeof req.query.biometric_device_id === 'string' ? req.query.biometric_device_id.trim() : '';
+    if (bioDeviceRaw) {
+      if (req.user?.role !== 'admin') {
+        return res.status(403).json({ error: 'Admin access required' });
+      }
+      const { getDeviceUserBiometricIds } = require('../services/biometricDeviceUsers');
+      const devRes = await getDeviceUserBiometricIds(bioDeviceRaw);
+      if (!devRes.ok) {
+        return res.status(devRes.statusCode).json({ error: devRes.message });
+      }
+      deviceBiometricIds = devRes.ids;
+    }
+
+    const { fromSql, params } = buildEmployeeListFromSql(req, { deviceBiometricIds });
     const orderBy = resolveEmployeeOrderBy(req.query.sort, req.query.order);
     const result = await pool.query(
       `SELECT u.employee_number, u.full_name, u.email, u.role, u.is_active, u.employment_status,
@@ -394,6 +445,29 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { full_name, role, email, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address, avatar_path, employment_type, salary_grade, date_hired, employment_status, biometric_user_id } = req.body;
+
+    const existingRes = await pool.query(
+      'SELECT biometric_user_id FROM users WHERE id = $1::uuid',
+      [id]
+    );
+    if (existingRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+    const currentBioRaw = existingRes.rows[0].biometric_user_id;
+    const currentBioStr = currentBioRaw != null ? String(currentBioRaw).trim() : '';
+
+    if (biometric_user_id !== undefined) {
+      const newBioStr =
+        biometric_user_id === null || biometric_user_id === ''
+          ? ''
+          : String(biometric_user_id).trim();
+      if (currentBioStr !== '' && newBioStr !== currentBioStr) {
+        return res.status(400).json({
+          error:
+            'Biometric User ID cannot be changed or cleared once it is set; it must stay aligned with the time clock.',
+        });
+      }
+    }
 
     const updates = [];
     const values = [];

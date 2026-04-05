@@ -49,6 +49,77 @@ async function getAssignmentShiftForDate(employeeId, dateStr) {
   return { startMinutes, endMinutes, graceMinutes, breakEndMinutes };
 }
 
+/**
+ * Approved leave that blocks biometric for this calendar day.
+ * Single-day leave with fewer than 1 day (e.g. half-day) does not block — employee may still punch the other session.
+ * Multi-day approved leave blocks each covered date.
+ */
+async function employeeHasBlockingApprovedLeave(employeeId, dateStr) {
+  if (!employeeId || !dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr))) return false;
+  const res = await pool.query(
+    `SELECT start_date::text AS sd, end_date::text AS ed,
+            number_of_days, total_days
+     FROM leave_requests
+     WHERE employee_id = $1::uuid
+       AND status = 'approved'
+       AND start_date <= $2::date
+       AND end_date >= $2::date`,
+    [employeeId, dateStr]
+  );
+  for (const row of res.rows) {
+    const sd = String(row.sd).slice(0, 10);
+    const ed = String(row.ed).slice(0, 10);
+    const singleDay = sd === ed;
+    let days =
+      row.number_of_days != null
+        ? parseFloat(String(row.number_of_days), 10)
+        : row.total_days != null
+          ? parseFloat(String(row.total_days), 10)
+          : null;
+    if (singleDay) {
+      if (days == null || Number.isNaN(days)) days = 1;
+      if (days < 1) continue;
+      return true;
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Gate biometric storage/processing: shift required; whole-day holidays block; approved full-day (or multi-day) leave blocks.
+ * Partial-day holidays (am_only/pm_only) do not block — late/undertime logic still applies.
+ * @returns {{ allowed: boolean, reason: null|'no_schedule'|'holiday'|'leave', shiftInfo: object|null }}
+ */
+async function evaluateBiometricDayGate(employeeId, dateStr) {
+  if (!employeeId || !dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr))) {
+    return { allowed: false, reason: 'no_schedule', shiftInfo: null };
+  }
+  let shiftInfo = null;
+  try {
+    shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
+  } catch (err) {
+    console.warn('[evaluateBiometricDayGate] Shift lookup failed:', { employeeId, dateStr, err });
+  }
+  if (!shiftInfo) {
+    return { allowed: false, reason: 'no_schedule', shiftInfo: null };
+  }
+  let holidayRow = null;
+  try {
+    holidayRow = await getHolidayForDate(dateStr);
+  } catch (err) {
+    console.warn('[evaluateBiometricDayGate] Holiday lookup failed:', { dateStr, err });
+  }
+  const coverage = holidayRow ? holidayRow.coverage || 'whole_day' : null;
+  if (holidayRow && coverage === 'whole_day') {
+    return { allowed: false, reason: 'holiday', shiftInfo };
+  }
+  if (await employeeHasBlockingApprovedLeave(employeeId, dateStr)) {
+    return { allowed: false, reason: 'leave', shiftInfo };
+  }
+  return { allowed: true, reason: null, shiftInfo };
+}
+
 function minutesFromMidnightInTimeZone(val, timeZone = HRMS_TIMEZONE) {
   if (!val) return null;
   const d = val instanceof Date ? val : new Date(val);
@@ -374,12 +445,35 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
       });
     }
 
-    let shiftInfo = null;
-    try {
-      shiftInfo = await getAssignmentShiftForDate(user_id, attendanceDateStr);
-    } catch (err) {
-      console.warn('[biometricProcessing] Shift lookup failed (using full_day):', { user_id, attendance_date: attendanceDateStr });
+    const gate = await evaluateBiometricDayGate(user_id, attendanceDateStr);
+    if (!gate.allowed) {
+      console.warn('[biometricProcessing] SKIP: biometric not allowed for day', {
+        user_id,
+        attendance_date: attendanceDateStr,
+        reason: gate.reason,
+      });
+      try {
+        const delRes = await pool.query(
+          `DELETE FROM dtr_daily_summary
+           WHERE employee_id = $1::uuid AND attendance_date = $2::date AND source = 'system'
+           RETURNING id`,
+          [user_id, attendanceDateStr]
+        );
+        if (delRes.rowCount > 0) {
+          console.log('[biometricProcessing] Removed system DTR row (policy gate)', {
+            user_id,
+            attendance_date: attendanceDateStr,
+            reason: gate.reason,
+            removed: delRes.rowCount,
+          });
+        }
+      } catch (err) {
+        console.error('[biometricProcessing] DELETE system DTR after policy skip failed:', err);
+      }
+      skipped++;
+      continue;
     }
+    const shiftInfo = gate.shiftInfo;
     const shiftType = getShiftType(shiftInfo);
 
     console.log('[biometricProcessing] Processing day:', {
@@ -542,4 +636,6 @@ module.exports = {
   processBiometricLogsToSummary,
   interpretPunchesForDay,
   computeTotalHours,
+  evaluateBiometricDayGate,
+  getManilaDateStr,
 };

@@ -1,4 +1,5 @@
 const express = require('express');
+const net = require('net');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
@@ -6,10 +7,78 @@ const { execFile } = require('child_process');
 const path = require('path');
 const bcrypt = require('bcrypt');
 
+/** ZKTeco default TCP port; quick reachability probe from the API server (not full pyzk). */
+function probeZkTcpPort(ipRaw, timeoutMs = 2500) {
+  return new Promise((resolve) => {
+    const ip = ipRaw && String(ipRaw).trim();
+    if (!ip) {
+      resolve(null);
+      return;
+    }
+    const socket = net.createConnection({ host: ip, port: 4370 });
+    let settled = false;
+    const done = (reachable) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        socket.destroy();
+      } catch (_) {
+        /* ignore */
+      }
+      resolve(reachable);
+    };
+    const timer = setTimeout(() => done(false), timeoutMs);
+    socket.setTimeout(timeoutMs);
+    socket.once('connect', () => done(true));
+    socket.once('error', () => done(false));
+    socket.once('timeout', () => done(false));
+  });
+}
+
 const router = express.Router();
 const protect = [authMiddleware];
 
+const PUSH_USER_SCRIPT_OPTS = { maxBuffer: 1024 * 1024, timeout: 120000 };
+
+/** Parse stdout JSON from zk_actions.py; fall back to stderr / generic hint. */
+function pushUserScriptFailure(res, err, stdout, stderr) {
+  const cleanOut = String(stdout || '').replace(/\0/g, '').trim();
+  const cleanErr = String(stderr || '').replace(/\0/g, '').trim();
+  console.error(
+    '[biometric-devices POST push-user] script error:',
+    err && err.message ? err.message : err,
+    cleanErr ? `stderr: ${cleanErr}` : ''
+  );
+  try {
+    if (cleanOut) {
+      const parsed = JSON.parse(cleanOut);
+      const msg = parsed.error || parsed.message;
+      if (msg) {
+        return res.status(500).json({ error: String(msg) });
+      }
+    }
+  } catch (parseErr) {
+    /* use fallback below */
+  }
+  if (cleanErr) {
+    return res.status(500).json({
+      error: `Device script: ${cleanErr.length > 400 ? `${cleanErr.slice(0, 400)}…` : cleanErr}`,
+    });
+  }
+  if (err && err.killed) {
+    return res.status(500).json({
+      error: 'Connection to the biometric device timed out. Check IP, cable, and firewall.',
+    });
+  }
+  return res.status(500).json({
+    error:
+      'Could not run push against the device. Check device IP, network, Python/pyzk, and server logs.',
+  });
+}
+
 // GET /api/biometric-devices - list (?status=Active|Inactive|All)
+// Optional: ?probe_online=0 — skip TCP probe (faster; no `online` field)
 router.get('/', protect, async (req, res) => {
   try {
     const status = req.query.status || 'Active';
@@ -17,12 +86,16 @@ router.get('/', protect, async (req, res) => {
     if (status === 'Active') where = 'WHERE (is_active IS NULL OR is_active = true)';
     else if (status === 'Inactive') where = 'WHERE is_active = false';
 
+    const probeOnline =
+      req.query.probe_online !== '0' && req.query.probe_online !== 'false';
+
     const result = await pool.query(
       `SELECT id, name, device_id, location, ip_address, last_sync_at, is_active, created_at
        FROM biometric_devices ${where}
        ORDER BY name`
     );
-    res.json(result.rows.map((r) => ({
+
+    const baseMap = (r) => ({
       id: r.id,
       name: r.name,
       device_id: r.device_id,
@@ -31,7 +104,24 @@ router.get('/', protect, async (req, res) => {
       last_sync_at: r.last_sync_at,
       is_active: r.is_active ?? true,
       created_at: r.created_at,
-    })));
+    });
+
+    if (!probeOnline) {
+      return res.json(result.rows.map(baseMap));
+    }
+
+    const rows = await Promise.all(
+      result.rows.map(async (r) => {
+        const row = baseMap(r);
+        if (r.ip_address && String(r.ip_address).trim()) {
+          row.online = await probeZkTcpPort(r.ip_address);
+        } else {
+          row.online = null;
+        }
+        return row;
+      })
+    );
+    res.json(rows);
   } catch (err) {
     console.error('[biometric-devices GET]', err);
     res.status(500).json({ error: 'Failed to fetch biometric devices' });
@@ -143,6 +233,86 @@ router.get('/:id/users', protect, requireAdmin, async (req, res) => {
   } catch (err) {
     console.error('[biometric-devices GET users]', err);
     res.status(500).json({ error: 'Internal server error while fetching device users' });
+  }
+});
+
+// POST /api/biometric-devices/:id/push-user — Create/update user on the device from HRMS (pyzk set_user)
+router.post('/:id/push-user', protect, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { employee_id, device_pin } = req.body || {};
+    if (!employee_id) {
+      return res.status(400).json({ error: 'employee_id is required' });
+    }
+
+    const devRes = await pool.query(
+      'SELECT ip_address FROM biometric_devices WHERE id = $1',
+      [id]
+    );
+    if (devRes.rowCount === 0) return res.status(404).json({ error: 'Device not found' });
+    const ip = devRes.rows[0].ip_address;
+    if (!ip) return res.status(400).json({ error: 'Device has no IP address configured' });
+
+    const userRes = await pool.query(
+      `SELECT id, full_name, biometric_user_id FROM users WHERE id = $1::uuid`,
+      [employee_id]
+    );
+    if (userRes.rowCount === 0) return res.status(404).json({ error: 'Employee not found' });
+
+    const row = userRes.rows[0];
+    const bioId = row.biometric_user_id != null ? String(row.biometric_user_id).trim() : '';
+    if (!bioId) {
+      return res.status(400).json({
+        error: 'Employee has no Biometric User ID. Set and save it before pushing to the device.',
+      });
+    }
+
+    const fullName = (row.full_name || 'User').trim() || 'User';
+
+    const pyScript = path.join(__dirname, '../../scripts/zk_actions.py');
+    const pythonExec = process.platform === 'win32' ? 'python' : 'python3';
+
+    const scriptArgs = [
+      pyScript,
+      '--action',
+      'set_user',
+      '--ip',
+      ip,
+      '--user-id',
+      bioId,
+      '--name',
+      fullName,
+    ];
+    const pinStr = device_pin != null ? String(device_pin).trim() : '';
+    if (pinStr !== '') {
+      scriptArgs.push('--pin', pinStr);
+    }
+
+    execFile(pythonExec, scriptArgs, PUSH_USER_SCRIPT_OPTS, (error, stdout, stderr) => {
+      if (error) {
+        return pushUserScriptFailure(res, error, stdout, stderr);
+      }
+
+      try {
+        const cleanStdout = stdout.replace(/\0/g, '').trim();
+        const parsed = JSON.parse(cleanStdout);
+        if (!parsed.success) {
+          return res.status(500).json({ error: parsed.error || 'Device rejected user update' });
+        }
+        res.json({
+          message: 'User pushed to device successfully',
+          uid: parsed.uid,
+          biometric_user_id: parsed.biometric_user_id,
+          name: parsed.name,
+        });
+      } catch (parseErr) {
+        console.error('[biometric-devices POST push-user] JSON parse err:', parseErr, stdout);
+        res.status(500).json({ error: 'Invalid response from device script' });
+      }
+    });
+  } catch (err) {
+    console.error('[biometric-devices POST push-user]', err);
+    res.status(500).json({ error: 'Failed to push user to device' });
   }
 });
 

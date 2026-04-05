@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-ZKTeco sync service - Python version using pyzk.
+ZKTeco sync service — pushes device attendance to HRMS via pyzk.
 
-Alternative to zkteco-sync.js when node-zklib fails on K20/ZMM200_TFT.
+Device IPs come from GET /api/biometric-attendance-logs/devices (see get_devices()).
 
-Install: pip install pyzk requests
+Install: pip install pyzk requests  (or pip install -r scripts/requirements-zkteco.txt)
 Run: python scripts/zkteco-sync-py.py
 
-Environment: Same as Node version (ZK_DEVICE_IP, ZK_DEVICE_PORT, HRMS_API_URL, BIO_SYNC_API_KEY, etc.)
+Environment: HRMS_API_URL, BIO_SYNC_API_KEY, ZK_POLL_INTERVAL, ZK_TIMEZONE_OFFSET, etc.
 """
 import json
 import os
@@ -178,8 +178,20 @@ def main():
                 if not ip: continue
                 # You can safely extract port if you prefer storing it in DB, default 4370
                 result = sync_once(ip)
-                if result and (result.get("inserted", 0) or result.get("duplicates_skipped", 0) or result.get("skipped_unmatched", 0)):
-                    print(f"[zkteco-sync-py] Sync {ip} -> Pushed: {result.get('inserted', 0)}, duplicates: {result.get('duplicates_skipped', 0)}, unmatched: {result.get('skipped_unmatched', 0)}")
+                if result and (
+                    result.get("inserted", 0)
+                    or result.get("duplicates_skipped", 0)
+                    or result.get("skipped_unmatched", 0)
+                    or result.get("skipped_no_schedule", 0)
+                    or result.get("skipped_holiday", 0)
+                    or result.get("skipped_leave", 0)
+                    or result.get("skipped_invalid_timestamp", 0)
+                ):
+                    print(
+                        f"[zkteco-sync-py] Sync {ip} -> Pushed: {result.get('inserted', 0)}, duplicates: {result.get('duplicates_skipped', 0)}, "
+                        f"unmatched: {result.get('skipped_unmatched', 0)}, no_schedule: {result.get('skipped_no_schedule', 0)}, "
+                        f"holiday: {result.get('skipped_holiday', 0)}, leave: {result.get('skipped_leave', 0)}, invalid_ts: {result.get('skipped_invalid_timestamp', 0)}"
+                    )
             time.sleep(POLL_INTERVAL)
     except KeyboardInterrupt:
         print("\n[zkteco-sync-py] Stopped")
