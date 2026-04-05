@@ -121,14 +121,26 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   void _applyNotificationTapResult(NotificationTapResult? result) {
-    if (result == null ||
-        result.kind != NotificationTapKind.adminDtrLeaveManagement) {
-      return;
+    if (result == null) return;
+    switch (result.kind) {
+      case NotificationTapKind.adminDtrLeaveManagement:
+        setState(() => _selectedNavIndex = 3);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _dtrContentKey.currentState?.openLeaveManagement();
+        });
+        break;
+      case NotificationTapKind.adminDtrAttendanceAdjustment:
+        setState(() => _selectedNavIndex = 3);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _dtrContentKey.currentState?.openAttendanceAdjustment();
+        });
+        break;
+      case NotificationTapKind.none:
+      case NotificationTapKind.employeeLeaveApprovals:
+      case NotificationTapKind.employeeLeaveRequests:
+      case NotificationTapKind.employeeMyAttendance:
+        break;
     }
-    setState(() => _selectedNavIndex = 3);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _dtrContentKey.currentState?.openLeaveManagement();
-    });
   }
 
   @override
@@ -2241,6 +2253,12 @@ class _DtrContentState extends State<_DtrContent> {
   void openLeaveManagement() {
     if (!mounted) return;
     setState(() => _dtrSectionIndex = 8);
+  }
+
+  /// Opens **Attendance Adjustment** (DTR correction queue). Used after notification taps.
+  void openAttendanceAdjustment() {
+    if (!mounted) return;
+    setState(() => _dtrSectionIndex = 11);
   }
 
   void _goToAssignmentWithEmployee(String employeeId) {

@@ -9,11 +9,17 @@ enum NotificationTapKind {
   /// HR/Admin: main nav → DTR → Leave Management (approvals).
   adminDtrLeaveManagement,
 
+  /// HR/Admin: main nav → DTR → Attendance Adjustment (correction queue).
+  adminDtrAttendanceAdjustment,
+
   /// Employee / department head: My Leave → Approvals.
   employeeLeaveApprovals,
 
   /// Employee: My Leave → My Requests.
   employeeLeaveRequests,
+
+  /// Employee: My Attendance (e.g. DTR correction approved/rejected).
+  employeeMyAttendance,
 }
 
 class NotificationTapResult {
@@ -26,12 +32,28 @@ class NotificationTapResult {
     AppNotification n, {
     String? role,
   }) {
-    if (n.category != 'leave') {
+    final cat = n.category.toLowerCase();
+    final t = n.type.toLowerCase();
+    final isPrivileged = role == 'admin' || role == 'hr';
+
+    if (cat == 'dtr') {
+      if (isPrivileged && t.contains('pending')) {
+        return const NotificationTapResult(
+          NotificationTapKind.adminDtrAttendanceAdjustment,
+        );
+      }
+      if (!isPrivileged &&
+          (t.contains('approved') || t.contains('rejected'))) {
+        return const NotificationTapResult(
+          NotificationTapKind.employeeMyAttendance,
+        );
+      }
       return const NotificationTapResult(NotificationTapKind.none);
     }
 
-    final t = n.type.toLowerCase();
-    final isPrivileged = role == 'admin' || role == 'hr';
+    if (cat != 'leave') {
+      return const NotificationTapResult(NotificationTapKind.none);
+    }
 
     if (isPrivileged) {
       if (t.contains('pending_hr') ||

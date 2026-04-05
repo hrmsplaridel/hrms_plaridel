@@ -15,6 +15,8 @@ import '../utils/responsive_leave_form_host.dart';
 import '../widgets/leave_balance_card.dart';
 import '../widgets/history_timeline.dart';
 import '../widgets/leave_card.dart';
+import '../widgets/leave_status_chip.dart';
+import '../widgets/my_leave_loading_skeleton.dart';
 
 /// Employee-facing leave screen.
 ///
@@ -88,6 +90,10 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
         : 'Employee';
     final width = MediaQuery.of(context).size.width;
     final compact = width < 820;
+    final showLeaveSkeleton =
+        provider.loading &&
+        provider.balances.isEmpty &&
+        provider.requests.isEmpty;
 
     final totalAvailable = provider.balances.fold<double>(
       0,
@@ -117,80 +123,84 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
           ),
         ],
         const SizedBox(height: 24),
-        compact
-            ? Column(
-                children: [
-                  _SummaryCard(
-                    title: 'Available Credits',
-                    value: totalAvailable.toStringAsFixed(1),
-                    subtitle: 'Across tracked leave balances',
-                    icon: Icons.account_balance_wallet_rounded,
-                  ),
-                  const SizedBox(height: 16),
-                  _SummaryCard(
-                    title: 'Pending Requests',
-                    value: '${provider.pendingCount}',
-                    subtitle:
-                        '${totalPendingDays.toStringAsFixed(1)} day(s) awaiting review',
-                    icon: Icons.pending_actions_rounded,
-                  ),
-                  const SizedBox(height: 16),
-                  _SummaryCard(
-                    title: 'Next Approved Leave',
-                    value: nextApproved?.leaveType.displayName ?? 'None',
-                    subtitle: _approvedLeaveSubtitle(nextApproved),
-                    icon: Icons.event_available_rounded,
-                  ),
-                ],
-              )
-            : Row(
-                children: [
-                  Expanded(
-                    child: _SummaryCard(
+        if (showLeaveSkeleton)
+          MyLeaveLoadingSkeleton(compact: compact)
+        else ...[
+          compact
+              ? Column(
+                  children: [
+                    _SummaryCard(
                       title: 'Available Credits',
                       value: totalAvailable.toStringAsFixed(1),
                       subtitle: 'Across tracked leave balances',
                       icon: Icons.account_balance_wallet_rounded,
                     ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: _SummaryCard(
+                    const SizedBox(height: 16),
+                    _SummaryCard(
                       title: 'Pending Requests',
                       value: '${provider.pendingCount}',
                       subtitle:
                           '${totalPendingDays.toStringAsFixed(1)} day(s) awaiting review',
                       icon: Icons.pending_actions_rounded,
                     ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: _SummaryCard(
+                    const SizedBox(height: 16),
+                    _SummaryCard(
                       title: 'Next Approved Leave',
                       value: nextApproved?.leaveType.displayName ?? 'None',
                       subtitle: _approvedLeaveSubtitle(nextApproved),
                       icon: Icons.event_available_rounded,
                     ),
-                  ),
-                ],
+                  ],
+                )
+              : Row(
+                  children: [
+                    Expanded(
+                      child: _SummaryCard(
+                        title: 'Available Credits',
+                        value: totalAvailable.toStringAsFixed(1),
+                        subtitle: 'Across tracked leave balances',
+                        icon: Icons.account_balance_wallet_rounded,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: _SummaryCard(
+                        title: 'Pending Requests',
+                        value: '${provider.pendingCount}',
+                        subtitle:
+                            '${totalPendingDays.toStringAsFixed(1)} day(s) awaiting review',
+                        icon: Icons.pending_actions_rounded,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: _SummaryCard(
+                        title: 'Next Approved Leave',
+                        value: nextApproved?.leaveType.displayName ?? 'None',
+                        subtitle: _approvedLeaveSubtitle(nextApproved),
+                        icon: Icons.event_available_rounded,
+                      ),
+                    ),
+                  ],
+                ),
+          const SizedBox(height: 24),
+          Column(
+            children: [
+              _BalancesPanel(
+                balances: provider.balances,
+                loading: provider.loading,
               ),
-        const SizedBox(height: 24),
-        Column(
-          children: [
-            _BalancesPanel(
-              balances: provider.balances,
-              loading: provider.loading,
-            ),
-            const SizedBox(height: 16),
-            _RequestsPanel(
-              requests: provider.requests,
-              loading: provider.loading,
-              onEdit: (request) => _editRequest(context, request),
-              onCancel: (request) => _cancelRequest(context, request),
-              onPrint: _printLeaveForm,
-            ),
-          ],
-        ),
+              const SizedBox(height: 16),
+              _RequestsPanel(
+                requests: provider.requests,
+                loading: provider.loading,
+                onEdit: (request) => _editRequest(context, request),
+                onCancel: (request) => _cancelRequest(context, request),
+                onPrint: _printLeaveForm,
+              ),
+            ],
+          ),
+        ],
       ],
     );
   }
@@ -605,41 +615,11 @@ class _EmployeeRequestItem extends StatelessWidget {
   void _showDetails(BuildContext context) {
     showDialog<void>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Leave Details'),
-        content: SizedBox(
-          width: 520,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _detailLine('Leave Type', request.leaveType.displayName),
-              _detailLine('Date Range', _formatRange(request)),
-              _detailLine(
-                'Number of Days',
-                request.workingDaysApplied?.toStringAsFixed(1) ?? '—',
-              ),
-              _detailLine('Status', request.status.displayName),
-              _detailLine(
-                'Submitted Date',
-                request.dateFiled != null
-                    ? _formatDate(request.dateFiled!)
-                    : '—',
-              ),
-              if ((request.reason ?? '').trim().isNotEmpty)
-                _detailLine('Reason', request.reason!.trim()),
-            ],
-          ),
-        ),
-        actions: [
-          if (_canEdit)
-            OutlinedButton(onPressed: onEdit, child: const Text('Edit')),
-          OutlinedButton(onPressed: onPrint, child: const Text('Print Form')),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
-          ),
-        ],
+      builder: (_) => _EmployeeLeaveDetailsDialog(
+        request: request,
+        canEdit: _canEdit,
+        onEdit: onEdit,
+        onPrint: onPrint,
       ),
     );
   }
@@ -708,28 +688,380 @@ class _EmployeeRequestItem extends StatelessWidget {
       ),
     ];
   }
+}
 
-  Widget _detailLine(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: RichText(
-        text: TextSpan(
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+/// Employee “view details” dialog — compact width, status chip, scrollable body.
+class _EmployeeLeaveDetailsDialog extends StatelessWidget {
+  const _EmployeeLeaveDetailsDialog({
+    required this.request,
+    required this.canEdit,
+    required this.onEdit,
+    required this.onPrint,
+  });
+
+  final LeaveRequest request;
+  final bool canEdit;
+  final VoidCallback onEdit;
+  final VoidCallback onPrint;
+
+  String get _leaveTypeText {
+    if (request.leaveType == LeaveType.others) {
+      final custom = request.customLeaveTypeText?.trim();
+      if (custom != null && custom.isNotEmpty) {
+        return '${request.leaveType.displayName} · $custom';
+      }
+    }
+    return request.leaveType.displayName;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screen = MediaQuery.sizeOf(context);
+    final maxW = (screen.width - 40).clamp(300.0, 420.0);
+    final bodyMaxH = (screen.height * 0.52).clamp(220.0, 420.0);
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 22),
+      clipBehavior: Clip.antiAlias,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxW),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            TextSpan(
-              text: '$label: ',
-              style: const TextStyle(fontWeight: FontWeight.w700),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 8, 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      Icons.event_available_rounded,
+                      color: AppTheme.primaryNavy,
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Leave details',
+                          style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.2,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        LeaveStatusChip(status: request.status),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
             ),
-            TextSpan(text: value),
+            Divider(height: 1, color: Colors.black.withValues(alpha: 0.06)),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: bodyMaxH),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _LeaveDetailTile(
+                      icon: Icons.category_outlined,
+                      label: 'Leave type',
+                      value: _leaveTypeText,
+                    ),
+                    _LeaveDetailTile(
+                      icon: Icons.date_range_rounded,
+                      label: 'Date range',
+                      value: _formatLeaveRequestRange(request),
+                    ),
+                    _LeaveDetailTile(
+                      icon: Icons.timelapse_rounded,
+                      label: 'Working days',
+                      value:
+                          request.workingDaysApplied?.toStringAsFixed(1) ?? '—',
+                    ),
+                    _LeaveDetailTile(
+                      icon: Icons.send_rounded,
+                      label: 'Submitted',
+                      value: request.dateFiled != null
+                          ? _formatDate(request.dateFiled!)
+                          : '—',
+                    ),
+                    if ((request.officeDepartment ?? '').trim().isNotEmpty)
+                      _LeaveDetailTile(
+                        icon: Icons.apartment_rounded,
+                        label: 'Office / department',
+                        value: request.officeDepartment!.trim(),
+                      ),
+                    _LeaveDetailTile(
+                      icon: Icons.swap_horiz_rounded,
+                      label: 'Commutation',
+                      value: request.commutation.displayName,
+                    ),
+                    if ((request.reason ?? '').trim().isNotEmpty)
+                      _LeaveDetailReasonCard(text: request.reason!.trim()),
+                    if ((request.disapprovalReason ?? '').trim().isNotEmpty)
+                      _LeaveDetailNotice(
+                        icon: Icons.info_outline_rounded,
+                        title: 'Decision note',
+                        body: request.disapprovalReason!.trim(),
+                        tone: _LeaveNoticeTone.warning,
+                      ),
+                    if ((request.hrRemarks ?? '').trim().isNotEmpty &&
+                        request.status == LeaveRequestStatus.approved)
+                      _LeaveDetailNotice(
+                        icon: Icons.check_circle_outline_rounded,
+                        title: 'HR remarks',
+                        body: request.hrRemarks!.trim(),
+                        tone: _LeaveNoticeTone.neutral,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            Divider(height: 1, color: Colors.black.withValues(alpha: 0.06)),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+              child: Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (canEdit)
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        onEdit();
+                      },
+                      icon: const Icon(Icons.edit_rounded, size: 18),
+                      label: const Text('Edit'),
+                    ),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      onPrint();
+                    },
+                    icon: const Icon(Icons.print_rounded, size: 18),
+                    label: const Text('Print'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Done'),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
     );
   }
+}
 
-  String _formatRange(LeaveRequest request) {
-    if (request.startDate == null || request.endDate == null) return '—';
-    return '${_formatDate(request.startDate!)} – ${_formatDate(request.endDate!)}';
+class _LeaveDetailTile extends StatelessWidget {
+  const _LeaveDetailTile({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppTheme.offWhite,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              icon,
+              size: 20,
+              color: AppTheme.primaryNavy.withValues(alpha: 0.85),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    value,
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LeaveDetailReasonCard extends StatelessWidget {
+  const _LeaveDetailReasonCard({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppTheme.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.notes_rounded,
+                  size: 18,
+                  color: AppTheme.textSecondary,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Reason',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              text,
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 14,
+                height: 1.45,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+enum _LeaveNoticeTone { neutral, warning }
+
+class _LeaveDetailNotice extends StatelessWidget {
+  const _LeaveDetailNotice({
+    required this.icon,
+    required this.title,
+    required this.body,
+    required this.tone,
+  });
+
+  final IconData icon;
+  final String title;
+  final String body;
+  final _LeaveNoticeTone tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final (bg, border, iconC) = switch (tone) {
+      _LeaveNoticeTone.warning => (
+        Colors.red.shade50,
+        Colors.red.shade100,
+        Colors.red.shade800,
+      ),
+      _LeaveNoticeTone.neutral => (
+        AppTheme.offWhite,
+        Colors.black.withValues(alpha: 0.08),
+        AppTheme.primaryNavy,
+      ),
+    };
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 18, color: iconC),
+                const SizedBox(width: 6),
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              body,
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -881,4 +1213,9 @@ String _formatDate(DateTime value) {
     'Dec',
   ];
   return '${months[value.month - 1]} ${value.day}, ${value.year}';
+}
+
+String _formatLeaveRequestRange(LeaveRequest request) {
+  if (request.startDate == null || request.endDate == null) return '—';
+  return '${_formatDate(request.startDate!)} – ${_formatDate(request.endDate!)}';
 }

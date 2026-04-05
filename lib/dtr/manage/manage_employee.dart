@@ -619,14 +619,25 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   }
 }
 
-String _messageForEmployeesLoadError(Object e) {
+/// Prefer JSON `error` from API responses (Dio), then Dio message.
+String _apiErrorMessageFromDio(Object e, {required String fallback}) {
   if (e is DioException) {
     final data = e.response?.data;
     if (data is Map && data['error'] != null) {
       return data['error'].toString();
     }
     if (e.message != null && e.message!.isNotEmpty) return e.message!;
-    return 'Could not load employees. Check your connection and try again.';
+  }
+  return fallback;
+}
+
+String _messageForEmployeesLoadError(Object e) {
+  if (e is DioException) {
+    return _apiErrorMessageFromDio(
+      e,
+      fallback:
+          'Could not load employees. Check your connection and try again.',
+    );
   }
   return 'Could not load employees.';
 }
@@ -711,6 +722,10 @@ class _ManageEmployeeState extends State<ManageEmployee> {
   String _privilegeFilter = 'All';
   String _statusFilter = 'Active';
   String? _departmentFilterId;
+
+  /// When set, list only employees whose biometric ID exists on this ZKTeco (admin API).
+  String? _biometricDeviceFilterId;
+  List<dynamic> _biometricDevicesForFilter = [];
   String? _selectedEmployeeId;
   List<_EmployeeProfile> _employees = [];
   List<DepartmentOption> _departmentOptions = [];
@@ -735,6 +750,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadDepartmentOptions();
+      _loadBiometricDevicesForFilter();
       _loadEmployees();
     });
   }
@@ -772,6 +788,27 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     }
   }
 
+  Future<void> _loadBiometricDevicesForFilter() async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/biometric-devices',
+        queryParameters: const {'status': 'Active'},
+      );
+      if (!mounted) return;
+      final list = res.data ?? [];
+      setState(() {
+        _biometricDevicesForFilter = list;
+        final fid = _biometricDeviceFilterId;
+        if (fid != null &&
+            !list.any((d) => (d as Map)['id']?.toString() == fid)) {
+          _biometricDeviceFilterId = null;
+        }
+      });
+    } catch (_) {
+      if (mounted) setState(() => _biometricDevicesForFilter = []);
+    }
+  }
+
   /// Query params shared by the paged list and CSV export (filters, search, sort).
   Map<String, dynamic> _employeeListQueryBase() {
     final q = <String, dynamic>{
@@ -782,6 +819,10 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     };
     if (_departmentFilterId != null && _departmentFilterId!.isNotEmpty) {
       q['department_id'] = _departmentFilterId;
+    }
+    final bioDev = _biometricDeviceFilterId?.trim();
+    if (bioDev != null && bioDev.isNotEmpty) {
+      q['biometric_device_id'] = bioDev;
     }
     final sq = _searchQuery.trim();
     if (sq.isNotEmpty) {
@@ -803,9 +844,13 @@ class _ManageEmployeeState extends State<ManageEmployee> {
         'offset': _pageIndex * _pageSize,
       };
 
+      final bioDev = _biometricDeviceFilterId?.trim();
       final res = await ApiClient.instance.get<dynamic>(
         '/api/employees',
         queryParameters: query,
+        options: bioDev != null && bioDev.isNotEmpty
+            ? Options(receiveTimeout: const Duration(seconds: 120))
+            : null,
       );
       final data = res.data;
       List<_EmployeeProfile> next;
@@ -930,12 +975,15 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     if (!mounted || _exportingCsv) return;
     setState(() => _exportingCsv = true);
     try {
+      final bioDev = _biometricDeviceFilterId?.trim();
       final res = await ApiClient.instance.dio.get<List<int>>(
         '/api/employees/export/csv',
         queryParameters: _employeeListQueryBase(),
         options: Options(
           responseType: ResponseType.bytes,
-          receiveTimeout: const Duration(seconds: 90),
+          receiveTimeout: Duration(
+            seconds: bioDev != null && bioDev.isNotEmpty ? 120 : 90,
+          ),
           headers: const {'Accept': 'text/csv'},
         ),
       );
@@ -1010,17 +1058,19 @@ class _ManageEmployeeState extends State<ManageEmployee> {
           : '';
       final priv = e.role == 'admin' ? 'Admin' : 'Employee';
       final acct = e.isActive ? 'Active' : 'Inactive';
-      lines.add([
-        _csvEscapeForExport(empNo),
-        _csvEscapeForExport(e.fullName),
-        _csvEscapeForExport(e.email ?? ''),
-        _csvEscapeForExport(e.departmentName ?? ''),
-        _csvEscapeForExport(e.positionName ?? ''),
-        _csvEscapeForExport(priv),
-        _csvEscapeForExport(acct),
-        _csvEscapeForExport(e.employmentStatus ?? ''),
-        _csvEscapeForExport(e.biometricUserId ?? ''),
-      ].join(','));
+      lines.add(
+        [
+          _csvEscapeForExport(empNo),
+          _csvEscapeForExport(e.fullName),
+          _csvEscapeForExport(e.email ?? ''),
+          _csvEscapeForExport(e.departmentName ?? ''),
+          _csvEscapeForExport(e.positionName ?? ''),
+          _csvEscapeForExport(priv),
+          _csvEscapeForExport(acct),
+          _csvEscapeForExport(e.employmentStatus ?? ''),
+          _csvEscapeForExport(e.biometricUserId ?? ''),
+        ].join(','),
+      );
     }
     final csv = '\uFEFF${lines.join('\n')}';
     final bytes = Uint8List.fromList(utf8.encode(csv));
@@ -1083,8 +1133,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
   }
 
   KeyEventResult _handleEmployeeRowKey(KeyEvent event, int index) {
-    if (event is KeyDownEvent &&
-        event.logicalKey == LogicalKeyboardKey.space) {
+    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.space) {
       final id = _employees[index].id;
       setState(() {
         if (_selectedBulkIds.contains(id)) {
@@ -1274,7 +1323,10 @@ class _ManageEmployeeState extends State<ManageEmployee> {
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFFE53935),
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
               ),
               icon: const Icon(Icons.person_off_rounded, size: 18),
               label: const Text('Deactivate'),
@@ -1286,7 +1338,10 @@ class _ManageEmployeeState extends State<ManageEmployee> {
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFF4CAF50),
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
               ),
               icon: const Icon(Icons.person_add_rounded, size: 18),
               label: const Text('Activate'),
@@ -1425,40 +1480,44 @@ class _ManageEmployeeState extends State<ManageEmployee> {
   }
 
   Widget _buildEmployeesToolbar() {
-    final filters = Wrap(
-      spacing: 12,
-      runSpacing: 12,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        SizedBox(width: 220, child: _buildSearchField()),
-        _buildDropdown(
-          'Privilege',
-          _privilegeFilter,
-          ['All', 'Admin', 'Employee'],
-          (v) {
-            setState(() {
-              _privilegeFilter = v ?? 'All';
-              _pageIndex = 0;
-            });
-            _loadEmployees();
-          },
+    // Single horizontal strip: sharing one row with action buttons squeezed the Wrap
+    // and forced each filter onto its own line. Scroll when the strip is wider than the panel.
+    final filterStrip = SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 2),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            SizedBox(width: 220, child: _buildSearchField()),
+            const SizedBox(width: 12),
+            _buildDropdown(_privilegeFilter, ['All', 'Admin', 'Employee'], (v) {
+              setState(() {
+                _privilegeFilter = v ?? 'All';
+                _pageIndex = 0;
+              });
+              _loadEmployees();
+            }),
+            const SizedBox(width: 12),
+            _buildDropdown(_statusFilter, ['Active', 'Inactive', 'All'], (v) {
+              setState(() {
+                _statusFilter = v ?? 'Active';
+                _pageIndex = 0;
+              });
+              _loadEmployees();
+            }),
+            const SizedBox(width: 12),
+            _buildDepartmentFilterDropdown(),
+            const SizedBox(width: 12),
+            _buildBiometricDeviceFilterDropdown(),
+          ],
         ),
-        _buildDropdown('Status', _statusFilter, ['Active', 'Inactive', 'All'], (
-          v,
-        ) {
-          setState(() {
-            _statusFilter = v ?? 'Active';
-            _pageIndex = 0;
-          });
-          _loadEmployees();
-        }),
-        _buildDepartmentFilterDropdown(),
-      ],
+      ),
     );
     final actions = Wrap(
       spacing: 8,
       runSpacing: 8,
-      alignment: WrapAlignment.end,
+      alignment: WrapAlignment.center,
       children: [
         OutlinedButton.icon(
           onPressed: () => _showImportDialog(context),
@@ -1469,6 +1528,26 @@ class _ManageEmployeeState extends State<ManageEmployee> {
           ),
           label: Text(
             'Import from Device',
+            style: TextStyle(color: AppTheme.primaryNavy),
+          ),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppTheme.primaryNavy,
+            side: BorderSide(color: AppTheme.primaryNavy.withOpacity(0.45)),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        ),
+        OutlinedButton.icon(
+          onPressed: () => _showBiometricRosterDialog(context),
+          icon: Icon(
+            Icons.badge_outlined,
+            size: 18,
+            color: AppTheme.primaryNavy,
+          ),
+          label: Text(
+            'Biometric roster',
             style: TextStyle(color: AppTheme.primaryNavy),
           ),
           style: OutlinedButton.styleFrom(
@@ -1515,9 +1594,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
               ),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppTheme.primaryNavy,
-                side: BorderSide(
-                  color: AppTheme.primaryNavy.withOpacity(0.45),
-                ),
+                side: BorderSide(color: AppTheme.primaryNavy.withOpacity(0.45)),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 14,
                   vertical: 12,
@@ -1554,23 +1631,13 @@ class _ManageEmployeeState extends State<ManageEmployee> {
         ),
       ],
     );
-    return LayoutBuilder(
-      builder: (context, c) {
-        if (c.maxWidth >= 640) {
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: filters),
-              const SizedBox(width: 12),
-              actions,
-            ],
-          );
-        }
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [filters, const SizedBox(height: 12), actions],
-        );
-      },
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        filterStrip,
+        const SizedBox(height: 12),
+        Center(child: actions),
+      ],
     );
   }
 
@@ -1586,7 +1653,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
       child: DropdownButton<String?>(
         value: _departmentFilterId,
         hint: Text(
-          'Department',
+          'All departments',
           style: TextStyle(
             color: AppTheme.textSecondary.withOpacity(0.85),
             fontSize: 14,
@@ -1610,6 +1677,57 @@ class _ManageEmployeeState extends State<ManageEmployee> {
         onChanged: (v) {
           setState(() {
             _departmentFilterId = v;
+            _pageIndex = 0;
+          });
+          _loadEmployees();
+        },
+      ),
+    );
+  }
+
+  Widget _buildBiometricDeviceFilterDropdown() {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 160, maxWidth: 240),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppTheme.lightGray.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.transparent),
+      ),
+      child: DropdownButton<String?>(
+        value: _biometricDeviceFilterId,
+        hint: Text(
+          'All devices',
+          style: TextStyle(
+            color: AppTheme.textSecondary.withOpacity(0.85),
+            fontSize: 14,
+          ),
+        ),
+        underline: const SizedBox.shrink(),
+        isDense: true,
+        isExpanded: true,
+        items: [
+          const DropdownMenuItem<String?>(
+            value: null,
+            child: Text('All devices'),
+          ),
+          ..._biometricDevicesForFilter.map((d) {
+            final m = Map<String, dynamic>.from(d as Map);
+            final id = m['id']?.toString() ?? '';
+            final name = m['name']?.toString() ?? id;
+            final loc = m['location']?.toString();
+            final line = (loc != null && loc.isNotEmpty)
+                ? '$name · $loc'
+                : name;
+            return DropdownMenuItem<String?>(
+              value: id,
+              child: Text(line, overflow: TextOverflow.ellipsis, maxLines: 1),
+            );
+          }),
+        ],
+        onChanged: (v) {
+          setState(() {
+            _biometricDeviceFilterId = v;
             _pageIndex = 0;
           });
           _loadEmployees();
@@ -2259,12 +2377,12 @@ class _ManageEmployeeState extends State<ManageEmployee> {
   }
 
   Widget _buildDropdown(
-    String label,
     String value,
     List<String> options,
     ValueChanged<String?> onChanged,
   ) {
     return Container(
+      constraints: const BoxConstraints(minWidth: 128, maxWidth: 200),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
         color: AppTheme.lightGray.withOpacity(0.5),
@@ -2275,6 +2393,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
         value: value,
         underline: const SizedBox.shrink(),
         isDense: true,
+        isExpanded: true,
         items: options
             .map((o) => DropdownMenuItem(value: o, child: Text(o)))
             .toList(),
@@ -2606,6 +2725,13 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     );
   }
 
+  void _showBiometricRosterDialog(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => const _BiometricRosterDialog(),
+    );
+  }
+
   void _confirmDeactivate(
     BuildContext context,
     _EmployeeProfile profile,
@@ -2714,6 +2840,11 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
   Uint8List? _selectedImageBytes;
   bool _saving = false;
 
+  List<dynamic> _bioDevices = [];
+  String? _selectedPushDeviceId;
+  bool _loadingBioDevices = true;
+  bool _pushingToDevice = false;
+
   @override
   void initState() {
     super.initState();
@@ -2738,6 +2869,82 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
     _dateHired = _profile.dateHired;
     _employmentStatus = _profile.employmentStatus ?? 'active';
     _biometricIdController.text = _profile.biometricUserId ?? '';
+    _loadBioDevicesForPush();
+  }
+
+  Future<void> _loadBioDevicesForPush() async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/biometric-devices',
+      );
+      if (!mounted) return;
+      final list = res.data ?? [];
+      setState(() {
+        _bioDevices = list;
+        _selectedPushDeviceId = list.isNotEmpty
+            ? list.first['id']?.toString()
+            : null;
+        _loadingBioDevices = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingBioDevices = false);
+    }
+  }
+
+  Future<void> _pushEmployeeToDevice() async {
+    final deviceId = _selectedPushDeviceId;
+    if (deviceId == null) return;
+    final bio = _biometricIdController.text.trim();
+    if (bio.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Set a Biometric User ID first (employee number on the clock).',
+          ),
+        ),
+      );
+      return;
+    }
+    setState(() => _pushingToDevice = true);
+    try {
+      await ApiClient.instance.post<Map<String, dynamic>>(
+        '/api/biometric-devices/$deviceId/push-user',
+        data: <String, dynamic>{'employee_id': _profile.id},
+        options: Options(
+          receiveTimeout: const Duration(seconds: 90),
+          sendTimeout: const Duration(seconds: 30),
+        ),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'User sent to device. Enroll fingerprint or face on the clock if required.',
+          ),
+        ),
+      );
+    } on DioException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _apiErrorMessageFromDio(
+                e,
+                fallback: 'Push to device failed. Check network and device IP.',
+              ),
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Push to device failed: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _pushingToDevice = false);
+    }
   }
 
   @override
@@ -2748,8 +2955,13 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
     _contactController.dispose();
     _addressController.dispose();
     _salaryGradeController.dispose();
+    _biometricIdController.dispose();
     super.dispose();
   }
+
+  /// Once saved, the ID must match the device (ZKTeco user ID is fixed on the clock).
+  bool get _biometricUserIdLocked =>
+      (_profile.biometricUserId?.trim().isNotEmpty ?? false);
 
   InputDecoration _inputDecoration(String hint) => InputDecoration(
     hintText: hint,
@@ -2824,7 +3036,8 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
         if (_dateHired != null)
           'date_hired': _dateHired!.toIso8601String().split('T')[0],
         if (_employmentStatus != null) 'employment_status': _employmentStatus,
-        if (_biometricIdController.text.trim().isNotEmpty)
+        if (!_biometricUserIdLocked &&
+            _biometricIdController.text.trim().isNotEmpty)
           'biometric_user_id': _biometricIdController.text.trim(),
       };
 
@@ -3069,10 +3282,82 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
             validator: (v) => v == null ? 'Required' : null,
           ),
           const SizedBox(height: 16),
-          TextFormField(
-            controller: _biometricIdController,
-            decoration: _inputDecoration('Biometric User ID (optional)'),
-          ),
+          if (_biometricUserIdLocked)
+            InputDecorator(
+              decoration: _inputDecoration('Biometric User ID').copyWith(
+                helperText:
+                    'Locked: must match the time clock. IDs cannot be edited here after they are set.',
+                helperMaxLines: 2,
+              ),
+              child: Text(
+                _profile.biometricUserId ?? '',
+                style: const TextStyle(fontSize: 14),
+              ),
+            )
+          else
+            TextFormField(
+              controller: _biometricIdController,
+              decoration: _inputDecoration('Biometric User ID (optional)').copyWith(
+                helperText:
+                    'Set once to match the user ID on the ZKTeco; then it becomes locked.',
+                helperMaxLines: 2,
+              ),
+            ),
+          const SizedBox(height: 12),
+          if (_loadingBioDevices)
+            const Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: LinearProgressIndicator(minHeight: 2),
+            )
+          else if (_bioDevices.isEmpty)
+            Text(
+              'No biometric devices registered. Add one under DTR / devices to push users to the clock.',
+              style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+            )
+          else
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  value: _selectedPushDeviceId,
+                  decoration: _inputDecoration('Push to device'),
+                  items: _bioDevices
+                      .where((d) => d['id'] != null && '${d['id']}'.isNotEmpty)
+                      .map(
+                        (d) => DropdownMenuItem<String>(
+                          value: d['id'].toString(),
+                          child: Text(
+                            '${d['name'] ?? 'Device'}${d['ip_address'] != null ? ' (${d['ip_address']})' : ''}',
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) => setState(() => _selectedPushDeviceId = v),
+                ),
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: _pushingToDevice ? null : _pushEmployeeToDevice,
+                  icon: _pushingToDevice
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.upload_rounded, size: 18),
+                  label: Text(
+                    _pushingToDevice ? 'Pushing…' : 'Push to Biometric Device',
+                  ),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF2E7D32),
+                    foregroundColor: Colors.white,
+                    alignment: Alignment.center,
+                  ),
+                ),
+              ],
+            ),
         ],
       ),
     );
@@ -3718,6 +4003,427 @@ class _SingleUserImportModalState extends State<_SingleUserImportModal> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Dialog: all employees with biometric user ID visibility (paged, search, filters).
+class _BiometricRosterDialog extends StatefulWidget {
+  const _BiometricRosterDialog();
+
+  @override
+  State<_BiometricRosterDialog> createState() => _BiometricRosterDialogState();
+}
+
+class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
+  static const int _pageSize = 50;
+
+  int _pageIndex = 0;
+  String _filter = 'all';
+  String? _selectedDeviceId;
+  List<dynamic> _devices = [];
+  bool _loadingDevices = true;
+  final TextEditingController _searchController = TextEditingController();
+  Timer? _searchDebounce;
+  bool _loading = true;
+  String? _error;
+  List<_EmployeeProfile> _rows = [];
+  int _total = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDevices();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  int get _totalPages {
+    if (_total <= 0) return 1;
+    return ((_total - 1) ~/ _pageSize) + 1;
+  }
+
+  Future<void> _loadDevices() async {
+    setState(() => _loadingDevices = true);
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/biometric-devices',
+        queryParameters: const {'status': 'Active'},
+      );
+      if (!mounted) return;
+      setState(() {
+        _devices = res.data ?? [];
+        _loadingDevices = false;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _devices = [];
+          _loadingDevices = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final query = <String, dynamic>{
+        'status': 'All',
+        'role': 'All',
+        'sort': 'full_name',
+        'order': 'asc',
+        'limit': _pageSize,
+        'offset': _pageIndex * _pageSize,
+      };
+      if (_filter != 'all') {
+        query['biometric_filter'] = _filter;
+      }
+      final dev = _selectedDeviceId?.trim();
+      if (dev != null && dev.isNotEmpty) {
+        query['biometric_device_id'] = dev;
+      }
+      final sq = _searchController.text.trim();
+      if (sq.isNotEmpty) {
+        query['q'] = sq;
+      }
+
+      final res = await ApiClient.instance.get<dynamic>(
+        '/api/employees',
+        queryParameters: query,
+        options: dev != null && dev.isNotEmpty
+            ? Options(receiveTimeout: const Duration(seconds: 120))
+            : null,
+      );
+      if (!mounted) return;
+      final data = res.data;
+      List<_EmployeeProfile> next = [];
+      var total = 0;
+      if (data is Map) {
+        final list = data['employees'] as List<dynamic>? ?? [];
+        total = (data['total'] as num?)?.toInt() ?? 0;
+        next = list
+            .map(
+              (e) =>
+                  _employeeProfileFromJson(Map<String, dynamic>.from(e as Map)),
+            )
+            .toList();
+      }
+      setState(() {
+        _rows = next;
+        _total = total;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+        _rows = [];
+        _total = 0;
+      });
+    }
+  }
+
+  void _onSearchChanged(String _) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+      _pageIndex = 0;
+      _load();
+    });
+  }
+
+  void _setFilter(String value) {
+    if (_filter == value) return;
+    setState(() {
+      _filter = value;
+      _pageIndex = 0;
+    });
+    _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 640,
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 8, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Biometric roster',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close),
+                    tooltip: 'Close',
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Text(
+                _selectedDeviceId == null || _selectedDeviceId!.trim().isEmpty
+                    ? 'Biometric user IDs stored in HRMS. Use this list to pick a free ID before enrolling someone on the ZKTeco.'
+                    : 'Only employees whose Biometric User ID exists on the selected device. The server reads the device user list (may take a few seconds the first time).',
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.35,
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Device',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String?>(
+                    isExpanded: true,
+                    value: _selectedDeviceId,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                    ),
+                    hint: const Text('All devices (HRMS only)'),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('All devices (HRMS only)'),
+                      ),
+                      ..._devices.map((d) {
+                        final map = Map<String, dynamic>.from(d as Map);
+                        final id = map['id']?.toString() ?? '';
+                        final name = map['name']?.toString() ?? id;
+                        final loc = map['location']?.toString();
+                        final label = (loc != null && loc.isNotEmpty)
+                            ? '$name · $loc'
+                            : name;
+                        return DropdownMenuItem<String?>(
+                          value: id,
+                          child: Text(label, overflow: TextOverflow.ellipsis),
+                        );
+                      }),
+                    ],
+                    onChanged: _loadingDevices
+                        ? null
+                        : (v) {
+                            setState(() {
+                              _selectedDeviceId = v;
+                              _pageIndex = 0;
+                            });
+                            _load();
+                          },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  ChoiceChip(
+                    label: const Text('All'),
+                    selected: _filter == 'all',
+                    onSelected: (sel) {
+                      if (sel) _setFilter('all');
+                    },
+                  ),
+                  ChoiceChip(
+                    label: const Text('Has ID'),
+                    selected: _filter == 'set',
+                    onSelected: (sel) {
+                      if (sel) _setFilter('set');
+                    },
+                  ),
+                  ChoiceChip(
+                    label: const Text('Missing ID'),
+                    selected: _filter == 'missing',
+                    onSelected: (sel) {
+                      if (sel) _setFilter('missing');
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: 'Search name, email, employee no., biometric ID…',
+                  isDense: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                ),
+                onChanged: _onSearchChanged,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _error != null
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Text(
+                          _error!,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.red.shade800),
+                        ),
+                      ),
+                    )
+                  : _rows.isEmpty
+                  ? Center(
+                      child: Text(
+                        'No employees match.',
+                        style: TextStyle(color: AppTheme.textSecondary),
+                      ),
+                    )
+                  : Scrollbar(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: SingleChildScrollView(
+                          child: DataTable(
+                            columnSpacing: 20,
+                            headingRowHeight: 40,
+                            dataRowMinHeight: 40,
+                            columns: const [
+                              DataColumn(label: Text('No.')),
+                              DataColumn(label: Text('Name')),
+                              DataColumn(label: Text('Biometric ID')),
+                              DataColumn(label: Text('Active')),
+                            ],
+                            rows: _rows.map((e) {
+                              final bio = e.biometricUserId?.trim() ?? '';
+                              return DataRow(
+                                cells: [
+                                  DataCell(Text(e.displayEmployeeNo)),
+                                  DataCell(
+                                    SizedBox(
+                                      width: 220,
+                                      child: Text(
+                                        e.fullName,
+                                        overflow: TextOverflow.ellipsis,
+                                        maxLines: 2,
+                                      ),
+                                    ),
+                                  ),
+                                  DataCell(
+                                    Text(
+                                      bio.isNotEmpty ? bio : '—',
+                                      style: TextStyle(
+                                        fontFeatures: const [
+                                          FontFeature.tabularFigures(),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  DataCell(Text(e.isActive ? 'Yes' : 'No')),
+                                ],
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                      ),
+                    ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Flexible(
+                    child: Text(
+                      _total == 0
+                          ? '0 employees'
+                          : 'Page ${_pageIndex + 1} of $_totalPages · $_total total',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextButton(
+                        onPressed: _pageIndex <= 0 || _loading
+                            ? null
+                            : () {
+                                setState(() => _pageIndex--);
+                                _load();
+                              },
+                        child: const Text('Previous'),
+                      ),
+                      TextButton(
+                        onPressed: _pageIndex >= _totalPages - 1 || _loading
+                            ? null
+                            : () {
+                                setState(() => _pageIndex++);
+                                _load();
+                              },
+                        child: const Text('Next'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

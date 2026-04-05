@@ -377,6 +377,37 @@ class TimeRecordRepo {
     await ApiClient.instance.delete('/api/dtr-daily-summary/$id');
   }
 
+  /// Employee (or HR acting as admin) requests a DTR time correction. POST /api/dtr-corrections.
+  Future<void> submitDtrCorrectionRequest({
+    required DateTime attendanceDate,
+    DateTime? requestedTimeIn,
+    DateTime? requestedTimeOut,
+    DateTime? requestedBreakIn,
+    DateTime? requestedBreakOut,
+    required String reason,
+  }) async {
+    final data = <String, dynamic>{
+      'attendance_date': TimeRecord._toDateOnlyString(attendanceDate),
+      'reason': reason.trim(),
+    };
+    if (requestedTimeIn != null) {
+      data['requested_time_in'] = TimeRecord._toUtcIso(requestedTimeIn);
+    }
+    if (requestedTimeOut != null) {
+      data['requested_time_out'] = TimeRecord._toUtcIso(requestedTimeOut);
+    }
+    if (requestedBreakIn != null) {
+      data['requested_break_in'] = TimeRecord._toUtcIso(requestedBreakIn);
+    }
+    if (requestedBreakOut != null) {
+      data['requested_break_out'] = TimeRecord._toUtcIso(requestedBreakOut);
+    }
+    await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/dtr-corrections',
+      data: data,
+    );
+  }
+
   /// Count present today. Uses GET /api/dtr-daily-summary/summary.
   Future<int> countPresentToday() async {
     try {

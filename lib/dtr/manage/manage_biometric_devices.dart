@@ -16,6 +16,17 @@ _BiometricSyncHealth _biometricSyncHealth(DateTime? lastSync, DateTime now) {
   return _BiometricSyncHealth.stale;
 }
 
+/// Parses `online` from API (bool, null, or loose string/num from JSON).
+bool? _parseOnlineBool(dynamic o) {
+  if (o == null) return null;
+  if (o is bool) return o;
+  if (o is num) return o != 0;
+  final s = o.toString().trim().toLowerCase();
+  if (s == 'true' || s == '1') return true;
+  if (s == 'false' || s == '0') return false;
+  return null;
+}
+
 String _formatRelativeSync(DateTime past, DateTime now) {
   final diff = now.difference(past);
   if (diff.isNegative) return 'Just now';
@@ -24,6 +35,57 @@ String _formatRelativeSync(DateTime past, DateTime now) {
   if (diff.inHours < 24) return '${diff.inHours} hr ago';
   if (diff.inDays < 7) return '${diff.inDays} days ago';
   return '${past.year}-${past.month.toString().padLeft(2, '0')}-${past.day.toString().padLeft(2, '0')}';
+}
+
+Widget _buildRegistrationBadge(bool isActive) {
+  final (label, bg, fg) = isActive
+      ? ('Active', const Color(0xFFE3F2FD), const Color(0xFF1565C0))
+      : ('Inactive', const Color(0xFFEEEEEE), const Color(0xFF616161));
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: bg,
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: fg.withOpacity(0.35)),
+    ),
+    child: Text(
+      label,
+      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: fg),
+    ),
+  );
+}
+
+/// Reachability of ZKTeco TCP port from the API server (not full SDK handshake).
+/// [online] null + no stored IP → "No IP". null + has IP → "Unknown" (probe missing or parse issue).
+Widget _buildOnlineBadge(bool? online, String? ipAddress) {
+  final hasIp = ipAddress != null && ipAddress.trim().isNotEmpty;
+  final (label, bg, fg) = !hasIp
+      ? ('No IP', const Color(0xFFFFF3E0), const Color(0xFFE65100))
+      : online == null
+      ? ('Unknown', const Color(0xFFF5F5F5), const Color(0xFF757575))
+      : online
+      ? ('Online', const Color(0xFFE8F5E9), const Color(0xFF2E7D32))
+      : ('Offline', const Color(0xFFFFEBEE), const Color(0xFFC62828));
+  final tip = !hasIp
+      ? 'No IP address stored — add one to probe connectivity.'
+      : online == null
+      ? 'Could not determine reachability (refresh or check API). When set: TCP port 4370 from the server.'
+      : 'Network reachability from the HRMS server (TCP port 4370).';
+  return Tooltip(
+    message: tip,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: fg.withOpacity(0.35)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: fg),
+      ),
+    ),
+  );
 }
 
 Widget _buildSyncBadge(_BiometricSyncHealth health) {
@@ -67,6 +129,7 @@ class _DeviceRecord {
     this.ipAddress,
     this.lastSyncAt,
     required this.isActive,
+    this.online,
   });
   final String id;
   final String name;
@@ -75,6 +138,9 @@ class _DeviceRecord {
   final String? ipAddress;
   final DateTime? lastSyncAt;
   final bool isActive;
+
+  /// `null` = no IP or probe skipped; `true`/`false` = TCP 4370 reachable from server.
+  final bool? online;
 }
 
 class ManageBiometricDevices extends StatefulWidget {
@@ -117,12 +183,15 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/biometric-devices',
-        queryParameters: {'status': _statusFilter},
+        queryParameters: {'status': _statusFilter, 'probe_online': '1'},
       );
       final data = res.data ?? [];
       _devices = (data).map((e) {
         final m = e as Map<String, dynamic>;
         final lastSync = m['last_sync_at'];
+        final online = m.containsKey('online')
+            ? _parseOnlineBool(m['online'])
+            : null;
         return _DeviceRecord(
           id: m['id'] as String,
           name: m['name'] as String? ?? '',
@@ -133,6 +202,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
               ? DateTime.tryParse(lastSync.toString())
               : null,
           isActive: m['is_active'] as bool? ?? true,
+          online: online,
         );
       }).toList();
     } on DioException catch (e) {
@@ -468,23 +538,25 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
                         ),
                       ),
                       const SizedBox(height: 6),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
+                          _buildRegistrationBadge(d.isActive),
+                          _buildOnlineBadge(d.online, d.ipAddress),
                           _buildSyncBadge(health),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              d.lastSyncAt != null
-                                  ? 'Last sync · ${_formatRelativeSync(d.lastSyncAt!, now)}'
-                                  : 'No sync recorded yet',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: AppTheme.textSecondary,
-                              ),
-                            ),
-                          ),
                         ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        d.lastSyncAt != null
+                            ? 'Last sync · ${_formatRelativeSync(d.lastSyncAt!, now)}'
+                            : 'No sync recorded yet',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppTheme.textSecondary,
+                        ),
                       ),
                     ],
                   ),

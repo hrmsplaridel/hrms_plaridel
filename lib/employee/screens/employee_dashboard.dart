@@ -8,12 +8,14 @@ import '../../../landingpage/screens/landing_page.dart';
 import '../../../login/screens/login_page.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../dtr/dtr_provider.dart';
+import '../../../dtr/widgets/request_dtr_correction_dialog.dart';
 import '../../../dtr/widgets/attendance_display.dart';
 import '../../../dtr/widgets/attendance_source_badge.dart';
 import '../../../docutracker/docutracker_main.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
 import '../../../leave/leave_provider.dart';
+import '../../../leave/widgets/my_leave_loading_skeleton.dart';
 import '../../../notifications/notification_provider.dart';
 import '../../../notifications/notification_tap_result.dart';
 import '../../../notifications/open_notifications_panel.dart';
@@ -21,6 +23,7 @@ import '../../../leave/models/leave_type.dart';
 import '../../../widgets/user_avatar.dart';
 import '../../../ld/training_daily_report_employee_screen.dart';
 import '../widgets/attendance_overview/attendance_overview.dart';
+import '../widgets/employee_dashboard_skeletons.dart';
 import '../../shared/screens/profile_and_settings_page.dart';
 
 /// Main scroll padding: comfortable insets on phones (narrower gutters still breathe).
@@ -128,7 +131,11 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
           }
         });
         break;
+      case NotificationTapKind.employeeMyAttendance:
+        setState(() => _selectedNavIndex = 1);
+        break;
       case NotificationTapKind.adminDtrLeaveManagement:
+      case NotificationTapKind.adminDtrAttendanceAdjustment:
       case NotificationTapKind.none:
         break;
     }
@@ -258,11 +265,26 @@ class _EmployeeLeaveMainEntryState extends State<_EmployeeLeaveMainEntry> {
       builder: (context, snapshot) {
         final isDeptHead = snapshot.data ?? false;
         if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: CircularProgressIndicator(),
-            ),
+          final compact = MediaQuery.sizeOf(context).width < 820;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Leave Management',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'View leave balances, file requests, and track approvals.',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+              ),
+              const SizedBox(height: 24),
+              MyLeaveLoadingSkeleton(compact: compact),
+            ],
           );
         }
         return LeaveMain(
@@ -933,11 +955,8 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
       final dtr = context.read<DtrProvider>();
       if (dtr.loading) return;
       dtr.loadTodayRecord();
-      final now = DateTime.now();
-      dtr.loadTimeRecordsForUser(
-        startDate: DateTime(now.year, now.month, 1),
-        endDate: DateTime(now.year, now.month + 1, 0),
-      );
+      // Month list is loaded by [EmployeeAttendanceOverviewCard] / My Attendance;
+      // avoid overwriting the provider with a fixed "current month" every tick.
     });
   }
 
@@ -979,11 +998,15 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
           ),
         ),
         SizedBox(height: isNarrow ? 18 : 24),
-        _EmployeeSummaryCards(
-          isNarrow: isNarrow,
-          onViewAttendance: widget.onViewAttendance,
+        EmployeeAttendanceOverviewCard(
+          onViewMore: widget.onViewAttendance,
+          summaryCards: _EmployeeSummaryCards(
+            isNarrow: isNarrow,
+            onViewAttendance: widget.onViewAttendance,
+          ),
+          upcomingLeave: const _EmployeeUpcomingLeaveCard(embedded: true),
         ),
-        const SizedBox(height: 24),
+        SizedBox(height: isNarrow ? 20 : 24),
         Text(
           'DocuTracker',
           style: TextStyle(
@@ -1020,10 +1043,6 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
         ),
         const SizedBox(height: 24),
         _EmployeeAnnouncementsCard(),
-        const SizedBox(height: 24),
-        _EmployeeUpcomingLeaveCard(),
-        const SizedBox(height: 24),
-        EmployeeAttendanceOverviewCard(onViewMore: widget.onViewAttendance),
         const SizedBox(height: 32),
       ],
     );
@@ -1036,6 +1055,8 @@ class _EmployeeSummaryCards extends StatelessWidget {
   final bool isNarrow;
   final VoidCallback? onViewAttendance;
 
+  /// Summary row: Clock In, Attendance, Leave balance. [_PayslipCard] omitted for now.
+
   @override
   Widget build(BuildContext context) {
     final w = MediaQuery.of(context).size.width;
@@ -1046,8 +1067,6 @@ class _EmployeeSummaryCards extends StatelessWidget {
     Widget clockIn = _ClockInCard();
     Widget attendance = _AttendanceCard(onViewAttendance: onViewAttendance);
     Widget leaveBalance = _LeaveBalanceCard();
-    Widget payslip = _PayslipCard();
-
     if (singleColumn) {
       return Column(
         children: [
@@ -1056,8 +1075,6 @@ class _EmployeeSummaryCards extends StatelessWidget {
           attendance,
           SizedBox(height: cardGap),
           leaveBalance,
-          SizedBox(height: cardGap),
-          payslip,
         ],
       );
     }
@@ -1072,13 +1089,7 @@ class _EmployeeSummaryCards extends StatelessWidget {
             ],
           ),
           SizedBox(height: cardGap),
-          Row(
-            children: [
-              Expanded(child: leaveBalance),
-              SizedBox(width: cardGap),
-              Expanded(child: payslip),
-            ],
-          ),
+          Row(children: [Expanded(child: leaveBalance)]),
         ],
       );
     }
@@ -1089,8 +1100,6 @@ class _EmployeeSummaryCards extends StatelessWidget {
         Expanded(child: attendance),
         SizedBox(width: cardGap),
         Expanded(child: leaveBalance),
-        SizedBox(width: cardGap),
-        Expanded(child: payslip),
       ],
     );
   }
@@ -1394,61 +1403,85 @@ class _AttendanceCard extends StatelessWidget {
               ),
             ],
           ),
-          child: Column(
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Attendance',
-                style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.baseline,
-                textBaseline: TextBaseline.alphabetic,
-                children: [
-                  Text(
-                    '$presentCount',
-                    style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: 28,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Present Days',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                monthLabel,
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-              ),
-              const SizedBox(height: 14),
-              TextButton(
-                onPressed: onViewAttendance,
-                style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.primaryNavy,
-                  padding: EdgeInsets.zero,
-                  minimumSize: Size.zero,
-                ),
-                child: const Row(
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('View details'),
-                    SizedBox(width: 4),
-                    Icon(Icons.arrow_forward_rounded, size: 16),
+                    Text(
+                      'Attendance',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      '$presentCount',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 28,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Present Days',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AttendanceOverviewColors.present.withValues(
+                          alpha: 0.08,
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        monthLabel,
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextButton(
+                      onPressed: onViewAttendance,
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppTheme.primaryNavy,
+                        padding: EdgeInsets.zero,
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('View details'),
+                          SizedBox(width: 4),
+                          Icon(Icons.arrow_forward_rounded, size: 16),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
+              ),
+              const SizedBox(width: 12),
+              const _SummaryCardIconAccent(
+                icon: Icons.event_available_rounded,
+                color: AttendanceOverviewColors.present,
               ),
             ],
           ),
@@ -1479,6 +1512,11 @@ class _LeaveBalanceCard extends StatelessWidget {
         final sickDays = sick.isNotEmpty ? sick.first.remainingDays : null;
 
         final hasData = leave.balances.isNotEmpty;
+        if (leave.loading && !hasData) {
+          return LeaveBalanceSummaryCardSkeleton(
+            padding: EdgeInsets.all(_employeeCardPadding(context)),
+          );
+        }
         return Container(
           padding: EdgeInsets.all(_employeeCardPadding(context)),
           decoration: BoxDecoration(
@@ -1493,60 +1531,71 @@ class _LeaveBalanceCard extends StatelessWidget {
               ),
             ],
           ),
-          child: Column(
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Leave Balance',
-                style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Leave Balance',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      hasData ? totalRemaining.toStringAsFixed(1) : '—',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 28,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Remaining Days',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: _LeaveBalanceMiniLine(
+                            icon: Icons.beach_access_rounded,
+                            label: 'Vacation',
+                            value: vacationDays != null
+                                ? vacationDays.toStringAsFixed(1)
+                                : '—',
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _LeaveBalanceMiniLine(
+                            icon: Icons.medical_services_outlined,
+                            label: 'Sick',
+                            value: sickDays != null
+                                ? sickDays.toStringAsFixed(1)
+                                : '—',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 12),
-              Text(
-                hasData ? totalRemaining.toStringAsFixed(1) : '—',
-                style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 28,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Remaining Days',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-              ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Icon(
-                    Icons.arrow_downward_rounded,
-                    size: 16,
-                    color: AppTheme.textSecondary,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Vacation ${vacationDays != null ? vacationDays.toStringAsFixed(1) : '—'}',
-                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  Icon(
-                    Icons.medical_services_outlined,
-                    size: 16,
-                    color: AppTheme.textSecondary,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Sick ${sickDays != null ? sickDays.toStringAsFixed(1) : '—'}',
-                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-                  ),
-                ],
+              const SizedBox(width: 12),
+              const _SummaryCardIconAccent(
+                icon: Icons.event_note_rounded,
+                color: AttendanceOverviewColors.onLeave,
               ),
             ],
           ),
@@ -1556,6 +1605,88 @@ class _LeaveBalanceCard extends StatelessWidget {
   }
 }
 
+/// Right-side visual anchor so summary cards use horizontal space evenly with the clock card.
+class _SummaryCardIconAccent extends StatelessWidget {
+  const _SummaryCardIconAccent({required this.icon, required this.color});
+
+  final IconData icon;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 48,
+      height: 48,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Icon(icon, color: color, size: 26),
+    );
+  }
+}
+
+class _LeaveBalanceMiniLine extends StatelessWidget {
+  const _LeaveBalanceMiniLine({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: AppTheme.textSecondary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  value,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// Re-enable in [_EmployeeSummaryCards] when payroll / payslip is ready.
+// ignore: unused_element
 class _PayslipCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -1733,9 +1864,14 @@ class _EmployeeAnnouncementsCard extends StatelessWidget {
 }
 
 class _EmployeeUpcomingLeaveCard extends StatelessWidget {
+  const _EmployeeUpcomingLeaveCard({this.embedded = false});
+
+  /// When true, omits outer card chrome (for use inside [EmployeeAttendanceOverviewCard]).
+  final bool embedded;
+
   @override
   Widget build(BuildContext context) {
-    final pad = _employeeSectionCardPadding(context);
+    final pad = embedded ? 0.0 : _employeeSectionCardPadding(context);
     final innerPad = MediaQuery.sizeOf(context).width < 600 ? 12.0 : 16.0;
 
     Widget titleRow() {
@@ -1761,6 +1897,74 @@ class _EmployeeUpcomingLeaveCard extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, c) {
         final stackHeader = c.maxWidth < 400;
+        final content = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (stackHeader) ...[
+              titleRow(),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () {},
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppTheme.primaryNavy,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                  ),
+                  child: const Text('View More >'),
+                ),
+              ),
+            ] else
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: titleRow()),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: () {},
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppTheme.primaryNavy,
+                    ),
+                    child: const Text('View More >'),
+                  ),
+                ],
+              ),
+            SizedBox(height: stackHeader ? 12 : 16),
+            Container(
+              padding: EdgeInsets.all(innerPad),
+              decoration: BoxDecoration(
+                color: AppTheme.offWhite,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.black.withOpacity(0.06)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'No upcoming leave.',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    Icons.event_rounded,
+                    color: AppTheme.textSecondary.withOpacity(0.5),
+                    size: 40,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+
+        if (embedded) {
+          return content;
+        }
+
         return Container(
           padding: EdgeInsets.all(pad),
           decoration: BoxDecoration(
@@ -1775,69 +1979,7 @@ class _EmployeeUpcomingLeaveCard extends StatelessWidget {
               ),
             ],
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (stackHeader) ...[
-                titleRow(),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: () {},
-                    style: TextButton.styleFrom(
-                      foregroundColor: AppTheme.primaryNavy,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                    ),
-                    child: const Text('View More >'),
-                  ),
-                ),
-              ] else
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(child: titleRow()),
-                    const SizedBox(width: 8),
-                    TextButton(
-                      onPressed: () {},
-                      style: TextButton.styleFrom(
-                        foregroundColor: AppTheme.primaryNavy,
-                      ),
-                      child: const Text('View More >'),
-                    ),
-                  ],
-                ),
-              SizedBox(height: stackHeader ? 12 : 16),
-              Container(
-                padding: EdgeInsets.all(innerPad),
-                decoration: BoxDecoration(
-                  color: AppTheme.offWhite,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.black.withOpacity(0.06)),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'No upcoming leave.',
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
-                    Icon(
-                      Icons.event_rounded,
-                      color: AppTheme.textSecondary.withOpacity(0.5),
-                      size: 40,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+          child: content,
         );
       },
     );
@@ -2190,13 +2332,7 @@ class _EmployeeAttendanceContentState
           },
         ),
         const SizedBox(height: 24),
-        if (dtr.loading)
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: CircularProgressIndicator(),
-            ),
-          ),
+        if (dtr.loading) const EmployeeTimeRecordsLoadingSkeleton(),
         if (!dtr.loading && visibleRecords.isEmpty)
           Container(
             padding: const EdgeInsets.all(24),
@@ -2206,16 +2342,53 @@ class _EmployeeAttendanceContentState
               border: Border.all(color: Colors.black.withOpacity(0.06)),
             ),
             child: Center(
-              child: Text(
-                'No time records for the selected period.',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'No time records for the selected period.',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final initial = DateTime(
+                        _selectedYear,
+                        _selectedMonth,
+                        (_selectedDay != null &&
+                                _selectedDay! >= 1 &&
+                                _selectedDay! <= _lastDayOfSelectedMonth)
+                            ? _selectedDay!
+                            : 1,
+                      );
+                      final ok = await showRequestDtrCorrectionDialog(
+                        context: context,
+                        initialDate: initial,
+                      );
+                      if (ok && context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Correction request submitted. HR will review it.',
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.edit_calendar_outlined, size: 20),
+                    label: const Text('Request attendance correction'),
+                  ),
+                ],
               ),
             ),
           ),
         if (!dtr.loading && visibleRecords.isNotEmpty)
           LayoutBuilder(
             builder: (context, constraints) {
-              const minTableWidth = 760.0;
+              const minTableWidth = 860.0;
               final tableWidth = constraints.maxWidth < minTableWidth
                   ? minTableWidth
                   : constraints.maxWidth;
@@ -2368,6 +2541,19 @@ class _EmployeeAttendanceContentState
                                   ),
                                 ),
                               ),
+                              Expanded(
+                                flex: 2,
+                                child: Center(
+                                  child: Text(
+                                    'Correction',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 13,
+                                      color: AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -2499,6 +2685,33 @@ class _EmployeeAttendanceContentState
                                     child: AttendanceSourceBadge(
                                       source: r.source,
                                       compact: true,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  flex: 2,
+                                  child: Center(
+                                    child: TextButton(
+                                      onPressed: () async {
+                                        final ok =
+                                            await showRequestDtrCorrectionDialog(
+                                              context: context,
+                                              existingRecord: r,
+                                            );
+                                        if (ok && context.mounted) {
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            const SnackBar(
+                                              content: Text(
+                                                'Correction request submitted. HR will review it.',
+                                              ),
+                                            ),
+                                          );
+                                          await _load();
+                                        }
+                                      },
+                                      child: const Text('Request fix'),
                                     ),
                                   ),
                                 ),

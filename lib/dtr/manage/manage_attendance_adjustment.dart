@@ -11,6 +11,8 @@ class _CorrectionRecord {
     required this.attendanceDate,
     this.requestedTimeIn,
     this.requestedTimeOut,
+    this.requestedBreakIn,
+    this.requestedBreakOut,
     required this.reason,
     required this.status,
     this.reviewedAt,
@@ -23,6 +25,8 @@ class _CorrectionRecord {
   final DateTime attendanceDate;
   final DateTime? requestedTimeIn;
   final DateTime? requestedTimeOut;
+  final DateTime? requestedBreakIn;
+  final DateTime? requestedBreakOut;
   final String reason;
   final String status;
   final DateTime? reviewedAt;
@@ -34,10 +38,12 @@ class ManageAttendanceAdjustment extends StatefulWidget {
   const ManageAttendanceAdjustment({super.key});
 
   @override
-  State<ManageAttendanceAdjustment> createState() => _ManageAttendanceAdjustmentState();
+  State<ManageAttendanceAdjustment> createState() =>
+      _ManageAttendanceAdjustmentState();
 }
 
-class _ManageAttendanceAdjustmentState extends State<ManageAttendanceAdjustment> {
+class _ManageAttendanceAdjustmentState
+    extends State<ManageAttendanceAdjustment> {
   String _statusFilter = 'pending';
   List<_CorrectionRecord> _corrections = [];
   bool _loading = false;
@@ -65,6 +71,8 @@ class _ManageAttendanceAdjustmentState extends State<ManageAttendanceAdjustment>
           attendanceDate: _parseDate(m['attendance_date']),
           requestedTimeIn: _parseDateTime(m['requested_time_in']),
           requestedTimeOut: _parseDateTime(m['requested_time_out']),
+          requestedBreakIn: _parseDateTime(m['requested_break_in']),
+          requestedBreakOut: _parseDateTime(m['requested_break_out']),
           reason: m['reason'] as String? ?? '',
           status: m['status'] as String? ?? 'pending',
           reviewedAt: _parseDateTime(m['reviewed_at']),
@@ -82,7 +90,8 @@ class _ManageAttendanceAdjustmentState extends State<ManageAttendanceAdjustment>
   DateTime _parseDate(dynamic v) {
     if (v == null) return DateTime.now();
     final s = v.toString();
-    if (s.length >= 10) return DateTime.tryParse(s.substring(0, 10)) ?? DateTime.now();
+    if (s.length >= 10)
+      return DateTime.tryParse(s.substring(0, 10)) ?? DateTime.now();
     return DateTime.now();
   }
 
@@ -103,15 +112,18 @@ class _ManageAttendanceAdjustmentState extends State<ManageAttendanceAdjustment>
         data: {'status': status, 'review_notes': reviewNotes?.trim()},
       );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Correction $status.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Correction $status.')));
         _loadCorrections();
       }
     } on DioException catch (e) {
       if (mounted) {
-        final msg = (e.response?.data as Map?)?['error'] ?? e.message ?? 'Failed';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $msg')));
+        final msg =
+            (e.response?.data as Map?)?['error'] ?? e.message ?? 'Failed';
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed: $msg')));
       }
     }
   }
@@ -127,8 +139,13 @@ class _ManageAttendanceAdjustmentState extends State<ManageAttendanceAdjustment>
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text('Employee: ${c.employeeName}'),
-            Text('Date: ${c.attendanceDate.year}-${c.attendanceDate.month.toString().padLeft(2, '0')}-${c.attendanceDate.day.toString().padLeft(2, '0')}'),
-            Text('Requested: ${_timeStr(c.requestedTimeIn)} – ${_timeStr(c.requestedTimeOut)}'),
+            Text(
+              'Date: ${c.attendanceDate.year}-${c.attendanceDate.month.toString().padLeft(2, '0')}-${c.attendanceDate.day.toString().padLeft(2, '0')}',
+            ),
+            Text(
+              'Requested: AM ${_timeStr(c.requestedTimeIn)}/${_timeStr(c.requestedBreakOut)} · '
+              'PM ${_timeStr(c.requestedBreakIn)}/${_timeStr(c.requestedTimeOut)}',
+            ),
             const SizedBox(height: 12),
             TextField(
               controller: reviewNotesController,
@@ -141,11 +158,18 @@ class _ManageAttendanceAdjustmentState extends State<ManageAttendanceAdjustment>
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             onPressed: () {
               Navigator.of(ctx).pop();
-              _review(c.id, approve ? 'approved' : 'rejected', reviewNotesController.text);
+              _review(
+                c.id,
+                approve ? 'approved' : 'rejected',
+                reviewNotesController.text,
+              );
             },
             style: FilledButton.styleFrom(
               backgroundColor: approve ? const Color(0xFF4CAF50) : Colors.red,
@@ -165,7 +189,11 @@ class _ManageAttendanceAdjustmentState extends State<ManageAttendanceAdjustment>
       children: [
         Text(
           'Attendance Adjustment',
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: 24, fontWeight: FontWeight.w800),
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: 24,
+            fontWeight: FontWeight.w800,
+          ),
         ),
         const SizedBox(height: 8),
         Text(
@@ -178,7 +206,13 @@ class _ManageAttendanceAdjustmentState extends State<ManageAttendanceAdjustment>
           decoration: BoxDecoration(
             color: AppTheme.white,
             borderRadius: BorderRadius.circular(12),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 16, offset: const Offset(0, 4))],
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.06),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+            ],
             border: Border.all(color: Colors.black.withOpacity(0.06)),
           ),
           child: Column(
@@ -189,9 +223,18 @@ class _ManageAttendanceAdjustmentState extends State<ManageAttendanceAdjustment>
                   DropdownButton<String>(
                     value: _statusFilter,
                     items: [
-                      const DropdownMenuItem(value: 'pending', child: Text('Pending')),
-                      const DropdownMenuItem(value: 'approved', child: Text('Approved')),
-                      const DropdownMenuItem(value: 'rejected', child: Text('Rejected')),
+                      const DropdownMenuItem(
+                        value: 'pending',
+                        child: Text('Pending'),
+                      ),
+                      const DropdownMenuItem(
+                        value: 'approved',
+                        child: Text('Approved'),
+                      ),
+                      const DropdownMenuItem(
+                        value: 'rejected',
+                        child: Text('Rejected'),
+                      ),
                       const DropdownMenuItem(value: 'All', child: Text('All')),
                     ],
                     onChanged: (v) {
@@ -209,14 +252,22 @@ class _ManageAttendanceAdjustmentState extends State<ManageAttendanceAdjustment>
               ),
               const SizedBox(height: 16),
               if (_loading)
-                const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator()))
+                const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(32),
+                    child: CircularProgressIndicator(),
+                  ),
+                )
               else if (_corrections.isEmpty)
                 Center(
                   child: Padding(
                     padding: const EdgeInsets.all(32),
                     child: Text(
                       'No correction requests',
-                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 14,
+                      ),
                     ),
                   ),
                 )
@@ -231,13 +282,20 @@ class _ManageAttendanceAdjustmentState extends State<ManageAttendanceAdjustment>
                     return ListTile(
                       title: Text(
                         c.employeeName,
-                        style: TextStyle(fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textPrimary,
+                        ),
                       ),
                       subtitle: Text(
                         '${c.attendanceDate.year}-${c.attendanceDate.month.toString().padLeft(2, '0')}-${c.attendanceDate.day.toString().padLeft(2, '0')} · '
-                        '${_timeStr(c.requestedTimeIn)} – ${_timeStr(c.requestedTimeOut)}\n'
+                        'AM ${_timeStr(c.requestedTimeIn)}/${_timeStr(c.requestedBreakOut)} · '
+                        'PM ${_timeStr(c.requestedBreakIn)}/${_timeStr(c.requestedTimeOut)}\n'
                         'Reason: ${c.reason}',
-                        style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.textSecondary,
+                        ),
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -248,17 +306,24 @@ class _ManageAttendanceAdjustmentState extends State<ManageAttendanceAdjustment>
                                 TextButton(
                                   onPressed: () => _showReviewDialog(c, true),
                                   child: const Text('Approve'),
-                                  style: TextButton.styleFrom(foregroundColor: const Color(0xFF4CAF50)),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: const Color(0xFF4CAF50),
+                                  ),
                                 ),
                                 TextButton(
                                   onPressed: () => _showReviewDialog(c, false),
                                   child: const Text('Reject'),
-                                  style: TextButton.styleFrom(foregroundColor: Colors.red),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: Colors.red,
+                                  ),
                                 ),
                               ],
                             )
                           : Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
                               decoration: BoxDecoration(
                                 color: c.status == 'approved'
                                     ? const Color(0xFF4CAF50).withOpacity(0.15)
@@ -270,7 +335,9 @@ class _ManageAttendanceAdjustmentState extends State<ManageAttendanceAdjustment>
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w600,
-                                  color: c.status == 'approved' ? const Color(0xFF2E7D32) : Colors.red,
+                                  color: c.status == 'approved'
+                                      ? const Color(0xFF2E7D32)
+                                      : Colors.red,
                                 ),
                               ),
                             ),
