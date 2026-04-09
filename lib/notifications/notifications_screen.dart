@@ -390,10 +390,15 @@ class _NotificationCard extends StatelessWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              if (n.category == 'leave')
+                              if (n.category == 'leave' ||
+                                  n.category == 'locator')
                                 Padding(
                                   padding: const EdgeInsets.only(bottom: 6),
-                                  child: _CategoryChip(label: 'Leave'),
+                                  child: _CategoryChip(
+                                    label: n.category == 'locator'
+                                        ? 'Locator'
+                                        : 'Leave',
+                                  ),
                                 ),
                               Text(
                                 n.title,
@@ -527,7 +532,29 @@ class _TypeVisual {
 
 _TypeVisual _visualForType(String type, String category) {
   final t = type.toLowerCase();
-  if (category.toLowerCase() != 'leave') {
+  final categoryLower = category.toLowerCase();
+  if (categoryLower == 'locator') {
+    if (t.contains('approved')) {
+      return _TypeVisual(
+        icon: Icons.check_circle_outline_rounded,
+        iconColor: const Color(0xFF2E7D32),
+        accentBg: const Color(0xFFE8F5E9),
+      );
+    }
+    if (t.contains('reject')) {
+      return _TypeVisual(
+        icon: Icons.cancel_outlined,
+        iconColor: const Color(0xFFC62828),
+        accentBg: const Color(0xFFFFEBEE),
+      );
+    }
+    return _TypeVisual(
+      icon: Icons.pin_drop_rounded,
+      iconColor: AppTheme.primaryNavy,
+      accentBg: AppTheme.primaryNavy.withValues(alpha: 0.12),
+    );
+  }
+  if (categoryLower != 'leave') {
     return _TypeVisual(
       icon: Icons.notifications_rounded,
       iconColor: AppTheme.primaryNavy,

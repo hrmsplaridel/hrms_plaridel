@@ -376,24 +376,34 @@ class ApiLeaveRepository implements LeaveRepository {
   }
 
   @override
-  Future<LeaveRequest> assignMandatoryForcedLeave(
-    AdminMandatoryLeaveAssignmentInput input,
+  Future<ForcedLeaveDeductionResult> applyForcedLeaveDeduction(
+    ForcedLeaveDeductionInput input,
   ) async {
     try {
       final res = await ApiClient.instance.post<Map<String, dynamic>>(
-        '/api/leave/admin/mandatory-forced',
+        '/api/leave/admin/forced-leave-deduction',
         data: {
           'user_id': input.userId,
-          'start_date':
-              '${input.startDate.year}-${input.startDate.month.toString().padLeft(2, '0')}-${input.startDate.day.toString().padLeft(2, '0')}',
-          'end_date':
-              '${input.endDate.year}-${input.endDate.month.toString().padLeft(2, '0')}-${input.endDate.day.toString().padLeft(2, '0')}',
-          'reason': input.reason,
+          'days_to_deduct': input.daysToDeduct,
+          if (input.year != null) 'year': input.year,
+          'remarks': input.remarks,
+          'allow_negative_balance': input.allowNegativeBalance,
         },
       );
       final data = res.data;
       if (data == null) throw Exception('No data returned');
-      return LeaveRequest.fromJson(data);
+      final leaveType = leaveTypeFromString(data['leave_type']?.toString());
+      return ForcedLeaveDeductionResult(
+        userId: (data['user_id'] ?? '').toString(),
+        leaveType: leaveType,
+        deductedDays: (data['deducted_days'] as num?)?.toDouble() ?? 0,
+        remainingDays: (data['remaining_days'] as num?)?.toDouble() ?? 0,
+        year: data['year'] as int?,
+        remarks: data['remarks']?.toString(),
+        appliedAt: data['applied_at'] != null
+            ? DateTime.tryParse(data['applied_at'].toString())
+            : null,
+      );
     } on DioException catch (e) {
       throw Exception(_messageFromDio(e));
     }

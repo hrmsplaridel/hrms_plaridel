@@ -284,6 +284,17 @@ class _DtrReportsState extends State<DtrReports> {
     return '$h12:${m.toString().padLeft(2, '0')} $ampm';
   }
 
+  static String _cellDisplayForSegment({
+    required TimeRecord record,
+    required DateTime? timeValue,
+    required String segment,
+  }) {
+    if (timeValue != null) return _formatTime(timeValue);
+    final segs = record.locatorSlipSegments ?? const <String>[];
+    if (segs.any((s) => s.toUpperCase() == segment)) return 'On Field';
+    return '—';
+  }
+
   static const List<String> _shortWeekdays = [
     'Mon',
     'Tue',
@@ -1244,9 +1255,11 @@ class _DtrReportsState extends State<DtrReports> {
                                 SizedBox(
                                   width: colTime,
                                   child: Text(
-                                    rec.timeIn != null
-                                        ? _formatTime(rec.timeIn)
-                                        : '—',
+                                    _cellDisplayForSegment(
+                                      record: rec,
+                                      timeValue: rec.timeIn,
+                                      segment: 'AM IN',
+                                    ),
                                     style: TextStyle(
                                       fontSize: 12,
                                       color: AppTheme.textPrimary,
@@ -1256,9 +1269,11 @@ class _DtrReportsState extends State<DtrReports> {
                                 SizedBox(
                                   width: colTime,
                                   child: Text(
-                                    rec.breakOut != null
-                                        ? _formatTime(rec.breakOut)
-                                        : '—',
+                                    _cellDisplayForSegment(
+                                      record: rec,
+                                      timeValue: rec.breakOut,
+                                      segment: 'AM OUT',
+                                    ),
                                     style: TextStyle(
                                       fontSize: compactColumns ? 11 : 12,
                                       color: AppTheme.textPrimary,
@@ -1268,9 +1283,11 @@ class _DtrReportsState extends State<DtrReports> {
                                 SizedBox(
                                   width: colTime,
                                   child: Text(
-                                    rec.breakIn != null
-                                        ? _formatTime(rec.breakIn)
-                                        : '—',
+                                    _cellDisplayForSegment(
+                                      record: rec,
+                                      timeValue: rec.breakIn,
+                                      segment: 'PM IN',
+                                    ),
                                     style: TextStyle(
                                       fontSize: compactColumns ? 11 : 12,
                                       color: AppTheme.textPrimary,
@@ -1280,9 +1297,11 @@ class _DtrReportsState extends State<DtrReports> {
                                 SizedBox(
                                   width: colTime,
                                   child: Text(
-                                    rec.timeOut != null
-                                        ? _formatTime(rec.timeOut)
-                                        : '—',
+                                    _cellDisplayForSegment(
+                                      record: rec,
+                                      timeValue: rec.timeOut,
+                                      segment: 'PM OUT',
+                                    ),
                                     style: TextStyle(
                                       fontSize: 12,
                                       color: AppTheme.textPrimary,

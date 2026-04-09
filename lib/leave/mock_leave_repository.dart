@@ -337,30 +337,37 @@ class MockLeaveRepository implements LeaveRepository {
       _requireRequest(input.requestId).copyWith(status: LeaveRequestStatus.returned);
 
   @override
-  Future<LeaveRequest> assignMandatoryForcedLeave(
-    AdminMandatoryLeaveAssignmentInput input,
+  Future<ForcedLeaveDeductionResult> applyForcedLeaveDeduction(
+    ForcedLeaveDeductionInput input,
   ) async {
-    final now = DateTime.now();
-    final days = input.endDate
-            .difference(input.startDate)
-            .inDays
-            .toDouble() +
-        1;
-    final req = LeaveRequest(
-      id: _nextRequestId(),
-      userId: input.userId,
-      leaveType: LeaveType.mandatoryForcedLeave,
-      startDate: input.startDate,
-      endDate: input.endDate,
-      workingDaysApplied: days < 0 ? 0 : days,
-      reason: input.reason,
-      status: LeaveRequestStatus.approved,
-      dateFiled: now,
-      createdAt: now,
-      updatedAt: now,
+    final vacation = await getBalanceForUserByType(
+      input.userId,
+      LeaveType.vacationLeave,
     );
-    _upsertRequest(req);
-    return req;
+    final remaining = vacation?.remainingDays ?? 0;
+    if (!input.allowNegativeBalance && input.daysToDeduct > remaining) {
+      throw Exception(
+        'Insufficient vacation leave balance. Remaining ${remaining.toStringAsFixed(2)}, requested ${input.daysToDeduct.toStringAsFixed(2)}.',
+      );
+    }
+    _adjustUsedDays(
+      input.userId,
+      LeaveType.vacationLeave,
+      input.daysToDeduct,
+    );
+    final updatedVacation = await getBalanceForUserByType(
+      input.userId,
+      LeaveType.vacationLeave,
+    );
+    return ForcedLeaveDeductionResult(
+      userId: input.userId,
+      leaveType: LeaveType.vacationLeave,
+      deductedDays: input.daysToDeduct,
+      remainingDays: updatedVacation?.remainingDays ?? 0,
+      year: input.year,
+      remarks: input.remarks,
+      appliedAt: DateTime.now(),
+    );
   }
 
   String _nextRequestId() {

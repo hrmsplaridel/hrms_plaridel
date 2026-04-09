@@ -60,7 +60,6 @@ extension LeaveTypeExtension on LeaveType {
 
   /// Employee can file this leave type; false = admin-only.
   bool get employeeCanFile => switch (this) {
-        LeaveType.mandatoryForcedLeave => false,
         _ => true,
       };
 

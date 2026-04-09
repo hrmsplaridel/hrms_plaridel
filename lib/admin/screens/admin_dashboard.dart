@@ -29,16 +29,18 @@ import '../../../dtr/manage/manage_position.dart';
 import '../../../dtr/manage/manage_shift.dart';
 import '../../../dtr/manage/manage_holiday.dart';
 import '../../../dtr/manage/manage_attendance_policy.dart';
-import '../../../dtr/manage/manage_attendance_adjustment.dart';
 import '../../../dtr/manage/manage_biometric_devices.dart';
 import '../../../docutracker/docutracker_main.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
+import '../../../leave/screens/employee_leave_screen.dart';
+import '../../../locator/screens/admin_locator_management_screen.dart';
 import '../../../recruitment/screens/rsp_admin_screen.dart';
 import '../../../widgets/feature_card.dart';
 import '../../../notifications/notification_provider.dart';
 import '../../../notifications/notification_tap_result.dart';
 import '../../../notifications/open_notifications_panel.dart';
+import '../../../employee/screens/employee_dashboard.dart';
 
 /// Dashboard accent colors for summary cards and accents (orange theme).
 class _DashboardColors {
@@ -48,6 +50,17 @@ class _DashboardColors {
   static const Color accentBlue = Color(0xFFE85D04);
   static const Color accentGreen = Color(0xFFBF360C);
   static const Color accentAmber = Color(0xFFFF9800);
+}
+
+enum AdminMenu {
+  dashboard,
+  myAttendance,
+  myLeave,
+  dtr,
+  rsp,
+  ld,
+  docutracker,
+  createAccount,
 }
 
 /// Admin dashboard matching reference layout; features only from existing system:
@@ -61,7 +74,7 @@ class AdminDashboard extends StatefulWidget {
 
 class _AdminDashboardState extends State<AdminDashboard>
     with WidgetsBindingObserver {
-  int _selectedNavIndex = 0;
+  AdminMenu _selectedMenu = AdminMenu.dashboard;
   final GlobalKey<_DtrContentState> _dtrContentKey =
       GlobalKey<_DtrContentState>();
   final TextEditingController _dashboardSearchController =
@@ -69,15 +82,6 @@ class _AdminDashboardState extends State<AdminDashboard>
   String _dashboardSearchQuery = '';
 
   Timer? _notificationPollTimer;
-
-  static const _navItems = [
-    'Dashboard',
-    'RSP',
-    'L&D',
-    'DTR',
-    'DocuTracker',
-    'Create Account',
-  ];
 
   @override
   void initState() {
@@ -87,13 +91,10 @@ class _AdminDashboardState extends State<AdminDashboard>
       if (!mounted) return;
       context.read<NotificationProvider>().refreshUnreadCount();
       _notificationPollTimer?.cancel();
-      _notificationPollTimer = Timer.periodic(
-        const Duration(seconds: 30),
-        (_) {
-          if (!mounted) return;
-          context.read<NotificationProvider>().refreshUnreadCount();
-        },
-      );
+      _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+        if (!mounted) return;
+        context.read<NotificationProvider>().refreshUnreadCount();
+      });
     });
   }
 
@@ -124,22 +125,58 @@ class _AdminDashboardState extends State<AdminDashboard>
     if (result == null) return;
     switch (result.kind) {
       case NotificationTapKind.adminDtrLeaveManagement:
-        setState(() => _selectedNavIndex = 3);
+        setState(() => _selectedMenu = AdminMenu.dtr);
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _dtrContentKey.currentState?.openLeaveManagement();
         });
         break;
-      case NotificationTapKind.adminDtrAttendanceAdjustment:
-        setState(() => _selectedNavIndex = 3);
+      case NotificationTapKind.adminDtrLocatorManagement:
+        setState(() => _selectedMenu = AdminMenu.dtr);
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          _dtrContentKey.currentState?.openAttendanceAdjustment();
+          _dtrContentKey.currentState?.openLocatorManagement();
         });
         break;
       case NotificationTapKind.none:
       case NotificationTapKind.employeeLeaveApprovals:
       case NotificationTapKind.employeeLeaveRequests:
+      case NotificationTapKind.employeeLocatorApprovals:
+      case NotificationTapKind.employeeLocatorRequests:
       case NotificationTapKind.employeeMyAttendance:
         break;
+    }
+  }
+
+  void _onMenuSelected(AdminMenu menu) {
+    setState(() {
+      _selectedMenu = menu;
+      if (menu != AdminMenu.dashboard) {
+        _dashboardSearchController.clear();
+        _dashboardSearchQuery = '';
+      }
+    });
+  }
+
+  Widget _buildContent(String displayName) {
+    switch (_selectedMenu) {
+      case AdminMenu.dashboard:
+        return _DashboardContent(searchQuery: _dashboardSearchQuery);
+      case AdminMenu.myAttendance:
+        return EmployeeAttendanceOverviewSection(
+          displayName: displayName,
+          adminPortal: true,
+        );
+      case AdminMenu.myLeave:
+        return const EmployeeLeaveScreen();
+      case AdminMenu.dtr:
+        return _DtrContent(key: _dtrContentKey);
+      case AdminMenu.rsp:
+        return const RspAdminContent();
+      case AdminMenu.ld:
+        return const _LdContent();
+      case AdminMenu.docutracker:
+        return const DocuTrackerMain(isAdmin: true);
+      case AdminMenu.createAccount:
+        return const _AdminSignUpContent();
     }
   }
 
@@ -171,16 +208,10 @@ class _AdminDashboardState extends State<AdminDashboard>
           : Drawer(
               child: SafeArea(
                 child: _Sidebar(
-                  selectedIndex: _selectedNavIndex,
+                  selectedMenu: _selectedMenu,
                   avatarPath: avatarPath,
-                  onTap: (i) {
-                    setState(() {
-                      _selectedNavIndex = i;
-                      if (i != 0) {
-                        _dashboardSearchController.clear();
-                        _dashboardSearchQuery = '';
-                      }
-                    });
+                  onTap: (menu) {
+                    _onMenuSelected(menu);
                     if (context.mounted) Navigator.of(context).pop();
                   },
                 ),
@@ -190,17 +221,9 @@ class _AdminDashboardState extends State<AdminDashboard>
         children: [
           if (isWide)
             _Sidebar(
-              selectedIndex: _selectedNavIndex,
+              selectedMenu: _selectedMenu,
               avatarPath: avatarPath,
-              onTap: (i) {
-                setState(() {
-                  _selectedNavIndex = i;
-                  if (i != 0) {
-                    _dashboardSearchController.clear();
-                    _dashboardSearchQuery = '';
-                  }
-                });
-              },
+              onTap: _onMenuSelected,
             ),
           Expanded(
             child: Container(
@@ -223,7 +246,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                     displayName: displayName,
                     avatarPath: avatarPath,
                     showMenuButton: !isWide,
-                    searchEnabled: _selectedNavIndex == 0,
+                    searchEnabled: _selectedMenu == AdminMenu.dashboard,
                     searchController: _dashboardSearchController,
                     searchQuery: _dashboardSearchQuery,
                     onSearchChanged: (value) {
@@ -234,23 +257,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                   Expanded(
                     child: SingleChildScrollView(
                       padding: EdgeInsets.all(contentPadding),
-                      child: _selectedNavIndex == 0
-                          ? _DashboardContent(
-                              searchQuery: _dashboardSearchQuery,
-                            )
-                          : _selectedNavIndex == 1
-                          ? const RspAdminContent()
-                          : _selectedNavIndex == 2
-                          ? const _LdContent()
-                          : _selectedNavIndex == 3
-                          ? _DtrContent(key: _dtrContentKey)
-                          : _selectedNavIndex == 4
-                          ? const DocuTrackerMain(isAdmin: true)
-                          : _selectedNavIndex == 5
-                          ? const _AdminSignUpContent()
-                          : _PlaceholderContent(
-                              title: _navItems[_selectedNavIndex],
-                            ),
+                      child: _buildContent(displayName),
                     ),
                   ),
                 ],
@@ -265,14 +272,14 @@ class _AdminDashboardState extends State<AdminDashboard>
 
 class _Sidebar extends StatelessWidget {
   const _Sidebar({
-    required this.selectedIndex,
+    required this.selectedMenu,
     this.avatarPath,
     required this.onTap,
   });
 
-  final int selectedIndex;
+  final AdminMenu selectedMenu;
   final String? avatarPath;
-  final ValueChanged<int> onTap;
+  final ValueChanged<AdminMenu> onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -399,38 +406,52 @@ class _Sidebar extends StatelessWidget {
                   _NavTile(
                     icon: Icons.dashboard_rounded,
                     label: 'Dashboard',
-                    selected: selectedIndex == 0,
-                    onTap: () => onTap(0),
+                    selected: selectedMenu == AdminMenu.dashboard,
+                    onTap: () => onTap(AdminMenu.dashboard),
                   ),
+                  const _SidebarSectionLabel('MY PORTAL'),
+                  _NavTile(
+                    icon: Icons.schedule_rounded,
+                    label: 'My Attendance',
+                    selected: selectedMenu == AdminMenu.myAttendance,
+                    onTap: () => onTap(AdminMenu.myAttendance),
+                  ),
+                  _NavTile(
+                    icon: Icons.event_note_rounded,
+                    label: 'My Leave',
+                    selected: selectedMenu == AdminMenu.myLeave,
+                    onTap: () => onTap(AdminMenu.myLeave),
+                  ),
+                  const _SidebarSectionLabel('MANAGEMENT'),
                   _NavTile(
                     icon: Icons.how_to_reg_rounded,
                     label: 'RSP',
-                    selected: selectedIndex == 1,
-                    onTap: () => onTap(1),
+                    selected: selectedMenu == AdminMenu.rsp,
+                    onTap: () => onTap(AdminMenu.rsp),
                   ),
                   _NavTile(
                     icon: Icons.school_rounded,
                     label: 'L&D',
-                    selected: selectedIndex == 2,
-                    onTap: () => onTap(2),
+                    selected: selectedMenu == AdminMenu.ld,
+                    onTap: () => onTap(AdminMenu.ld),
                   ),
                   _NavTile(
                     icon: Icons.access_time_rounded,
                     label: 'DTR',
-                    selected: selectedIndex == 3,
-                    onTap: () => onTap(3),
+                    selected: selectedMenu == AdminMenu.dtr,
+                    onTap: () => onTap(AdminMenu.dtr),
                   ),
                   _NavTile(
                     icon: Icons.folder_rounded,
                     label: 'DocuTracker',
-                    selected: selectedIndex == 4,
-                    onTap: () => onTap(4),
+                    selected: selectedMenu == AdminMenu.docutracker,
+                    onTap: () => onTap(AdminMenu.docutracker),
                   ),
                   _NavTile(
                     icon: Icons.person_add_rounded,
                     label: 'Create Account',
-                    selected: selectedIndex == 5,
-                    onTap: () => onTap(5),
+                    selected: selectedMenu == AdminMenu.createAccount,
+                    onTap: () => onTap(AdminMenu.createAccount),
                   ),
                 ],
               ),
@@ -521,6 +542,31 @@ class _Sidebar extends StatelessWidget {
           ),
           const SizedBox(height: 16),
         ],
+      ),
+    );
+  }
+}
+
+class _SidebarSectionLabel extends StatelessWidget {
+  const _SidebarSectionLabel(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(30, 18, 30, 8),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          label,
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.9,
+          ),
+        ),
       ),
     );
   }
@@ -777,7 +823,10 @@ class _TopBar extends StatelessWidget {
                           horizontal: 5,
                           vertical: 1,
                         ),
-                        constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                        constraints: const BoxConstraints(
+                          minWidth: 18,
+                          minHeight: 18,
+                        ),
                         decoration: BoxDecoration(
                           color: const Color(0xFFE53935),
                           borderRadius: BorderRadius.circular(8),
@@ -2243,7 +2292,8 @@ class _DtrContent extends StatefulWidget {
 class _DtrContentState extends State<_DtrContent> {
   /// 0 = menu, 1 = Time Logs, 2 = Reports, 3 = Employees, 4 = Assignment,
   /// 5 = Department, 6 = Position, 7 = Shift, 8 = Leave Management,
-  /// 9–11 = Holiday / Policy / Adjustment via [_ManageContent], 12 = Biometric Devices
+  /// 9–10 = Holiday / Policy via [_ManageContent], 11 = Biometric Devices,
+  /// 12 = Locator Slip Management
   int _dtrSectionIndex = 0;
 
   /// When opening **Assignment** from Employees, pre-select this employee once.
@@ -2255,10 +2305,10 @@ class _DtrContentState extends State<_DtrContent> {
     setState(() => _dtrSectionIndex = 8);
   }
 
-  /// Opens **Attendance Adjustment** (DTR correction queue). Used after notification taps.
-  void openAttendanceAdjustment() {
+  /// Opens **Locator Slip Management** (notification deep-link).
+  void openLocatorManagement() {
     if (!mounted) return;
-    setState(() => _dtrSectionIndex = 11);
+    setState(() => _dtrSectionIndex = 12);
   }
 
   void _goToAssignmentWithEmployee(String employeeId) {
@@ -2381,6 +2431,13 @@ class _DtrContentState extends State<_DtrContent> {
                       onTap: () => setState(() => _dtrSectionIndex = 8),
                     ),
                     FeatureCard(
+                      title: 'Locator Slip Management',
+                      subtitle:
+                          'Review locator slip approvals, department-head endorsements, and HR final decisions.',
+                      icon: Icons.pin_drop_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 12),
+                    ),
+                    FeatureCard(
                       title: 'Holiday Management',
                       subtitle:
                           'Define regular, special, and local holidays for DTR and payroll.',
@@ -2395,18 +2452,11 @@ class _DtrContentState extends State<_DtrContent> {
                       onTap: () => setState(() => _dtrSectionIndex = 10),
                     ),
                     FeatureCard(
-                      title: 'Attendance Adjustment',
-                      subtitle:
-                          'Review and approve or reject DTR correction requests.',
-                      icon: Icons.edit_calendar_rounded,
-                      onTap: () => setState(() => _dtrSectionIndex = 11),
-                    ),
-                    FeatureCard(
                       title: 'Biometric Devices',
                       subtitle:
                           'Register and manage biometric time clocks linked to your database.',
                       icon: Icons.fingerprint_rounded,
-                      onTap: () => setState(() => _dtrSectionIndex = 12),
+                      onTap: () => setState(() => _dtrSectionIndex = 11),
                     ),
                   ],
                 ),
@@ -2416,14 +2466,17 @@ class _DtrContentState extends State<_DtrContent> {
                 DtrMain(section: DtrSection.reports)
               else if (_dtrSectionIndex == 8)
                 const LeaveMain(isAdmin: true)
-              else if (_dtrSectionIndex == 12)
+              else if (_dtrSectionIndex == 11)
                 const ManageBiometricDevices()
+              else if (_dtrSectionIndex == 12)
+                const AdminLocatorManagementScreen()
               else
                 _ManageContent(
                   subIndex: _dtrSectionIndex - 3,
                   onOpenAssignmentForEmployee: _goToAssignmentWithEmployee,
-                  prefillAssignmentEmployeeId:
-                      _dtrSectionIndex == 4 ? _prefillAssignmentEmployeeId : null,
+                  prefillAssignmentEmployeeId: _dtrSectionIndex == 4
+                      ? _prefillAssignmentEmployeeId
+                      : null,
                   onPrefillAssignmentConsumed: () {
                     if (_prefillAssignmentEmployeeId != null) {
                       setState(() => _prefillAssignmentEmployeeId = null);
@@ -4340,7 +4393,6 @@ class _ManageContent extends StatelessWidget {
     'Shift',
     'Holiday',
     'Attendance Policy',
-    'Attendance Adjustment',
   ];
 
   @override
@@ -4371,9 +4423,6 @@ class _ManageContent extends StatelessWidget {
     if (subIndex == 7) {
       return const ManageAttendancePolicy();
     }
-    if (subIndex == 8) {
-      return const ManageAttendanceAdjustment();
-    }
     final title = subIndex >= 0 && subIndex < _titles.length
         ? _titles[subIndex]
         : 'Manage';
@@ -4394,83 +4443,6 @@ class _ManageContent extends StatelessWidget {
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
         ),
       ],
-    );
-  }
-}
-
-class _PlaceholderContent extends StatelessWidget {
-  const _PlaceholderContent({required this.title});
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    final isNarrow = MediaQuery.of(context).size.width < 500;
-    return Center(
-      child: Container(
-        padding: EdgeInsets.symmetric(
-          horizontal: isNarrow ? 24 : 48,
-          vertical: isNarrow ? 32 : 48,
-        ),
-        margin: EdgeInsets.all(isNarrow ? 16 : 24),
-        decoration: BoxDecoration(
-          color: AppTheme.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.06),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
-            ),
-          ],
-          border: Border.all(color: Colors.black.withOpacity(0.06)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: EdgeInsets.all(isNarrow ? 20 : 24),
-              decoration: BoxDecoration(
-                color: AppTheme.primaryNavy.withOpacity(0.08),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.construction_rounded,
-                size: isNarrow ? 44 : 56,
-                color: AppTheme.primaryNavy.withOpacity(0.7),
-              ),
-            ),
-            SizedBox(height: isNarrow ? 20 : 24),
-            Text(
-              title,
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: isNarrow ? 18 : 22,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Coming soon',
-              style: TextStyle(
-                color: AppTheme.primaryNavy,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'This section will be available in a future update.',
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: isNarrow ? 13 : 14,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

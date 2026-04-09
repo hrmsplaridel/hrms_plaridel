@@ -531,7 +531,7 @@ class _BalancesPanel extends StatelessWidget {
   }
 }
 
-class _RequestsPanel extends StatelessWidget {
+class _RequestsPanel extends StatefulWidget {
   const _RequestsPanel({
     required this.requests,
     required this.loading,
@@ -547,106 +547,145 @@ class _RequestsPanel extends StatelessWidget {
   final ValueChanged<LeaveRequest> onPrint;
 
   @override
+  State<_RequestsPanel> createState() => _RequestsPanelState();
+}
+
+class _RequestsPanelState extends State<_RequestsPanel> {
+  late final ScrollController _requestsScrollController;
+  int? _selectedRequestIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _requestsScrollController = ScrollController();
+  }
+
+  @override
+  void dispose() {
+    _requestsScrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.sizeOf(context).height;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final maxListHeight = screenWidth < 600
+        ? (screenHeight * 0.38).clamp(260.0, 420.0)
+        : screenWidth < 1024
+        ? (screenHeight * 0.5).clamp(320.0, 560.0)
+        : (screenHeight * 0.58).clamp(380.0, 700.0);
+    final useScrollableList = widget.requests.length > 3;
+    final selectedRequest =
+        (_selectedRequestIndex != null &&
+            _selectedRequestIndex! >= 0 &&
+            _selectedRequestIndex! < widget.requests.length)
+        ? widget.requests[_selectedRequestIndex!]
+        : null;
+
     return _SectionCard(
       title: 'My Requests',
       subtitle: 'Recent leave applications and their current status.',
       icon: Icons.event_note_rounded,
-      child: loading && requests.isEmpty
+      headerTrailing: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          OutlinedButton(
+            onPressed: selectedRequest == null
+                ? null
+                : () => _showDetails(context, selectedRequest),
+            child: const Text('View Details'),
+          ),
+          OutlinedButton(
+            onPressed: selectedRequest == null
+                ? null
+                : () => _showHistory(context, selectedRequest),
+            child: const Text('View History'),
+          ),
+        ],
+      ),
+      child: widget.loading && widget.requests.isEmpty
           ? const _CenteredState(message: 'Loading leave requests...')
-          : requests.isEmpty
+          : widget.requests.isEmpty
           ? const _CenteredState(
               message:
                   'No leave requests yet. Start by filing your first leave request.',
             )
-          : Column(
-              children: requests
-                  .map(
-                    (request) => Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: _EmployeeRequestItem(
-                        request: request,
-                        onEdit: () => onEdit(request),
-                        onCancel: () => onCancel(request),
-                        onPrint: () => onPrint(request),
-                      ),
-                    ),
-                  )
-                  .toList(),
+          : !useScrollableList
+          ? Column(
+              children: List.generate(widget.requests.length, (index) {
+                final request = widget.requests[index];
+                return Padding(
+                  padding: EdgeInsets.only(
+                    bottom: index == widget.requests.length - 1 ? 0 : 12,
+                  ),
+                  child: _EmployeeRequestItem(
+                    request: request,
+                    isSelected: _selectedRequestIndex == index,
+                    onTap: () => _toggleSelection(index),
+                  ),
+                );
+              }),
+            )
+          : ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: maxListHeight),
+              child: Scrollbar(
+                controller: _requestsScrollController,
+                thumbVisibility: true,
+                child: ListView.separated(
+                  controller: _requestsScrollController,
+                  primary: false,
+                  physics: const BouncingScrollPhysics(
+                    parent: AlwaysScrollableScrollPhysics(),
+                  ),
+                  itemCount: widget.requests.length,
+                  itemBuilder: (context, index) {
+                    final request = widget.requests[index];
+                    return _EmployeeRequestItem(
+                      request: request,
+                      isSelected: _selectedRequestIndex == index,
+                      onTap: () => _toggleSelection(index),
+                    );
+                  },
+                  separatorBuilder: (_, __) => const SizedBox(height: 12),
+                ),
+              ),
             ),
     );
   }
-}
 
-class _EmployeeRequestItem extends StatelessWidget {
-  const _EmployeeRequestItem({
-    required this.request,
-    required this.onEdit,
-    required this.onCancel,
-    required this.onPrint,
-  });
-
-  final LeaveRequest request;
-  final VoidCallback onEdit;
-  final VoidCallback onCancel;
-  final VoidCallback onPrint;
-
-  bool get _canEdit =>
-      request.status == LeaveRequestStatus.draft ||
-      request.status == LeaveRequestStatus.returned ||
-      request.status == LeaveRequestStatus.rejectedByDepartmentHead ||
-      request.status == LeaveRequestStatus.rejectedByHr;
-
-  bool get _canCancel =>
-      request.status == LeaveRequestStatus.draft ||
-      request.status.isPending ||
-      request.status == LeaveRequestStatus.returned;
-
-  @override
-  Widget build(BuildContext context) {
-    return LeaveCard(
-      request: request,
-      onViewDetails: () => _showDetails(context),
-      onViewHistory: () => _showHistory(context),
-      onCancel: _canCancel ? onCancel : null,
-    );
+  void _toggleSelection(int index) {
+    setState(() {
+      _selectedRequestIndex = _selectedRequestIndex == index ? null : index;
+    });
   }
 
-  void _showDetails(BuildContext context) {
+  void _showDetails(BuildContext context, LeaveRequest request) {
+    final canEdit =
+        request.status == LeaveRequestStatus.draft ||
+        request.status == LeaveRequestStatus.returned ||
+        request.status == LeaveRequestStatus.rejectedByDepartmentHead ||
+        request.status == LeaveRequestStatus.rejectedByHr;
+
     showDialog<void>(
       context: context,
       builder: (_) => _EmployeeLeaveDetailsDialog(
         request: request,
-        canEdit: _canEdit,
-        onEdit: onEdit,
-        onPrint: onPrint,
+        canEdit: canEdit,
+        onEdit: () => widget.onEdit(request),
+        onPrint: () => widget.onPrint(request),
       ),
     );
   }
 
-  void _showHistory(BuildContext context) {
-    final events = _buildHistoryEvents(request);
-    showDialog<void>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Leave Request History'),
-        content: SizedBox(width: 560, child: HistoryTimeline(events: events)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  List<LeaveHistoryEvent> _buildHistoryEvents(LeaveRequest request) {
+  void _showHistory(BuildContext context, LeaveRequest request) {
     final reviewed = request.reviewedAt;
     final reviewer = (request.reviewerName ?? '').trim().isNotEmpty
         ? request.reviewerName!.trim()
         : 'Approver';
-    return [
+
+    final events = [
       LeaveHistoryEvent(
         label: 'Submitted',
         dateTime: request.dateFiled ?? request.createdAt,
@@ -687,6 +726,45 @@ class _EmployeeRequestItem extends StatelessWidget {
         completed: request.status == LeaveRequestStatus.approved,
       ),
     ];
+
+    showDialog<void>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Leave Request History'),
+        content: SizedBox(width: 560, child: HistoryTimeline(events: events)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmployeeRequestItem extends StatelessWidget {
+  const _EmployeeRequestItem({
+    required this.request,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  final LeaveRequest request;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return LeaveCard(
+      request: request,
+      onTap: onTap,
+      isSelected: isSelected,
+      showActions: false,
+      onViewDetails: () {},
+      onViewHistory: () {},
+      onCancel: null,
+    );
   }
 }
 
@@ -1071,12 +1149,14 @@ class _SectionCard extends StatelessWidget {
     required this.subtitle,
     required this.icon,
     required this.child,
+    this.headerTrailing,
   });
 
   final String title;
   final String subtitle;
   final IconData icon;
   final Widget child;
+  final Widget? headerTrailing;
 
   @override
   Widget build(BuildContext context) {
@@ -1126,6 +1206,15 @@ class _SectionCard extends StatelessWidget {
                   ],
                 ),
               ),
+              if (headerTrailing != null) ...[
+                const SizedBox(width: 12),
+                Flexible(
+                  child: Align(
+                    alignment: Alignment.topRight,
+                    child: headerTrailing!,
+                  ),
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 20),

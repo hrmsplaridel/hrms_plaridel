@@ -4,6 +4,137 @@ const { dateInRecurringRange } = require('./holidayRangeUtils');
 const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
 const NOON_MINUTES = 12 * 60;
 const ONE_PM_MINUTES = 13 * 60;
+const ATTENDANCE_POLICY_CACHE_TTL_MS = 60 * 1000;
+let _cachedAttendancePolicy = null;
+let _cachedAttendancePolicyAt = 0;
+const _policyByEmployeeDateCache = new Map();
+
+function _normalizePolicy(row) {
+  return {
+    id: row?.id || null,
+    workHoursPerDay: row?.work_hours_per_day != null ? parseFloat(row.work_hours_per_day) : 8,
+    deductLate: row?.deduct_late ?? true,
+    maxLateMinutesPerMonth:
+      row?.max_late_minutes_per_month != null ? parseInt(row.max_late_minutes_per_month, 10) : null,
+    convertLateToEquivalentDay: row?.convert_late_to_equivalent_day ?? false,
+    deductUndertime: row?.deduct_undertime ?? true,
+    convertUndertimeToEquivalentDay: row?.convert_undertime_to_equivalent_day ?? false,
+    absentEqualsFullDayDeduction: row?.absent_equals_full_day_deduction ?? true,
+    combineLateAndUndertime: row?.combine_late_and_undertime ?? false,
+    deductionMultiplier: row?.deduction_multiplier != null ? parseFloat(row.deduction_multiplier) : 1,
+  };
+}
+
+async function getActiveDefaultAttendancePolicy() {
+  const now = Date.now();
+  if (_cachedAttendancePolicy && now - _cachedAttendancePolicyAt < ATTENDANCE_POLICY_CACHE_TTL_MS) {
+    return _cachedAttendancePolicy;
+  }
+  const result = await pool.query(
+    `SELECT id, work_hours_per_day, deduct_late, max_late_minutes_per_month,
+            convert_late_to_equivalent_day, deduct_undertime, convert_undertime_to_equivalent_day,
+            absent_equals_full_day_deduction, combine_late_and_undertime, deduction_multiplier
+     FROM attendance_policies
+     WHERE (is_active IS NULL OR is_active = true)
+     ORDER BY is_default DESC, updated_at DESC, created_at DESC
+     LIMIT 1`
+  );
+  _cachedAttendancePolicy = _normalizePolicy(result.rows[0]);
+  _cachedAttendancePolicyAt = now;
+  return _cachedAttendancePolicy;
+}
+
+async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
+  if (!employeeId || !dateStr) return getActiveDefaultAttendancePolicy();
+  const cacheKey = `${employeeId}|${dateStr}`;
+  const now = Date.now();
+  const cached = _policyByEmployeeDateCache.get(cacheKey);
+  if (cached && now - cached.at < ATTENDANCE_POLICY_CACHE_TTL_MS) return cached.value;
+
+  const result = await pool.query(
+    `WITH eff AS (
+       SELECT a.department_id, a.shift_id
+       FROM assignments a
+       WHERE a.employee_id = $1::uuid
+         AND (a.is_active IS NULL OR a.is_active = true)
+         AND a.effective_from <= $2::date
+         AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
+       ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
+       LIMIT 1
+     )
+     SELECT p.id, p.work_hours_per_day, p.deduct_late, p.max_late_minutes_per_month,
+            p.convert_late_to_equivalent_day, p.deduct_undertime, p.convert_undertime_to_equivalent_day,
+            p.absent_equals_full_day_deduction, p.combine_late_and_undertime, p.deduction_multiplier
+     FROM policy_assignments pa
+     JOIN attendance_policies p ON p.id = pa.attendance_policy_id
+     LEFT JOIN eff e ON true
+     WHERE (pa.is_active IS NULL OR pa.is_active = true)
+       AND (p.is_active IS NULL OR p.is_active = true)
+       AND pa.effective_from <= $2::date
+       AND (pa.effective_to IS NULL OR pa.effective_to >= $2::date)
+       AND (
+         pa.employee_id = $1::uuid
+         OR (pa.department_id IS NOT NULL AND pa.department_id = e.department_id)
+         OR (pa.shift_id IS NOT NULL AND pa.shift_id = e.shift_id)
+       )
+     ORDER BY CASE
+                WHEN pa.employee_id = $1::uuid THEN 1
+                WHEN pa.department_id IS NOT NULL AND pa.department_id = e.department_id THEN 2
+                WHEN pa.shift_id IS NOT NULL AND pa.shift_id = e.shift_id THEN 3
+                ELSE 4
+              END,
+              pa.effective_from DESC,
+              pa.created_at DESC
+     LIMIT 1`,
+    [employeeId, dateStr]
+  );
+  const resolved = result.rows[0] ? _normalizePolicy(result.rows[0]) : await getActiveDefaultAttendancePolicy();
+  _policyByEmployeeDateCache.set(cacheKey, { at: now, value: resolved });
+  return resolved;
+}
+
+function applyPolicyConversion(minutes, convertToEquivalentDay, workHoursPerDay, multiplier) {
+  if (!Number.isFinite(minutes) || minutes <= 0) return 0;
+  const mult = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+  if (!convertToEquivalentDay) return Math.round(minutes * mult);
+  const workMinutes = Math.max(1, Math.round((Number.isFinite(workHoursPerDay) ? workHoursPerDay : 8) * 60));
+  const dayValue = minutes / workMinutes;
+  return Math.round(dayValue * mult * workMinutes);
+}
+
+async function applyAttendancePolicyPenalties(employeeId, dateStr, rawLateMinutes, rawUndertimeMinutes) {
+  const policy = await getAttendancePolicyForEmployeeDate(employeeId, dateStr);
+  let late = policy.deductLate ? Math.max(0, rawLateMinutes || 0) : 0;
+  let under = policy.deductUndertime ? Math.max(0, rawUndertimeMinutes || 0) : 0;
+
+  if (policy.maxLateMinutesPerMonth != null && policy.maxLateMinutesPerMonth >= 0 && late > 0) {
+    const used = await pool.query(
+      `SELECT COALESCE(SUM(late_minutes), 0) AS total
+       FROM dtr_daily_summary
+       WHERE employee_id = $1::uuid
+         AND date_trunc('month', attendance_date) = date_trunc('month', $2::date)
+         AND attendance_date < $2::date`,
+      [employeeId, dateStr]
+    );
+    const consumed = parseInt(used.rows[0]?.total ?? 0, 10) || 0;
+    const remaining = Math.max(0, policy.maxLateMinutesPerMonth - consumed);
+    late = Math.min(late, remaining);
+  }
+
+  if (policy.combineLateAndUndertime) {
+    under += late;
+    late = 0;
+  }
+
+  late = applyPolicyConversion(late, policy.convertLateToEquivalentDay, policy.workHoursPerDay, policy.deductionMultiplier);
+  under = applyPolicyConversion(
+    under,
+    policy.convertUndertimeToEquivalentDay,
+    policy.workHoursPerDay,
+    policy.deductionMultiplier
+  );
+  return { lateMinutes: late, undertimeMinutes: under, policy };
+}
 
 function timeToMinutes(timeStr) {
   if (!timeStr) return null;
@@ -209,6 +340,19 @@ async function computeUndertimeMinutes(employeeId, dateStr, timeOutIso, breakOut
   const type = getShiftType(shiftInfo);
   const evalAm = !isHolidayOrSuspension || coverage !== 'am_only';
   const evalPm = !isHolidayOrSuspension || coverage !== 'pm_only';
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  let amUndertimePenalty = 0;
+  if (type === 'full_day' && evalAm && shiftInfo.startMinutes != null) {
+    const hasAmLogs = timeInIso != null && breakOutIso != null;
+    const pmStartMinutes = shiftInfo.breakEndMinutes ?? NOON_MINUTES;
+    const amWindowClosed =
+      dateStr < todayStr || (dateStr === todayStr && nowMinutes >= pmStartMinutes);
+    if (!hasAmLogs && amWindowClosed) {
+      amUndertimePenalty = Math.max(0, pmStartMinutes - shiftInfo.startMinutes);
+    }
+  }
   let clockOutMins = null;
   if (evalAm && type === 'am_only' && breakOutIso) {
     clockOutMins = minutesFromMidnightInTimeZone(breakOutIso);
@@ -219,20 +363,27 @@ async function computeUndertimeMinutes(employeeId, dateStr, timeOutIso, breakOut
     // Incomplete record: employee clocked in but never clocked out.
     const hasClockIn = !!(timeInIso || breakInIso);
     if (!hasClockIn) return 0;
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const now = new Date();
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
     const isPast = dateStr < todayStr;
     const isShiftOver = dateStr === todayStr && nowMinutes > shiftInfo.endMinutes;
     if (isPast || isShiftOver) {
+      // For full-day shifts, undertime baseline is net work minutes (exclude lunch),
+      // not raw elapsed span (e.g. 8-5 should be 480, not 540).
       const startMinutes = shiftInfo.startMinutes != null ? shiftInfo.startMinutes : 0;
-      return Math.max(0, shiftInfo.endMinutes - startMinutes);
+      const spanMinutes = Math.max(0, shiftInfo.endMinutes - startMinutes);
+      if (type === 'full_day') {
+        const lunchMinutes =
+          shiftInfo.breakEndMinutes != null
+            ? Math.max(0, shiftInfo.breakEndMinutes - NOON_MINUTES)
+            : 60;
+        return Math.max(0, spanMinutes - lunchMinutes) + amUndertimePenalty;
+      }
+      return spanMinutes + amUndertimePenalty;
     }
     return 0;
   }
   const endMinutes = shiftInfo.endMinutes;
   if (clockOutMins >= endMinutes) return 0;
-  return endMinutes - clockOutMins;
+  return (endMinutes - clockOutMins) + amUndertimePenalty;
 }
 
 function getShiftType(shiftInfo) {
@@ -281,9 +432,10 @@ function getManilaDateStr(val) {
  *
  * @param {Array<Date|string>} punches - ascending order, same calendar day (Manila)
  * @param {string|null} shiftType - 'pm_only' | 'am_only' | 'full_day' | null
+ * @param {{ breakEndMinutes?: number|null }|null} shiftInfo - assignment shift info for thresholding
  * @returns {{ timeIn, breakOut, breakIn, timeOut, status, totalHours, punchCount }}
  */
-function interpretPunchesForDay(punches, shiftType) {
+function interpretPunchesForDay(punches, shiftType, shiftInfo = null) {
   const n = punches.length;
   if (n === 0) return null;
 
@@ -302,17 +454,43 @@ function interpretPunchesForDay(punches, shiftType) {
     if (n >= 2) breakOut = punches[1];
     status = n >= 2 ? 'present' : 'incomplete';
   } else {
+    // Full-day shift: if first punch is in PM window, treat it as PM-only attendance
+    // for the day (AM absent). This avoids showing afternoon punches in AM columns.
+    const firstPunchMins = minutesFromMidnightInTimeZone(punches[0]);
+    const pmStartThreshold =
+      shiftInfo && Number.isFinite(shiftInfo.breakEndMinutes)
+        ? shiftInfo.breakEndMinutes
+        : NOON_MINUTES;
+    const isAfternoonFirstPunch =
+      firstPunchMins != null && firstPunchMins >= pmStartThreshold;
+
+    if (isAfternoonFirstPunch) {
+      breakIn = punches[0];
+      if (n >= 2) timeOut = punches[n - 1];
+      status = n >= 2 ? 'present' : 'incomplete';
+      const totalHours = computeTotalHours(timeIn, timeOut, breakOut, breakIn, 'pm_only');
+      return {
+        timeIn,
+        breakOut,
+        breakIn,
+        timeOut,
+        status,
+        totalHours,
+        punchCount: n,
+      };
+    }
+
     if (n === 1) {
       timeIn = punches[0];
       status = 'incomplete';
     } else if (n === 2) {
       timeIn = punches[0];
-      timeOut = punches[1];
-      status = 'present';
+      breakOut = punches[1];
+      status = 'incomplete';
     } else if (n === 3) {
       timeIn = punches[0];
       breakOut = punches[1];
-      timeOut = punches[2];
+      breakIn = punches[2];
       status = 'incomplete';
     } else {
       timeIn = punches[0];
@@ -484,7 +662,7 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
       punches: punchList.map((p) => (p instanceof Date ? p.toISOString() : String(p))),
     });
 
-    const interpreted = interpretPunchesForDay(punchList, shiftType);
+    const interpreted = interpretPunchesForDay(punchList, shiftType, shiftInfo);
     if (!interpreted) {
       skipped++;
       continue;
@@ -534,14 +712,41 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
     let lateMinutes = 0;
     let undertimeMinutes = 0;
     if (effectiveStatus !== 'on_leave') {
-      lateMinutes = await computeLateMinutes(user_id, attendanceDateStr, timeIn, breakIn, effectiveStatus, holidayId, coverage);
-      undertimeMinutes = await computeUndertimeMinutes(user_id, attendanceDateStr, timeOut, breakOut, effectiveStatus, holidayId, coverage, timeIn, breakIn);
+      const rawLate = await computeLateMinutes(
+        user_id,
+        attendanceDateStr,
+        timeIn,
+        breakIn,
+        effectiveStatus,
+        holidayId,
+        coverage
+      );
+      const rawUnder = await computeUndertimeMinutes(
+        user_id,
+        attendanceDateStr,
+        timeOut,
+        breakOut,
+        effectiveStatus,
+        holidayId,
+        coverage,
+        timeIn,
+        breakIn
+      );
+      const adjusted = await applyAttendancePolicyPenalties(
+        user_id,
+        attendanceDateStr,
+        rawLate,
+        rawUnder
+      );
+      lateMinutes = adjusted.lateMinutes;
+      undertimeMinutes = adjusted.undertimeMinutes;
     }
 
     let existing;
     try {
       existing = await pool.query(
-        `SELECT id, source FROM dtr_daily_summary
+        `SELECT id, source, time_in, break_in, time_out
+         FROM dtr_daily_summary
          WHERE employee_id = $1::uuid AND attendance_date = $2::date`,
         [user_id, attendanceDateStr]
       );
@@ -581,6 +786,19 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
         throw err;
       }
     } else if (existing.rows[0].source === 'system') {
+      const existingRow = existing.rows[0];
+      const isCompletedSummary =
+        existingRow.time_out != null &&
+        (existingRow.time_in != null || existingRow.break_in != null);
+      if (isCompletedSummary) {
+        skipped++;
+        console.log('[biometricProcessing] SKIP (completed system summary locked)', {
+          employee_id: user_id,
+          attendance_date: attendanceDateStr,
+          punches: punchCount,
+        });
+        continue;
+      }
       try {
         await pool.query(
           `UPDATE dtr_daily_summary SET

@@ -427,18 +427,16 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
-  Future<LeaveRequest?> assignMandatoryForcedLeave(
-    AdminMandatoryLeaveAssignmentInput input,
+  Future<ForcedLeaveDeductionResult?> applyForcedLeaveDeduction(
+    ForcedLeaveDeductionInput input,
   ) async {
     _reviewing = true;
     _error = null;
     notifyListeners();
     try {
-      final created = await _repository.assignMandatoryForcedLeave(input);
-      _selectedRequest = created;
-      _upsertRequest(created);
+      final result = await _repository.applyForcedLeaveDeduction(input);
       _notifyMutation();
-      return created;
+      return result;
     } catch (e) {
       _error = e is Exception && e.toString().startsWith('Exception: ')
           ? e.toString().replaceFirst('Exception: ', '')

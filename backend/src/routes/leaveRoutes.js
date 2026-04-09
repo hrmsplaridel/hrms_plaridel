@@ -41,6 +41,28 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads
 const LEAVE_ATTACHMENT_SUBDIR = 'leave-attachments';
 
 initLeaveRequestHistory(pool);
+pool
+  .query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`)
+  .then(() =>
+    pool.query(`
+      CREATE TABLE IF NOT EXISTS leave_balance_deduction_history (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        leave_type TEXT NOT NULL,
+        deducted_days NUMERIC NOT NULL,
+        remaining_days NUMERIC,
+        remarks TEXT,
+        applied_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        metadata_json JSONB
+      );
+      CREATE INDEX IF NOT EXISTS idx_leave_balance_deduction_history_user_applied
+        ON leave_balance_deduction_history(user_id, applied_at DESC);
+    `)
+  )
+  .catch((err) =>
+    console.error('[leave] failed to ensure leave_balance_deduction_history table', err)
+  );
 
 function toIsoDateStr(val) {
   if (!val) return null;
@@ -85,7 +107,7 @@ async function computeNumberOfDays(startStr, endStr, dbClient = null) {
       const nonRec = await dbClient.query(
         `SELECT date_from, date_to FROM holidays
          WHERE is_active = true
-           AND recurring = false
+          AND recurring = false
            AND holiday_type IN ('regular', 'special', 'local')
            AND date_from <= $2::date AND date_to >= $1::date`,
         [startStr, endStr]
@@ -314,10 +336,17 @@ function balanceLedgerLeaveType(leaveTypeName) {
   return leaveTypeName === 'mandatoryForcedLeave' ? 'vacationLeave' : leaveTypeName;
 }
 
-async function upsertLeaveBalanceDeduction(client, userId, leaveTypeName, daysToDeduct) {
+async function upsertLeaveBalanceDeduction(
+  client,
+  userId,
+  leaveTypeName,
+  daysToDeduct,
+  options = {}
+) {
   if (!userId || !leaveTypeName) return;
   const days = daysToDeduct != null ? parseFloat(daysToDeduct) : 0;
   if (!Number.isFinite(days) || days <= 0) return;
+  const allowNegative = options.allowNegative === true;
 
   const ledgerType = balanceLedgerLeaveType(leaveTypeName);
 
@@ -334,7 +363,7 @@ async function upsertLeaveBalanceDeduction(client, userId, leaveTypeName, daysTo
   const used = bal.rows.length > 0 ? parseFloat(bal.rows[0].used_days ?? 0) : 0;
   const adjusted = bal.rows.length > 0 ? parseFloat(bal.rows[0].adjusted_days ?? 0) : 0;
   const remaining = earned - used + adjusted;
-  if (days > remaining) {
+  if (!allowNegative && days > remaining) {
     const prefix =
       leaveTypeName === 'mandatoryForcedLeave'
         ? 'Insufficient vacation leave balance (mandatory/forced leave uses vacation credits)'
@@ -353,6 +382,15 @@ async function upsertLeaveBalanceDeduction(client, userId, leaveTypeName, daysTo
                    updated_at = now()`,
     [userId, ledgerType, days]
   );
+
+  const after = await client.query(
+    `SELECT COALESCE(earned_days, 0) - COALESCE(used_days, 0) + COALESCE(adjusted_days, 0) AS remaining
+     FROM leave_balances
+     WHERE user_id = $1::uuid AND leave_type = $2::text
+     LIMIT 1`,
+    [userId, ledgerType]
+  );
+  return after.rows.length > 0 ? parseFloat(after.rows[0].remaining ?? 0) : 0;
 }
 
 async function applyApprovedLeaveToDtr(client, userId, leaveRequestId, startDateStr, endDateStr) {
@@ -1018,17 +1056,19 @@ router.get('/my', protect, async (req, res) => {
 // ADMIN ENDPOINTS
 // ============================
 
-// POST /api/leave/admin/mandatory-forced (admin/HR assign)
-router.post('/admin/mandatory-forced', protect, requireAdminOrHr, async (req, res) => {
+// POST /api/leave/admin/forced-leave-deduction
+// Admin/HR-only: applies a direct vacation leave balance deduction (no leave request row).
+router.post('/admin/forced-leave-deduction', protect, requireAdminOrHr, async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const userId = (req.body?.user_id || '').toString().trim();
-  const startStr = toIsoDateStr(req.body?.start_date);
-  const endStr = toIsoDateStr(req.body?.end_date);
-  const reason = (req.body?.reason || '').toString().trim() || null;
+  const daysRaw = req.body?.days_to_deduct ?? req.body?.daysToDeduct;
+  const days = daysRaw != null && daysRaw !== '' ? parseFloat(daysRaw) : NaN;
+  const remarks = (req.body?.remarks || '').toString().trim() || null;
+  const allowNegative = req.body?.allow_negative_balance === true;
   if (!userId) return res.status(400).json({ error: 'user_id is required' });
-  if (!startStr || !endStr) {
-    return res.status(400).json({ error: 'start_date and end_date are required' });
+  if (!Number.isFinite(days) || days <= 0) {
+    return res.status(400).json({ error: 'days_to_deduct must be greater than 0' });
   }
 
   const client = await pool.connect();
@@ -1042,99 +1082,56 @@ router.post('/admin/mandatory-forced', protect, requireAdminOrHr, async (req, re
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Target employee not found or inactive' });
     }
-
-    const days = await computeNumberOfDays(startStr, endStr, client);
-    if (days == null || days <= 0) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Number of working days must be greater than 0.' });
-    }
-    if (days > 5) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Mandatory/Forced Leave allows a maximum of 5 working days.' });
-    }
-
-    const hasOverlap = await hasOverlappingLeaveRequest(client, userId, startStr, endStr, null);
-    if (hasOverlap) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Overlapping leave request exists' });
-    }
-
-    const leaveTypeId = await ensureLeaveTypeIdByName(client, 'mandatoryForcedLeave');
-    if (!leaveTypeId) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'mandatoryForcedLeave is not configured in leave_types' });
-    }
-
-    const details = {
-      leave_type: 'mandatoryForcedLeave',
-      start_date: startStr,
-      end_date: endStr,
-      admin_assigned: true,
-    };
-    const created = await client.query(
-      `INSERT INTO leave_requests (
-          employee_id, user_id, leave_type_id, start_date, end_date,
-          total_days, number_of_days, reason, details, status,
-          reviewer_id, reviewer_remarks, reviewed_at, approved_by, approved_at,
-          created_at, updated_at
-        )
-        VALUES (
-          $1::uuid, $1::uuid, $2::uuid, $3::date, $4::date,
-          $5::numeric, $5::numeric, $6::text, $7::jsonb, 'approved',
-          $8::uuid, $6::text, now(), $8::uuid, now(),
-          now(), now()
-        )
-        RETURNING *`,
-      [userId, leaveTypeId, startStr, endStr, days, reason, details, reviewerId]
+    const remaining = await upsertLeaveBalanceDeduction(
+      client,
+      userId,
+      'mandatoryForcedLeave',
+      days,
+      { allowNegative }
     );
-    const row = created.rows[0];
-
-    await upsertLeaveBalanceDeduction(client, userId, 'mandatoryForcedLeave', days);
-    await applyApprovedLeaveToDtr(client, userId, row.id, startStr, endStr);
-
-    await insertLeaveRequestHistory(client, {
-      leaveRequestId: row.id,
-      action: 'admin_assigned_mandatory_forced',
-      fromStatus: null,
-      toStatus: 'approved',
-      actedBy: reviewerId,
-      remarks: reason,
-      metadataJson: {
-        leave_type: 'mandatoryForcedLeave',
-        start_date: startStr,
-        end_date: endStr,
-        number_of_days: days,
-      },
-    });
+    await client.query(
+      `INSERT INTO leave_balance_deduction_history (
+        user_id, leave_type, deducted_days, remaining_days, remarks, applied_by, applied_at, metadata_json
+      ) VALUES (
+        $1::uuid, 'vacationLeave', $2::numeric, $3::numeric, $4::text, $5::uuid, now(),
+        $6::jsonb
+      )`,
+      [
+        userId,
+        days,
+        remaining,
+        remarks,
+        reviewerId,
+        JSON.stringify({
+          source: 'forced_leave_deduction',
+          requested_leave_type: 'mandatoryForcedLeave',
+          allow_negative_balance: allowNegative,
+        }),
+      ]
+    );
 
     await client.query('COMMIT');
-    const out = await pool.query(
-      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
-              d.name AS assignment_department_name
-       FROM leave_requests lr
-       LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
-       LEFT JOIN users u ON u.id = COALESCE(lr.user_id, lr.employee_id)
-       ${SQL_LEAVE_ASSIGNMENT_DEPT_JOIN}
-       WHERE lr.id = $1`,
-      [row.id]
-    );
-    const mappedMf = mapLeaveRowToApi(out.rows[0]);
     notifySafe(() =>
-      leaveNotifications.notifyMandatoryForcedAssigned(pool, {
-        leaveRequestId: row.id,
+      leaveNotifications.notifyForcedLeaveDeductionApplied(pool, {
         employeeUserId: userId,
-        employeeName: mappedMf.employee_name,
-        startDateStr: startStr,
-        endDateStr: endStr,
-        reason,
+        deductedDays: days,
+        remainingDays: remaining,
+        remarks,
       })
     );
-    res.status(201).json(mappedMf);
+    res.status(201).json({
+      user_id: userId,
+      leave_type: 'vacationLeave',
+      deducted_days: days,
+      remaining_days: remaining,
+      remarks,
+      applied_at: new Date().toISOString(),
+    });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { }
-    console.error('[leave POST /admin/mandatory-forced]', err);
+    console.error('[leave POST /admin/forced-leave-deduction]', err);
     if (err && err.statusCode) return res.status(err.statusCode).json({ error: err.message });
-    res.status(500).json({ error: 'Failed to assign Mandatory/Forced Leave' });
+    res.status(500).json({ error: 'Failed to apply forced leave deduction' });
   } finally {
     client.release();
   }

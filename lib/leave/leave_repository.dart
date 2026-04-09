@@ -93,19 +93,42 @@ class LeaveReviewDecisionInput {
   final DateTime? reviewedAt;
 }
 
-/// Admin payload for assigning Mandatory/Forced Leave to an employee.
-class AdminMandatoryLeaveAssignmentInput {
-  const AdminMandatoryLeaveAssignmentInput({
+/// Admin payload for year-end forced leave deduction.
+class ForcedLeaveDeductionInput {
+  const ForcedLeaveDeductionInput({
     required this.userId,
-    required this.startDate,
-    required this.endDate,
-    this.reason,
+    required this.daysToDeduct,
+    this.year,
+    this.remarks,
+    this.allowNegativeBalance = false,
   });
 
   final String userId;
-  final DateTime startDate;
-  final DateTime endDate;
-  final String? reason;
+  final double daysToDeduct;
+  final int? year;
+  final String? remarks;
+  final bool allowNegativeBalance;
+}
+
+/// Result returned after a forced leave deduction is applied.
+class ForcedLeaveDeductionResult {
+  const ForcedLeaveDeductionResult({
+    required this.userId,
+    required this.leaveType,
+    required this.deductedDays,
+    required this.remainingDays,
+    this.year,
+    this.remarks,
+    this.appliedAt,
+  });
+
+  final String userId;
+  final LeaveType leaveType;
+  final double deductedDays;
+  final double remainingDays;
+  final int? year;
+  final String? remarks;
+  final DateTime? appliedAt;
 }
 
 /// Backend-neutral contract for leave data access.
@@ -208,8 +231,8 @@ abstract class LeaveRepository {
   /// Department head returns a request to the employee.
   Future<LeaveRequest> departmentHeadReturn(LeaveReviewDecisionInput input);
 
-  /// Admin assigns Mandatory/Forced Leave to an employee.
-  Future<LeaveRequest> assignMandatoryForcedLeave(
-    AdminMandatoryLeaveAssignmentInput input,
+  /// Admin/HR applies year-end forced leave as a vacation balance deduction.
+  Future<ForcedLeaveDeductionResult> applyForcedLeaveDeduction(
+    ForcedLeaveDeductionInput input,
   );
 }

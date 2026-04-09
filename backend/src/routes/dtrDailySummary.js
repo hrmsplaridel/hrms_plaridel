@@ -42,6 +42,137 @@ const NOON_MINUTES = 12 * 60;
 
 /** Default timezone for interpreting shift rules vs log timestamps. */
 const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
+const ATTENDANCE_POLICY_CACHE_TTL_MS = 60 * 1000;
+let _cachedAttendancePolicy = null;
+let _cachedAttendancePolicyAt = 0;
+const _policyByEmployeeDateCache = new Map();
+
+function _normalizePolicy(row) {
+  return {
+    id: row?.id || null,
+    workHoursPerDay: row?.work_hours_per_day != null ? parseFloat(row.work_hours_per_day) : 8,
+    deductLate: row?.deduct_late ?? true,
+    maxLateMinutesPerMonth:
+      row?.max_late_minutes_per_month != null ? parseInt(row.max_late_minutes_per_month, 10) : null,
+    convertLateToEquivalentDay: row?.convert_late_to_equivalent_day ?? false,
+    deductUndertime: row?.deduct_undertime ?? true,
+    convertUndertimeToEquivalentDay: row?.convert_undertime_to_equivalent_day ?? false,
+    absentEqualsFullDayDeduction: row?.absent_equals_full_day_deduction ?? true,
+    combineLateAndUndertime: row?.combine_late_and_undertime ?? false,
+    deductionMultiplier: row?.deduction_multiplier != null ? parseFloat(row.deduction_multiplier) : 1,
+  };
+}
+
+async function getActiveDefaultAttendancePolicy() {
+  const now = Date.now();
+  if (_cachedAttendancePolicy && now - _cachedAttendancePolicyAt < ATTENDANCE_POLICY_CACHE_TTL_MS) {
+    return _cachedAttendancePolicy;
+  }
+  const result = await pool.query(
+    `SELECT id, work_hours_per_day, deduct_late, max_late_minutes_per_month,
+            convert_late_to_equivalent_day, deduct_undertime, convert_undertime_to_equivalent_day,
+            absent_equals_full_day_deduction, combine_late_and_undertime, deduction_multiplier
+     FROM attendance_policies
+     WHERE (is_active IS NULL OR is_active = true)
+     ORDER BY is_default DESC, updated_at DESC, created_at DESC
+     LIMIT 1`
+  );
+  _cachedAttendancePolicy = _normalizePolicy(result.rows[0]);
+  _cachedAttendancePolicyAt = now;
+  return _cachedAttendancePolicy;
+}
+
+async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
+  if (!employeeId || !dateStr) return getActiveDefaultAttendancePolicy();
+  const cacheKey = `${employeeId}|${dateStr}`;
+  const now = Date.now();
+  const cached = _policyByEmployeeDateCache.get(cacheKey);
+  if (cached && now - cached.at < ATTENDANCE_POLICY_CACHE_TTL_MS) return cached.value;
+
+  const result = await pool.query(
+    `WITH eff AS (
+       SELECT a.department_id, a.shift_id
+       FROM assignments a
+       WHERE a.employee_id = $1::uuid
+         AND (a.is_active IS NULL OR a.is_active = true)
+         AND a.effective_from <= $2::date
+         AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
+       ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
+       LIMIT 1
+     )
+     SELECT p.id, p.work_hours_per_day, p.deduct_late, p.max_late_minutes_per_month,
+            p.convert_late_to_equivalent_day, p.deduct_undertime, p.convert_undertime_to_equivalent_day,
+            p.absent_equals_full_day_deduction, p.combine_late_and_undertime, p.deduction_multiplier
+     FROM policy_assignments pa
+     JOIN attendance_policies p ON p.id = pa.attendance_policy_id
+     LEFT JOIN eff e ON true
+     WHERE (pa.is_active IS NULL OR pa.is_active = true)
+       AND (p.is_active IS NULL OR p.is_active = true)
+       AND pa.effective_from <= $2::date
+       AND (pa.effective_to IS NULL OR pa.effective_to >= $2::date)
+       AND (
+         pa.employee_id = $1::uuid
+         OR (pa.department_id IS NOT NULL AND pa.department_id = e.department_id)
+         OR (pa.shift_id IS NOT NULL AND pa.shift_id = e.shift_id)
+       )
+     ORDER BY CASE
+                WHEN pa.employee_id = $1::uuid THEN 1
+                WHEN pa.department_id IS NOT NULL AND pa.department_id = e.department_id THEN 2
+                WHEN pa.shift_id IS NOT NULL AND pa.shift_id = e.shift_id THEN 3
+                ELSE 4
+              END,
+              pa.effective_from DESC,
+              pa.created_at DESC
+     LIMIT 1`,
+    [employeeId, dateStr]
+  );
+  const resolved = result.rows[0] ? _normalizePolicy(result.rows[0]) : await getActiveDefaultAttendancePolicy();
+  _policyByEmployeeDateCache.set(cacheKey, { at: now, value: resolved });
+  return resolved;
+}
+
+function applyPolicyConversion(minutes, convertToEquivalentDay, workHoursPerDay, multiplier) {
+  if (!Number.isFinite(minutes) || minutes <= 0) return 0;
+  const mult = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+  if (!convertToEquivalentDay) return Math.round(minutes * mult);
+  const workMinutes = Math.max(1, Math.round((Number.isFinite(workHoursPerDay) ? workHoursPerDay : 8) * 60));
+  const dayValue = minutes / workMinutes;
+  return Math.round(dayValue * mult * workMinutes);
+}
+
+async function applyAttendancePolicyPenalties(employeeId, dateStr, rawLateMinutes, rawUndertimeMinutes) {
+  const policy = await getAttendancePolicyForEmployeeDate(employeeId, dateStr);
+  let late = policy.deductLate ? Math.max(0, rawLateMinutes || 0) : 0;
+  let under = policy.deductUndertime ? Math.max(0, rawUndertimeMinutes || 0) : 0;
+
+  if (policy.maxLateMinutesPerMonth != null && policy.maxLateMinutesPerMonth >= 0 && late > 0) {
+    const used = await pool.query(
+      `SELECT COALESCE(SUM(late_minutes), 0) AS total
+       FROM dtr_daily_summary
+       WHERE employee_id = $1::uuid
+         AND date_trunc('month', attendance_date) = date_trunc('month', $2::date)
+         AND attendance_date < $2::date`,
+      [employeeId, dateStr]
+    );
+    const consumed = parseInt(used.rows[0]?.total ?? 0, 10) || 0;
+    const remaining = Math.max(0, policy.maxLateMinutesPerMonth - consumed);
+    late = Math.min(late, remaining);
+  }
+
+  if (policy.combineLateAndUndertime) {
+    under += late;
+    late = 0;
+  }
+
+  late = applyPolicyConversion(late, policy.convertLateToEquivalentDay, policy.workHoursPerDay, policy.deductionMultiplier);
+  under = applyPolicyConversion(
+    under,
+    policy.convertUndertimeToEquivalentDay,
+    policy.workHoursPerDay,
+    policy.deductionMultiplier
+  );
+  return { lateMinutes: late, undertimeMinutes: under, policy };
+}
 
 /** Get minutes-from-midnight in a specific IANA timezone from a Date/ISO value. */
 function minutesFromMidnightInTimeZone(val, timeZone = HRMS_TIMEZONE) {
@@ -93,6 +224,21 @@ function getShiftType(shiftInfo) {
   if (startMinutes >= NOON_MINUTES) return 'pm_only';
   if (breakEndMinutes == null && endMinutes != null && endMinutes <= ONE_PM_MINUTES) return 'am_only';
   return 'full_day';
+}
+
+/** Expected net work minutes for a shift (exclude lunch on full-day shifts). */
+function getExpectedWorkMinutes(shiftInfo) {
+  if (!shiftInfo || shiftInfo.startMinutes == null || shiftInfo.endMinutes == null) {
+    return 0;
+  }
+  const spanMinutes = Math.max(0, shiftInfo.endMinutes - shiftInfo.startMinutes);
+  const type = getShiftType(shiftInfo);
+  if (type !== 'full_day') return spanMinutes;
+  const lunchMinutes =
+    shiftInfo.breakEndMinutes != null
+      ? Math.max(0, shiftInfo.breakEndMinutes - NOON_MINUTES)
+      : 60;
+  return Math.max(0, spanMinutes - lunchMinutes);
 }
 
 /**
@@ -237,8 +383,28 @@ async function computeLateMinutes(employeeId, dateStr, timeInIso, breakInIso, st
  * Returns 0 for holiday/on_leave or when no shift. For partial-day suspension (coverage am_only/pm_only),
  * only the non-suspended half is evaluated. Seconds ignored.
  */
-async function computeUndertimeMinutes(employeeId, dateStr, timeOutIso, breakOutIso, status, holidayId, coverage, timeInIso, breakInIso) {
+async function computeUndertimeMinutes(
+  employeeId,
+  dateStr,
+  timeOutIso,
+  breakOutIso,
+  status,
+  holidayId,
+  coverage,
+  timeInIso,
+  breakInIso,
+  locatorSegments = []
+) {
   if (status === 'on_leave') return 0;
+  if (
+    status === 'on_field' &&
+    !timeInIso &&
+    !breakOutIso &&
+    !breakInIso &&
+    !timeOutIso
+  ) {
+    return 0;
+  }
   const isHolidayOrSuspension = status === 'holiday' || holidayId != null;
   if (isHolidayOrSuspension && (!coverage || coverage === 'whole_day')) return 0;
   const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
@@ -246,6 +412,25 @@ async function computeUndertimeMinutes(employeeId, dateStr, timeOutIso, breakOut
   const type = getShiftType(shiftInfo);
   const evalAm = !isHolidayOrSuspension || coverage !== 'am_only';
   const evalPm = !isHolidayOrSuspension || coverage !== 'pm_only';
+  const locatorSegSet = new Set(
+    (Array.isArray(locatorSegments) ? locatorSegments : [])
+      .map((s) => String(s).toUpperCase().trim())
+  );
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  let amUndertimePenalty = 0;
+  if (type === 'full_day' && evalAm && shiftInfo.startMinutes != null) {
+    const hasAmLogs =
+      (timeInIso != null || locatorSegSet.has('AM IN')) &&
+      (breakOutIso != null || locatorSegSet.has('AM OUT'));
+    const pmStartMinutes = shiftInfo.breakEndMinutes ?? NOON_MINUTES;
+    const amWindowClosed =
+      dateStr < todayStr || (dateStr === todayStr && nowMinutes >= pmStartMinutes);
+    if (!hasAmLogs && amWindowClosed) {
+      amUndertimePenalty = Math.max(0, pmStartMinutes - shiftInfo.startMinutes);
+    }
+  }
   let clockOutMins = null;
   if (evalAm && type === 'am_only' && breakOutIso) {
     clockOutMins = minutesFromMidnightInTimeZone(breakOutIso);
@@ -259,28 +444,41 @@ async function computeUndertimeMinutes(employeeId, dateStr, timeOutIso, breakOut
     //   - Today but shift has already ended.
     const hasClockIn = !!(timeInIso || breakInIso);
     if (!hasClockIn) return 0;
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const now = new Date();
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
     const isPast = dateStr < todayStr;
     const isShiftOver = dateStr === todayStr && nowMinutes > shiftInfo.endMinutes;
     if (isPast || isShiftOver) {
-      // Undertime = full shift duration (end - start)
+      // For full-day shifts, undertime baseline is net work minutes (exclude lunch),
+      // not raw elapsed span (e.g. 8-5 should be 480, not 540).
       const startMinutes = shiftInfo.startMinutes != null ? shiftInfo.startMinutes : 0;
-      return Math.max(0, shiftInfo.endMinutes - startMinutes);
+      const spanMinutes = Math.max(0, shiftInfo.endMinutes - startMinutes);
+      if (type === 'full_day') {
+        const lunchMinutes =
+          shiftInfo.breakEndMinutes != null
+              ? Math.max(0, shiftInfo.breakEndMinutes - NOON_MINUTES)
+              : 60;
+        return Math.max(0, spanMinutes - lunchMinutes) + amUndertimePenalty;
+      }
+      return spanMinutes + amUndertimePenalty;
     }
     return 0;
   }
   const endMinutes = shiftInfo.endMinutes;
   if (clockOutMins >= endMinutes) return 0;
-  return endMinutes - clockOutMins;
+  return (endMinutes - clockOutMins) + amUndertimePenalty;
 }
 
 /**
  * Compute attendance remark. Priority: 1) Holiday/Suspension 2) Leave 3) Absent 4) Incomplete 5) Late+Undertime 6) Late 7) Undertime 8) On Time.
  * holidayInfo: { name, holiday_type, coverage } or null.
  */
-async function computeAttendanceRemark(record, shiftInfo, holidayId, leaveRequestId, holidayInfo) {
+async function computeAttendanceRemark(
+  record,
+  shiftInfo,
+  holidayId,
+  leaveRequestId,
+  holidayInfo,
+  locatorSegments = []
+) {
   if (record.holiday_id != null || holidayId != null || record.status === 'holiday') {
     const name = (holidayInfo && holidayInfo.name) || record.holiday_name || 'Holiday';
     const cov = (holidayInfo && holidayInfo.coverage) || record.coverage;
@@ -291,13 +489,26 @@ async function computeAttendanceRemark(record, shiftInfo, holidayId, leaveReques
   if (record.leave_request_id != null || leaveRequestId != null || record.status === 'on_leave') {
     return (record.leave_type_name && String(record.leave_type_name).trim()) || 'Leave';
   }
-  const hasAnyLog = record.time_in || record.break_out || record.break_in || record.time_out;
+  const locatorSegSet = new Set(
+    (Array.isArray(locatorSegments) ? locatorSegments : [])
+      .map((s) => String(s).toUpperCase().trim())
+  );
+  const hasAnyLog =
+    record.time_in ||
+    record.break_out ||
+    record.break_in ||
+    record.time_out ||
+    locatorSegSet.size > 0;
   if (!hasAnyLog) return 'Absent';
   if (record.status === 'invalid') return 'Invalid Log';
 
   const expected = getExpectedLogsForDay(shiftInfo, holidayInfo);
-  const hasAm = record.time_in != null && record.break_out != null;
-  const hasPm = record.break_in != null && record.time_out != null;
+  const hasAm =
+    (record.time_in != null || locatorSegSet.has('AM IN')) &&
+    (record.break_out != null || locatorSegSet.has('AM OUT'));
+  const hasPm =
+    (record.break_in != null || locatorSegSet.has('PM IN')) &&
+    (record.time_out != null || locatorSegSet.has('PM OUT'));
   const missingRequired =
     (expected.needsAm && !hasAm) || (expected.needsPm && !hasPm);
   if (missingRequired) return 'Incomplete';
@@ -402,6 +613,44 @@ async function getApprovedLeaveKeysInRange(employeeIds, startStr, endStr) {
       if (dStr >= startStr && dStr <= endStr) out.add(`${empId}|${dStr}`);
       cur.setDate(cur.getDate() + 1);
     }
+  }
+  return out;
+}
+
+/**
+ * Get approved locator slips in [startStr, endStr] for employees.
+ * Returns Map key "employeeId|YYYY-MM-DD" -> metadata object.
+ */
+async function getApprovedLocatorByDateInRange(employeeIds, startStr, endStr) {
+  const out = new Map();
+  if (!startStr || !endStr) return out;
+  if (!employeeIds || employeeIds.length === 0) return out;
+  const res = await pool.query(
+    `SELECT id, employee_id, slip_date::text AS slip_date_str,
+            am_in, am_out, pm_in, pm_out, office, reason
+     FROM locator_slips
+     WHERE status = 'approved'
+       AND employee_id = ANY($1::uuid[])
+       AND slip_date >= $2::date
+       AND slip_date <= $3::date
+     ORDER BY updated_at DESC, created_at DESC`,
+    [employeeIds, startStr, endStr]
+  );
+  for (const r of res.rows) {
+    const dateStr = String(r.slip_date_str).slice(0, 10);
+    const key = `${r.employee_id}|${dateStr}`;
+    if (out.has(key)) continue;
+    const segments = [];
+    if (r.am_in) segments.push('AM IN');
+    if (r.am_out) segments.push('AM OUT');
+    if (r.pm_in) segments.push('PM IN');
+    if (r.pm_out) segments.push('PM OUT');
+    out.set(key, {
+      id: r.id,
+      office: r.office || null,
+      reason: r.reason || null,
+      segments,
+    });
   }
   return out;
 }
@@ -588,12 +837,36 @@ router.get('/', protect, async (req, res) => {
       let lateMinutes = r.late_minutes != null ? parseInt(r.late_minutes, 10) : 0;
       let undertimeMinutes = r.undertime_minutes != null ? parseInt(r.undertime_minutes, 10) : 0;
       if (dateStr && r.status !== 'on_leave' && (r.status !== 'holiday' || isPartialSuspension)) {
-        if (lateMinutes === 0 && (r.time_in || r.break_in)) {
-          lateMinutes = await computeLateMinutes(r.employee_id, dateStr, r.time_in, r.break_in, r.status, r.holiday_id, coverage);
-        }
-        if (undertimeMinutes === 0 && (r.time_out || r.break_out || r.time_in || r.break_in)) {
-          undertimeMinutes = await computeUndertimeMinutes(r.employee_id, dateStr, r.time_out, r.break_out, r.status, r.holiday_id, coverage, r.time_in, r.break_in);
-        }
+        // Always recompute from current assignment/shift so shift changes
+        // immediately reflect in Time Logs (not only when stored values are zero).
+        lateMinutes = await computeLateMinutes(
+          r.employee_id,
+          dateStr,
+          r.time_in,
+          r.break_in,
+          r.status,
+          r.holiday_id,
+          coverage
+        );
+        undertimeMinutes = await computeUndertimeMinutes(
+          r.employee_id,
+          dateStr,
+          r.time_out,
+          r.break_out,
+          r.status,
+          r.holiday_id,
+          coverage,
+          r.time_in,
+          r.break_in
+        );
+        const adjusted = await applyAttendancePolicyPenalties(
+          r.employee_id,
+          dateStr,
+          lateMinutes,
+          undertimeMinutes
+        );
+        lateMinutes = adjusted.lateMinutes;
+        undertimeMinutes = adjusted.undertimeMinutes;
       }
       const recordForRemark = {
         time_in: r.time_in,
@@ -759,6 +1032,18 @@ router.get('/', protect, async (req, res) => {
       const nowMinutes = now.getHours() * 60 + now.getMinutes();
 
       const leaveKeys = await getApprovedLeaveKeysInRange(employeeIds, startStr, endStr);
+      const locatorByKey = await getApprovedLocatorByDateInRange(
+        employeeIds,
+        startStr,
+        endStr
+      );
+      const hasFullDayLocatorCoverage = (locator) => {
+        const locatorSegments = Array.isArray(locator?.segments)
+          ? locator.segments.map((s) => String(s).toUpperCase().trim())
+          : [];
+        return ['AM IN', 'AM OUT', 'PM IN', 'PM OUT']
+          .every((seg) => locatorSegments.includes(seg));
+      };
 
       // Iterate by calendar date (YYYY-MM-DD) to avoid timezone shifting: e.g. "Day 14" must not show as March 13 in UTC+8.
       const startD = new Date(`${startStr}T12:00:00`); // noon avoids UTC date shift
@@ -776,6 +1061,8 @@ router.get('/', protect, async (req, res) => {
           const key = `${empId}|${dateStr}`;
           if (existingKeys.has(key)) continue;
           if (leaveKeys.has(key)) continue;
+          const locator = locatorByKey.get(key);
+          if (locator && hasFullDayLocatorCoverage(locator)) continue;
 
           const shiftInfo = getShiftInfoForDateFromAssignments(assignmentsByEmployee, empId, dateStr);
           if (!shiftInfo) continue; // no assignment/shift => can't determine working day
@@ -791,11 +1078,12 @@ router.get('/', protect, async (req, res) => {
             if (nowMinutes <= endMinutes) continue;
           }
 
-          // Absent = full scheduled shift not worked; undertime = scheduled minutes for the day.
-          const absentUndertime =
-            shiftInfo.endMinutes != null && shiftInfo.startMinutes != null
-              ? Math.max(0, shiftInfo.endMinutes - shiftInfo.startMinutes)
-              : 0;
+          // Absent = no rendered work; undertime baseline should be net expected
+          // work minutes (exclude lunch for full-day shifts).
+          const policyForDay = await getAttendancePolicyForEmployeeDate(empId, dateStr);
+          const absentUndertime = policyForDay.absentEqualsFullDayDeduction
+            ? getExpectedWorkMinutes(shiftInfo)
+            : 0;
 
           existingKeys.add(key);
           rows.push({
@@ -824,6 +1112,117 @@ router.get('/', protect, async (req, res) => {
             employee_name: userIdToName[empId] || null,
           });
         }
+      }
+
+      // 3) Inject synthetic rows for approved locator slips with no existing DTR row.
+      for (const [key, locator] of locatorByKey.entries()) {
+        if (!hasFullDayLocatorCoverage(locator)) continue;
+        if (existingKeys.has(key)) continue;
+        const [empId, dateStr] = key.split('|');
+        existingKeys.add(key);
+        const segText =
+          locator.segments && locator.segments.length > 0
+            ? ` (${locator.segments.join(', ')})`
+            : '';
+        rows.push({
+          id: null,
+          user_id: empId,
+          record_date: dateStr,
+          time_in: null,
+          break_out: null,
+          break_in: null,
+          time_out: null,
+          total_hours: null,
+          late_minutes: 0,
+          undertime_minutes: 0,
+          status: 'on_field',
+          pm_status: null,
+          remarks: null,
+          source: 'adjusted',
+          attendance_remark: `Locator Slip${segText}`,
+          holiday_id: null,
+          leave_request_id: null,
+          locator_slip_id: locator.id || null,
+          locator_slip_office: locator.office || null,
+          locator_slip_reason: locator.reason || null,
+          locator_slip_segments: locator.segments || [],
+          holiday_name: null,
+          holiday_type: null,
+          coverage: null,
+          created_at: null,
+          updated_at: null,
+          employee_name: userIdToName[empId] || null,
+        });
+      }
+
+      // 4) Annotate existing rows with locator metadata for transparency.
+      for (const row of rows) {
+        const rowKey = `${row.user_id}|${row.record_date}`;
+        const locator = locatorByKey.get(rowKey);
+        if (!locator) continue;
+        row.locator_slip_id = locator.id || null;
+        row.locator_slip_office = locator.office || null;
+        row.locator_slip_reason = locator.reason || null;
+        row.locator_slip_segments = locator.segments || [];
+
+        const hasFullDayCoverage = hasFullDayLocatorCoverage(locator);
+
+        // Only clear deductions when locator slip covers the full day.
+        // Partial locator segments (e.g., AM IN only) should keep computed
+        // late/undertime from other uncovered segments.
+        if (
+          hasFullDayCoverage &&
+          row.status !== 'holiday' &&
+          row.status !== 'on_leave'
+        ) {
+          row.late_minutes = 0;
+          row.undertime_minutes = 0;
+        }
+
+        const hasAnyLog = !!(row.time_in || row.break_out || row.break_in || row.time_out);
+        if (
+          !hasAnyLog &&
+          hasFullDayCoverage &&
+          row.status !== 'holiday' &&
+          row.status !== 'on_leave'
+        ) {
+          const segText =
+            locator.segments && locator.segments.length > 0
+              ? ` (${locator.segments.join(', ')})`
+              : '';
+          row.status = 'on_field';
+          row.late_minutes = 0;
+          row.undertime_minutes = 0;
+          row.attendance_remark = `Locator Slip${segText}`;
+        }
+
+        // Re-evaluate remark/undertime with locator segment substitution so
+        // partial approved locator segments (e.g., AM IN) can satisfy
+        // completeness checks with existing punches.
+        const rowDateStr = String(row.record_date).slice(0, 10);
+        const holidayInfo = holidayByDate.get(rowDateStr) || null;
+        const coverage = holidayInfo?.coverage || row.coverage || null;
+        row.undertime_minutes = await computeUndertimeMinutes(
+          row.user_id,
+          rowDateStr,
+          row.time_out,
+          row.break_out,
+          row.status,
+          row.holiday_id,
+          coverage,
+          row.time_in,
+          row.break_in,
+          row.locator_slip_segments || []
+        );
+        const shiftInfo = await getAssignmentShiftForDate(row.user_id, rowDateStr);
+        row.attendance_remark = await computeAttendanceRemark(
+          row,
+          shiftInfo,
+          row.holiday_id,
+          row.leave_request_id,
+          holidayInfo,
+          row.locator_slip_segments || []
+        );
       }
 
       rows.sort((a, b) => {
@@ -1007,8 +1406,21 @@ router.post('/', protect, async (req, res) => {
     let lateMinutes = 0;
     let undertimeMinutes = 0;
     if ((!holiday || coverage === 'am_only' || coverage === 'pm_only') && status !== 'on_leave') {
-      lateMinutes = await computeLateMinutes(targetId, date, timeIn, break_in || null, status, holidayId, coverage);
-      undertimeMinutes = await computeUndertimeMinutes(targetId, date, time_out || null, break_out || null, status, holidayId, coverage, timeIn || null, break_in || null);
+      const rawLate = await computeLateMinutes(targetId, date, timeIn, break_in || null, status, holidayId, coverage);
+      const rawUnder = await computeUndertimeMinutes(
+        targetId,
+        date,
+        time_out || null,
+        break_out || null,
+        status,
+        holidayId,
+        coverage,
+        timeIn || null,
+        break_in || null
+      );
+      const adjusted = await applyAttendancePolicyPenalties(targetId, date, rawLate, rawUnder);
+      lateMinutes = adjusted.lateMinutes;
+      undertimeMinutes = adjusted.undertimeMinutes;
     }
 
     const sourceValue = (status === 'holiday' || holidayId) ? 'adjusted' : 'manual';
@@ -1126,12 +1538,28 @@ router.put('/:id', protect, async (req, res) => {
     const isPartialSuspension = isHolidayOrLeave && (existingCoverage === 'am_only' || existingCoverage === 'pm_only');
     if (anyTimeChanged && (!isHolidayOrLeave || isPartialSuspension)) {
       const bo = break_out !== undefined ? break_out : existing.break_out;
-      const lateMin = await computeLateMinutes(employeeId, dateStr, ti, bi, finalStatus, existing.holiday_id, existingCoverage);
-      const underMin = await computeUndertimeMinutes(employeeId, dateStr, to, bo, finalStatus, existing.holiday_id, existingCoverage, ti, bi);
+      const rawLate = await computeLateMinutes(employeeId, dateStr, ti, bi, finalStatus, existing.holiday_id, existingCoverage);
+      const rawUnder = await computeUndertimeMinutes(
+        employeeId,
+        dateStr,
+        to,
+        bo,
+        finalStatus,
+        existing.holiday_id,
+        existingCoverage,
+        ti,
+        bi
+      );
+      const adjusted = await applyAttendancePolicyPenalties(
+        employeeId,
+        dateStr,
+        rawLate,
+        rawUnder
+      );
       updates.push(`late_minutes = $${i++}`);
-      values.push(lateMin);
+      values.push(adjusted.lateMinutes);
       updates.push(`undertime_minutes = $${i++}`);
-      values.push(underMin);
+      values.push(adjusted.undertimeMinutes);
     }
 
     if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
@@ -1168,13 +1596,46 @@ router.put('/:id', protect, async (req, res) => {
 
 // DELETE /api/dtr-daily-summary/:id - admin only
 router.delete('/:id', protect, requireAdmin, async (req, res) => {
+  const client = await pool.connect();
   try {
-    const result = await pool.query('DELETE FROM dtr_daily_summary WHERE id = $1 RETURNING id', [req.params.id]);
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Record not found' });
+    await client.query('BEGIN');
+    const target = await client.query(
+      `SELECT id, employee_id, attendance_date::text AS attendance_date_iso, source
+       FROM dtr_daily_summary
+       WHERE id = $1`,
+      [req.params.id]
+    );
+    if (target.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Record not found' });
+    }
+
+    const row = target.rows[0];
+    await client.query('DELETE FROM dtr_daily_summary WHERE id = $1', [req.params.id]);
+
+    // Biometric rows are rebuilt from biometric_attendance_logs during processing.
+    // Delete matching raw logs for the same employee/date so the summary row does not return.
+    if (row.source === 'system' && row.employee_id && row.attendance_date_iso) {
+      const dateStr = String(row.attendance_date_iso).slice(0, 10);
+      await client.query(
+        `DELETE FROM biometric_attendance_logs
+         WHERE user_id = $1::uuid
+           AND logged_at >= $2::date
+           AND logged_at < ($2::date + INTERVAL '1 day')`,
+        [row.employee_id, dateStr]
+      );
+    }
+
+    await client.query('COMMIT');
     res.status(204).send();
   } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {}
     console.error('[dtr-daily-summary DELETE]', err);
     res.status(500).json({ error: 'Failed to delete DTR record' });
+  } finally {
+    client.release();
   }
 });
 
@@ -1295,7 +1756,7 @@ async function applyApprovedCorrectionToSummary(client, correctionRow) {
     (!holiday || coverage === 'am_only' || coverage === 'pm_only') &&
     status !== 'on_leave'
   ) {
-    lateMinutes = await computeLateMinutes(
+    const rawLate = await computeLateMinutes(
       employeeId,
       dateStr,
       timeIn,
@@ -1304,7 +1765,7 @@ async function applyApprovedCorrectionToSummary(client, correctionRow) {
       holidayId,
       coverage
     );
-    undertimeMinutes = await computeUndertimeMinutes(
+    const rawUnder = await computeUndertimeMinutes(
       employeeId,
       dateStr,
       to,
@@ -1315,6 +1776,14 @@ async function applyApprovedCorrectionToSummary(client, correctionRow) {
       timeIn,
       bi
     );
+    const adjusted = await applyAttendancePolicyPenalties(
+      employeeId,
+      dateStr,
+      rawLate,
+      rawUnder
+    );
+    lateMinutes = adjusted.lateMinutes;
+    undertimeMinutes = adjusted.undertimeMinutes;
   }
 
   const remarkLine = `[DTR correction ${correctionRow.id}] applied.`;

@@ -181,7 +181,10 @@ class _DtrDashboardState extends State<DtrDashboard> {
         ],
         cards,
         const SizedBox(height: 24),
-        DtrRecentActivity(records: dtr.timeRecords, loading: dtr.loading),
+        DtrRecentActivity(
+          records: dtr.dashboardRecentRecords,
+          loading: dtr.dashboardRecentLoading,
+        ),
       ],
     );
   }

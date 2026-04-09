@@ -8,7 +8,7 @@ import '../../../landingpage/screens/landing_page.dart';
 import '../../../login/screens/login_page.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../dtr/dtr_provider.dart';
-import '../../../dtr/widgets/request_dtr_correction_dialog.dart';
+import '../../../data/time_record.dart';
 import '../../../dtr/widgets/attendance_display.dart';
 import '../../../dtr/widgets/attendance_source_badge.dart';
 import '../../../docutracker/docutracker_main.dart';
@@ -16,6 +16,7 @@ import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
 import '../../../leave/leave_provider.dart';
 import '../../../leave/widgets/my_leave_loading_skeleton.dart';
+import '../../../locator/screens/employee_locator_slip_screen.dart';
 import '../../../notifications/notification_provider.dart';
 import '../../../notifications/notification_tap_result.dart';
 import '../../../notifications/open_notifications_panel.dart';
@@ -100,6 +101,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
     'Dashboard',
     'My Attendance',
     'My Leave',
+    'Locator Slip',
     'Training Reports',
     'DocuTracker',
     'Announcements',
@@ -134,8 +136,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
       case NotificationTapKind.employeeMyAttendance:
         setState(() => _selectedNavIndex = 1);
         break;
+      case NotificationTapKind.employeeLocatorApprovals:
+      case NotificationTapKind.employeeLocatorRequests:
+        setState(() => _selectedNavIndex = 3);
+        break;
+      case NotificationTapKind.adminDtrLocatorManagement:
       case NotificationTapKind.adminDtrLeaveManagement:
-      case NotificationTapKind.adminDtrAttendanceAdjustment:
       case NotificationTapKind.none:
         break;
     }
@@ -221,8 +227,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                               initialSection: _leaveInitialSection,
                             )
                           : _selectedNavIndex == 3
-                          ? const TrainingDailyReportEmployeeScreen()
+                          ? const EmployeeLocatorSlipScreen()
                           : _selectedNavIndex == 4
+                          ? const TrainingDailyReportEmployeeScreen()
+                          : _selectedNavIndex == 5
                           ? const DocuTrackerMain(isAdmin: false)
                           : _EmployeePlaceholderContent(
                               title: _navItems[_selectedNavIndex],
@@ -236,6 +244,140 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
         ),
       ),
     );
+  }
+}
+
+/// Reusable employee attendance overview container.
+///
+/// Employee mode: welcome line + Clock In, Attendance, Leave summary cards,
+/// monthly overview, and upcoming leave.
+///
+/// Admin portal mode ([adminPortal]: true): Clock In only (no Attendance /
+/// Leave Balance cards), no upcoming leave, monthly overview, then the full
+/// **My Attendance** table on the same scroll — admin-only layout.
+class EmployeeAttendanceOverviewSection extends StatelessWidget {
+  const EmployeeAttendanceOverviewSection({
+    super.key,
+    required this.displayName,
+    this.onViewAttendance,
+    this.adminPortal = false,
+  });
+
+  final String displayName;
+  final VoidCallback? onViewAttendance;
+  final bool adminPortal;
+
+  @override
+  Widget build(BuildContext context) {
+    final w = MediaQuery.sizeOf(context).width;
+    final isNarrow = w < 600;
+    final isTiny = w < 360;
+    final welcomeSize = isTiny ? 18.0 : (isNarrow ? 20.0 : 26.0);
+    final subtitleSize = isNarrow ? 13.5 : 15.0;
+
+    final header = adminPortal
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'My Attendance',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: welcomeSize,
+                  fontWeight: FontWeight.w800,
+                  height: 1.25,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'View your time-in/out records.',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: subtitleSize,
+                  height: 1.35,
+                ),
+              ),
+            ],
+          )
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Welcome back, $displayName!',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: welcomeSize,
+                  fontWeight: FontWeight.w800,
+                  height: 1.25,
+                ),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                "Here's your latest information and updates.",
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: subtitleSize,
+                  height: 1.35,
+                ),
+              ),
+            ],
+          );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        header,
+        SizedBox(height: isNarrow ? 18 : 24),
+        EmployeeAttendanceOverviewCard(
+          onViewMore: adminPortal ? null : onViewAttendance,
+          summaryCards: adminPortal
+              ? const _EmployeeClockInOnlySummary()
+              : _EmployeeSummaryCards(
+                  isNarrow: isNarrow,
+                  onViewAttendance: onViewAttendance,
+                ),
+          upcomingLeave: adminPortal
+              ? null
+              : const _EmployeeUpcomingLeaveCard(embedded: true),
+        ),
+        if (adminPortal) ...[
+          const SizedBox(height: 24),
+          const EmployeeAttendanceDetailsSection(showPageHeader: false),
+        ],
+      ],
+    );
+  }
+}
+
+/// Clock In card only — used for admin My Attendance overview (no Attendance /
+/// Leave Balance strip).
+class _EmployeeClockInOnlySummary extends StatelessWidget {
+  const _EmployeeClockInOnlySummary();
+
+  @override
+  Widget build(BuildContext context) {
+    final w = MediaQuery.sizeOf(context).width;
+    final singleColumn = w < 500;
+    final clockIn = _ClockInCard();
+    if (singleColumn) return clockIn;
+    return Row(children: [Expanded(child: clockIn)]);
+  }
+}
+
+/// Reusable detailed "My Attendance" table/list.
+class EmployeeAttendanceDetailsSection extends StatelessWidget {
+  const EmployeeAttendanceDetailsSection({
+    super.key,
+    this.showPageHeader = true,
+  });
+
+  final bool showPageHeader;
+
+  @override
+  Widget build(BuildContext context) {
+    return _EmployeeAttendanceContent(showPageHeader: showPageHeader);
   }
 }
 
@@ -434,22 +576,28 @@ class _EmployeeSidebar extends StatelessWidget {
             onTap: () => onTap(2),
           ),
           _EmployeeNavTile(
-            icon: Icons.assignment_rounded,
-            label: 'Training Reports',
+            icon: Icons.pin_drop_outlined,
+            label: 'Locator Slip',
             selected: selectedIndex == 3,
             onTap: () => onTap(3),
           ),
           _EmployeeNavTile(
-            icon: Icons.description_rounded,
-            label: 'DocuTracker',
+            icon: Icons.assignment_rounded,
+            label: 'Training Reports',
             selected: selectedIndex == 4,
             onTap: () => onTap(4),
           ),
           _EmployeeNavTile(
-            icon: Icons.campaign_rounded,
-            label: 'Announcements',
+            icon: Icons.description_rounded,
+            label: 'DocuTracker',
             selected: selectedIndex == 5,
             onTap: () => onTap(5),
+          ),
+          _EmployeeNavTile(
+            icon: Icons.campaign_rounded,
+            label: 'Announcements',
+            selected: selectedIndex == 6,
+            onTap: () => onTap(6),
           ),
           const Spacer(),
           const Divider(height: 1, color: Colors.white24),
@@ -2003,7 +2151,10 @@ const List<String> _attendanceMonths = [
 
 /// My Attendance: employee's own time records.
 class _EmployeeAttendanceContent extends StatefulWidget {
-  const _EmployeeAttendanceContent();
+  const _EmployeeAttendanceContent({this.showPageHeader = true});
+
+  /// When false, omits the title/subtitle (e.g. embedded under admin overview).
+  final bool showPageHeader;
 
   @override
   State<_EmployeeAttendanceContent> createState() =>
@@ -2092,6 +2243,21 @@ class _EmployeeAttendanceContentState
     return '$h12:${m.toString().padLeft(2, '0')} $ampm';
   }
 
+  static String _formatTimeWithLocator(
+    TimeRecord r,
+    DateTime? dt,
+    String segment,
+  ) {
+    if (dt != null) return _formatTime(dt);
+    final segs = r.locatorSlipSegments ?? const <String>[];
+    if (segs.any((s) => s.toUpperCase() == segment)) return 'On Field';
+    if (segs.isEmpty &&
+        segment == 'AM IN' &&
+        (r.status == 'on_field' || r.locatorSlipId != null))
+      return 'On Field';
+    return '—';
+  }
+
   static const List<String> _shortWeekdays = [
     'Mon',
     'Tue',
@@ -2127,20 +2293,22 @@ class _EmployeeAttendanceContentState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'My Attendance',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
+        if (widget.showPageHeader) ...[
+          Text(
+            'My Attendance',
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+            ),
           ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'View your time-in/out records.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-        ),
-        const SizedBox(height: 24),
+          const SizedBox(height: 8),
+          Text(
+            'View your time-in/out records.',
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          ),
+          const SizedBox(height: 24),
+        ],
         LayoutBuilder(
           builder: (context, constraints) {
             final isNarrow = constraints.maxWidth < 520;
@@ -2352,35 +2520,6 @@ class _EmployeeAttendanceContentState
                       fontSize: 14,
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  OutlinedButton.icon(
-                    onPressed: () async {
-                      final initial = DateTime(
-                        _selectedYear,
-                        _selectedMonth,
-                        (_selectedDay != null &&
-                                _selectedDay! >= 1 &&
-                                _selectedDay! <= _lastDayOfSelectedMonth)
-                            ? _selectedDay!
-                            : 1,
-                      );
-                      final ok = await showRequestDtrCorrectionDialog(
-                        context: context,
-                        initialDate: initial,
-                      );
-                      if (ok && context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Correction request submitted. HR will review it.',
-                            ),
-                          ),
-                        );
-                      }
-                    },
-                    icon: const Icon(Icons.edit_calendar_outlined, size: 20),
-                    label: const Text('Request attendance correction'),
-                  ),
                 ],
               ),
             ),
@@ -2541,19 +2680,6 @@ class _EmployeeAttendanceContentState
                                   ),
                                 ),
                               ),
-                              Expanded(
-                                flex: 2,
-                                child: Center(
-                                  child: Text(
-                                    'Correction',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 13,
-                                      color: AppTheme.textPrimary,
-                                    ),
-                                  ),
-                                ),
-                              ),
                             ],
                           ),
                         ),
@@ -2594,7 +2720,11 @@ class _EmployeeAttendanceContentState
                                   flex: 1,
                                   child: Center(
                                     child: Text(
-                                      _formatTime(timeIn),
+                                      _formatTimeWithLocator(
+                                        r,
+                                        timeIn,
+                                        'AM IN',
+                                      ),
                                       style: TextStyle(
                                         fontSize: 13,
                                         color: AppTheme.textPrimary,
@@ -2607,7 +2737,11 @@ class _EmployeeAttendanceContentState
                                   flex: 1,
                                   child: Center(
                                     child: Text(
-                                      _formatTime(breakOut),
+                                      _formatTimeWithLocator(
+                                        r,
+                                        breakOut,
+                                        'AM OUT',
+                                      ),
                                       style: TextStyle(
                                         fontSize: 13,
                                         color: AppTheme.textPrimary,
@@ -2620,7 +2754,11 @@ class _EmployeeAttendanceContentState
                                   flex: 1,
                                   child: Center(
                                     child: Text(
-                                      _formatTime(breakIn),
+                                      _formatTimeWithLocator(
+                                        r,
+                                        breakIn,
+                                        'PM IN',
+                                      ),
                                       style: TextStyle(
                                         fontSize: 13,
                                         color: AppTheme.textPrimary,
@@ -2633,7 +2771,11 @@ class _EmployeeAttendanceContentState
                                   flex: 1,
                                   child: Center(
                                     child: Text(
-                                      _formatTime(timeOut),
+                                      _formatTimeWithLocator(
+                                        r,
+                                        timeOut,
+                                        'PM OUT',
+                                      ),
                                       style: TextStyle(
                                         fontSize: 13,
                                         color: AppTheme.textPrimary,
@@ -2685,33 +2827,6 @@ class _EmployeeAttendanceContentState
                                     child: AttendanceSourceBadge(
                                       source: r.source,
                                       compact: true,
-                                    ),
-                                  ),
-                                ),
-                                Expanded(
-                                  flex: 2,
-                                  child: Center(
-                                    child: TextButton(
-                                      onPressed: () async {
-                                        final ok =
-                                            await showRequestDtrCorrectionDialog(
-                                              context: context,
-                                              existingRecord: r,
-                                            );
-                                        if (ok && context.mounted) {
-                                          ScaffoldMessenger.of(
-                                            context,
-                                          ).showSnackBar(
-                                            const SnackBar(
-                                              content: Text(
-                                                'Correction request submitted. HR will review it.',
-                                              ),
-                                            ),
-                                          );
-                                          await _load();
-                                        }
-                                      },
-                                      child: const Text('Request fix'),
                                     ),
                                   ),
                                 ),

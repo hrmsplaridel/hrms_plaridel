@@ -8,15 +8,15 @@ enum NotificationTapKind {
 
   /// HR/Admin: main nav → DTR → Leave Management (approvals).
   adminDtrLeaveManagement,
-
-  /// HR/Admin: main nav → DTR → Attendance Adjustment (correction queue).
-  adminDtrAttendanceAdjustment,
+  adminDtrLocatorManagement,
 
   /// Employee / department head: My Leave → Approvals.
   employeeLeaveApprovals,
 
   /// Employee: My Leave → My Requests.
   employeeLeaveRequests,
+  employeeLocatorApprovals,
+  employeeLocatorRequests,
 
   /// Employee: My Attendance (e.g. DTR correction approved/rejected).
   employeeMyAttendance,
@@ -37,11 +37,6 @@ class NotificationTapResult {
     final isPrivileged = role == 'admin' || role == 'hr';
 
     if (cat == 'dtr') {
-      if (isPrivileged && t.contains('pending')) {
-        return const NotificationTapResult(
-          NotificationTapKind.adminDtrAttendanceAdjustment,
-        );
-      }
       if (!isPrivileged &&
           (t.contains('approved') || t.contains('rejected'))) {
         return const NotificationTapResult(
@@ -52,6 +47,21 @@ class NotificationTapResult {
     }
 
     if (cat != 'leave') {
+      if (cat == 'locator') {
+        if (isPrivileged) {
+          return const NotificationTapResult(
+            NotificationTapKind.adminDtrLocatorManagement,
+          );
+        }
+        if (t.contains('pending_department_head')) {
+          return const NotificationTapResult(
+            NotificationTapKind.employeeLocatorApprovals,
+          );
+        }
+        return const NotificationTapResult(
+          NotificationTapKind.employeeLocatorRequests,
+        );
+      }
       return const NotificationTapResult(NotificationTapKind.none);
     }
 

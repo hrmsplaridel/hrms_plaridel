@@ -13,7 +13,7 @@ const uploadRoutes = require('./routes/upload');
 const filesRoutes = require('./routes/files');
 const holidaysRoutes = require('./routes/holidays');
 const attendancePoliciesRoutes = require('./routes/attendancePolicies');
-const dtrCorrectionsRoutes = require('./routes/dtrCorrections');
+const policyAssignmentsRoutes = require('./routes/policyAssignments');
 const biometricDevicesRoutes = require('./routes/biometricDevices');
 const biometricAttendanceLogsRoutes = require('./routes/biometricAttendanceLogs');
 const overtimeRoutes = require('./routes/overtime');
@@ -27,6 +27,7 @@ const rspApplicationsRoutes = require('./routes/rspApplications');
 const rspStorageRoutes = require('./routes/rspStorage');
 const leaveRoutes = require('./routes/leaveRoutes');
 const notificationsRoutes = require('./routes/notifications');
+const locatorSlipsRoutes = require('./routes/locatorSlips');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -100,7 +101,7 @@ app.use('/api/upload', uploadRoutes);
 app.use('/api/files', filesRoutes);
 app.use('/api/holidays', holidaysRoutes);
 app.use('/api/attendance-policies', attendancePoliciesRoutes);
-app.use('/api/dtr-corrections', dtrCorrectionsRoutes);
+app.use('/api/policy-assignments', policyAssignmentsRoutes);
 app.use('/api/biometric-devices', biometricDevicesRoutes);
 app.use('/api/biometric-attendance-logs', biometricAttendanceLogsRoutes);
 app.use('/api/overtime', overtimeRoutes);
@@ -114,6 +115,7 @@ app.use('/api/rsp/applications', rspApplicationsRoutes);
 app.use('/api/rsp/storage', rspStorageRoutes);
 app.use('/api/leave', leaveRoutes);
 app.use('/api/notifications', notificationsRoutes);
+app.use('/api/locator-slips', locatorSlipsRoutes);
 
 // --- Start server ---
 app.listen(PORT, HOST, () => {

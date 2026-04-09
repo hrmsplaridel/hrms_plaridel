@@ -58,8 +58,11 @@ class LeaveGuidance {
       description:
           'All officials and employees are required to go on vacation leave for at least 5 working days annually.',
       requirements: 'No documentary requirement.',
-      limits: 'Mandatory 5 working days per year (scheduled by the agency).',
-      notes: 'This leave type is typically scheduled by your HR/Admin, not filed by the employee.',
+      limits: 'Mandatory 5 working days per year.',
+      notes:
+          'Employees may file this leave through the normal workflow. '
+          'If unused within the year, HR/Admin may apply a year-end deduction '
+          'against vacation leave credits.',
     ),
 
     LeaveType.sickLeave: LeaveTypeGuidance(

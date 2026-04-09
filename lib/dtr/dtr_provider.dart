@@ -62,6 +62,15 @@ class DtrProvider extends ChangeNotifier {
   List<TimeRecord> _timeRecords = [];
   List<TimeRecord> get timeRecords => List.unmodifiable(_timeRecords);
 
+  /// Latest N rows for admin home [DtrDashboard] only (`limit` without date range).
+  /// Kept separate from [timeRecords] so polling does not overwrite Time Logs / Reports filters.
+  List<TimeRecord> _dashboardRecentRecords = [];
+  List<TimeRecord> get dashboardRecentRecords =>
+      List.unmodifiable(_dashboardRecentRecords);
+
+  bool _dashboardRecentLoading = false;
+  bool get dashboardRecentLoading => _dashboardRecentLoading;
+
   DtrSummary _summary = const DtrSummary();
   DtrSummary get summary => _summary;
 
@@ -201,6 +210,36 @@ class DtrProvider extends ChangeNotifier {
     int? limit,
     bool silent = false,
   }) async {
+    // Admin home: recent rows only — do not touch [timeRecords] or date/user filters (Time Logs).
+    final dashboardRecentOnly =
+        limit != null && startDate == null && endDate == null;
+    if (dashboardRecentOnly) {
+      if (!silent) {
+        _dashboardRecentLoading = true;
+        _error = null;
+        notifyListeners();
+      }
+      try {
+        _tableMissing = false;
+        final list = await TimeRecordRepo.instance.listForAdmin(limit: limit);
+        _dashboardRecentRecords = list;
+        if (!silent) _dashboardRecentLoading = false;
+        notifyListeners();
+      } catch (e) {
+        if (_isTableNotFoundError(e)) {
+          _tableMissing = true;
+          _error = null;
+          _dashboardRecentRecords = [];
+        } else {
+          _error = e.toString();
+          _dashboardRecentRecords = [];
+        }
+        if (!silent) _dashboardRecentLoading = false;
+        notifyListeners();
+      }
+      return;
+    }
+
     if (!silent) {
       _loading = true;
       _error = null;
@@ -294,10 +333,20 @@ class DtrProvider extends ChangeNotifier {
     }
   }
 
-  /// Load employee list for admin filter. Optional [departmentId] filters to employees in that department.
-  Future<void> loadEmployees({String? departmentId}) async {
+  /// Load employee list for admin filter.
+  ///
+  /// By default this keeps the historical behavior (only regular users).
+  /// Set [includePrivileged] to true when admin/supervisor accounts should
+  /// also appear in the selector.
+  Future<void> loadEmployees({
+    String? departmentId,
+    bool includePrivileged = false,
+  }) async {
     try {
-      final params = <String, dynamic>{'role': 'User', 'status': 'Active'};
+      final params = <String, dynamic>{'status': 'Active'};
+      if (!includePrivileged) {
+        params['role'] = 'User';
+      }
       if (departmentId != null && departmentId.isNotEmpty) {
         params['department_id'] = departmentId;
       }

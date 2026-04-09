@@ -161,6 +161,27 @@ class DtrExport {
     return 'ABSENT';
   }
 
+  static bool _hasLocatorSegment(TimeRecord? r, String segment) {
+    final segs = r?.locatorSlipSegments ?? const <String>[];
+    final upper = segment.toUpperCase();
+    for (final s in segs) {
+      if (s.toUpperCase() == upper) return true;
+    }
+    return false;
+  }
+
+  static bool _isOnFieldByLocator(TimeRecord? r) {
+    return (r?.status == 'on_field') || (r?.locatorSlipId != null);
+  }
+
+  static String _locatorSlotOrBlank(TimeRecord? r, String segment) {
+    if (!_isOnFieldByLocator(r)) return '';
+    if (_hasLocatorSegment(r, segment)) return 'ON FIELD';
+    final segs = r?.locatorSlipSegments ?? const <String>[];
+    if (segs.isEmpty && segment.toUpperCase() == 'AM IN') return 'ON FIELD';
+    return '';
+  }
+
   /// Row-level remark for print (holiday, leave, suspension, absent, or custom remarks).
   /// Returns empty when we have punches so times are shown instead.
   static String _getRowRemark(TimeRecord? r, DateTime dt, bool isWeekend) {
@@ -705,10 +726,25 @@ class DtrExport {
       String pmOutStr;
       PdfColor? statusColor;
       if (showTimes) {
-        amInStr = rec.timeIn != null ? _formatTimePrint(rec.timeIn) : '';
-        amOutStr = rec.breakOut != null ? _formatTimePrint(rec.breakOut) : '';
-        pmInStr = rec.breakIn != null ? _formatTimePrint(rec.breakIn) : '';
-        pmOutStr = rec.timeOut != null ? _formatTimePrint(rec.timeOut) : '';
+        // For each slot, prefer the real punch time; if null, check whether a
+        // locator slip covers that slot and show "ON FIELD" instead of blank.
+        amInStr = rec.timeIn != null
+            ? _formatTimePrint(rec.timeIn)
+            : _locatorSlotOrBlank(rec, 'AM IN');
+        amOutStr = rec.breakOut != null
+            ? _formatTimePrint(rec.breakOut)
+            : _locatorSlotOrBlank(rec, 'AM OUT');
+        pmInStr = rec.breakIn != null
+            ? _formatTimePrint(rec.breakIn)
+            : _locatorSlotOrBlank(rec, 'PM IN');
+        pmOutStr = rec.timeOut != null
+            ? _formatTimePrint(rec.timeOut)
+            : _locatorSlotOrBlank(rec, 'PM OUT');
+      } else if (_isOnFieldByLocator(rec)) {
+        amInStr = _locatorSlotOrBlank(rec, 'AM IN');
+        amOutStr = _locatorSlotOrBlank(rec, 'AM OUT');
+        pmInStr = _locatorSlotOrBlank(rec, 'PM IN');
+        pmOutStr = _locatorSlotOrBlank(rec, 'PM OUT');
       } else {
         amInStr = remark.isNotEmpty
             ? remark
@@ -1112,20 +1148,29 @@ class DtrExport {
       final hasAnyPunch =
           rec != null && (rec.timeIn != null || rec.breakIn != null);
       final showTimes = remark.isEmpty && displayVal.isEmpty && hasAnyPunch;
-      final amInStr = showTimes && rec.timeIn != null
-          ? _formatTime(rec.timeIn)
-          : (remark.isNotEmpty
-                ? remark
-                : (displayVal == 'ABSENT' ? 'ABSENT' : ''));
-      final amOutStr = showTimes && rec.breakOut != null
-          ? _formatTime(rec.breakOut)
-          : '';
-      final pmInStr = showTimes && rec.breakIn != null
-          ? _formatTime(rec.breakIn)
-          : '';
-      final pmOutStr = showTimes && rec.timeOut != null
-          ? _formatTime(rec.timeOut)
-          : '';
+      final exRec = rec; // non-null alias for clean field access
+      final amInStr = exRec != null && exRec.timeIn != null
+          ? (showTimes ? _formatTime(exRec.timeIn) : '')
+          : (_isOnFieldByLocator(rec)
+                ? _locatorSlotOrBlank(rec, 'AM IN')
+                : (showTimes
+                      ? ''
+                      : (remark.isNotEmpty
+                            ? remark
+                            : (displayVal == 'ABSENT' ? 'ABSENT' : ''))));
+      final amOutStr = exRec != null && exRec.breakOut != null
+          ? (showTimes ? _formatTime(exRec.breakOut) : '')
+          : (_isOnFieldByLocator(rec)
+                ? _locatorSlotOrBlank(rec, 'AM OUT')
+                : '');
+      final pmInStr = exRec != null && exRec.breakIn != null
+          ? (showTimes ? _formatTime(exRec.breakIn) : '')
+          : (_isOnFieldByLocator(rec) ? _locatorSlotOrBlank(rec, 'PM IN') : '');
+      final pmOutStr = exRec != null && exRec.timeOut != null
+          ? (showTimes ? _formatTime(exRec.timeOut) : '')
+          : (_isOnFieldByLocator(rec)
+                ? _locatorSlotOrBlank(rec, 'PM OUT')
+                : '');
 
       final isHoliday = rec?.status == 'holiday' || rec?.holidayId != null;
       final statusColorHex = _excelColorHexForStatus(
@@ -1416,20 +1461,29 @@ class DtrExport {
       final hasAnyPunch =
           rec != null && (rec.timeIn != null || rec.breakIn != null);
       final showTimes = remark.isEmpty && displayVal.isEmpty && hasAnyPunch;
-      final amIn = showTimes && rec.timeIn != null
-          ? _formatTime(rec.timeIn)
-          : (remark.isNotEmpty
-                ? remark
-                : (displayVal == 'ABSENT' ? 'ABSENT' : ''));
-      final amOut = showTimes && rec.breakOut != null
-          ? _formatTime(rec.breakOut)
-          : '';
-      final pmIn = showTimes && rec.breakIn != null
-          ? _formatTime(rec.breakIn)
-          : '';
-      final pmOut = showTimes && rec.timeOut != null
-          ? _formatTime(rec.timeOut)
-          : '';
+      final hr = rec; // non-null alias for clean field access
+      final amIn = hr != null && hr.timeIn != null
+          ? (showTimes ? _formatTime(hr.timeIn) : '')
+          : (_isOnFieldByLocator(rec)
+                ? _locatorSlotOrBlank(rec, 'AM IN')
+                : (showTimes
+                      ? ''
+                      : (remark.isNotEmpty
+                            ? remark
+                            : (displayVal == 'ABSENT' ? 'ABSENT' : ''))));
+      final amOut = hr != null && hr.breakOut != null
+          ? (showTimes ? _formatTime(hr.breakOut) : '')
+          : (_isOnFieldByLocator(rec)
+                ? _locatorSlotOrBlank(rec, 'AM OUT')
+                : '');
+      final pmIn = hr != null && hr.breakIn != null
+          ? (showTimes ? _formatTime(hr.breakIn) : '')
+          : (_isOnFieldByLocator(rec) ? _locatorSlotOrBlank(rec, 'PM IN') : '');
+      final pmOut = hr != null && hr.timeOut != null
+          ? (showTimes ? _formatTime(hr.timeOut) : '')
+          : (_isOnFieldByLocator(rec)
+                ? _locatorSlotOrBlank(rec, 'PM OUT')
+                : '');
       final isHoliday = rec?.status == 'holiday' || rec?.holidayId != null;
       final statusColorHex = _excelColorHexForStatus(
         amIn.isNotEmpty ? amIn : null,
@@ -1634,20 +1688,33 @@ class DtrExport {
       final hasAnyPunch =
           rec != null && (rec.timeIn != null || rec.breakIn != null);
       final showTimes = remark.isEmpty && displayVal.isEmpty && hasAnyPunch;
-      final amIn = showTimes && rec.timeIn != null
-          ? _formatTime(rec.timeIn)
-          : (remark.isNotEmpty
-                ? remark
-                : (displayVal == 'ABSENT' ? 'ABSENT' : ''));
-      final amOut = showTimes && rec.breakOut != null
-          ? _formatTime(rec.breakOut)
-          : '';
-      final pmIn = showTimes && rec.breakIn != null
-          ? _formatTime(rec.breakIn)
-          : '';
-      final pmOut = showTimes && rec.timeOut != null
-          ? _formatTime(rec.timeOut)
-          : '';
+      // For each slot, prefer the real punch time. If showTimes is true but the
+      // individual slot time is null, fall back to the locator slip segment so
+      // "ON FIELD" appears in the correct column (e.g. AM IN covered by locator
+      // but breakIn/breakOut/timeOut have real punches).
+      final r = rec; // non-null alias used for clean field access below
+      final amIn = r != null && r.timeIn != null
+          ? (showTimes ? _formatTime(r.timeIn) : '')
+          : (_isOnFieldByLocator(rec)
+                ? _locatorSlotOrBlank(rec, 'AM IN')
+                : (showTimes
+                      ? ''
+                      : (remark.isNotEmpty
+                            ? remark
+                            : (displayVal == 'ABSENT' ? 'ABSENT' : ''))));
+      final amOut = r != null && r.breakOut != null
+          ? (showTimes ? _formatTime(r.breakOut) : '')
+          : (_isOnFieldByLocator(rec)
+                ? _locatorSlotOrBlank(rec, 'AM OUT')
+                : '');
+      final pmIn = r != null && r.breakIn != null
+          ? (showTimes ? _formatTime(r.breakIn) : '')
+          : (_isOnFieldByLocator(rec) ? _locatorSlotOrBlank(rec, 'PM IN') : '');
+      final pmOut = r != null && r.timeOut != null
+          ? (showTimes ? _formatTime(r.timeOut) : '')
+          : (_isOnFieldByLocator(rec)
+                ? _locatorSlotOrBlank(rec, 'PM OUT')
+                : '');
       final isHoliday = rec?.status == 'holiday' || rec?.holidayId != null;
       final statusColorHex = _excelColorHexForStatus(
         amIn.isNotEmpty ? amIn : null,

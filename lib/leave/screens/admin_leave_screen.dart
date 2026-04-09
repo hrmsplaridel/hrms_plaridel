@@ -14,6 +14,7 @@ import '../leave_repository.dart';
 import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
+import '../utils/employee_leave_card_view_screen.dart';
 import '../utils/leave_request_pdf.dart';
 import '../../utils/responsive_right_side_panel.dart';
 import '../widgets/admin_row.dart';
@@ -270,9 +271,12 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
               .length,
           reviewing: provider.reviewing,
           onRefresh: _loadRequests,
-          onAssignMandatoryLeave: widget.isDepartmentHead
+          onForcedLeaveDeduction: widget.isDepartmentHead
               ? null
-              : _assignMandatoryForcedLeave,
+              : _applyForcedLeaveDeduction,
+          onEmployeeLeaveCard: widget.isDepartmentHead
+              ? null
+              : _openEmployeeLeaveCard,
         ),
         if (provider.error != null) ...[
           const SizedBox(height: 16),
@@ -282,57 +286,57 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
           ),
         ],
         const SizedBox(height: 24),
-        _FilterBar(
-          isDepartmentHead: widget.isDepartmentHead,
-          status: _statusFilter,
-          leaveType: _leaveTypeFilter,
-          department: _departmentFilter,
-          departments: departments,
-          employee: _employeeFilter,
-          employees: employees
-              .map((e) => _EmployeeFilterOption(id: e.id, name: e.name))
-              .toList(),
-          startDateFrom: _startDateFrom,
-          startDateTo: _startDateTo,
-          onStatusChanged: (value) {
-            setState(() => _statusFilter = value);
-            _loadRequests();
-          },
-          onLeaveTypeChanged: (value) {
-            setState(() => _leaveTypeFilter = value);
-            _loadRequests();
-          },
-          onDepartmentChanged: (value) => setState(() {
-            _departmentFilter = value;
-            _employeeFilter = null;
-          }),
-          onEmployeeChanged: (value) => setState(() => _employeeFilter = value),
-          onStartDateFromChanged: (value) {
-            setState(() => _startDateFrom = value);
-            _loadRequests();
-          },
-          onStartDateToChanged: (value) {
-            setState(() => _startDateTo = value);
-            _loadRequests();
-          },
-          onReset: () {
-            setState(() {
-              _statusFilter = null;
-              _leaveTypeFilter = null;
-              _departmentFilter = null;
-              _employeeFilter = null;
-              _startDateFrom = null;
-              _startDateTo = null;
-            });
-            _loadRequests();
-          },
-        ),
-        const SizedBox(height: 20),
         _RequestQueuePanel(
           requests: filteredRequests,
           isDepartmentHead: widget.isDepartmentHead,
           loading: provider.loading,
           selectedRequest: selected,
+          filterBar: _FilterBar(
+            isDepartmentHead: widget.isDepartmentHead,
+            status: _statusFilter,
+            leaveType: _leaveTypeFilter,
+            department: _departmentFilter,
+            departments: departments,
+            employee: _employeeFilter,
+            employees: employees
+                .map((e) => _EmployeeFilterOption(id: e.id, name: e.name))
+                .toList(),
+            startDateFrom: _startDateFrom,
+            startDateTo: _startDateTo,
+            onStatusChanged: (value) {
+              setState(() => _statusFilter = value);
+              _loadRequests();
+            },
+            onLeaveTypeChanged: (value) {
+              setState(() => _leaveTypeFilter = value);
+              _loadRequests();
+            },
+            onDepartmentChanged: (value) => setState(() {
+              _departmentFilter = value;
+              _employeeFilter = null;
+            }),
+            onEmployeeChanged: (value) =>
+                setState(() => _employeeFilter = value),
+            onStartDateFromChanged: (value) {
+              setState(() => _startDateFrom = value);
+              _loadRequests();
+            },
+            onStartDateToChanged: (value) {
+              setState(() => _startDateTo = value);
+              _loadRequests();
+            },
+            onReset: () {
+              setState(() {
+                _statusFilter = null;
+                _leaveTypeFilter = null;
+                _departmentFilter = null;
+                _employeeFilter = null;
+                _startDateFrom = null;
+                _startDateTo = null;
+              });
+              _loadRequests();
+            },
+          ),
           onSelect: (request) {
             setState(() => _selectedRequest = request);
             _openRequestDetailsPanel(request);
@@ -664,21 +668,21 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  Future<void> _assignMandatoryForcedLeave() async {
-    final input = await showDialog<_AssignMandatoryForcedLeaveInput>(
+  Future<void> _applyForcedLeaveDeduction() async {
+    final input = await showDialog<_ForcedLeaveDeductionInput>(
       context: context,
-      builder: (_) => const _AssignMandatoryForcedLeaveDialog(),
+      builder: (_) => const _ForcedLeaveDeductionDialog(),
     );
     if (input == null) return;
 
     final result = await context
         .read<LeaveProvider>()
-        .assignMandatoryForcedLeave(
-          AdminMandatoryLeaveAssignmentInput(
+        .applyForcedLeaveDeduction(
+          ForcedLeaveDeductionInput(
             userId: input.userId,
-            startDate: input.startDate,
-            endDate: input.endDate,
-            reason: input.reason,
+            daysToDeduct: input.daysToDeduct,
+            year: input.year,
+            remarks: input.remarks,
           ),
         );
     if (!mounted) return;
@@ -686,10 +690,26 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     final provider = context.read<LeaveProvider>();
     _showMessage(
       ok
-          ? 'Mandatory/Forced Leave assigned.'
-          : (provider.error ?? 'Assign action failed.'),
+          ? 'Year-end forced leave deduction applied.'
+          : (provider.error ?? 'Deduction action failed.'),
     );
     if (ok) await _loadRequests();
+  }
+
+  Future<void> _openEmployeeLeaveCard() async {
+    final selected = await showDialog<_EmployeeLeaveCardSelection>(
+      context: context,
+      builder: (_) => const _EmployeeLeaveCardPickerDialog(),
+    );
+    if (!mounted || selected == null) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => EmployeeLeaveCardViewScreen(
+          userId: selected.userId,
+          employeeName: selected.name,
+        ),
+      ),
+    );
   }
 
   // ---- Department Head actions ----
@@ -798,14 +818,16 @@ class _AdminHeaderCard extends StatelessWidget {
     required this.pendingCount,
     required this.reviewing,
     required this.onRefresh,
-    this.onAssignMandatoryLeave,
+    this.onForcedLeaveDeduction,
+    this.onEmployeeLeaveCard,
   });
 
   final int totalRequests;
   final int pendingCount;
   final bool reviewing;
   final Future<void> Function() onRefresh;
-  final Future<void> Function()? onAssignMandatoryLeave;
+  final Future<void> Function()? onForcedLeaveDeduction;
+  final Future<void> Function()? onEmployeeLeaveCard;
 
   @override
   Widget build(BuildContext context) {
@@ -870,11 +892,26 @@ class _AdminHeaderCard extends StatelessWidget {
             spacing: 10,
             runSpacing: 10,
             children: [
-              if (onAssignMandatoryLeave != null)
-                OutlinedButton.icon(
-                  onPressed: reviewing ? null : onAssignMandatoryLeave,
-                  icon: const Icon(Icons.assignment_turned_in_rounded),
-                  label: const Text('Assign Mandatory/Forced'),
+              if (onForcedLeaveDeduction != null)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: reviewing ? null : onForcedLeaveDeduction,
+                      icon: const Icon(Icons.assignment_turned_in_rounded),
+                      label: const Text(
+                        'Apply Year-End Forced Leave Deduction',
+                      ),
+                    ),
+                    if (onEmployeeLeaveCard != null) ...[
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        onPressed: reviewing ? null : onEmployeeLeaveCard,
+                        icon: const Icon(Icons.badge_outlined),
+                        label: const Text("Employee's Leave Card"),
+                      ),
+                    ],
+                  ],
                 ),
               FilledButton.icon(
                 onPressed: reviewing ? null : onRefresh,
@@ -889,38 +926,44 @@ class _AdminHeaderCard extends StatelessWidget {
   }
 }
 
-class _AssignMandatoryForcedLeaveInput {
-  const _AssignMandatoryForcedLeaveInput({
+class _ForcedLeaveDeductionInput {
+  const _ForcedLeaveDeductionInput({
     required this.userId,
-    required this.startDate,
-    required this.endDate,
-    this.reason,
+    required this.daysToDeduct,
+    required this.year,
+    this.remarks,
   });
 
   final String userId;
-  final DateTime startDate;
-  final DateTime endDate;
-  final String? reason;
+  final double daysToDeduct;
+  final int year;
+  final String? remarks;
 }
 
-class _AssignMandatoryForcedLeaveDialog extends StatefulWidget {
-  const _AssignMandatoryForcedLeaveDialog();
+class _EmployeeLeaveCardSelection {
+  const _EmployeeLeaveCardSelection({required this.userId, required this.name});
+
+  final String userId;
+  final String name;
+}
+
+class _EmployeeLeaveCardPickerDialog extends StatefulWidget {
+  const _EmployeeLeaveCardPickerDialog();
 
   @override
-  State<_AssignMandatoryForcedLeaveDialog> createState() =>
-      _AssignMandatoryForcedLeaveDialogState();
+  State<_EmployeeLeaveCardPickerDialog> createState() =>
+      _EmployeeLeaveCardPickerDialogState();
 }
 
-class _AssignMandatoryForcedLeaveDialogState
-    extends State<_AssignMandatoryForcedLeaveDialog> {
-  final _formKey = GlobalKey<FormState>();
-  final _reasonController = TextEditingController();
+class _EmployeeLeaveCardPickerDialogState
+    extends State<_EmployeeLeaveCardPickerDialog> {
   bool _loadingEmployees = true;
   String? _employeesError;
+  List<Map<String, String>> _allEmployees = const [];
   List<Map<String, String>> _employees = const [];
+  List<String> _departments = const [];
+  String? _selectedDepartment;
   String? _selectedUserId;
-  DateTime? _startDate;
-  DateTime? _endDate;
 
   @override
   void initState() {
@@ -928,9 +971,296 @@ class _AssignMandatoryForcedLeaveDialogState
     _loadEmployees();
   }
 
+  Future<void> _loadEmployees() async {
+    setState(() {
+      _loadingEmployees = true;
+      _employeesError = null;
+    });
+    try {
+      final departmentsRes = await ApiClient.instance.get<List<dynamic>>(
+        '/api/departments',
+      );
+      final departmentNameById = <String, String>{};
+      for (final raw in (departmentsRes.data ?? const [])) {
+        if (raw is! Map) continue;
+        final row = Map<String, dynamic>.from(raw);
+        final id = row['id']?.toString() ?? '';
+        final name = row['name']?.toString().trim() ?? '';
+        if (id.isNotEmpty && name.isNotEmpty) {
+          departmentNameById[id] = name;
+        }
+      }
+
+      final res = await ApiClient.instance.get<dynamic>(
+        '/api/employees',
+        queryParameters: const {'status': 'Active', 'limit': 1000, 'offset': 0},
+      );
+      final payload = res.data;
+      final employeeRows = payload is Map
+          ? (payload['employees'] as List<dynamic>? ?? const <dynamic>[])
+          : (payload is List ? payload : const <dynamic>[]);
+      final rows =
+          employeeRows
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .map(
+                (e) => {
+                  'id': e['id']?.toString() ?? '',
+                  'name': e['full_name']?.toString() ?? 'Unnamed',
+                  'department': _extractDepartment(
+                    e,
+                    departmentNameById: departmentNameById,
+                  ),
+                },
+              )
+              .where((e) => (e['id'] ?? '').isNotEmpty)
+              .toList()
+            ..sort((a, b) => (a['name']!).compareTo(b['name']!));
+      final departmentsFromApi = departmentNameById.values.toSet().toList()
+        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      final departmentsFromEmployees =
+          rows
+              .map((e) => (e['department'] ?? '').trim())
+              .where((d) => d.isNotEmpty)
+              .toSet()
+              .toList()
+            ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      final departments = departmentsFromApi.isNotEmpty
+          ? departmentsFromApi
+          : departmentsFromEmployees;
+      setState(() {
+        _allEmployees = rows;
+        _departments = departments;
+        _selectedDepartment = null;
+        _employees = rows;
+        _selectedUserId = rows.isNotEmpty ? rows.first['id'] : null;
+        _loadingEmployees = false;
+      });
+    } catch (e) {
+      setState(() {
+        _employeesError = e.toString();
+        _loadingEmployees = false;
+      });
+    }
+  }
+
+  String _extractDepartment(
+    Map<String, dynamic> row, {
+    required Map<String, String> departmentNameById,
+  }) {
+    const candidates = [
+      'current_department_name',
+      'department',
+      'department_name',
+      'office_department',
+      'division',
+      'division_office',
+      'office',
+    ];
+    for (final key in candidates) {
+      final value = row[key]?.toString().trim() ?? '';
+      if (value.isNotEmpty) return value;
+    }
+    const idCandidates = ['current_department_id', 'department_id'];
+    for (final key in idCandidates) {
+      final id = row[key]?.toString().trim() ?? '';
+      if (id.isNotEmpty && departmentNameById.containsKey(id)) {
+        return departmentNameById[id]!;
+      }
+    }
+    return '';
+  }
+
+  void _onDepartmentChanged(String? department) {
+    final filtered = department == null || department.isEmpty
+        ? _allEmployees
+        : _allEmployees
+              .where((e) => (e['department'] ?? '').trim() == department)
+              .toList();
+    setState(() {
+      _selectedDepartment = department;
+      _employees = filtered;
+      _selectedUserId = filtered.isNotEmpty ? filtered.first['id'] : null;
+    });
+  }
+
+  void _confirmSelection() {
+    final selectedUserId = _selectedUserId;
+    if (selectedUserId == null || selectedUserId.isEmpty) return;
+    final selectedEmployee = _employees.firstWhere(
+      (e) => e['id'] == selectedUserId,
+      orElse: () => {'id': selectedUserId, 'name': 'Selected employee'},
+    );
+    Navigator.of(context).pop(
+      _EmployeeLeaveCardSelection(
+        userId: selectedUserId,
+        name: selectedEmployee['name'] ?? 'Selected employee',
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      title: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: AppTheme.primaryNavy.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              Icons.badge_outlined,
+              color: AppTheme.primaryNavy,
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 10),
+          const Expanded(child: Text("Employee's Leave Card")),
+        ],
+      ),
+      content: SizedBox(
+        width: 520,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Choose an employee to view the leave card.',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            if (_loadingEmployees)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_employeesError != null)
+              Text(
+                'Failed to load employees: $_employeesError',
+                style: TextStyle(color: Colors.red.shade700),
+              )
+            else ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.offWhite,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.black.withOpacity(0.06)),
+                ),
+                child: Column(
+                  children: [
+                    DropdownButtonFormField<String>(
+                      value: _selectedDepartment,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Department',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      items: [
+                        const DropdownMenuItem<String>(
+                          value: null,
+                          child: Text('All Departments'),
+                        ),
+                        ..._departments.map(
+                          (department) => DropdownMenuItem<String>(
+                            value: department,
+                            child: Text(department),
+                          ),
+                        ),
+                      ],
+                      onChanged: _onDepartmentChanged,
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      value: _selectedUserId,
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        labelText: 'Employee',
+                        border: const OutlineInputBorder(),
+                        isDense: true,
+                        helperText: _employees.isEmpty
+                            ? 'No employees found for this department.'
+                            : '${_employees.length} employee(s) found',
+                      ),
+                      items: _employees
+                          .map(
+                            (e) => DropdownMenuItem<String>(
+                              value: e['id'],
+                              child: Text(e['name']!),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: _employees.isEmpty
+                          ? null
+                          : (v) => setState(() => _selectedUserId = v),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton.icon(
+          onPressed:
+              _loadingEmployees ||
+                  _employeesError != null ||
+                  _selectedUserId == null ||
+                  _employees.isEmpty
+              ? null
+              : _confirmSelection,
+          icon: const Icon(Icons.visibility_rounded),
+          label: const Text('View Leave Card'),
+        ),
+      ],
+    );
+  }
+}
+
+class _ForcedLeaveDeductionDialog extends StatefulWidget {
+  const _ForcedLeaveDeductionDialog();
+
+  @override
+  State<_ForcedLeaveDeductionDialog> createState() =>
+      _ForcedLeaveDeductionDialogState();
+}
+
+class _ForcedLeaveDeductionDialogState
+    extends State<_ForcedLeaveDeductionDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _daysController = TextEditingController();
+  final _remarksController = TextEditingController();
+  bool _loadingEmployees = true;
+  String? _employeesError;
+  List<Map<String, String>> _employees = const [];
+  String? _selectedUserId;
+  late final TextEditingController _yearController;
+
+  @override
+  void initState() {
+    super.initState();
+    _yearController = TextEditingController(
+      text: DateTime.now().year.toString(),
+    );
+    _loadEmployees();
+  }
+
   @override
   void dispose() {
-    _reasonController.dispose();
+    _daysController.dispose();
+    _remarksController.dispose();
+    _yearController.dispose();
     super.dispose();
   }
 
@@ -969,26 +1299,10 @@ class _AssignMandatoryForcedLeaveDialogState
     }
   }
 
-  int? _computeWeekdays() {
-    final s = _startDate;
-    final e = _endDate;
-    if (s == null || e == null || e.isBefore(s)) return null;
-    int count = 0;
-    DateTime d = s;
-    while (!d.isAfter(e)) {
-      if (d.weekday != DateTime.saturday && d.weekday != DateTime.sunday) {
-        count++;
-      }
-      d = d.add(const Duration(days: 1));
-    }
-    return count;
-  }
-
   @override
   Widget build(BuildContext context) {
-    final weekdays = _computeWeekdays();
     return AlertDialog(
-      title: const Text('Assign Mandatory/Forced Leave'),
+      title: const Text('Apply Year-End Forced Leave Deduction'),
       content: SizedBox(
         width: 520,
         child: Form(
@@ -1024,29 +1338,44 @@ class _AssignMandatoryForcedLeaveDialogState
                         (v == null || v.isEmpty) ? 'Select an employee' : null,
                   ),
                 const SizedBox(height: 12),
-                _dateField(
-                  label: 'Start Date',
-                  value: _startDate,
-                  onChanged: (v) => setState(() => _startDate = v),
-                ),
-                const SizedBox(height: 12),
-                _dateField(
-                  label: 'End Date',
-                  value: _endDate,
-                  onChanged: (v) => setState(() => _endDate = v),
+                TextFormField(
+                  controller: _daysController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: _inputDecoration('Days to Deduct'),
+                  validator: (value) {
+                    final parsed = _parseDouble(value ?? '');
+                    if (parsed == null) return 'Enter deduction days';
+                    if (parsed <= 0) return 'Days must be greater than 0';
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
-                  controller: _reasonController,
+                  controller: _yearController,
+                  keyboardType: TextInputType.number,
+                  decoration: _inputDecoration('Year'),
+                  validator: (value) {
+                    final parsed = int.tryParse((value ?? '').trim());
+                    if (parsed == null) return 'Enter a valid year';
+                    if (parsed < 2000 || parsed > 2100) {
+                      return 'Year must be between 2000 and 2100';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _remarksController,
                   minLines: 2,
                   maxLines: null,
-                  decoration: _inputDecoration('Reason / Notes (Optional)'),
+                  decoration: _inputDecoration('Remarks (Optional)'),
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  weekdays == null
-                      ? 'Select a valid date range.'
-                      : 'Computed weekdays: $weekdays (max 5 for Mandatory/Forced Leave)',
+                  'Fallback action for unused forced leave. This deducts vacation leave credits directly '
+                  'and records an audit trail; it does not create a leave request.',
                   style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
                 ),
               ],
@@ -1062,57 +1391,22 @@ class _AssignMandatoryForcedLeaveDialogState
         FilledButton(
           onPressed: () {
             if (!(_formKey.currentState?.validate() ?? false)) return;
-            if (_startDate == null || _endDate == null) return;
-            final days = _computeWeekdays();
+            final days = _parseDouble(_daysController.text);
             if (days == null || days <= 0) return;
-            if (days > 5) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Mandatory/Forced Leave allows a maximum of 5 working days.',
-                  ),
-                ),
-              );
-              return;
-            }
+            final year = int.tryParse(_yearController.text.trim());
+            if (year == null) return;
             Navigator.of(context).pop(
-              _AssignMandatoryForcedLeaveInput(
+              _ForcedLeaveDeductionInput(
                 userId: _selectedUserId!,
-                startDate: _startDate!,
-                endDate: _endDate!,
-                reason: _trimOrNull(_reasonController.text),
+                daysToDeduct: days,
+                year: year,
+                remarks: _trimOrNull(_remarksController.text),
               ),
             );
           },
-          child: const Text('Assign'),
+          child: const Text('Apply Deduction'),
         ),
       ],
-    );
-  }
-
-  Widget _dateField({
-    required String label,
-    required DateTime? value,
-    required ValueChanged<DateTime?> onChanged,
-  }) {
-    return InkWell(
-      onTap: () async {
-        final d = await showDatePicker(
-          context: context,
-          initialDate: value ?? DateTime.now(),
-          firstDate: DateTime(2020),
-          lastDate: DateTime(2100),
-        );
-        if (d != null) onChanged(d);
-      },
-      child: InputDecorator(
-        decoration: _inputDecoration(label),
-        child: Text(
-          value == null
-              ? 'Select Date'
-              : '${value.year}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}',
-        ),
-      ),
     );
   }
 }
@@ -1367,6 +1661,7 @@ class _RequestQueuePanel extends StatelessWidget {
     required this.isDepartmentHead,
     required this.loading,
     required this.selectedRequest,
+    required this.filterBar,
     required this.onSelect,
   });
 
@@ -1374,10 +1669,19 @@ class _RequestQueuePanel extends StatelessWidget {
   final bool isDepartmentHead;
   final bool loading;
   final LeaveRequest? selectedRequest;
+  final Widget filterBar;
   final ValueChanged<LeaveRequest> onSelect;
 
   @override
   Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.sizeOf(context).height;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final maxQueueHeight = screenWidth < 600
+        ? (screenHeight * 0.42).clamp(260.0, 420.0)
+        : screenWidth < 1024
+        ? (screenHeight * 0.52).clamp(320.0, 580.0)
+        : (screenHeight * 0.6).clamp(380.0, 760.0);
+
     return _SectionCard(
       title: 'Request Queue',
       subtitle:
@@ -1388,46 +1692,60 @@ class _RequestQueuePanel extends StatelessWidget {
           ? const _CenteredState(
               message: 'No leave requests matched the filters.',
             )
-          : Container(
-              width: double.infinity,
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.black.withOpacity(0.08)),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final maxW = constraints.maxWidth;
-                  final tableWidth = !maxW.isFinite || maxW <= 0
-                      ? kAdminTableMinWidth
-                      : (maxW < kAdminTableMinWidth
-                            ? kAdminTableMinWidth
-                            : maxW);
-                  return SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: SizedBox(
-                      width: tableWidth,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          const AdminTableHeader(),
-                          ...requests.map(
-                            (request) => AdminRow(
-                              request: request,
-                              statusLabel: _statusLabel(
-                                request.status,
-                                isDepartmentHead: isDepartmentHead,
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                filterBar,
+                const SizedBox(height: 14),
+                Container(
+                  width: double.infinity,
+                  constraints: BoxConstraints(maxHeight: maxQueueHeight),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.black.withOpacity(0.08)),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final maxW = constraints.maxWidth;
+                      final tableWidth = !maxW.isFinite || maxW <= 0
+                          ? kAdminTableMinWidth
+                          : (maxW < kAdminTableMinWidth
+                                ? kAdminTableMinWidth
+                                : maxW);
+                      return Scrollbar(
+                        thumbVisibility: true,
+                        child: SingleChildScrollView(
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: SizedBox(
+                              width: tableWidth,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  const AdminTableHeader(),
+                                  ...requests.map(
+                                    (request) => AdminRow(
+                                      request: request,
+                                      statusLabel: _statusLabel(
+                                        request.status,
+                                        isDepartmentHead: isDepartmentHead,
+                                      ),
+                                      highlighted:
+                                          request.id == selectedRequest?.id,
+                                      onView: () => onSelect(request),
+                                    ),
+                                  ),
+                                ],
                               ),
-                              highlighted: request.id == selectedRequest?.id,
-                              onView: () => onSelect(request),
                             ),
                           ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
             ),
     );
   }

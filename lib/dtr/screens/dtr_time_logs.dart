@@ -154,9 +154,12 @@ class DtrTimeLogs extends StatefulWidget {
   State<DtrTimeLogs> createState() => _DtrTimeLogsState();
 }
 
-class _DtrTimeLogsState extends State<DtrTimeLogs> {
+class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
   final _searchController = TextEditingController();
   Timer? _refreshTimer;
+
+  /// Poll often while this screen is open so biometric punches show soon after sync (not true push).
+  static const Duration _autoRefreshInterval = Duration(seconds: 5);
   int _selectedMonth = DateTime.now().month;
   int _selectedYear = DateTime.now().year;
 
@@ -240,20 +243,28 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final now = DateTime.now();
     _selectedDay = now.day;
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
-    // Auto-refresh every 30s so new time-in/time-out shows without manual refresh
-    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+    _refreshTimer = Timer.periodic(_autoRefreshInterval, (_) {
       if (mounted) _applyFilters(silent: true);
     });
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _refreshTimer?.cancel();
     _searchController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      _applyFilters(silent: true);
+    }
   }
 
   Future<void> _load() async {
@@ -337,6 +348,19 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
     return '$h12:${m.toString().padLeft(2, '0')} $ampm';
   }
 
+  static String _cellDisplayForSegment({
+    required TimeRecord record,
+    required DateTime? timeValue,
+    required String segment,
+  }) {
+    if (timeValue != null) return _formatTime(timeValue);
+    final segs = record.locatorSlipSegments ?? const <String>[];
+    if (segs.any((s) => s.toUpperCase() == segment)) {
+      return 'On Field';
+    }
+    return '—';
+  }
+
   /// Prefer [preferredUserId] if still in list; otherwise first employee.
   static String? _pickUserIdForEmployeeList(
     List<EmployeeOption> emps,
@@ -385,8 +409,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
     if (r.status == 'holiday' ||
         r.holidayId != null ||
         r.status == 'on_leave' ||
-        r.leaveRequestId != null)
+        r.leaveRequestId != null) {
       return '—';
+    }
     final m = r.lateMinutes ?? 0;
     return m == 0 ? '0 min' : '$m min';
   }
@@ -396,8 +421,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
     if (r.status == 'holiday' ||
         r.holidayId != null ||
         r.status == 'on_leave' ||
-        r.leaveRequestId != null)
+        r.leaveRequestId != null) {
       return '—';
+    }
+
     final m = r.undertimeMinutes ?? 0;
     return m == 0 ? '0 min' : '$m min';
   }
@@ -1033,7 +1060,11 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                                         flex: 1,
                                         child: Center(
                                           child: Text(
-                                            _formatTime(timeIn),
+                                            _cellDisplayForSegment(
+                                              record: r,
+                                              timeValue: timeIn,
+                                              segment: 'AM IN',
+                                            ),
                                             style: TextStyle(
                                               fontSize: 13,
                                               color: AppTheme.textPrimary,
@@ -1046,7 +1077,11 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                                         flex: 1,
                                         child: Center(
                                           child: Text(
-                                            _formatTime(breakOut),
+                                            _cellDisplayForSegment(
+                                              record: r,
+                                              timeValue: breakOut,
+                                              segment: 'AM OUT',
+                                            ),
                                             style: TextStyle(
                                               fontSize: 13,
                                               color: AppTheme.textPrimary,
@@ -1059,7 +1094,11 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                                         flex: 1,
                                         child: Center(
                                           child: Text(
-                                            _formatTime(breakIn),
+                                            _cellDisplayForSegment(
+                                              record: r,
+                                              timeValue: breakIn,
+                                              segment: 'PM IN',
+                                            ),
                                             style: TextStyle(
                                               fontSize: 13,
                                               color: AppTheme.textPrimary,
@@ -1072,7 +1111,11 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                                         flex: 1,
                                         child: Center(
                                           child: Text(
-                                            _formatTime(timeOut),
+                                            _cellDisplayForSegment(
+                                              record: r,
+                                              timeValue: timeOut,
+                                              segment: 'PM OUT',
+                                            ),
                                             style: TextStyle(
                                               fontSize: 13,
                                               color: AppTheme.textPrimary,
@@ -1931,7 +1974,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
       ),
     );
 
-    if (updated == true && r.id != null) {
+    if (updated == true) {
       final date = DateTime(recordDate.year, recordDate.month, recordDate.day);
       DateTime? tin;
       DateTime? bo;
@@ -1989,7 +2032,11 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
         timeOut: tout,
         totalHours: hours,
       );
-      await dtr.updateEntry(updatedRec);
+      if (r.id != null) {
+        await dtr.updateEntry(updatedRec);
+      } else {
+        await dtr.addManualEntry(updatedRec);
+      }
       if (context.mounted) {
         ScaffoldMessenger.of(
           context,
@@ -2024,12 +2071,26 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
       ),
     );
     if (ok == true && r.id != null) {
-      await dtr.deleteEntry(r.id!);
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Time entry deleted.')));
-      }
+      final deleted = await dtr.deleteEntry(r.id!);
+      if (!context.mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(deleted ? 'Time entry deleted' : 'Delete failed'),
+          content: Text(
+            deleted
+                ? 'The time log was deleted successfully.'
+                : (dtr.error ??
+                      'Unable to delete this time log. Please try again.'),
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
     }
   }
 }

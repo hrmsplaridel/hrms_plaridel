@@ -103,23 +103,31 @@ async function notifyEmployee(pool, {
   });
 }
 
-/** HR/admin assigned mandatory leave to an employee (already approved). */
-async function notifyMandatoryForcedAssigned(pool, {
-  leaveRequestId,
+/** HR/admin applied forced leave deduction against vacation balance. */
+async function notifyForcedLeaveDeductionApplied(pool, {
   employeeUserId,
-  employeeName,
-  startDateStr,
-  endDateStr,
-  reason,
+  deductedDays,
+  remainingDays,
+  remarks,
 }) {
-  const range = fmtRange(startDateStr, endDateStr);
-  await notifyEmployee(pool, {
-    employeeUserId,
-    leaveRequestId,
-    type: 'leave_admin_assigned_mandatory',
-    title: 'Mandatory/Forced leave assigned',
-    body: `HR assigned mandatory/forced leave for ${range}.${reason ? ` Note: ${reason}` : ''}`,
-    metadata: { start_date: startDateStr, end_date: endDateStr },
+  if (!employeeUserId) return;
+  await insertNotification(pool, {
+    userId: employeeUserId,
+    category: 'leave',
+    type: 'leave_forced_deduction_applied',
+    title: 'Forced leave deduction applied',
+    body:
+      `HR applied a forced leave deduction of ${deductedDays} day(s) from your Vacation Leave balance.` +
+      ` Remaining balance: ${remainingDays} day(s).` +
+      (remarks ? ` Note: ${remarks}` : ''),
+    referenceType: null,
+    referenceId: null,
+    metadata: {
+      leave_type: 'vacationLeave',
+      deducted_days: deductedDays,
+      remaining_days: remainingDays,
+      remarks: remarks || null,
+    },
   });
 }
 
@@ -174,7 +182,7 @@ module.exports = {
   notifyAfterSubmit,
   notifyDepartmentHeadApprovedForHr,
   notifyEmployee,
-  notifyMandatoryForcedAssigned,
+  notifyForcedLeaveDeductionApplied,
   notifyStakeholdersLeaveCancelled,
   fmtRange,
   leaveLabel,
