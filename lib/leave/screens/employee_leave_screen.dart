@@ -552,7 +552,11 @@ class _RequestsPanel extends StatefulWidget {
 
 class _RequestsPanelState extends State<_RequestsPanel> {
   late final ScrollController _requestsScrollController;
-  int? _selectedRequestIndex;
+  String? _selectedRequestKey;
+  LeaveRequestStatus? _selectedStatus;
+  DateTime? _fromDate;
+  DateTime? _toDate;
+  String _searchQuery = '';
 
   @override
   void initState() {
@@ -575,13 +579,15 @@ class _RequestsPanelState extends State<_RequestsPanel> {
         : screenWidth < 1024
         ? (screenHeight * 0.5).clamp(320.0, 560.0)
         : (screenHeight * 0.58).clamp(380.0, 700.0);
-    final useScrollableList = widget.requests.length > 3;
-    final selectedRequest =
-        (_selectedRequestIndex != null &&
-            _selectedRequestIndex! >= 0 &&
-            _selectedRequestIndex! < widget.requests.length)
-        ? widget.requests[_selectedRequestIndex!]
-        : null;
+    final filteredRequests = _filteredRequests;
+    final useScrollableList = filteredRequests.length > 3;
+    LeaveRequest? selectedRequest;
+    for (final item in filteredRequests) {
+      if (_requestKey(item) == _selectedRequestKey) {
+        selectedRequest = item;
+        break;
+      }
+    }
 
     return _SectionCard(
       title: 'My Requests',
@@ -594,13 +600,13 @@ class _RequestsPanelState extends State<_RequestsPanel> {
           OutlinedButton(
             onPressed: selectedRequest == null
                 ? null
-                : () => _showDetails(context, selectedRequest),
+                : () => _showDetails(context, selectedRequest!),
             child: const Text('View Details'),
           ),
           OutlinedButton(
             onPressed: selectedRequest == null
                 ? null
-                : () => _showHistory(context, selectedRequest),
+                : () => _showHistory(context, selectedRequest!),
             child: const Text('View History'),
           ),
         ],
@@ -612,52 +618,172 @@ class _RequestsPanelState extends State<_RequestsPanel> {
               message:
                   'No leave requests yet. Start by filing your first leave request.',
             )
+          : filteredRequests.isEmpty
+          ? const _CenteredState(
+              message: 'No leave requests match the current filters.',
+            )
           : !useScrollableList
           ? Column(
-              children: List.generate(widget.requests.length, (index) {
-                final request = widget.requests[index];
-                return Padding(
-                  padding: EdgeInsets.only(
-                    bottom: index == widget.requests.length - 1 ? 0 : 12,
-                  ),
-                  child: _EmployeeRequestItem(
-                    request: request,
-                    isSelected: _selectedRequestIndex == index,
-                    onTap: () => _toggleSelection(index),
-                  ),
-                );
-              }),
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _LeaveRequestsFiltersBar(
+                  selectedStatus: _selectedStatus,
+                  fromDate: _fromDate,
+                  toDate: _toDate,
+                  searchQuery: _searchQuery,
+                  visibleCount: filteredRequests.length,
+                  totalCount: widget.requests.length,
+                  onSearchChanged: (value) =>
+                      setState(() => _searchQuery = value),
+                  onStatusChanged: (status) =>
+                      setState(() => _selectedStatus = status),
+                  onPickFromDate: () => _pickFilterDate(isFrom: true),
+                  onPickToDate: () => _pickFilterDate(isFrom: false),
+                  onClearFilters: _clearFilters,
+                ),
+                const SizedBox(height: 12),
+                ...List.generate(filteredRequests.length, (index) {
+                  final request = filteredRequests[index];
+                  return Padding(
+                    padding: EdgeInsets.only(
+                      bottom: index == filteredRequests.length - 1 ? 0 : 12,
+                    ),
+                    child: _EmployeeRequestItem(
+                      request: request,
+                      isSelected: _requestKey(request) == _selectedRequestKey,
+                      onTap: () => _toggleSelection(request),
+                    ),
+                  );
+                }),
+              ],
             )
           : ConstrainedBox(
               constraints: BoxConstraints(maxHeight: maxListHeight),
               child: Scrollbar(
                 controller: _requestsScrollController,
                 thumbVisibility: true,
-                child: ListView.separated(
+                child: ListView(
                   controller: _requestsScrollController,
                   primary: false,
                   physics: const BouncingScrollPhysics(
                     parent: AlwaysScrollableScrollPhysics(),
                   ),
-                  itemCount: widget.requests.length,
-                  itemBuilder: (context, index) {
-                    final request = widget.requests[index];
-                    return _EmployeeRequestItem(
-                      request: request,
-                      isSelected: _selectedRequestIndex == index,
-                      onTap: () => _toggleSelection(index),
-                    );
-                  },
-                  separatorBuilder: (_, __) => const SizedBox(height: 12),
+                  children: [
+                    _LeaveRequestsFiltersBar(
+                      selectedStatus: _selectedStatus,
+                      fromDate: _fromDate,
+                      toDate: _toDate,
+                      searchQuery: _searchQuery,
+                      visibleCount: filteredRequests.length,
+                      totalCount: widget.requests.length,
+                      onSearchChanged: (value) =>
+                          setState(() => _searchQuery = value),
+                      onStatusChanged: (status) =>
+                          setState(() => _selectedStatus = status),
+                      onPickFromDate: () => _pickFilterDate(isFrom: true),
+                      onPickToDate: () => _pickFilterDate(isFrom: false),
+                      onClearFilters: _clearFilters,
+                    ),
+                    const SizedBox(height: 12),
+                    ...List.generate(filteredRequests.length, (index) {
+                      final request = filteredRequests[index];
+                      return Padding(
+                        padding: EdgeInsets.only(
+                          bottom: index == filteredRequests.length - 1 ? 0 : 12,
+                        ),
+                        child: _EmployeeRequestItem(
+                          request: request,
+                          isSelected:
+                              _requestKey(request) == _selectedRequestKey,
+                          onTap: () => _toggleSelection(request),
+                        ),
+                      );
+                    }),
+                  ],
                 ),
               ),
             ),
     );
   }
 
-  void _toggleSelection(int index) {
+  List<LeaveRequest> get _filteredRequests {
+    return widget.requests.where((request) {
+      if (_searchQuery.trim().isNotEmpty) {
+        final q = _searchQuery.trim().toLowerCase();
+        final text =
+            '${request.leaveType.displayName} ${request.reason ?? ''} ${request.status.displayName} ${request.employeeName ?? ''}'
+                .toLowerCase();
+        if (!text.contains(q)) return false;
+      }
+      if (_selectedStatus != null) {
+        final status = request.status;
+        if (_selectedStatus == LeaveRequestStatus.pending) {
+          if (!status.isPending) return false;
+        } else if (_selectedStatus == LeaveRequestStatus.rejected) {
+          if (!status.isRejected) return false;
+        } else if (status != _selectedStatus) {
+          return false;
+        }
+      }
+      if (_fromDate != null && request.startDate != null) {
+        final d = _dateOnly(request.startDate!);
+        if (d.isBefore(_dateOnly(_fromDate!))) return false;
+      }
+      if (_toDate != null && request.endDate != null) {
+        final d = _dateOnly(request.endDate!);
+        if (d.isAfter(_dateOnly(_toDate!))) return false;
+      }
+      return true;
+    }).toList();
+  }
+
+  void _toggleSelection(LeaveRequest request) {
+    final key = _requestKey(request);
     setState(() {
-      _selectedRequestIndex = _selectedRequestIndex == index ? null : index;
+      _selectedRequestKey = _selectedRequestKey == key ? null : key;
+    });
+  }
+
+  String _requestKey(LeaveRequest request) {
+    return request.id ??
+        '${request.createdAt?.toIso8601String() ?? ''}-${request.startDate?.toIso8601String() ?? ''}-${request.endDate?.toIso8601String() ?? ''}-${request.leaveType.displayName}';
+  }
+
+  DateTime _dateOnly(DateTime value) =>
+      DateTime(value.year, value.month, value.day);
+
+  Future<void> _pickFilterDate({required bool isFrom}) async {
+    final initial = isFrom
+        ? (_fromDate ?? DateTime.now())
+        : (_toDate ?? _fromDate ?? DateTime.now());
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (picked == null) return;
+    setState(() {
+      if (isFrom) {
+        _fromDate = picked;
+        if (_toDate != null && _toDate!.isBefore(_fromDate!)) {
+          _toDate = _fromDate;
+        }
+      } else {
+        _toDate = picked;
+        if (_fromDate != null && _fromDate!.isAfter(_toDate!)) {
+          _fromDate = _toDate;
+        }
+      }
+    });
+  }
+
+  void _clearFilters() {
+    setState(() {
+      _searchQuery = '';
+      _selectedStatus = null;
+      _fromDate = null;
+      _toDate = null;
     });
   }
 
@@ -738,6 +864,240 @@ class _RequestsPanelState extends State<_RequestsPanel> {
             child: const Text('Close'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _LeaveRequestsFiltersBar extends StatelessWidget {
+  const _LeaveRequestsFiltersBar({
+    required this.selectedStatus,
+    required this.fromDate,
+    required this.toDate,
+    required this.searchQuery,
+    required this.visibleCount,
+    required this.totalCount,
+    required this.onSearchChanged,
+    required this.onStatusChanged,
+    required this.onPickFromDate,
+    required this.onPickToDate,
+    required this.onClearFilters,
+  });
+
+  final LeaveRequestStatus? selectedStatus;
+  final DateTime? fromDate;
+  final DateTime? toDate;
+  final String searchQuery;
+  final int visibleCount;
+  final int totalCount;
+  final ValueChanged<String> onSearchChanged;
+  final ValueChanged<LeaveRequestStatus?> onStatusChanged;
+  final VoidCallback onPickFromDate;
+  final VoidCallback onPickToDate;
+  final VoidCallback onClearFilters;
+
+  @override
+  Widget build(BuildContext context) {
+    const border = Color(0xFFD7DCE2);
+    const activePill = Color(0xFF123B6D);
+    const inactiveText = Color(0xFF2D3640);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            SizedBox(
+              width: 240,
+              height: 36,
+              child: TextFormField(
+                key: ValueKey(searchQuery),
+                initialValue: searchQuery,
+                onChanged: onSearchChanged,
+                style: const TextStyle(
+                  color: Color(0xFF2D3640),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+                decoration: _filterDecoration(
+                  hintText: 'Search',
+                  borderColor: border,
+                  suffixIcon: const Icon(
+                    Icons.search_rounded,
+                    size: 20,
+                    color: Color(0xFF8792A0),
+                  ),
+                ),
+              ),
+            ),
+            _dateButton(
+              label: fromDate == null ? 'From' : _formatDate(fromDate!),
+              onPressed: onPickFromDate,
+              borderColor: border,
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 2),
+              child: Text(
+                '-',
+                style: TextStyle(
+                  color: Color(0xFF7F8895),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+            _dateButton(
+              label: toDate == null ? 'To' : _formatDate(toDate!),
+              onPressed: onPickToDate,
+              borderColor: border,
+            ),
+            _statusChip(
+              label: 'All',
+              selected: selectedStatus == null,
+              onTap: () => onStatusChanged(null),
+              selectedColor: activePill,
+              unselectedTextColor: inactiveText,
+            ),
+            _statusChip(
+              label: 'Pending',
+              selected: selectedStatus == LeaveRequestStatus.pending,
+              onTap: () => onStatusChanged(LeaveRequestStatus.pending),
+              selectedColor: activePill,
+              unselectedTextColor: inactiveText,
+            ),
+            _statusChip(
+              label: 'Approved',
+              selected: selectedStatus == LeaveRequestStatus.approved,
+              onTap: () => onStatusChanged(LeaveRequestStatus.approved),
+              selectedColor: activePill,
+              unselectedTextColor: inactiveText,
+            ),
+            _statusChip(
+              label: 'Rejected',
+              selected: selectedStatus == LeaveRequestStatus.rejected,
+              onTap: () => onStatusChanged(LeaveRequestStatus.rejected),
+              selectedColor: activePill,
+              unselectedTextColor: inactiveText,
+            ),
+            _statusChip(
+              label: 'Cancelled',
+              selected: selectedStatus == LeaveRequestStatus.cancelled,
+              onTap: () => onStatusChanged(LeaveRequestStatus.cancelled),
+              selectedColor: activePill,
+              unselectedTextColor: inactiveText,
+            ),
+            TextButton(
+              onPressed: onClearFilters,
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF1A568B),
+                textStyle: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                minimumSize: const Size(0, 36),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text('Clear'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '$visibleCount of $totalCount',
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _dateButton({
+    required String label,
+    required VoidCallback onPressed,
+    required Color borderColor,
+  }) {
+    return SizedBox(
+      height: 36,
+      child: OutlinedButton.icon(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFF556070),
+          side: BorderSide(color: borderColor),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+        icon: const Icon(
+          Icons.calendar_today_rounded,
+          size: 16,
+          color: Color(0xFF8A95A3),
+        ),
+        label: Text(label),
+      ),
+    );
+  }
+
+  Widget _statusChip({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+    required Color selectedColor,
+    required Color unselectedTextColor,
+  }) {
+    return SizedBox(
+      height: 36,
+      child: TextButton(
+        onPressed: onTap,
+        style: TextButton.styleFrom(
+          backgroundColor: selected ? selectedColor : const Color(0xFFF7F8FA),
+          foregroundColor: selected ? Colors.white : unselectedTextColor,
+          side: const BorderSide(color: Color(0xFFDDE2E8)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          minimumSize: const Size(0, 36),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+        ),
+        child: Text(label),
+      ),
+    );
+  }
+
+  InputDecoration _filterDecoration({
+    required String hintText,
+    required Color borderColor,
+    Widget? suffixIcon,
+  }) {
+    return InputDecoration(
+      hintText: hintText,
+      hintStyle: const TextStyle(
+        color: Color(0xFF8D96A3),
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+      ),
+      suffixIcon: suffixIcon,
+      isDense: true,
+      filled: true,
+      fillColor: Colors.white,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: borderColor),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: Color(0xFF123B6D), width: 1.2),
       ),
     );
   }

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../providers/auth_provider.dart';
+import '../utils/locator_slip_print.dart';
 
 class EmployeeLocatorSlipScreen extends StatefulWidget {
   const EmployeeLocatorSlipScreen({super.key});
@@ -22,9 +23,10 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
   bool _loadingMy = false;
   bool _loadingApprovals = false;
   String? _error;
-  _LocatorSlipStatus? _selectedStatus;
+  String? _selectedStatusFilter;
   DateTime? _fromDate;
   DateTime? _toDate;
+  String _searchQuery = '';
   String? _selectedSlipId;
   String? _selectedApprovalSlipId;
 
@@ -39,8 +41,27 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
 
   List<_LocatorSlipDraft> get _filteredSlips {
     return _slips.where((item) {
-      if (_selectedStatus != null && item.status != _selectedStatus)
-        return false;
+      if (_searchQuery.trim().isNotEmpty) {
+        final q = _searchQuery.trim().toLowerCase();
+        final searchable =
+            '${item.employeeName} ${item.office} ${item.remarks} ${item.status.label}'
+                .toLowerCase();
+        if (!searchable.contains(q)) return false;
+      }
+      if (_selectedStatusFilter != null) {
+        if (_selectedStatusFilter == 'pending') {
+          if (item.status != _LocatorSlipStatus.pendingDepartmentHead &&
+              item.status != _LocatorSlipStatus.pendingHr) {
+            return false;
+          }
+        } else if (_selectedStatusFilter == 'approved') {
+          if (item.status != _LocatorSlipStatus.approved) return false;
+        } else if (_selectedStatusFilter == 'rejected') {
+          if (item.status != _LocatorSlipStatus.rejected) return false;
+        } else if (_selectedStatusFilter == 'cancelled') {
+          if (item.status != _LocatorSlipStatus.cancelled) return false;
+        }
+      }
       if (_fromDate != null &&
           _dateOnly(item.date).isBefore(_dateOnly(_fromDate!))) {
         return false;
@@ -149,13 +170,15 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _LocatorFiltersCard(
-            selectedStatus: _selectedStatus,
+            selectedStatusFilter: _selectedStatusFilter,
             fromDate: _fromDate,
             toDate: _toDate,
+            searchQuery: _searchQuery,
             visibleCount: _filteredSlips.length,
             totalCount: _slips.length,
             onStatusChanged: (status) =>
-                setState(() => _selectedStatus = status),
+                setState(() => _selectedStatusFilter = status),
+            onSearchChanged: (value) => setState(() => _searchQuery = value),
             onPickFromDate: () => _pickFilterDate(isFrom: true),
             onPickToDate: () => _pickFilterDate(isFrom: false),
             onClearFilters: _clearFilters,
@@ -236,94 +259,184 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
   void _showSlipDetails(BuildContext context, _LocatorSlipDraft item) {
     showDialog<void>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Locator Slip Details'),
-        content: SizedBox(
-          width: 560,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Date: ${_formatDate(item.date)}'),
-              const SizedBox(height: 6),
-              Text('Office: ${item.office}'),
-              const SizedBox(height: 6),
-              Text('Status: ${item.status.label}'),
-              const SizedBox(height: 10),
-              Text('Reason: ${item.remarks}'),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
+      builder: (dialogContext) => _LocatorSlipDetailsDialog(item: item),
     );
   }
 
   void _showSlipHistory(BuildContext context, _LocatorSlipDraft item) {
     final history = switch (item.status) {
-      _LocatorSlipStatus.approved => const [
-        'Submitted',
-        'Reviewed by Department Head',
-        'Approved by HR',
+      _LocatorSlipStatus.approved => [
+        (title: 'Submitted', actor: null),
+        (title: 'Reviewed by Department Head', actor: item.departmentHeadName),
+        (title: 'Approved by HR', actor: item.hrReviewerName),
       ],
-      _LocatorSlipStatus.rejected => const [
-        'Submitted',
-        'Reviewed by Department Head',
-        'Rejected',
+      _LocatorSlipStatus.rejected => [
+        (title: 'Submitted', actor: null),
+        (title: 'Reviewed by Department Head', actor: item.departmentHeadName),
+        (
+          title: 'Rejected',
+          actor: item.hrReviewerName ?? item.departmentHeadName,
+        ),
       ],
-      _LocatorSlipStatus.cancelled => const ['Submitted', 'Cancelled'],
-      _LocatorSlipStatus.pendingHr => const [
-        'Submitted',
-        'Reviewed by Department Head',
-        'Pending HR Admin',
+      _LocatorSlipStatus.cancelled => [
+        (title: 'Submitted', actor: null),
+        (title: 'Cancelled', actor: null),
       ],
-      _LocatorSlipStatus.pendingDepartmentHead => const [
-        'Submitted',
-        'Pending Department Head',
+      _LocatorSlipStatus.pendingHr => [
+        (title: 'Submitted', actor: null),
+        (title: 'Reviewed by Department Head', actor: item.departmentHeadName),
+        (title: 'Pending HR Admin', actor: item.hrReviewerName),
       ],
-      _LocatorSlipStatus.draft => const ['Draft'],
+      _LocatorSlipStatus.pendingDepartmentHead => [
+        (title: 'Submitted', actor: null),
+        (title: 'Pending Department Head', actor: item.departmentHeadName),
+      ],
+      _LocatorSlipStatus.draft => [(title: 'Draft', actor: null)],
     };
+    final eventDate = _formatDate(item.date);
+    final accent = AppTheme.primaryNavy;
 
     showDialog<void>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Locator Slip History'),
-        content: SizedBox(
-          width: 560,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 880),
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: history
-                .map(
-                  (step) => Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Padding(
-                          padding: EdgeInsets.only(top: 2),
-                          child: Icon(Icons.circle, size: 8),
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 20, 12, 14),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Locator Slip History',
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 40 * 0.5,
+                          fontWeight: FontWeight.w700,
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text(step)),
-                      ],
+                      ),
                     ),
+                    IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: Icon(Icons.close, color: AppTheme.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+              Divider(height: 1, color: AppTheme.lightGray),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
+                  child: Column(
+                    children: List.generate(history.length, (index) {
+                      final step = history[index];
+                      final isFirst = index == 0;
+                      final isLast = index == history.length - 1;
+                      final actor = step.actor?.trim();
+                      String subtitle = eventDate;
+                      if (actor != null && actor.isNotEmpty) {
+                        subtitle = '$eventDate by $actor';
+                      } else if (step.title.contains('Department Head') &&
+                          step.title != 'Pending Department Head') {
+                        subtitle = '$eventDate by Department Head';
+                      } else if (step.title.contains('HR')) {
+                        subtitle = '$eventDate by HR Admin';
+                      }
+                      return Padding(
+                        padding: EdgeInsets.only(bottom: isLast ? 0 : 2),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(
+                              width: 44,
+                              height: 96,
+                              child: Stack(
+                                children: [
+                                  Positioned(
+                                    left: 20,
+                                    top: isFirst ? 14 : 0,
+                                    bottom: isLast ? 82 : 0,
+                                    child: Container(width: 4, color: accent),
+                                  ),
+                                  Positioned(
+                                    left: 8,
+                                    top: 0,
+                                    child: Container(
+                                      width: 28,
+                                      height: 28,
+                                      decoration: BoxDecoration(
+                                        color: accent,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: const Icon(
+                                        Icons.check_rounded,
+                                        size: 18,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      step.title,
+                                      style: TextStyle(
+                                        color: AppTheme.textPrimary,
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      subtitle,
+                                      style: TextStyle(
+                                        color: AppTheme.textSecondary,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
                   ),
-                )
-                .toList(),
+                ),
+              ),
+              Divider(height: 1, color: AppTheme.lightGray),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 20, 16),
+                child: Row(
+                  children: [
+                    const Spacer(),
+                    FilledButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: accent.withValues(alpha: 0.15),
+                        foregroundColor: accent,
+                      ),
+                      child: const Text('Close'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
-          ),
-        ],
       ),
     );
   }
@@ -591,7 +704,8 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
 
   void _clearFilters() {
     setState(() {
-      _selectedStatus = null;
+      _searchQuery = '';
+      _selectedStatusFilter = null;
       _fromDate = null;
       _toDate = null;
     });
@@ -605,6 +719,286 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
     final m = value.month.toString().padLeft(2, '0');
     final d = value.day.toString().padLeft(2, '0');
     return '$y-$m-$d';
+  }
+}
+
+/// Locator slip details — layout/positioning (theme borders and typography only).
+class _LocatorSlipDetailsDialog extends StatelessWidget {
+  const _LocatorSlipDetailsDialog({required this.item});
+
+  final _LocatorSlipDraft item;
+
+  String _segmentsLine() {
+    final parts = <String>[];
+    if (item.amIn) parts.add('AM IN');
+    if (item.amOut) parts.add('AM OUT');
+    if (item.pmIn) parts.add('PM IN');
+    if (item.pmOut) parts.add('PM OUT');
+    return parts.isEmpty ? '—' : parts.join(', ');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final borderColor = theme.dividerColor;
+    final maxH = MediaQuery.sizeOf(context).height * 0.85;
+
+    Widget slipInformation() {
+      return _LocatorDetailPanel(
+        title: 'Slip Information',
+        borderColor: borderColor,
+        children: [
+          _LocatorDetailLabeledBlock(
+            label: 'Date',
+            value: _formatDate(item.date),
+          ),
+          Divider(height: 1, thickness: 1, color: borderColor),
+          _LocatorDetailLabeledBlock(
+            label: 'Office/Destination',
+            value: item.office,
+          ),
+          Divider(height: 1, thickness: 1, color: borderColor),
+          _LocatorDetailLabeledBlock(
+            label: 'Applicable Time Segment(s)',
+            value: _segmentsLine(),
+          ),
+        ],
+      );
+    }
+
+    Widget statusFiling() {
+      return _LocatorDetailPanel(
+        title: 'Status & Filing',
+        borderColor: borderColor,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Status', style: theme.textTheme.bodySmall),
+                const SizedBox(height: 8),
+                _LocatorStatusBadgeOutline(status: item.status),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    Widget reasonPurpose() {
+      return _LocatorDetailPanel(
+        title: 'Reason/Purpose',
+        borderColor: borderColor,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Text(item.remarks, style: theme.textTheme.bodyMedium),
+          ),
+        ],
+      );
+    }
+
+    return Dialog(
+      backgroundColor: Colors.white,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: 640, maxHeight: maxH),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 4, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Locator Slip Details',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    tooltip: 'Close',
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+            ),
+            Divider(height: 1, thickness: 1, color: borderColor),
+            Flexible(
+              fit: FlexFit.loose,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final wide = constraints.maxWidth >= 520;
+                    final top = wide
+                        ? Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(child: slipInformation()),
+                              const SizedBox(width: 12),
+                              Expanded(child: statusFiling()),
+                            ],
+                          )
+                        : Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              slipInformation(),
+                              const SizedBox(height: 12),
+                              statusFiling(),
+                            ],
+                          );
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        top,
+                        const SizedBox(height: 12),
+                        reasonPurpose(),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
+            Divider(height: 1, thickness: 1, color: borderColor),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Center(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  spacing: 40,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Close'),
+                    ),
+                    SizedBox(width: 12),
+                    FilledButton(
+                      onPressed: () => LocatorSlipPrint.printForm(
+                        context: context,
+                        id: item.id,
+                        employeeName: item.employeeName,
+                        dateText: _formatDate(item.date),
+                        office: item.office,
+                        remarks: item.remarks,
+                        amIn: item.amIn,
+                        amOut: item.amOut,
+                        pmIn: item.pmIn,
+                        pmOut: item.pmOut,
+                      ),
+                      child: const Text('Print Form'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LocatorDetailPanel extends StatelessWidget {
+  const _LocatorDetailPanel({
+    required this.title,
+    required this.borderColor,
+    required this.children,
+  });
+
+  final String title;
+  final Color borderColor;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: borderColor),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                border: Border(bottom: BorderSide(color: borderColor)),
+              ),
+              child: Text(
+                title,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            ...children,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LocatorDetailLabeledBlock extends StatelessWidget {
+  const _LocatorDetailLabeledBlock({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: theme.textTheme.bodySmall),
+          const SizedBox(height: 4),
+          Text(value, style: theme.textTheme.bodyMedium),
+        ],
+      ),
+    );
+  }
+}
+
+class _LocatorStatusBadgeOutline extends StatelessWidget {
+  const _LocatorStatusBadgeOutline({required this.status});
+
+  final _LocatorSlipStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final icon = status == _LocatorSlipStatus.approved
+        ? Icons.check
+        : Icons.flag_outlined;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: theme.dividerColor),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16),
+            const SizedBox(width: 6),
+            Text(status.label),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -690,10 +1084,24 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
 
   @override
   Widget build(BuildContext context) {
+    const accent = Color(0xFFF57C00);
     return AlertDialog(
-      title: const Text('File Locator Slip'),
+      backgroundColor: const Color(0xFFFFFDF7),
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+      contentPadding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
+      actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+      title: const Text(
+        'File Locator Slip',
+        style: TextStyle(
+          color: Color(0xFF111111),
+          fontSize: 17,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
       content: SizedBox(
-        width: 560,
+        width: 360,
         child: Form(
           key: _formKey,
           child: SingleChildScrollView(
@@ -704,24 +1112,37 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
                 const SizedBox(height: 14),
                 _segmentSelector(),
                 const SizedBox(height: 14),
+                _fieldLabel('Name'),
                 TextFormField(
                   initialValue: widget.employeeName,
                   enabled: false,
-                  decoration: _inputDecoration('Name'),
+                  decoration: _inputDecoration().copyWith(
+                    hintText: widget.employeeName,
+                  ),
                 ),
                 const SizedBox(height: 12),
+                _fieldLabel('Office'),
                 TextFormField(
                   controller: _officeController,
-                  decoration: _inputDecoration('Office'),
+                  decoration: _inputDecoration(),
                   validator: (v) => (v == null || v.trim().isEmpty)
                       ? 'Office is required'
                       : null,
                 ),
                 const SizedBox(height: 12),
+                _fieldLabel('Remarks / Reasons'),
                 TextFormField(
                   controller: _remarksController,
-                  maxLines: 3,
-                  decoration: _inputDecoration('Remarks / Reasons'),
+                  minLines: 4,
+                  maxLines: 4,
+                  decoration: _inputDecoration().copyWith(
+                    hintText: 'Enter remarks...',
+                    alignLabelWithHint: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 12,
+                    ),
+                  ),
                   validator: (v) => (v == null || v.trim().isEmpty)
                       ? 'Remarks/Reasons is required'
                       : null,
@@ -732,70 +1153,30 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(onPressed: _save, child: const Text('Save')),
-      ],
-    );
-  }
-
-  Widget _datePicker() {
-    return InkWell(
-      onTap: () async {
-        final picked = await showDatePicker(
-          context: context,
-          initialDate: _date,
-          firstDate: DateTime(2000),
-          lastDate: DateTime(2100),
-        );
-        if (picked != null) {
-          setState(() => _date = picked);
-        }
-      },
-      child: InputDecorator(
-        decoration: _inputDecoration('Date'),
-        child: Text(_formatDate(_date)),
-      ),
-    );
-  }
-
-  Widget _segmentSelector() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Applicable Time Segment(s)',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          spacing: 40,
           children: [
-            FilterChip(
-              selected: _amIn,
-              label: const Text('AM IN'),
-              onSelected: (v) => setState(() => _amIn = v),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              style: TextButton.styleFrom(
+                foregroundColor: accent,
+                textStyle: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              child: const Text('Cancel'),
             ),
-            FilterChip(
-              selected: _amOut,
-              label: const Text('AM OUT'),
-              onSelected: (v) => setState(() => _amOut = v),
-            ),
-            FilterChip(
-              selected: _pmIn,
-              label: const Text('PM IN'),
-              onSelected: (v) => setState(() => _pmIn = v),
-            ),
-            FilterChip(
-              selected: _pmOut,
-              label: const Text('PM OUT'),
-              onSelected: (v) => setState(() => _pmOut = v),
+            SizedBox(width: 12),
+            FilledButton(
+              onPressed: _save,
+              style: FilledButton.styleFrom(
+                backgroundColor: accent,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(72, 38),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: const Text('Save'),
             ),
           ],
         ),
@@ -803,11 +1184,158 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
     );
   }
 
-  InputDecoration _inputDecoration(String label) {
+  Widget _datePicker() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _fieldLabel('Date'),
+        InkWell(
+          onTap: () async {
+            final picked = await showDatePicker(
+              context: context,
+              initialDate: _date,
+              firstDate: DateTime(2000),
+              lastDate: DateTime(2100),
+            );
+            if (picked != null) {
+              setState(() => _date = picked);
+            }
+          },
+          child: InputDecorator(
+            decoration: _inputDecoration().copyWith(
+              suffixIcon: const Icon(
+                Icons.calendar_today_rounded,
+                size: 18,
+                color: Color(0xFF7A7A7A),
+              ),
+            ),
+            child: Text(_formatDate(_date)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _segmentSelector() {
+    const accent = Color(0xFFF57C00);
+    const border = Color(0xFFBEBEBE);
+    const divider = Color(0xFFC9C9C9);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _fieldLabel('Applicable Time Segment(s)'),
+        const SizedBox(height: 8),
+        Container(
+          height: 42,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: border),
+          ),
+          child: Row(
+            children: [
+              _segmentCell(
+                label: 'AM IN',
+                selected: _amIn,
+                onTap: () => setState(() => _amIn = !_amIn),
+                accent: accent,
+              ),
+              _segmentDivider(divider),
+              _segmentCell(
+                label: 'AM OUT',
+                selected: _amOut,
+                onTap: () => setState(() => _amOut = !_amOut),
+                accent: accent,
+              ),
+              _segmentDivider(divider),
+              _segmentCell(
+                label: 'PM IN',
+                selected: _pmIn,
+                onTap: () => setState(() => _pmIn = !_pmIn),
+                accent: accent,
+              ),
+              _segmentDivider(divider),
+              _segmentCell(
+                label: 'PM OUT',
+                selected: _pmOut,
+                onTap: () => setState(() => _pmOut = !_pmOut),
+                accent: accent,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _segmentDivider(Color color) => Container(width: 1, color: color);
+
+  Widget _segmentCell({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+    required Color accent,
+  }) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(color: selected ? accent : Colors.white),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: selected ? Colors.white : const Color(0xFF2F2F2F),
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _fieldLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: Color(0xFF1F1F1F),
+        ),
+      ),
+    );
+  }
+
+  InputDecoration _inputDecoration() {
     return InputDecoration(
-      labelText: label,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      isDense: true,
+      hintStyle: const TextStyle(color: Color(0xFFA7A7A7), fontSize: 14),
+      filled: true,
+      fillColor: Colors.white,
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: Color(0xFFCFCFCF), width: 1.2),
+      ),
+      disabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: Color(0xFFCFCFCF), width: 1.2),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: Color(0xFFF57C00), width: 2),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: Colors.redAccent, width: 1.2),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: Colors.redAccent, width: 2),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
     );
   }
 
@@ -846,6 +1374,8 @@ class _LocatorSlipDraft {
     required this.employeeName,
     required this.office,
     required this.remarks,
+    this.departmentHeadName,
+    this.hrReviewerName,
     required this.amIn,
     required this.amOut,
     required this.pmIn,
@@ -858,6 +1388,8 @@ class _LocatorSlipDraft {
   final String employeeName;
   final String office;
   final String remarks;
+  final String? departmentHeadName;
+  final String? hrReviewerName;
   final bool amIn;
   final bool amOut;
   final bool pmIn;
@@ -870,6 +1402,8 @@ class _LocatorSlipDraft {
     String? employeeName,
     String? office,
     String? remarks,
+    String? departmentHeadName,
+    String? hrReviewerName,
     bool? amIn,
     bool? amOut,
     bool? pmIn,
@@ -882,6 +1416,8 @@ class _LocatorSlipDraft {
       employeeName: employeeName ?? this.employeeName,
       office: office ?? this.office,
       remarks: remarks ?? this.remarks,
+      departmentHeadName: departmentHeadName ?? this.departmentHeadName,
+      hrReviewerName: hrReviewerName ?? this.hrReviewerName,
       amIn: amIn ?? this.amIn,
       amOut: amOut ?? this.amOut,
       pmIn: pmIn ?? this.pmIn,
@@ -893,17 +1429,51 @@ class _LocatorSlipDraft {
   factory _LocatorSlipDraft.fromApi(Map<String, dynamic> json) {
     final rawDate = (json['slip_date'] ?? '').toString();
     final parsedDate = DateTime.tryParse(rawDate);
+    String? readName(List<String> keys) {
+      for (final key in keys) {
+        final value = (json[key] ?? '').toString().trim();
+        if (value.isNotEmpty && value.toLowerCase() != 'null') {
+          return value;
+        }
+      }
+      return null;
+    }
+
+    final status = _LocatorSlipStatus.fromApi(
+      (json['status'] ?? '').toString(),
+    );
+    final genericReviewer = readName(['reviewer_name', 'approver_name']);
     return _LocatorSlipDraft(
       id: (json['id'] ?? '').toString(),
       date: parsedDate ?? DateTime.now(),
       employeeName: (json['employee_name'] ?? 'Employee').toString(),
       office: (json['office'] ?? '').toString(),
       remarks: (json['reason'] ?? '').toString(),
+      departmentHeadName:
+          readName([
+            'dept_head_reviewer_name',
+            'department_head_name',
+            'dept_head_name',
+            'reviewed_by_department_head_name',
+            'department_head_reviewer_name',
+          ]) ??
+          (status == _LocatorSlipStatus.pendingHr ? genericReviewer : null),
+      hrReviewerName:
+          readName([
+            'hr_name',
+            'hr_reviewer_name',
+            'reviewed_by_hr_name',
+            'approved_by_hr_name',
+          ]) ??
+          ((status == _LocatorSlipStatus.approved ||
+                  status == _LocatorSlipStatus.rejected)
+              ? genericReviewer
+              : null),
       amIn: json['am_in'] == true,
       amOut: json['am_out'] == true,
       pmIn: json['pm_in'] == true,
       pmOut: json['pm_out'] == true,
-      status: _LocatorSlipStatus.fromApi((json['status'] ?? '').toString()),
+      status: status,
     );
   }
 }
@@ -1218,101 +1788,230 @@ class _LocatorSectionTabs extends StatelessWidget {
 
 class _LocatorFiltersCard extends StatelessWidget {
   const _LocatorFiltersCard({
-    required this.selectedStatus,
+    required this.selectedStatusFilter,
     required this.fromDate,
     required this.toDate,
+    required this.searchQuery,
     required this.visibleCount,
     required this.totalCount,
     required this.onStatusChanged,
+    required this.onSearchChanged,
     required this.onPickFromDate,
     required this.onPickToDate,
     required this.onClearFilters,
   });
 
-  final _LocatorSlipStatus? selectedStatus;
+  final String? selectedStatusFilter;
   final DateTime? fromDate;
   final DateTime? toDate;
+  final String searchQuery;
   final int visibleCount;
   final int totalCount;
-  final ValueChanged<_LocatorSlipStatus?> onStatusChanged;
+  final ValueChanged<String?> onStatusChanged;
+  final ValueChanged<String> onSearchChanged;
   final VoidCallback onPickFromDate;
   final VoidCallback onPickToDate;
   final VoidCallback onClearFilters;
 
   @override
   Widget build(BuildContext context) {
+    const border = Color(0xFFD7DCE2);
+    const activePill = Color(0xFF123B6D);
+    const inactiveText = Color(0xFF2D3640);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Text(
-              'Filters',
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const Spacer(),
-            Text(
-              '$visibleCount of $totalCount',
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
         Wrap(
           spacing: 8,
           runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            OutlinedButton.icon(
+            SizedBox(
+              width: 240,
+              height: 36,
+              child: TextFormField(
+                key: ValueKey(searchQuery),
+                initialValue: searchQuery,
+                onChanged: onSearchChanged,
+                style: const TextStyle(
+                  color: Color(0xFF2D3640),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+                decoration: _filterDecoration(
+                  hintText: 'Search',
+                  borderColor: border,
+                  suffixIcon: const Icon(
+                    Icons.search_rounded,
+                    size: 20,
+                    color: Color(0xFF8792A0),
+                  ),
+                ),
+              ),
+            ),
+            _dateButton(
+              label: fromDate == null ? 'From' : _formatDate(fromDate!),
               onPressed: onPickFromDate,
-              icon: const Icon(Icons.calendar_month_rounded, size: 18),
-              label: Text(
-                fromDate == null
-                    ? 'From date'
-                    : 'From: ${_formatDate(fromDate!)}',
+              borderColor: border,
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 2),
+              child: Text(
+                '-',
+                style: TextStyle(
+                  color: Color(0xFF7F8895),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
+                ),
               ),
             ),
-            OutlinedButton.icon(
+            _dateButton(
+              label: toDate == null ? 'To' : _formatDate(toDate!),
               onPressed: onPickToDate,
-              icon: const Icon(Icons.event_rounded, size: 18),
-              label: Text(
-                toDate == null ? 'To date' : 'To: ${_formatDate(toDate!)}',
+              borderColor: border,
+            ),
+            _statusChip(
+              label: 'All',
+              selected: selectedStatusFilter == null,
+              onTap: () => onStatusChanged(null),
+              selectedColor: activePill,
+              unselectedTextColor: inactiveText,
+            ),
+            ...const ['pending', 'approved', 'rejected', 'cancelled'].map(
+              (statusKey) => _statusChip(
+                label: _statusFilterLabel(statusKey),
+                selected: selectedStatusFilter == statusKey,
+                onTap: () => onStatusChanged(statusKey),
+                selectedColor: activePill,
+                unselectedTextColor: inactiveText,
               ),
             ),
-            TextButton.icon(
+            TextButton(
               onPressed: onClearFilters,
-              icon: const Icon(Icons.clear_all_rounded, size: 18),
-              label: const Text('Clear'),
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF1A568B),
+                textStyle: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                minimumSize: const Size(0, 36),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text('Clear'),
             ),
           ],
         ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            ChoiceChip(
-              selected: selectedStatus == null,
-              label: const Text('All'),
-              onSelected: (_) => onStatusChanged(null),
-            ),
-            ..._LocatorSlipStatus.values.map(
-              (status) => ChoiceChip(
-                selected: selectedStatus == status,
-                label: Text(status.label),
-                onSelected: (_) => onStatusChanged(status),
-              ),
-            ),
-          ],
+        const SizedBox(height: 8),
+        Text(
+          '$visibleCount of $totalCount',
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ],
+    );
+  }
+
+  Widget _dateButton({
+    required String label,
+    required VoidCallback onPressed,
+    required Color borderColor,
+  }) {
+    return SizedBox(
+      height: 36,
+      child: OutlinedButton.icon(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFF556070),
+          side: BorderSide(color: borderColor),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+        icon: const Icon(
+          Icons.calendar_today_rounded,
+          size: 16,
+          color: Color(0xFF8A95A3),
+        ),
+        label: Text(label),
+      ),
+    );
+  }
+
+  Widget _statusChip({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+    required Color selectedColor,
+    required Color unselectedTextColor,
+  }) {
+    return SizedBox(
+      height: 36,
+      child: TextButton(
+        onPressed: onTap,
+        style: TextButton.styleFrom(
+          backgroundColor: selected ? selectedColor : const Color(0xFFF7F8FA),
+          foregroundColor: selected ? Colors.white : unselectedTextColor,
+          side: const BorderSide(color: Color(0xFFDDE2E8)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          minimumSize: const Size(0, 36),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+        ),
+        child: Text(label),
+      ),
+    );
+  }
+
+  static String _statusFilterLabel(String key) {
+    switch (key) {
+      case 'pending':
+        return 'Pending';
+      case 'approved':
+        return 'Approved';
+      case 'rejected':
+        return 'Rejected';
+      case 'cancelled':
+        return 'Cancelled';
+      default:
+        return key;
+    }
+  }
+
+  InputDecoration _filterDecoration({
+    required String hintText,
+    required Color borderColor,
+    Widget? suffixIcon,
+  }) {
+    return InputDecoration(
+      hintText: hintText,
+      hintStyle: const TextStyle(
+        color: Color(0xFF8D96A3),
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+      ),
+      suffixIcon: suffixIcon,
+      isDense: true,
+      filled: true,
+      fillColor: Colors.white,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: borderColor),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: Color(0xFF123B6D), width: 1.2),
+      ),
     );
   }
 }
