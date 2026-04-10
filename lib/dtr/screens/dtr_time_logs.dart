@@ -156,10 +156,7 @@ class DtrTimeLogs extends StatefulWidget {
 
 class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
   final _searchController = TextEditingController();
-  Timer? _refreshTimer;
-
-  /// Poll often while this screen is open so biometric punches show soon after sync (not true push).
-  static const Duration _autoRefreshInterval = Duration(seconds: 5);
+  StreamSubscription? _wsSub;
   int _selectedMonth = DateTime.now().month;
   int _selectedYear = DateTime.now().year;
 
@@ -246,16 +243,20 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     final now = DateTime.now();
     _selectedDay = now.day;
-    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
-    _refreshTimer = Timer.periodic(_autoRefreshInterval, (_) {
-      if (mounted) _applyFilters(silent: true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _load();
+      if (mounted) {
+        _wsSub = context.read<DtrProvider>().onDtrUpdate.listen((_) {
+          if (mounted) _applyFilters(silent: true);
+        });
+      }
     });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _refreshTimer?.cancel();
+    _wsSub?.cancel();
     _searchController.dispose();
     super.dispose();
   }

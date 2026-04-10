@@ -1,7 +1,11 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../api/client.dart';
+import '../api/config.dart';
 import '../data/time_record.dart';
 
 // Previously used Supabase for auth; now use setUserFromApi(userId) from AuthProvider.
@@ -50,7 +54,50 @@ class DepartmentOption {
 /// DTR state and operations. Used by admin DTR module and employee clock in/attendance.
 /// Current user id is set via [setUserFromApi] (e.g. from AuthProvider after API login).
 class DtrProvider extends ChangeNotifier {
-  DtrProvider();
+  WebSocketChannel? _wsChannel;
+  final _dtrUpdateController = StreamController<void>.broadcast();
+  Stream<void> get onDtrUpdate => _dtrUpdateController.stream;
+
+  DtrProvider() {
+    _initWebSocket();
+  }
+
+  void _initWebSocket() {
+    try {
+      final wsUrl =
+          '${ApiConfig.baseUrl.replaceFirst('http://', 'ws://').replaceFirst('https://', 'wss://')}/ws/biometrics';
+      _wsChannel = WebSocketChannel.connect(Uri.parse(wsUrl));
+      _wsChannel?.stream.listen(
+        (message) {
+          try {
+            final data = jsonDecode(message);
+            if (data['event'] == 'dtr_refresh') {
+              _dtrUpdateController.add(null);
+              if (_dashboardRecentRecords.isNotEmpty) {
+                loadTimeRecordsForAdmin(
+                  limit: _dashboardRecentRecords.length,
+                  silent: true,
+                );
+              }
+            }
+          } catch (_) {}
+        },
+        onDone: () {
+          Future.delayed(const Duration(seconds: 5), () => _initWebSocket());
+        },
+        onError: (_) {
+          Future.delayed(const Duration(seconds: 5), () => _initWebSocket());
+        },
+      );
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _wsChannel?.sink.close();
+    _dtrUpdateController.close();
+    super.dispose();
+  }
 
   /// Current user id (from API auth). Set via setUserFromApi(auth.user?.id) when using API login.
   String? _userId;

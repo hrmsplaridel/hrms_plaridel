@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { pool } = require('./config/db');
+const { initWebSocket } = require('./websockets/biometricStream');
 
 const authRoutes = require('./routes/auth');
 const departmentsRoutes = require('./routes/departments');
@@ -118,7 +119,7 @@ app.use('/api/notifications', notificationsRoutes);
 app.use('/api/locator-slips', locatorSlipsRoutes);
 
 // --- Start server ---
-app.listen(PORT, HOST, () => {
+const server = app.listen(PORT, HOST, () => {
   console.log(`HRMS API listening on http://${HOST}:${PORT}`);
   console.log('  GET  /health           - app health');
   console.log('  GET  /health/db        - database health');
@@ -136,3 +137,6 @@ app.listen(PORT, HOST, () => {
   console.log('  GET  /api/rsp/storage/view-token - admin token for /api/files/recruitment-attachment');
   console.log('  GET  /api/rsp/storage/signed-url - admin signed attachment URL (service role)');
 });
+
+// Initialize WebSocket server for Biometrics/DTR updates
+initWebSocket(server);

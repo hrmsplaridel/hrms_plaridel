@@ -7,6 +7,7 @@ const {
   expandRecurringToWindow,
   dateInRecurringRange,
 } = require('../services/holidayRangeUtils');
+const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -1433,6 +1434,9 @@ router.post('/', protect, async (req, res) => {
     );
     const r = result.rows[0];
     const recordDateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || date;
+    
+    broadcastBiometricUpdate('dtr_refresh', { action: 'manual_inserted', userId: r.employee_id });
+    
     res.status(201).json({
       id: r.id,
       user_id: r.employee_id,
@@ -1572,6 +1576,9 @@ router.put('/:id', protect, async (req, res) => {
     );
     const r = result.rows[0];
     const recordDateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || toIsoDateStr(existing.attendance_date);
+    
+    broadcastBiometricUpdate('dtr_refresh', { action: 'manual_updated', userId: r.employee_id });
+    
     res.json({
       id: r.id,
       user_id: r.employee_id,

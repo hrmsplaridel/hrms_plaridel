@@ -1,5 +1,6 @@
 const { pool } = require('../config/db');
 const { dateInRecurringRange } = require('./holidayRangeUtils');
+const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
 
 const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
 const NOON_MINUTES = 12 * 60;
@@ -847,6 +848,11 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
   }
 
   console.log('[biometricProcessing] Done:', { inserted, updated, skipped });
+  
+  if (inserted > 0 || updated > 0) {
+    broadcastBiometricUpdate('dtr_refresh', { action: 'biometric_processed', inserted, updated });
+  }
+
   return { inserted, updated };
 }
 
