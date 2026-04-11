@@ -82,9 +82,10 @@ router.post('/register', async (req, res) => {
     const user = result.rows[0];
 
     try {
+      // VL/SL: earned credits come from monthly accrual only (1.25/mo each); no static seed.
       await pool.query(
         `INSERT INTO leave_balances (user_id, leave_type, earned_days, used_days, pending_days, adjusted_days)
-         VALUES ($1::uuid, 'vacationLeave', 15, 0, 0, 0), ($1::uuid, 'sickLeave', 15, 0, 0, 0)
+         VALUES ($1::uuid, 'vacationLeave', 0, 0, 0, 0), ($1::uuid, 'sickLeave', 0, 0, 0, 0)
          ON CONFLICT (user_id, leave_type) DO NOTHING`,
         [user.id]
       );

@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const { pool } = require('./config/db');
 const { initWebSocket } = require('./websockets/biometricStream');
+const { scheduleLeaveMonthlyAccrualCron } = require('./jobs/leaveMonthlyAccrualScheduler');
 
 const authRoutes = require('./routes/auth');
 const departmentsRoutes = require('./routes/departments');
@@ -136,6 +137,7 @@ const server = app.listen(PORT, HOST, () => {
   console.log('  DELETE /api/rsp/applications/:applicationId - admin delete applicant');
   console.log('  GET  /api/rsp/storage/view-token - admin token for /api/files/recruitment-attachment');
   console.log('  GET  /api/rsp/storage/signed-url - admin signed attachment URL (service role)');
+  scheduleLeaveMonthlyAccrualCron(pool);
 });
 
 // Initialize WebSocket server for Biometrics/DTR updates

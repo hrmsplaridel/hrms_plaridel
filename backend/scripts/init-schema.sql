@@ -408,6 +408,34 @@ CREATE INDEX IF NOT EXISTS idx_leave_request_history_leave_request_id
   ON leave_request_history(leave_request_id);
 
 -- =========================================
+-- LEAVE BALANCE LEDGER (append-only audit of bucket changes)
+-- =========================================
+-- Distinct from leave_request_history (workflow). Records earned/pending/used/adjusted movements.
+CREATE TABLE IF NOT EXISTS leave_balance_ledger (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  leave_type TEXT NOT NULL,
+  action TEXT NOT NULL,
+  affected_bucket TEXT NOT NULL,
+  days_changed NUMERIC NOT NULL DEFAULT 0,
+  old_value NUMERIC,
+  new_value NUMERIC,
+  related_leave_request_id UUID REFERENCES leave_requests(id) ON DELETE SET NULL,
+  actor_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  actor_kind TEXT NOT NULL DEFAULT 'user',
+  remarks TEXT,
+  metadata_json JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_leave_balance_ledger_user_created
+  ON leave_balance_ledger(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_leave_balance_ledger_action
+  ON leave_balance_ledger(action);
+CREATE INDEX IF NOT EXISTS idx_leave_balance_ledger_leave_request
+  ON leave_balance_ledger(related_leave_request_id)
+  WHERE related_leave_request_id IS NOT NULL;
+
+-- =========================================
 -- IN-APP NOTIFICATIONS (DTR / leave / future modules)
 -- =========================================
 CREATE TABLE IF NOT EXISTS user_notifications (

@@ -118,14 +118,14 @@ async function notifyForcedLeaveDeductionApplied(pool, {
     title: 'Forced leave deduction applied',
     body:
       `HR applied a forced leave deduction of ${deductedDays} day(s) from your Vacation Leave balance.` +
-      ` Remaining balance: ${remainingDays} day(s).` +
+      ` Available balance: ${remainingDays} day(s).` +
       (remarks ? ` Note: ${remarks}` : ''),
     referenceType: null,
     referenceId: null,
     metadata: {
       leave_type: 'vacationLeave',
       deducted_days: deductedDays,
-      remaining_days: remainingDays,
+      available_days: remainingDays,
       remarks: remarks || null,
     },
   });
