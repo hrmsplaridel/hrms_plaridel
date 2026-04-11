@@ -201,15 +201,21 @@ class _LeaveMainState extends State<LeaveMain> {
   }
 
   Future<void> _openLeaveRequestForm() async {
-    final result = await openResponsiveLeaveFormHost<bool>(
+    final result = await openResponsiveLeaveFormHost<String?>(
       context: context,
       builder: (_) => _buildLeaveRequestForm(),
     );
-    if (!mounted || result != true) return;
+    if (!mounted || result == null) return;
+    if (result != kLeaveFormResultDraftSaved &&
+        result != kLeaveFormResultSubmitted) {
+      return;
+    }
     final userId = context.read<AuthProvider>().user?.id;
     if (userId != null && userId.isNotEmpty) {
       await context.read<LeaveProvider>().loadMyLeaveData(userId);
     }
+    if (!mounted) return;
+    showLeaveFormSuccessSnackBar(context, result);
   }
 
   Widget _buildLeaveRequestForm() {

@@ -290,6 +290,18 @@ class _AdminLocatorManagementScreenState
     });
   }
 
+  void _showLocatorSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      ),
+    );
+  }
+
   Widget _chip(String text) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -393,6 +405,8 @@ class _AdminLocatorManagementScreenState
         data: const {},
       );
       await _load();
+      if (!mounted) return;
+      _showLocatorSnack('Locator slip approved.');
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = 'Approve failed: $e');
@@ -409,6 +423,8 @@ class _AdminLocatorManagementScreenState
         data: const {},
       );
       await _load();
+      if (!mounted) return;
+      _showLocatorSnack('Locator slip rejected.');
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = 'Reject failed: $e');

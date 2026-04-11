@@ -23,6 +23,8 @@ class LeaveCardPrintView {
     required String officeDepartment,
     DateTime? firstDayOfService,
     required List<LeaveRequest> requests,
+    required double vacationEarnedDays,
+    required double sickEarnedDays,
   }) async {
     final sorted = [...requests]
       ..sort((a, b) {
@@ -31,7 +33,11 @@ class LeaveCardPrintView {
         return aDate.compareTo(bDate);
       });
     final doc = pw.Document(title: "Employee's Leave Card");
-    final rows = _buildRows(sorted);
+    final rows = _buildRows(
+      sorted,
+      vacationEarnedDays: vacationEarnedDays,
+      sickEarnedDays: sickEarnedDays,
+    );
     const rowsPerPage = 34;
     final chunks = <List<_LeaveCardRow>>[];
     for (var i = 0; i < rows.length; i += rowsPerPage) {
@@ -397,10 +403,16 @@ class LeaveCardPrintView {
     );
   }
 
-  static List<_LeaveCardRow> _buildRows(List<LeaveRequest> requests) {
+  static List<_LeaveCardRow> _buildRows(
+    List<LeaveRequest> requests, {
+    required double vacationEarnedDays,
+    required double sickEarnedDays,
+  }) {
     if (requests.isEmpty) {
       return List.generate(16, (_) => const _LeaveCardRow.empty());
     }
+    final vacEarnedStr = _fmtNum(vacationEarnedDays);
+    final slEarnedStr = _fmtNum(sickEarnedDays);
     final rows = requests.map((request) {
       final start = request.startDate;
       final end = request.endDate;
@@ -417,10 +429,10 @@ class LeaveCardPrintView {
       return _LeaveCardRow(
         period: period,
         particulars: request.leaveType.displayName,
-        vacEarned: '',
+        vacEarned: vacEarnedStr,
         vacWithPay: isVacation ? _fmtNum(withPay) : '',
         vacWithoutPay: isVacation ? _fmtNum(withoutPay) : '',
-        slEarned: '',
+        slEarned: slEarnedStr,
         slWithPay: isSick ? _fmtNum(withPay) : '',
         slWithoutPay: isSick ? _fmtNum(withoutPay) : '',
         dateTakenOnApplication: request.dateFiled != null

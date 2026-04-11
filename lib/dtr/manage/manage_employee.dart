@@ -106,11 +106,15 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   final _lastNameController = TextEditingController();
   final _contactController = TextEditingController();
   final _addressController = TextEditingController();
+  final _salaryGradeController = TextEditingController();
 
   String? _privilege;
   String? _suffix;
   String? _sex;
   DateTime? _dateOfBirth;
+  String? _employmentType;
+  String _employmentStatus = 'active';
+  DateTime? _dateHired;
   bool _obscurePassword = true;
   bool _obscureRepeatPassword = true;
   Uint8List? _selectedImageBytes;
@@ -126,6 +130,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     _lastNameController.dispose();
     _contactController.dispose();
     _addressController.dispose();
+    _salaryGradeController.dispose();
     super.dispose();
   }
 
@@ -176,11 +181,15 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     _lastNameController.clear();
     _contactController.clear();
     _addressController.clear();
+    _salaryGradeController.clear();
     setState(() {
       _privilege = null;
       _suffix = null;
       _sex = null;
       _dateOfBirth = null;
+      _employmentType = null;
+      _employmentStatus = 'active';
+      _dateHired = null;
       _selectedImageBytes = null;
     });
   }
@@ -218,6 +227,11 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           'contact_number': _contactController.text.trim(),
         if (_addressController.text.trim().isNotEmpty)
           'address': _addressController.text.trim(),
+        if (_employmentType != null) 'employment_type': _employmentType,
+        if (_salaryGradeController.text.trim().isNotEmpty)
+          'salary_grade': _salaryGradeController.text.trim(),
+        'date_hired': _dateHired!.toIso8601String().split('T')[0],
+        'employment_status': _employmentStatus,
       };
 
       final res = await ApiClient.instance.post<Map<String, dynamic>>(
@@ -297,6 +311,8 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
                       _buildAccountSection(),
                       const SizedBox(height: 24),
                       _buildPersonalSection(),
+                      const SizedBox(height: 24),
+                      _buildEmploymentSection(),
                     ],
                   )
                 : Row(
@@ -304,7 +320,16 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
                     children: [
                       Expanded(child: _buildAccountSection()),
                       const SizedBox(width: 24),
-                      Expanded(child: _buildPersonalSection()),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildPersonalSection(),
+                            const SizedBox(height: 24),
+                            _buildEmploymentSection(),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
           ),
@@ -612,6 +637,108 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             controller: _addressController,
             decoration: _inputDecoration('Address'),
             maxLines: 3,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmploymentSection() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.black.withOpacity(0.06)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Employment',
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 16),
+          DropdownButtonFormField<String>(
+            value: _employmentType,
+            decoration: _inputDecoration('Employment Type'),
+            hint: const Text('Employment Type'),
+            items: [
+              'regular',
+              'contractual',
+              'job_order',
+              'casual',
+            ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+            onChanged: (v) => setState(() => _employmentType = v),
+          ),
+          const SizedBox(height: 16),
+          TextFormField(
+            controller: _salaryGradeController,
+            decoration: _inputDecoration('Salary Grade'),
+            keyboardType: TextInputType.text,
+          ),
+          const SizedBox(height: 16),
+          FormField<DateTime>(
+            key: ValueKey(_dateHired?.toIso8601String() ?? 'hire_null'),
+            validator: (_) =>
+                _dateHired == null ? 'Date hired is required' : null,
+            builder: (state) {
+              return InkWell(
+                onTap: () async {
+                  final d = await showDatePicker(
+                    context: context,
+                    initialDate: _dateHired ?? DateTime.now(),
+                    firstDate: DateTime(1900),
+                    lastDate: DateTime.now().add(
+                      const Duration(days: 365 * 10),
+                    ),
+                  );
+                  if (d != null) {
+                    setState(() => _dateHired = d);
+                    state.didChange(d);
+                  }
+                },
+                borderRadius: BorderRadius.circular(8),
+                child: InputDecorator(
+                  decoration: _inputDecoration('').copyWith(
+                    errorText: state.errorText,
+                    suffixIcon: Icon(
+                      Icons.calendar_today_rounded,
+                      size: 20,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                  child: Text(
+                    _dateHired != null
+                        ? '${_dateHired!.year}-${_dateHired!.month.toString().padLeft(2, '0')}-${_dateHired!.day.toString().padLeft(2, '0')}'
+                        : 'Date Hired (tap to select) *',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: _dateHired != null
+                          ? AppTheme.textPrimary
+                          : AppTheme.textSecondary,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 16),
+          DropdownButtonFormField<String>(
+            value: _employmentStatus,
+            decoration: _inputDecoration('Employment Status'),
+            items: [
+              'active',
+              'inactive',
+              'resigned',
+              'retired',
+              'terminated',
+            ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+            onChanged: (v) => setState(() => _employmentStatus = v ?? 'active'),
           ),
         ],
       ),
@@ -3538,6 +3665,15 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
                       : AppTheme.textSecondary,
                 ),
               ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Changing date hired may affect leave accrual and first-month proration.',
+            style: TextStyle(
+              fontSize: 12,
+              height: 1.35,
+              color: AppTheme.textSecondary.withOpacity(0.9),
             ),
           ),
           const SizedBox(height: 16),

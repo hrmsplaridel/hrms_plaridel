@@ -50,7 +50,8 @@ class LeaveGuidance {
       description:
           'Granted to employees for personal recreation, rest, or travel. '
           'Must be applied for in advance and is subject to approval.',
-      requirements: 'No documentary requirement. Indicate location (within Philippines or abroad).',
+      requirements:
+          'No documentary requirement. Indicate location (within Philippines or abroad).',
       advanceFiling: 'File at least 5 days before the intended leave date.',
     ),
 
@@ -71,7 +72,8 @@ class LeaveGuidance {
       requirements:
           'Medical certificate required if the absence is 5 or more consecutive days, '
           'or at the discretion of the head of office.',
-      advanceFiling: 'Apply immediately upon return or during absence if possible.',
+      advanceFiling:
+          'Apply immediately upon return or during absence if possible.',
     ),
 
     LeaveType.maternityLeave: LeaveTypeGuidance(
@@ -80,8 +82,10 @@ class LeaveGuidance {
       requirements:
           'Medical certificate or birth/delivery record. Marriage certificate (if applicable). '
           'Notify your agency before the expected delivery.',
-      limits: 'Up to 105 days; extended to 120 days for solo parents. 30-day optional extension without pay.',
-      advanceFiling: 'Notify your supervisor at least 30 days before the expected delivery date.',
+      limits:
+          'Up to 105 days; extended to 120 days for solo parents. 30-day optional extension without pay.',
+      advanceFiling:
+          'Notify your supervisor at least 30 days before the expected delivery date.',
       notes: 'Covers normal delivery, caesarean section, and miscarriage.',
     ),
 
@@ -118,7 +122,8 @@ class LeaveGuidance {
       requirements:
           'Written request citing the course/exam. School enrollment certificate or review program documents. '
           'Agency head approval required.',
-      limits: 'Maximum 6 months (180 working days). Service obligation applies after.',
+      limits:
+          'Maximum 6 months (180 working days). Service obligation applies after.',
       advanceFiling: 'Apply well in advance — requires agency head approval.',
     ),
 
@@ -129,7 +134,8 @@ class LeaveGuidance {
       requirements:
           'Barangay Protection Order, Court order, or any certified document from a government agency '
           'confirming the VAWC situation.',
-      limits: '10 days per year; may be extended as deemed necessary by the agency.',
+      limits:
+          '10 days per year; may be extended as deemed necessary by the agency.',
     ),
 
     LeaveType.rehabilitationPrivilege: LeaveTypeGuidance(
@@ -139,7 +145,8 @@ class LeaveGuidance {
           'Medical certificate showing the injury and its direct connection to official duties. '
           'Incident/accident report endorsed by the head of office.',
       limits: 'Up to 6 months (180 working days).',
-      notes: 'Available only for work-related injuries, not personal accidents.',
+      notes:
+          'Available only for work-related injuries, not personal accidents.',
     ),
 
     LeaveType.specialLeaveBenefitsForWomen: LeaveTypeGuidance(
@@ -175,8 +182,10 @@ class LeaveGuidance {
       description:
           'Other leave types not covered by the standard categories. '
           'Include complete details in the reason/remarks field.',
-      requirements: 'Provide supporting documents as applicable to the specific circumstance.',
-      notes: 'Your supervisor and HR will review and determine applicable rules.',
+      requirements:
+          'Provide supporting documents as applicable to the specific circumstance.',
+      notes:
+          'Your supervisor and HR will review and determine applicable rules.',
     ),
   };
 
@@ -184,8 +193,10 @@ class LeaveGuidance {
   static LeaveTypeGuidance forType(LeaveType leaveType) {
     return _guidance[leaveType] ??
         const LeaveTypeGuidance(
-          description: 'Please review the leave guidelines and provide the required information.',
-          requirements: 'Attach relevant supporting documents as advised by HR.',
+          description:
+              'Please review the leave guidelines and provide the required information.',
+          requirements:
+              'Attach relevant supporting documents as advised by HR.',
         );
   }
 
@@ -238,7 +249,7 @@ class LeaveGuidance {
       title: 'Leave Credits & Limits',
       icon: 'event_available',
       items: [
-        'Vacation Leave & Sick Leave: Earned at 1.25 days per month of service (15 days/year).',
+        'Vacation Leave & Sick Leave: 1.25 days accrued per month each (15 days total after 12 months of service — not a starting lump sum).',
         'Mandatory/Forced Leave: 5 working days minimum per year.',
         'Maternity Leave: 105 days (120 for solo parents). 30-day optional extension without pay.',
         'Paternity Leave: 7 working days within 60 days of delivery.',

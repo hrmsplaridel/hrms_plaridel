@@ -15,6 +15,7 @@ import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
 import '../utils/employee_leave_card_view_screen.dart';
+import 'leave_balance_history_screen.dart';
 import '../utils/leave_request_pdf.dart';
 import '../../utils/responsive_right_side_panel.dart';
 import '../widgets/admin_row.dart';
@@ -274,9 +275,13 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
           onForcedLeaveDeduction: widget.isDepartmentHead
               ? null
               : _applyForcedLeaveDeduction,
+          onManualBalanceAdjustment: widget.isDepartmentHead
+              ? null
+              : _manualBalanceAdjustment,
           onEmployeeLeaveCard: widget.isDepartmentHead
               ? null
               : _openEmployeeLeaveCard,
+          onLeaveLedger: widget.isDepartmentHead ? null : _openLeaveLedger,
         ),
         if (provider.error != null) ...[
           const SizedBox(height: 16),
@@ -696,6 +701,27 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     if (ok) await _loadRequests();
   }
 
+  Future<void> _manualBalanceAdjustment() async {
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => const _ManualBalanceAdjustmentDialog(),
+    );
+    if (!mounted || saved != true) return;
+    _showMessage('Leave balance saved.');
+    await _loadRequests();
+  }
+
+  void _openLeaveLedger() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => LeaveBalanceHistoryScreen(
+          isAdmin: true,
+          initialFilterUserId: _employeeFilter,
+        ),
+      ),
+    );
+  }
+
   Future<void> _openEmployeeLeaveCard() async {
     final selected = await showDialog<_EmployeeLeaveCardSelection>(
       context: context,
@@ -819,7 +845,9 @@ class _AdminHeaderCard extends StatelessWidget {
     required this.reviewing,
     required this.onRefresh,
     this.onForcedLeaveDeduction,
+    this.onManualBalanceAdjustment,
     this.onEmployeeLeaveCard,
+    this.onLeaveLedger,
   });
 
   final int totalRequests;
@@ -827,10 +855,18 @@ class _AdminHeaderCard extends StatelessWidget {
   final bool reviewing;
   final Future<void> Function() onRefresh;
   final Future<void> Function()? onForcedLeaveDeduction;
+  final Future<void> Function()? onManualBalanceAdjustment;
   final Future<void> Function()? onEmployeeLeaveCard;
+  final VoidCallback? onLeaveLedger;
 
   @override
   Widget build(BuildContext context) {
+    final hasHrActions =
+        onForcedLeaveDeduction != null ||
+        onManualBalanceAdjustment != null ||
+        onEmployeeLeaveCard != null ||
+        onLeaveLedger != null;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
@@ -846,79 +882,102 @@ class _AdminHeaderCard extends StatelessWidget {
           ),
         ],
       ),
-      child: Wrap(
-        alignment: WrapAlignment.spaceBetween,
-        runSpacing: 16,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 700),
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Leave Approvals',
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 24,
-                    fontWeight: FontWeight.w700,
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 700),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Leave Approvals',
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 24,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Review employee leave applications, inspect their form details, and record approval decisions.',
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 14,
+                          height: 1.45,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          _HeaderChip(
+                            label: 'Total Loaded',
+                            value: '$totalRequests',
+                          ),
+                          _HeaderChip(
+                            label: 'Pending',
+                            value: '$pendingCount',
+                            emphasize: true,
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  'Review employee leave applications, inspect their form details, and record approval decisions.',
-                  style: TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 14,
-                    height: 1.45,
+                if (hasHrActions) ...[
+                  const SizedBox(height: 14),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      if (onForcedLeaveDeduction != null)
+                        OutlinedButton.icon(
+                          onPressed: reviewing ? null : onForcedLeaveDeduction,
+                          icon: const Icon(Icons.assignment_turned_in_rounded),
+                          label: const Text(
+                            'Apply Year-End Forced Leave Deduction',
+                          ),
+                        ),
+                      if (onManualBalanceAdjustment != null)
+                        OutlinedButton.icon(
+                          onPressed: reviewing
+                              ? null
+                              : onManualBalanceAdjustment,
+                          icon: const Icon(
+                            Icons.account_balance_wallet_outlined,
+                          ),
+                          label: const Text('Manual balance adjustment'),
+                        ),
+                      if (onEmployeeLeaveCard != null)
+                        OutlinedButton.icon(
+                          onPressed: reviewing ? null : onEmployeeLeaveCard,
+                          icon: const Icon(Icons.badge_outlined),
+                          label: const Text("Employee's Leave Card"),
+                        ),
+                      if (onLeaveLedger != null)
+                        OutlinedButton.icon(
+                          onPressed: reviewing ? null : onLeaveLedger,
+                          icon: const Icon(Icons.receipt_long_outlined),
+                          label: const Text('Leave Ledger'),
+                        ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    _HeaderChip(label: 'Total Loaded', value: '$totalRequests'),
-                    _HeaderChip(
-                      label: 'Pending',
-                      value: '$pendingCount',
-                      emphasize: true,
-                    ),
-                  ],
-                ),
+                ],
               ],
             ),
           ),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              if (onForcedLeaveDeduction != null)
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: reviewing ? null : onForcedLeaveDeduction,
-                      icon: const Icon(Icons.assignment_turned_in_rounded),
-                      label: const Text(
-                        'Apply Year-End Forced Leave Deduction',
-                      ),
-                    ),
-                    if (onEmployeeLeaveCard != null) ...[
-                      const SizedBox(height: 10),
-                      OutlinedButton.icon(
-                        onPressed: reviewing ? null : onEmployeeLeaveCard,
-                        icon: const Icon(Icons.badge_outlined),
-                        label: const Text("Employee's Leave Card"),
-                      ),
-                    ],
-                  ],
-                ),
-              FilledButton.icon(
-                onPressed: reviewing ? null : onRefresh,
-                icon: const Icon(Icons.refresh_rounded),
-                label: Text(reviewing ? 'Reviewing...' : 'Refresh'),
-              ),
-            ],
+          const SizedBox(width: 16),
+          FilledButton.icon(
+            onPressed: reviewing ? null : onRefresh,
+            icon: const Icon(Icons.refresh_rounded),
+            label: Text(reviewing ? 'Reviewing...' : 'Refresh'),
           ),
         ],
       ),
@@ -1405,6 +1464,319 @@ class _ForcedLeaveDeductionDialogState
             );
           },
           child: const Text('Apply Deduction'),
+        ),
+      ],
+    );
+  }
+}
+
+class _ManualBalanceAdjustmentDialog extends StatefulWidget {
+  const _ManualBalanceAdjustmentDialog();
+
+  @override
+  State<_ManualBalanceAdjustmentDialog> createState() =>
+      _ManualBalanceAdjustmentDialogState();
+}
+
+class _ManualBalanceAdjustmentDialogState
+    extends State<_ManualBalanceAdjustmentDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _earnedController = TextEditingController();
+  final _usedController = TextEditingController();
+  final _pendingController = TextEditingController();
+  final _adjustedController = TextEditingController();
+
+  bool _loadingEmployees = true;
+  bool _loadingBalances = false;
+  String? _employeesError;
+  List<Map<String, String>> _employees = const [];
+  String? _selectedUserId;
+
+  LeaveType _selectedLeaveType = LeaveType.vacationLeave;
+  List<LeaveBalance> _balances = const [];
+
+  @override
+  void dispose() {
+    _earnedController.dispose();
+    _usedController.dispose();
+    _pendingController.dispose();
+    _adjustedController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadEmployees();
+  }
+
+  Future<void> _loadEmployees() async {
+    setState(() {
+      _loadingEmployees = true;
+      _employeesError = null;
+    });
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/employees?status=Active',
+      );
+      final rows =
+          (res.data ?? const [])
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .map(
+                (e) => {
+                  'id': e['id']?.toString() ?? '',
+                  'name': e['full_name']?.toString() ?? 'Unnamed',
+                },
+              )
+              .where((e) => (e['id'] ?? '').isNotEmpty)
+              .toList()
+            ..sort((a, b) => (a['name']!).compareTo(b['name']!));
+      final firstId = rows.isNotEmpty ? rows.first['id'] : null;
+      setState(() {
+        _employees = rows;
+        _selectedUserId = firstId;
+        _loadingEmployees = false;
+      });
+      if (firstId != null && firstId.isNotEmpty) {
+        await _loadBalancesFor(firstId);
+      }
+    } catch (e) {
+      setState(() {
+        _employeesError = e.toString();
+        _loadingEmployees = false;
+      });
+    }
+  }
+
+  Future<void> _loadBalancesFor(String userId) async {
+    setState(() => _loadingBalances = true);
+    try {
+      final list = await context.read<LeaveProvider>().fetchBalancesForUser(
+        userId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _balances = list;
+        _loadingBalances = false;
+      });
+      _applyBalanceToFields();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _balances = const [];
+        _loadingBalances = false;
+      });
+      _applyBalanceToFields();
+    }
+  }
+
+  void _applyBalanceToFields() {
+    LeaveBalance? row;
+    for (final b in _balances) {
+      if (b.leaveType == _selectedLeaveType) {
+        row = b;
+        break;
+      }
+    }
+    _earnedController.text = (row?.earnedDays ?? 0).toString();
+    _usedController.text = (row?.usedDays ?? 0).toString();
+    _pendingController.text = (row?.pendingDays ?? 0).toString();
+    _adjustedController.text = (row?.adjustedDays ?? 0).toString();
+  }
+
+  Future<void> _onEmployeeChanged(String? id) async {
+    setState(() => _selectedUserId = id);
+    if (id != null && id.isNotEmpty) {
+      await _loadBalancesFor(id);
+    }
+  }
+
+  Future<void> _onSave() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    final uid = _selectedUserId;
+    if (uid == null || uid.isEmpty) return;
+
+    final balance = LeaveBalance(
+      userId: uid,
+      leaveType: _selectedLeaveType,
+      earnedDays: _parseDouble(_earnedController.text) ?? 0,
+      usedDays: _parseDouble(_usedController.text) ?? 0,
+      pendingDays: _parseDouble(_pendingController.text) ?? 0,
+      adjustedDays: _parseDouble(_adjustedController.text) ?? 0,
+    );
+
+    final saved = await context.read<LeaveProvider>().upsertBalance(balance);
+    if (!mounted) return;
+    if (saved != null) {
+      Navigator.of(context).pop(true);
+    } else {
+      final err = context.read<LeaveProvider>().error ?? 'Save failed.';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final saving = context.watch<LeaveProvider>().submitting;
+
+    return AlertDialog(
+      title: const Text('Manual balance adjustment'),
+      content: SizedBox(
+        width: 520,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_loadingEmployees)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                else if (_employeesError != null)
+                  Text(
+                    'Failed to load employees: $_employeesError',
+                    style: TextStyle(color: Colors.red.shade700),
+                  )
+                else ...[
+                  DropdownButtonFormField<String>(
+                    value: _selectedUserId,
+                    decoration: _inputDecoration('Employee'),
+                    items: _employees
+                        .map(
+                          (e) => DropdownMenuItem<String>(
+                            value: e['id'],
+                            child: Text(e['name']!),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: saving
+                        ? null
+                        : (v) {
+                            if (v != null) unawaited(_onEmployeeChanged(v));
+                          },
+                    validator: (v) =>
+                        (v == null || v.isEmpty) ? 'Select an employee' : null,
+                  ),
+                  const SizedBox(height: 12),
+                  if (_loadingBalances)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Center(
+                        child: SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                    ),
+                  DropdownButtonFormField<LeaveType>(
+                    value: _selectedLeaveType,
+                    decoration: _inputDecoration('Leave type'),
+                    items: LeaveType.values
+                        .map(
+                          (t) => DropdownMenuItem<LeaveType>(
+                            value: t,
+                            child: Text(t.displayName),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: saving || _loadingBalances
+                        ? null
+                        : (v) {
+                            if (v == null) return;
+                            setState(() => _selectedLeaveType = v);
+                            _applyBalanceToFields();
+                          },
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _earnedController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: _inputDecoration('Earned days'),
+                    validator: (value) {
+                      final parsed = _parseDouble(value ?? '');
+                      if (parsed == null) return 'Enter earned days';
+                      if (parsed < 0) return 'Must be ≥ 0';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _usedController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: _inputDecoration('Used days'),
+                    validator: (value) {
+                      final parsed = _parseDouble(value ?? '');
+                      if (parsed == null) return 'Enter used days';
+                      if (parsed < 0) return 'Must be ≥ 0';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _pendingController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: _inputDecoration('Pending days'),
+                    validator: (value) {
+                      final parsed = _parseDouble(value ?? '');
+                      if (parsed == null) return 'Enter pending days';
+                      if (parsed < 0) return 'Must be ≥ 0';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _adjustedController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                      signed: true,
+                    ),
+                    decoration: _inputDecoration('Adjusted days'),
+                    validator: (value) {
+                      final parsed = _parseDouble(value ?? '');
+                      if (parsed == null)
+                        return 'Enter adjusted days (use 0 if none)';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Creates or overwrites the balance row for this employee and leave type. '
+                    'Use for HR corrections; normal approvals still update balances automatically.',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: saving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed:
+              saving ||
+                  _loadingEmployees ||
+                  _loadingBalances ||
+                  _employeesError != null
+              ? null
+              : _onSave,
+          child: Text(saving ? 'Saving…' : 'Save balance'),
         ),
       ],
     );
@@ -2325,7 +2697,9 @@ class _ApproveDialogState extends State<_ApproveDialog> {
   @override
   Widget build(BuildContext context) {
     final balanceLabel = widget.leaveBalance != null
-        ? '${widget.leaveBalance!.leaveType.displayName}: ${widget.leaveBalance!.remainingDays.toStringAsFixed(1)} days remaining'
+        ? '${widget.leaveBalance!.leaveType.displayName}: '
+              '${widget.leaveBalance!.availableDays.toStringAsFixed(1)} available '
+              '(${widget.leaveBalance!.remainingDays.toStringAsFixed(1)} remaining excl. pending)'
         : 'No balance record for this leave type';
 
     return AlertDialog(

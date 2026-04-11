@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../leave_provider.dart';
 import '../leave_repository.dart';
+import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
 import 'leave_card_print_view.dart';
@@ -32,6 +33,10 @@ class _EmployeeLeaveCardViewScreenState
   String? _error;
   List<LeaveRequest> _requests = const [];
 
+  /// Current VL / SL earned totals from [leave_balances] (same on each ledger row).
+  double _vacationEarnedDays = 0;
+  double _sickEarnedDays = 0;
+
   @override
   void initState() {
     super.initState();
@@ -53,8 +58,12 @@ class _EmployeeLeaveCardViewScreenState
         final bDate = b.startDate ?? b.dateFiled ?? DateTime(1900);
         return aDate.compareTo(bDate);
       });
+      final balances = await repository.getBalancesForUser(widget.userId);
+      final earned = _vlSlEarnedFromBalances(balances);
       setState(() {
         _requests = rows;
+        _vacationEarnedDays = earned.$1;
+        _sickEarnedDays = earned.$2;
         _loading = false;
       });
     } catch (e) {
@@ -118,6 +127,8 @@ class _EmployeeLeaveCardViewScreenState
         officeDepartment: office,
         firstDayOfService: firstDayOfService,
         requests: _requests,
+        vacationEarnedDays: _vacationEarnedDays,
+        sickEarnedDays: _sickEarnedDays,
       );
     } catch (e) {
       if (!mounted) return;
@@ -163,7 +174,15 @@ class _EmployeeLeaveCardViewScreenState
   }
 
   Widget _buildCardLayout(String office) {
-    final entries = _requests.map(_LeaveCardEntry.fromRequest).toList();
+    final entries = _requests
+        .map(
+          (r) => _LeaveCardEntry.fromRequest(
+            r,
+            vacationEarnedDays: _vacationEarnedDays,
+            sickEarnedDays: _sickEarnedDays,
+          ),
+        )
+        .toList();
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -638,7 +657,11 @@ class _LeaveCardEntry {
   final String slAbsWithoutPay;
   final String dateTakenOnApplication;
 
-  factory _LeaveCardEntry.fromRequest(LeaveRequest request) {
+  factory _LeaveCardEntry.fromRequest(
+    LeaveRequest request, {
+    required double vacationEarnedDays,
+    required double sickEarnedDays,
+  }) {
     final start = request.startDate;
     final end = request.endDate;
     final period = (start != null && end != null)
@@ -655,10 +678,10 @@ class _LeaveCardEntry {
     return _LeaveCardEntry(
       period: period,
       particulars: request.leaveType.displayName,
-      vacEarned: '',
+      vacEarned: _fmtNum(vacationEarnedDays),
       vacAbsWithPay: isVacation ? _fmtNum(withPay) : '',
       vacAbsWithoutPay: isVacation ? _fmtNum(withoutPay) : '',
-      slEarned: '',
+      slEarned: _fmtNum(sickEarnedDays),
       slAbsWithPay: isSick ? _fmtNum(withPay) : '',
       slAbsWithoutPay: isSick ? _fmtNum(withoutPay) : '',
       dateTakenOnApplication: request.dateFiled != null
@@ -666,6 +689,17 @@ class _LeaveCardEntry {
           : '',
     );
   }
+}
+
+/// Vacation / sick earned days from API balances (`leave_balances.earned_days`).
+(double, double) _vlSlEarnedFromBalances(List<LeaveBalance> balances) {
+  var vl = 0.0;
+  var sl = 0.0;
+  for (final b in balances) {
+    if (b.leaveType == LeaveType.vacationLeave) vl = b.earnedDays;
+    if (b.leaveType == LeaveType.sickLeave) sl = b.earnedDays;
+  }
+  return (vl, sl);
 }
 
 String _fmtNum(double value) {

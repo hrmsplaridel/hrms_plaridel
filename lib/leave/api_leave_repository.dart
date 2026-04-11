@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import '../api/client.dart';
 import 'leave_repository.dart';
 import 'models/leave_balance.dart';
+import 'models/leave_balance_ledger.dart';
 import 'models/leave_request.dart';
 import 'models/leave_type.dart';
 
@@ -157,8 +158,39 @@ class ApiLeaveRepository implements LeaveRepository {
 
   @override
   Future<LeaveBalance> upsertBalance(LeaveBalance balance) async {
-    throw Exception('Balance upsert not implemented yet.');
+    if (balance.userId.isEmpty) {
+      throw Exception('Missing user id');
+    }
+    try {
+      final payload = <String, dynamic>{
+        'leave_type': balance.leaveType.value,
+        'earned_days': balance.earnedDays,
+        'used_days': balance.usedDays,
+        'pending_days': balance.pendingDays,
+        'adjusted_days': balance.adjustedDays,
+      };
+      final asOf = balance.asOfDate;
+      if (asOf != null) {
+        payload['as_of_date'] = _leaveDateOnly(asOf);
+      }
+      final lastAcc = balance.lastAccrualDate;
+      if (lastAcc != null) {
+        payload['last_accrual_date'] = _leaveDateOnly(lastAcc);
+      }
+      final res = await ApiClient.instance.put<Map<String, dynamic>>(
+        '/api/leave/balances/${balance.userId}',
+        data: payload,
+      );
+      final data = res.data;
+      if (data == null) throw Exception('No data returned');
+      return LeaveBalance.fromJson(data);
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
   }
+
+  static String _leaveDateOnly(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
   @override
   Future<LeaveRequest> approveRequest(LeaveApprovalInput input) async {
@@ -404,6 +436,21 @@ class ApiLeaveRepository implements LeaveRepository {
             ? DateTime.tryParse(data['applied_at'].toString())
             : null,
       );
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
+  Future<LeaveLedgerResult> getLeaveLedger(LeaveLedgerQuery query) async {
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/leave/ledger',
+        queryParameters: query.toQueryParams(),
+      );
+      final data = res.data;
+      if (data == null) throw Exception('No data returned');
+      return LeaveLedgerResult.fromJson(data);
     } on DioException catch (e) {
       throw Exception(_messageFromDio(e));
     }

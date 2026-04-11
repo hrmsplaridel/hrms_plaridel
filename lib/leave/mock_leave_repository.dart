@@ -1,5 +1,6 @@
 import 'leave_repository.dart';
 import 'models/leave_balance.dart';
+import 'models/leave_balance_ledger.dart';
 import 'models/leave_request.dart';
 import 'models/leave_type.dart';
 
@@ -317,24 +318,36 @@ class MockLeaveRepository implements LeaveRepository {
   // ---- Department Head stubs (mock) ----
 
   @override
-  Future<Map<String, dynamic>> checkIsDepartmentHead() async =>
-      {'isDeptHead': false, 'departmentId': null, 'departmentName': null};
+  Future<Map<String, dynamic>> checkIsDepartmentHead() async => {
+    'isDeptHead': false,
+    'departmentId': null,
+    'departmentName': null,
+  };
 
   @override
   Future<List<LeaveRequest>> listDepartmentHeadRequests() async =>
       const <LeaveRequest>[];
 
   @override
-  Future<LeaveRequest> departmentHeadApprove(LeaveReviewDecisionInput input) async =>
-      _requireRequest(input.requestId).copyWith(status: LeaveRequestStatus.pendingHr);
+  Future<LeaveRequest> departmentHeadApprove(
+    LeaveReviewDecisionInput input,
+  ) async => _requireRequest(
+    input.requestId,
+  ).copyWith(status: LeaveRequestStatus.pendingHr);
 
   @override
-  Future<LeaveRequest> departmentHeadReject(LeaveReviewDecisionInput input) async =>
-      _requireRequest(input.requestId).copyWith(status: LeaveRequestStatus.rejectedByDepartmentHead);
+  Future<LeaveRequest> departmentHeadReject(
+    LeaveReviewDecisionInput input,
+  ) async => _requireRequest(
+    input.requestId,
+  ).copyWith(status: LeaveRequestStatus.rejectedByDepartmentHead);
 
   @override
-  Future<LeaveRequest> departmentHeadReturn(LeaveReviewDecisionInput input) async =>
-      _requireRequest(input.requestId).copyWith(status: LeaveRequestStatus.returned);
+  Future<LeaveRequest> departmentHeadReturn(
+    LeaveReviewDecisionInput input,
+  ) async => _requireRequest(
+    input.requestId,
+  ).copyWith(status: LeaveRequestStatus.returned);
 
   @override
   Future<ForcedLeaveDeductionResult> applyForcedLeaveDeduction(
@@ -344,17 +357,13 @@ class MockLeaveRepository implements LeaveRepository {
       input.userId,
       LeaveType.vacationLeave,
     );
-    final remaining = vacation?.remainingDays ?? 0;
-    if (!input.allowNegativeBalance && input.daysToDeduct > remaining) {
+    final available = vacation?.availableDays ?? 0;
+    if (!input.allowNegativeBalance && input.daysToDeduct > available) {
       throw Exception(
-        'Insufficient vacation leave balance. Remaining ${remaining.toStringAsFixed(2)}, requested ${input.daysToDeduct.toStringAsFixed(2)}.',
+        'Insufficient vacation leave balance. Available ${available.toStringAsFixed(2)}, requested ${input.daysToDeduct.toStringAsFixed(2)}.',
       );
     }
-    _adjustUsedDays(
-      input.userId,
-      LeaveType.vacationLeave,
-      input.daysToDeduct,
-    );
+    _adjustUsedDays(input.userId, LeaveType.vacationLeave, input.daysToDeduct);
     final updatedVacation = await getBalanceForUserByType(
       input.userId,
       LeaveType.vacationLeave,
@@ -420,8 +429,6 @@ class MockLeaveRepository implements LeaveRepository {
               userId: userId,
               leaveType: type,
               earnedDays: switch (type) {
-                LeaveType.vacationLeave => 15,
-                LeaveType.sickLeave => 15,
                 LeaveType.specialPrivilegeLeave => 3,
                 _ => 0,
               },
@@ -429,7 +436,10 @@ class MockLeaveRepository implements LeaveRepository {
               pendingDays: 0,
               adjustedDays: 0,
               asOfDate: now,
-              lastAccrualDate: now,
+              lastAccrualDate: switch (type) {
+                LeaveType.specialPrivilegeLeave => now,
+                _ => null,
+              },
               createdAt: now,
               updatedAt: now,
             ),
@@ -485,6 +495,16 @@ class MockLeaveRepository implements LeaveRepository {
     list[index] = current.copyWith(
       usedDays: next < 0 ? 0 : next,
       updatedAt: DateTime.now(),
+    );
+  }
+
+  @override
+  Future<LeaveLedgerResult> getLeaveLedger(LeaveLedgerQuery query) async {
+    return LeaveLedgerResult(
+      total: 0,
+      limit: query.limit,
+      offset: query.offset,
+      rows: const [],
     );
   }
 }

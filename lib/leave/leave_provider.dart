@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import 'leave_repository.dart';
 import 'models/leave_balance.dart';
+import 'models/leave_balance_ledger.dart';
 import 'models/leave_request.dart';
 import 'models/leave_type.dart';
 
@@ -448,6 +449,26 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
+  /// Admin/HR: create or overwrite one [LeaveBalance] row for an employee.
+  Future<LeaveBalance?> upsertBalance(LeaveBalance balance) async {
+    _submitting = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final saved = await _repository.upsertBalance(balance);
+      _notifyMutation();
+      return saved;
+    } catch (e) {
+      _error = e is Exception && e.toString().startsWith('Exception: ')
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
+      return null;
+    } finally {
+      _submitting = false;
+      notifyListeners();
+    }
+  }
+
   Future<LeaveRequest?> attachFile({
     required String requestId,
     required List<int> fileBytes,
@@ -605,5 +626,10 @@ class LeaveProvider extends ChangeNotifier {
       _reviewing = false;
       notifyListeners();
     }
+  }
+
+  /// Balance movement audit (does not mutate provider list state).
+  Future<LeaveLedgerResult> fetchLeaveLedger(LeaveLedgerQuery query) async {
+    return _repository.getLeaveLedger(query);
   }
 }

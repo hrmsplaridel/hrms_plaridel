@@ -1,4 +1,5 @@
 import 'models/leave_balance.dart';
+import 'models/leave_balance_ledger.dart';
 import 'models/leave_request.dart';
 import 'models/leave_type.dart';
 
@@ -235,4 +236,7 @@ abstract class LeaveRepository {
   Future<ForcedLeaveDeductionResult> applyForcedLeaveDeduction(
     ForcedLeaveDeductionInput input,
   );
+
+  /// Balance movement audit (GET /api/leave/ledger). Employees: omit [query.userId].
+  Future<LeaveLedgerResult> getLeaveLedger(LeaveLedgerQuery query);
 }

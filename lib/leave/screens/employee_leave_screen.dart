@@ -9,6 +9,7 @@ import '../leave_provider.dart';
 import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
+import 'leave_balance_history_screen.dart';
 import 'leave_request_form_screen.dart';
 import '../utils/leave_request_pdf.dart';
 import '../utils/responsive_leave_form_host.dart';
@@ -189,6 +190,15 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
               _BalancesPanel(
                 balances: provider.balances,
                 loading: provider.loading,
+                onBalanceHistory: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const LeaveBalanceHistoryScreen(
+                        isAdmin: false,
+                      ),
+                    ),
+                  );
+                },
               ),
               const SizedBox(height: 16),
               _RequestsPanel(
@@ -216,16 +226,22 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
 
   Future<void> _editRequest(BuildContext context, LeaveRequest request) async {
     final provider = context.read<LeaveProvider>();
-    final result = await openResponsiveLeaveFormHost<bool>(
+    final result = await openResponsiveLeaveFormHost<String?>(
       context: context,
       builder: (_) =>
           _buildEditLeaveRequestForm(provider: provider, request: request),
     );
-    if (!mounted || result != true) return;
+    if (!mounted || result == null) return;
+    if (result != kLeaveFormResultDraftSaved &&
+        result != kLeaveFormResultSubmitted) {
+      return;
+    }
     final userId = context.read<AuthProvider>().user?.id;
     if (userId != null && userId.isNotEmpty) {
       await context.read<LeaveProvider>().loadMyLeaveData(userId);
     }
+    if (!mounted) return;
+    showLeaveFormSuccessSnackBar(context, result);
   }
 
   Widget _buildEditLeaveRequestForm({
@@ -490,10 +506,15 @@ class _SummaryCard extends StatelessWidget {
 }
 
 class _BalancesPanel extends StatelessWidget {
-  const _BalancesPanel({required this.balances, required this.loading});
+  const _BalancesPanel({
+    required this.balances,
+    required this.loading,
+    required this.onBalanceHistory,
+  });
 
   final List<LeaveBalance> balances;
   final bool loading;
+  final VoidCallback onBalanceHistory;
 
   @override
   Widget build(BuildContext context) {
@@ -501,6 +522,11 @@ class _BalancesPanel extends StatelessWidget {
       title: 'Leave Balances',
       subtitle: 'Available and pending credits per leave type.',
       icon: Icons.account_balance_wallet_rounded,
+      headerTrailing: OutlinedButton.icon(
+        onPressed: onBalanceHistory,
+        icon: const Icon(Icons.receipt_long_outlined, size: 18),
+        label: const Text('Balance History'),
+      ),
       child: loading && balances.isEmpty
           ? const _CenteredState(message: 'Loading leave balances...')
           : balances.isEmpty

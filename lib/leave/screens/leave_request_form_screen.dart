@@ -375,13 +375,17 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
             ? await widget.onSaveDraft!(req)
             : false;
         if (!mounted) return;
-        if (success) Navigator.of(context).pop(true);
+        if (success) {
+          Navigator.of(context).pop(kLeaveFormResultDraftSaved);
+        }
       } else {
         final action = widget.onSubmitRequest;
         if (action != null) {
           final success = await action(req);
           if (!mounted) return;
-          if (success) Navigator.of(context).pop(true);
+          if (success) {
+            Navigator.of(context).pop(kLeaveFormResultSubmitted);
+          }
         }
       }
     } catch (e) {
@@ -1061,4 +1065,25 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       _showMessage('Remove failed: $e');
     }
   }
+}
+
+/// Pop value from [LeaveRequestFormScreen] after a successful draft save or submit.
+const String kLeaveFormResultDraftSaved = 'leave_draft_saved';
+const String kLeaveFormResultSubmitted = 'leave_submitted';
+
+void showLeaveFormSuccessSnackBar(BuildContext context, String result) {
+  final text = result == kLeaveFormResultDraftSaved
+      ? 'Draft saved successfully.'
+      : result == kLeaveFormResultSubmitted
+      ? 'Leave request submitted successfully.'
+      : null;
+  if (text == null) return;
+  ScaffoldMessenger.of(context).clearSnackBars();
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(text),
+      behavior: SnackBarBehavior.floating,
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+    ),
+  );
 }

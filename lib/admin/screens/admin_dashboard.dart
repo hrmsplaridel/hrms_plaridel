@@ -33,7 +33,11 @@ import '../../../dtr/manage/manage_biometric_devices.dart';
 import '../../../docutracker/docutracker_main.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
+import '../../../leave/leave_provider.dart';
+import '../../../leave/models/leave_request.dart';
 import '../../../leave/screens/employee_leave_screen.dart';
+import '../../../leave/screens/leave_request_form_screen.dart';
+import '../../../leave/utils/responsive_leave_form_host.dart';
 import '../../../locator/screens/admin_locator_management_screen.dart';
 import '../../../recruitment/screens/rsp_admin_screen.dart';
 import '../../../widgets/feature_card.dart';
@@ -156,6 +160,45 @@ class _AdminDashboardState extends State<AdminDashboard>
     });
   }
 
+  /// Same flow as [LeaveMain] — admin My Portal must pass a handler or File Leave stays disabled.
+  Future<void> _openMyLeaveRequestForm() async {
+    final result = await openResponsiveLeaveFormHost<String?>(
+      context: context,
+      builder: (_) => _buildAdminLeaveRequestForm(),
+    );
+    if (!mounted || result == null) return;
+    if (result != kLeaveFormResultDraftSaved &&
+        result != kLeaveFormResultSubmitted) {
+      return;
+    }
+    final userId = context.read<AuthProvider>().user?.id;
+    if (userId != null && userId.isNotEmpty) {
+      await context.read<LeaveProvider>().loadMyLeaveData(userId);
+    }
+    if (!mounted) return;
+    showLeaveFormSuccessSnackBar(context, result);
+  }
+
+  Widget _buildAdminLeaveRequestForm() {
+    return LeaveRequestFormScreen(
+      onSaveDraft: (LeaveRequest request) async {
+        final provider = context.read<LeaveProvider>();
+        if (request.id != null && request.id!.isNotEmpty) {
+          final updated = await provider.updateRequest(request);
+          return updated != null;
+        }
+        final saved = await provider.saveDraft(request);
+        return saved != null;
+      },
+      onSubmitRequest: (LeaveRequest request) async {
+        final saved = await context.read<LeaveProvider>().submitRequest(
+          request,
+        );
+        return saved != null;
+      },
+    );
+  }
+
   Widget _buildContent(String displayName) {
     switch (_selectedMenu) {
       case AdminMenu.dashboard:
@@ -166,7 +209,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           adminPortal: true,
         );
       case AdminMenu.myLeave:
-        return const EmployeeLeaveScreen();
+        return EmployeeLeaveScreen(onFileLeavePressed: _openMyLeaveRequestForm);
       case AdminMenu.dtr:
         return _DtrContent(key: _dtrContentKey);
       case AdminMenu.rsp:
