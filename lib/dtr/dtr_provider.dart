@@ -7,6 +7,12 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../api/client.dart';
 import '../api/config.dart';
 import '../data/time_record.dart';
+import '../leave/api_leave_repository.dart';
+import '../leave/leave_repository.dart';
+import '../leave/models/leave_request.dart';
+import '../leave/models/leave_type.dart';
+import 'dtr_dashboard_analytics_logic.dart';
+import 'dtr_dashboard_analytics_models.dart';
 
 // Previously used Supabase for auth; now use setUserFromApi(userId) from AuthProvider.
 
@@ -15,14 +21,14 @@ class DtrSummary {
   const DtrSummary({
     this.presentToday = 0,
     this.lateToday = 0,
-    this.onLeaveToday,
-    this.pendingApproval,
+    this.onLeaveToday = 0,
+    this.pendingApproval = 0,
   });
 
   final int presentToday;
   final int lateToday;
-  final int? onLeaveToday;
-  final int? pendingApproval;
+  final int onLeaveToday;
+  final int pendingApproval;
 }
 
 /// Simple employee profile for admin filters.
@@ -31,12 +37,16 @@ class EmployeeOption {
     required this.id,
     required this.fullName,
     this.employeeNumber,
+    this.departmentName,
   });
   final String id;
   final String fullName;
 
   /// Human-friendly number (1, 2, 3...) for display.
   final int? employeeNumber;
+
+  /// From `current_department_name` when [loadEmployees] runs (for analytics grouping).
+  final String? departmentName;
 
   /// Display as EMP-001, EMP-002, etc., or "—" if null.
   String get displayEmployeeNo => employeeNumber != null
@@ -73,12 +83,6 @@ class DtrProvider extends ChangeNotifier {
             final data = jsonDecode(message);
             if (data['event'] == 'dtr_refresh') {
               _dtrUpdateController.add(null);
-              if (_dashboardRecentRecords.isNotEmpty) {
-                loadTimeRecordsForAdmin(
-                  limit: _dashboardRecentRecords.length,
-                  silent: true,
-                );
-              }
             }
           } catch (_) {}
         },
@@ -109,14 +113,24 @@ class DtrProvider extends ChangeNotifier {
   List<TimeRecord> _timeRecords = [];
   List<TimeRecord> get timeRecords => List.unmodifiable(_timeRecords);
 
-  /// Latest N rows for admin home [DtrDashboard] only (`limit` without date range).
-  /// Kept separate from [timeRecords] so polling does not overwrite Time Logs / Reports filters.
-  List<TimeRecord> _dashboardRecentRecords = [];
-  List<TimeRecord> get dashboardRecentRecords =>
-      List.unmodifiable(_dashboardRecentRecords);
+  /// Admin dashboard analytics window (last 30 days); isolated from [timeRecords] / Time Logs.
+  List<TimeRecord> _dashboardAnalyticsRecords = [];
+  List<TimeRecord> get dashboardAnalyticsRecords =>
+      List.unmodifiable(_dashboardAnalyticsRecords);
 
-  bool _dashboardRecentLoading = false;
-  bool get dashboardRecentLoading => _dashboardRecentLoading;
+  bool _dashboardAnalyticsLoading = false;
+  bool get dashboardAnalyticsLoading => _dashboardAnalyticsLoading;
+
+  DtrDashboardAnalyticsSnapshot? _analyticsSnapshot;
+  DtrDashboardAnalyticsSnapshot? get analyticsSnapshot => _analyticsSnapshot;
+
+  /// Selected department name for charts (`null` or "All departments" = no filter).
+  String? _analyticsDepartmentName;
+  String? get analyticsDepartmentName => _analyticsDepartmentName;
+
+  static const String analyticsAllDepartmentsLabel = 'All departments';
+
+  final LeaveRepository _leaveRepository = const ApiLeaveRepository();
 
   DtrSummary _summary = const DtrSummary();
   DtrSummary get summary => _summary;
@@ -221,18 +235,17 @@ class DtrProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Load summary for admin dashboard (present, late, etc.).
+  /// Load summary for admin dashboard (present, late, on leave, pending — from `/summary`).
   Future<void> loadSummary() async {
     try {
       _error = null;
       _tableMissing = false;
-      final present = await TimeRecordRepo.instance.countPresentToday();
-      final late = await TimeRecordRepo.instance.countLateToday();
+      final c = await TimeRecordRepo.instance.fetchSummaryCounts();
       _summary = DtrSummary(
-        presentToday: present,
-        lateToday: late,
-        onLeaveToday: null, // placeholder until leave module exists
-        pendingApproval: null, // placeholder until approval workflow exists
+        presentToday: c.presentToday,
+        lateToday: c.lateToday,
+        onLeaveToday: c.onLeaveToday,
+        pendingApproval: c.pendingApproval,
       );
       notifyListeners();
     } catch (e) {
@@ -247,8 +260,11 @@ class DtrProvider extends ChangeNotifier {
     }
   }
 
-  /// Load time records for admin (with optional filters). [limit] caps results for dashboard.
+  /// Load time records for admin (with optional filters).
   /// When [silent] is true, does not set [loading] so existing data stays visible during refresh.
+  ///
+  /// When [forDashboardAnalytics] is true, loads the last 30 days into [dashboardAnalyticsRecords]
+  /// and updates [analyticsSnapshot] without touching [timeRecords] or filter fields (Time Logs safe).
   Future<void> loadTimeRecordsForAdmin({
     DateTime? startDate,
     DateTime? endDate,
@@ -256,37 +272,12 @@ class DtrProvider extends ChangeNotifier {
     String? departmentId,
     int? limit,
     bool silent = false,
+    bool forDashboardAnalytics = false,
   }) async {
-    // Admin home: recent rows only — do not touch [timeRecords] or date/user filters (Time Logs).
-    final dashboardRecentOnly =
-        limit != null && startDate == null && endDate == null;
-    if (dashboardRecentOnly) {
-      if (!silent) {
-        _dashboardRecentLoading = true;
-        _error = null;
-        notifyListeners();
-      }
-      try {
-        _tableMissing = false;
-        final list = await TimeRecordRepo.instance.listForAdmin(limit: limit);
-        _dashboardRecentRecords = list;
-        if (!silent) _dashboardRecentLoading = false;
-        notifyListeners();
-      } catch (e) {
-        if (_isTableNotFoundError(e)) {
-          _tableMissing = true;
-          _error = null;
-          _dashboardRecentRecords = [];
-        } else {
-          _error = e.toString();
-          _dashboardRecentRecords = [];
-        }
-        if (!silent) _dashboardRecentLoading = false;
-        notifyListeners();
-      }
+    if (forDashboardAnalytics) {
+      await _loadDashboardAnalyticsData();
       return;
     }
-
     if (!silent) {
       _loading = true;
       _error = null;
@@ -321,6 +312,117 @@ class DtrProvider extends ChangeNotifier {
       if (!silent) _loading = false;
       notifyListeners();
     }
+  }
+
+  Map<String, double> _dashboardLeaveByType = {};
+  bool _dashboardLeaveFetchOk = false;
+
+  Future<void> _loadDashboardAnalyticsData() async {
+    if (_dashboardAnalyticsLoading) return;
+    _dashboardAnalyticsLoading = true;
+    notifyListeners();
+    try {
+      _tableMissing = false;
+      final now = DateTime.now();
+      final endDay = DateTime(now.year, now.month, now.day);
+      final startDay = endDay.subtract(const Duration(days: 29));
+      final list = await TimeRecordRepo.instance.listForAdmin(
+        startDate: startDay,
+        endDate: endDay,
+      );
+      _dashboardAnalyticsRecords = list;
+      if (_employees.isEmpty) {
+        await loadEmployees(includePrivileged: true);
+      }
+      if (_departments.isEmpty) {
+        await loadDepartments();
+      }
+      _dashboardLeaveByType = {};
+      _dashboardLeaveFetchOk = false;
+      try {
+        _dashboardLeaveByType =
+            await _loadLeaveDistributionForWindow(startDay, endDay);
+        _dashboardLeaveFetchOk = true;
+      } catch (_) {
+        _dashboardLeaveByType = {};
+      }
+      _recomputeAnalyticsSnapshot();
+    } catch (e) {
+      if (_isTableNotFoundError(e)) {
+        _tableMissing = true;
+        _dashboardAnalyticsRecords = [];
+        _analyticsSnapshot = null;
+      }
+    } finally {
+      _dashboardAnalyticsLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<Map<String, double>> _loadLeaveDistributionForWindow(
+    DateTime start,
+    DateTime end,
+  ) async {
+    final list = await _leaveRepository.listRequests(
+      query: const LeaveRequestQuery(
+        status: LeaveRequestStatus.approved,
+        limit: 500,
+      ),
+    );
+    final map = <String, double>{};
+    for (final r in list) {
+      if (r.startDate == null || r.endDate == null) continue;
+      final rs = DateTime(
+        r.startDate!.year,
+        r.startDate!.month,
+        r.startDate!.day,
+      );
+      final re = DateTime(
+        r.endDate!.year,
+        r.endDate!.month,
+        r.endDate!.day,
+      );
+      if (re.isBefore(start) || rs.isAfter(end)) continue;
+      final label = r.leaveType.displayName;
+      final days = r.workingDaysApplied ?? 1.0;
+      map[label] = (map[label] ?? 0) + days;
+    }
+    return map;
+  }
+
+  void _recomputeAnalyticsSnapshot() {
+    final now = DateTime.now();
+    final endDay = DateTime(now.year, now.month, now.day);
+    final map = _employeeDepartmentByUserId();
+    _analyticsSnapshot = computeDashboardAnalytics(
+      records: _dashboardAnalyticsRecords,
+      userIdToDepartment: map,
+      windowEnd: endDay,
+      departmentFilter: _analyticsDepartmentName,
+      leaveDaysByType: _dashboardLeaveByType,
+      leaveDataAvailable: _dashboardLeaveFetchOk,
+    );
+  }
+
+  Map<String, String> _employeeDepartmentByUserId() {
+    final m = <String, String>{};
+    for (final e in _employees) {
+      final d = e.departmentName?.trim();
+      if (d != null && d.isNotEmpty) m[e.id] = d;
+    }
+    return m;
+  }
+
+  /// Updates department filter for dashboard charts/table only (no API call).
+  void setAnalyticsDepartmentFilter(String? departmentDisplayName) {
+    final v = (departmentDisplayName == null ||
+            departmentDisplayName == analyticsAllDepartmentsLabel)
+        ? null
+        : departmentDisplayName;
+    if (_analyticsDepartmentName == v) return;
+    _analyticsDepartmentName = v;
+    _recomputeAnalyticsSnapshot();
+    notifyListeners();
   }
 
   /// Load time records for current user (employee).
@@ -411,6 +513,7 @@ class DtrProvider extends ChangeNotifier {
           employeeNumber: empNum is int
               ? empNum
               : (empNum != null ? int.tryParse(empNum.toString()) : null),
+          departmentName: m['current_department_name']?.toString(),
         );
       }).toList();
       notifyListeners();

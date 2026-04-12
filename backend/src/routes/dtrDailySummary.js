@@ -1253,7 +1253,7 @@ router.get('/', protect, async (req, res) => {
   }
 });
 
-// GET /api/dtr-daily-summary/summary - counts for dashboard (present today, late today)
+// GET /api/dtr-daily-summary/summary - counts for dashboard (DTR + leave pipeline)
 router.get('/summary', protect, async (req, res) => {
   try {
     const today = new Date().toISOString().slice(0, 10);
@@ -1265,9 +1265,38 @@ router.get('/summary', protect, async (req, res) => {
       `SELECT COUNT(*) AS c FROM dtr_daily_summary WHERE attendance_date = $1::date AND time_in IS NOT NULL AND status = 'late'`,
       [today]
     );
+
+    let onLeaveToday = 0;
+    try {
+      const onLeave = await pool.query(
+        `SELECT COUNT(DISTINCT COALESCE(user_id, employee_id)) AS c
+         FROM leave_requests
+         WHERE status = 'approved'
+           AND start_date <= $1::date
+           AND end_date >= $1::date`,
+        [today]
+      );
+      onLeaveToday = parseInt(onLeave.rows[0]?.c ?? 0, 10);
+    } catch (leaveErr) {
+      console.warn('[dtr-daily-summary/summary GET] on_leave_today:', leaveErr?.message || leaveErr);
+    }
+
+    let pendingApproval = 0;
+    try {
+      const pend = await pool.query(
+        `SELECT COUNT(*) AS c FROM leave_requests
+         WHERE status IN ('pending', 'pending_department_head', 'pending_hr')`
+      );
+      pendingApproval = parseInt(pend.rows[0]?.c ?? 0, 10);
+    } catch (pendErr) {
+      console.warn('[dtr-daily-summary/summary GET] pending_approval:', pendErr?.message || pendErr);
+    }
+
     res.json({
       present_today: parseInt(present.rows[0]?.c ?? 0, 10),
       late_today: parseInt(late.rows[0]?.c ?? 0, 10),
+      on_leave_today: onLeaveToday,
+      pending_approval: pendingApproval,
     });
   } catch (err) {
     console.error('[dtr-daily-summary/summary GET]', err);

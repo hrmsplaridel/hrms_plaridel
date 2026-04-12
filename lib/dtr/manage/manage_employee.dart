@@ -194,7 +194,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     });
   }
 
-  Future<void> _saveEmployee(BuildContext context) async {
+  Future<void> _saveEmployee() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
     final email = _emailController.text.trim();
@@ -238,9 +238,10 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         '/api/employees',
         data: body,
       );
+      if (!mounted) return;
       final data = res.data;
       if (data == null || data['id'] == null) {
-        _showSnackBar(context, 'Account creation failed');
+        _showSnackBar('Account creation failed');
         return;
       }
 
@@ -267,27 +268,29 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         widget.onAccountCreated!();
       } else {
         _showSnackBar(
-          context,
           'Account created successfully. They can sign in with their email and password.',
         );
       }
     } on DioException catch (e) {
+      if (!mounted) return;
       if (e.response?.statusCode == 409) {
-        if (mounted) _showSnackBar(context, 'Email already registered');
+        _showSnackBar('Email already registered');
       } else {
         final msg = e.response?.data is Map
             ? (e.response!.data as Map)['error']?.toString()
             : e.message ?? 'Failed';
-        if (mounted) _showSnackBar(context, msg ?? 'Failed');
+        _showSnackBar(msg ?? 'Failed');
       }
     } catch (e) {
-      if (mounted) _showSnackBar(context, 'Failed: $e');
+      if (!mounted) return;
+      _showSnackBar('Failed: $e');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
-  void _showSnackBar(BuildContext context, String msg) {
+  void _showSnackBar(String msg) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
@@ -345,7 +348,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 FilledButton(
-                  onPressed: _saving ? null : () => _saveEmployee(context),
+                  onPressed: _saving ? null : _saveEmployee,
                   style: FilledButton.styleFrom(
                     backgroundColor: AppTheme.primaryNavy,
                     foregroundColor: Colors.white,
@@ -1291,7 +1294,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     return KeyEventResult.ignored;
   }
 
-  Future<void> _confirmBulkDeactivate(BuildContext context) async {
+  Future<void> _confirmBulkDeactivate() async {
     final targets = _employees
         .where((e) => _selectedBulkIds.contains(e.id) && e.isActive)
         .toList();
@@ -1350,7 +1353,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     }
   }
 
-  Future<void> _confirmBulkActivate(BuildContext context) async {
+  Future<void> _confirmBulkActivate() async {
     final targets = _employees
         .where((e) => _selectedBulkIds.contains(e.id) && !e.isActive)
         .toList();
@@ -1446,7 +1449,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             FilledButton.icon(
               onPressed: _bulkWorking || !canDeactivate
                   ? null
-                  : () => _confirmBulkDeactivate(context),
+                  : _confirmBulkDeactivate,
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFFE53935),
                 foregroundColor: Colors.white,
@@ -1461,7 +1464,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             FilledButton.icon(
               onPressed: _bulkWorking || !canActivate
                   ? null
-                  : () => _confirmBulkActivate(context),
+                  : _confirmBulkActivate,
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFF4CAF50),
                 foregroundColor: Colors.white,
@@ -2638,10 +2641,10 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: AppTheme.primaryNavy.withOpacity(0.08),
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color: AppTheme.primaryNavy.withOpacity(0.2),
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.2),
                   ),
                 ),
                 child: Column(
@@ -2653,7 +2656,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
-                        color: AppTheme.primaryNavy.withOpacity(0.9),
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.9),
                         letterSpacing: 0.2,
                       ),
                     ),
@@ -2713,7 +2716,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             width: double.infinity,
             child: OutlinedButton.icon(
               onPressed: hasSelection
-                  ? () => _showEditEmployeeDialog(context, sel)
+                  ? () => _showEditEmployeeDialog(sel)
                   : null,
               icon: Icon(
                 Icons.edit_rounded,
@@ -2744,9 +2747,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
               onPressed: hasSelection
                   ? () {
                       final p = sel;
-                      p.isActive
-                          ? _confirmDeactivate(context, p)
-                          : _confirmActivate(context, p);
+                      p.isActive ? _confirmDeactivate(p) : _confirmActivate(p);
                     }
                   : null,
               icon: Icon(
@@ -2780,7 +2781,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     );
   }
 
-  void _confirmActivate(BuildContext context, _EmployeeProfile profile) async {
+  Future<void> _confirmActivate(_EmployeeProfile profile) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -2809,34 +2810,30 @@ class _ManageEmployeeState extends State<ManageEmployee> {
         '/api/employees/${profile.id}',
         data: {'is_active': true},
       );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${profile.fullName} has been activated.')),
-        );
-        _loadEmployees();
-        context.read<DtrProvider>().loadEmployees();
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${profile.fullName} has been activated.')),
+      );
+      await _loadEmployees();
+      if (!mounted) return;
+      context.read<DtrProvider>().loadEmployees();
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to activate: $e')));
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to activate: $e')));
     }
   }
 
-  void _showEditEmployeeDialog(
-    BuildContext context,
-    _EmployeeProfile profile,
-  ) async {
+  Future<void> _showEditEmployeeDialog(_EmployeeProfile profile) async {
     final updated = await showDialog<bool>(
       context: context,
-      builder: (context) => _EditEmployeeDialog(profile: profile),
+      builder: (dialogCtx) => _EditEmployeeDialog(profile: profile),
     );
-    if (updated == true && mounted) {
-      _loadEmployees();
-      context.read<DtrProvider>().loadEmployees();
-    }
+    if (updated != true || !mounted) return;
+    await _loadEmployees();
+    if (!mounted) return;
+    context.read<DtrProvider>().loadEmployees();
   }
 
   void _showImportDialog(BuildContext context) async {
@@ -2859,10 +2856,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     );
   }
 
-  void _confirmDeactivate(
-    BuildContext context,
-    _EmployeeProfile profile,
-  ) async {
+  Future<void> _confirmDeactivate(_EmployeeProfile profile) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -2886,19 +2880,18 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     if (ok != true || !mounted) return;
     try {
       await ApiClient.instance.delete('/api/employees/${profile.id}');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${profile.fullName} has been deactivated.')),
-        );
-        _loadEmployees();
-        context.read<DtrProvider>().loadEmployees();
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${profile.fullName} has been deactivated.')),
+      );
+      await _loadEmployees();
+      if (!mounted) return;
+      context.read<DtrProvider>().loadEmployees();
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to deactivate: $e')));
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to deactivate: $e')));
     }
   }
 }
@@ -3128,7 +3121,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
     }
   }
 
-  Future<void> _saveEmployee(BuildContext context) async {
+  Future<void> _saveEmployee() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
     final firstName = _firstNameController.text.trim();
@@ -3180,6 +3173,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
         }
       }
 
+      if (!mounted) return;
       await ApiClient.instance.put('/api/employees/${_profile.id}', data: body);
 
       if (!mounted) return;
@@ -3189,13 +3183,12 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Employee updated successfully.')),
       );
-      if (mounted) Navigator.of(context).pop(true);
+      Navigator.of(context).pop(true);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -3278,7 +3271,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
                   ),
                   const SizedBox(width: 12),
                   FilledButton(
-                    onPressed: _saving ? null : () => _saveEmployee(context),
+                    onPressed: _saving ? null : _saveEmployee,
                     style: FilledButton.styleFrom(
                       backgroundColor: const Color(0xFF4CAF50),
                       foregroundColor: Colors.white,

@@ -51,6 +51,7 @@ dependencies:
   web: ^1.1.1
   shimmer: ^3.0.0
   web_socket_channel: ^3.0.3
+  fl_chart: ^0.69.0
 
 dev_dependencies:
   flutter_test:

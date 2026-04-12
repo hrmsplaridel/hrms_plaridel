@@ -7,7 +7,7 @@
  * - admin_only: Only admin/HR can create; blocks employee submission
  * - allows_past_dates: Past-date filing allowed
  * - requires_attachment: Supporting document required (TODO: enforce when upload is implemented)
- * - requires_attachment_when_over_days: If days > this, attachment required (e.g. sick leave > 5)
+ * - requires_attachment_when_over_days: Sick leave only — medical certificate required if working days >= this value (default 5)
  * - max_days: Maximum working days for this leave type (null = no limit)
  * - special_process_only: Not normal DTR leave; HR/admin process (e.g. monetization, terminal)
  * - special_process_purposes: For "others" type, purposes that are special-process-only
@@ -202,12 +202,26 @@ function validateEmployeeLeaveRequest(opts) {
     }
   }
 
-  // TODO: When attachment upload is implemented, enforce:
-  // - rule.requires_attachment -> block if !hasAttachment
-  // - rule.requires_attachment_when_over_days (sick leave > 5 days) -> block if days > threshold && !hasAttachment
-  // For now we do not block; UI shows a note for attachment-required types.
-
   return { valid: true };
+}
+
+/**
+ * True if submission should be rejected because a required attachment is missing.
+ * @param {object|null} rule - from getRule()
+ * @param {string} leaveType
+ * @param {number} days - working days requested
+ * @param {boolean} hasAttachment
+ */
+function mustBlockMissingAttachment(rule, leaveType, days, hasAttachment) {
+  if (hasAttachment) return false;
+  if (!rule) return false;
+  const d = parseFloat(days);
+  if (leaveType === 'sickLeave') {
+    const threshold = rule.requires_attachment_when_over_days ?? 5;
+    if (Number.isNaN(d)) return false;
+    return d >= threshold;
+  }
+  return !!rule.requires_attachment;
 }
 
 /**
@@ -231,4 +245,5 @@ module.exports = {
   getRule,
   validateEmployeeLeaveRequest,
   isEmployeeFileable,
+  mustBlockMissingAttachment,
 };

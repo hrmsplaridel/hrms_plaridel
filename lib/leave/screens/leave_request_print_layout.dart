@@ -1794,9 +1794,23 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
       _showMessage('Please choose the location for this leave request.');
       return false;
     }
-    if (_leaveType == LeaveType.sickLeave && _sickLeaveNature == null) {
-      _showMessage('Please choose the sick leave nature.');
-      return false;
+    if (_leaveType == LeaveType.sickLeave) {
+      if (_sickLeaveNature == null) {
+        _showMessage('Please choose the sick leave nature.');
+        return false;
+      }
+      final wd = _workingDaysApplied;
+      if (wd != null && wd >= 5) {
+        final cur = _savedRequest ?? widget.initialRequest;
+        final hasAtt = (cur?.attachmentName ?? '').trim().isNotEmpty;
+        if (!hasAtt) {
+          _showMessage(
+            'Sick leave of 5 or more working days requires a medical certificate. '
+            'Save as draft, upload the document, then submit.',
+          );
+          return false;
+        }
+      }
     }
     if (_leaveType == LeaveType.studyLeave && _studyPurpose == null) {
       _showMessage('Please choose the study leave purpose.');

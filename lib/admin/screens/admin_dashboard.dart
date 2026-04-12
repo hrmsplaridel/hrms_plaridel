@@ -191,9 +191,14 @@ class _AdminDashboardState extends State<AdminDashboard>
         return saved != null;
       },
       onSubmitRequest: (LeaveRequest request) async {
-        final saved = await context.read<LeaveProvider>().submitRequest(
-          request,
-        );
+        final provider = context.read<LeaveProvider>();
+        if (request.id != null && request.id!.isNotEmpty) {
+          final updated = await provider.updateRequest(
+            request.copyWith(status: LeaveRequestStatus.pending),
+          );
+          return updated != null;
+        }
+        final saved = await provider.submitRequest(request);
         return saved != null;
       },
     );

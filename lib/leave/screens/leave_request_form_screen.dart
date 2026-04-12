@@ -160,17 +160,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       }
     }
 
-    // FIX #6: Block submit if leave type requires an attachment and none exists.
-    if (_leaveType.requiresAttachment && !_hasAttachment()) {
-      // For sick leave, the attachment is only strictly required when > 5 days
-      // (matching the backend leaveTypeRules.js rule).
-      final isSickLeaveMandatory = _leaveType == LeaveType.sickLeave
-          ? ((_computeWorkingDays() ?? 0) > 5)
-          : true;
-      if (isSickLeaveMandatory) {
-        _showAttachmentRequiredDialog();
-        return;
-      }
+    if (_shouldShowAttachmentSection() && !_hasAttachment()) {
+      _showMessage('Attachment is required for this leave type.');
+      return;
     }
 
     await _submit(isDraft: false);
@@ -194,6 +186,20 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   bool _hasAttachment() {
     final current = _savedRequest ?? widget.initialRequest;
     return (current?.attachmentName ?? '').trim().isNotEmpty;
+  }
+
+  bool _hasLeaveRequestId() {
+    final id = (_savedRequest ?? widget.initialRequest)?.id;
+    return id != null && id.trim().isNotEmpty;
+  }
+
+  /// Visible only when an attachment is mandatory: sick leave ≥5 working days,
+  /// or any non–sick type with [LeaveType.requiresAttachment].
+  bool _shouldShowAttachmentSection() {
+    if (_leaveType == LeaveType.sickLeave) {
+      return (_computeWorkingDays() ?? 0) >= 5;
+    }
+    return _leaveType.requiresAttachment;
   }
 
   /// Fills CSC header fields (name, office, position, salary, date filed) from
@@ -274,32 +280,6 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     );
   }
 
-  void _showAttachmentRequiredDialog() {
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.warning_amber_rounded, color: Colors.orange[700]),
-            const SizedBox(width: 8),
-            const Text('Attachment Required'),
-          ],
-        ),
-        content: Text(
-          'This leave type (${_leaveType.displayName}) requires a supporting '
-          'document (e.g. medical certificate, birth certificate).\n\n'
-          'Please save as draft first, upload the required document, then submit.',
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> _submit({required bool isDraft}) async {
     setState(() => _busy = true);
     try {
@@ -376,7 +356,14 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
             : false;
         if (!mounted) return;
         if (success) {
-          Navigator.of(context).pop(kLeaveFormResultDraftSaved);
+          final provider = context.read<LeaveProvider>();
+          final saved = provider.selectedRequest;
+          if (saved != null &&
+              saved.id != null &&
+              saved.id!.trim().isNotEmpty) {
+            setState(() => _savedRequest = saved);
+          }
+          _showMessage('Draft saved.');
         }
       } else {
         final action = widget.onSubmitRequest;
@@ -620,8 +607,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                               ),
                             ],
                           ),
-                          const Divider(height: 32),
-                          _buildAttachmentSection(),
+                          if (_shouldShowAttachmentSection()) ...[
+                            const Divider(height: 32),
+                            _buildAttachmentSection(),
+                          ],
                         ],
                       ),
                     ),
@@ -858,7 +847,6 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
   Widget _buildAttachmentSection() {
     final current = _savedRequest ?? widget.initialRequest;
-    final requestId = current?.id;
     final hasAttachment = (current?.attachmentName ?? '').trim().isNotEmpty;
 
     return Column(
@@ -867,113 +855,119 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         Row(
           children: [
             Text('Attachments', style: TextStyle(fontWeight: FontWeight.w500)),
-            if (_leaveType.requiresAttachment) ...[
-              const SizedBox(width: 8),
-              // FIX #6: Show mandatory badge for attachment-required types.
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.orange[100],
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: Colors.orange.shade300),
-                ),
-                child: Text(
-                  _leaveType == LeaveType.sickLeave
-                      ? 'Required if > 5 days'
-                      : 'Required',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.orange[800],
-                  ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.orange[100],
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: Colors.orange.shade300),
+              ),
+              child: Text(
+                'Required',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.orange[800],
                 ),
               ),
-            ],
+            ),
           ],
         ),
         const SizedBox(height: 4),
         Text(
-          _leaveType.requiresAttachment
-              ? 'A supporting document is required for this leave type (e.g. medical certificate, birth certificate). PDF, JPG, PNG (max 10MB).'
-              : 'Supporting attachment: optional. PDF, JPG, PNG (max 10MB).',
+          _leaveType == LeaveType.sickLeave
+              ? 'Medical certificate is required for sick leave exceeding 5 days. '
+                    'PDF, JPG, PNG (max 10MB).'
+              : 'A supporting document is required for ${_leaveType.displayName} '
+                    '(e.g. medical certificate, birth certificate). '
+                    'PDF, JPG, PNG (max 10MB).',
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
         ),
-        const SizedBox(height: 12),
-        if (requestId == null || requestId.isEmpty)
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppTheme.lightGray,
-              borderRadius: BorderRadius.circular(8),
+        if (!_hasLeaveRequestId()) ...[
+          const SizedBox(height: 8),
+          Text(
+            'If you upload before saving manually, a draft is created automatically.',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 12,
+              fontStyle: FontStyle.italic,
             ),
-            child: const Row(
-              children: [
-                Icon(Icons.info_outline, size: 20),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Save draft first to upload an attachment.',
-                    style: TextStyle(fontSize: 13),
-                  ),
-                ),
-              ],
-            ),
-          )
-        else ...[
-          if (hasAttachment)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Row(
-                children: [
-                  Icon(Icons.attach_file, color: AppTheme.primaryNavy),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      current!.attachmentName!,
-                      style: const TextStyle(fontWeight: FontWeight.w500),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          Row(
-            children: [
-              OutlinedButton.icon(
-                onPressed: (_busy || _attachmentUploading)
-                    ? null
-                    : _pickAndUploadAttachment,
-                icon: _attachmentUploading
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.upload_file, size: 18),
-                label: Text(hasAttachment ? 'Replace File' : 'Upload File'),
-              ),
-              if (hasAttachment) ...[
-                const SizedBox(width: 12),
-                TextButton(
-                  onPressed: (_busy || _attachmentUploading)
-                      ? null
-                      : _removeAttachment,
-                  style: TextButton.styleFrom(foregroundColor: Colors.red),
-                  child: const Text('Remove'),
-                ),
-              ],
-            ],
           ),
         ],
+        const SizedBox(height: 12),
+        if (hasAttachment)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Row(
+              children: [
+                Icon(Icons.attach_file, color: AppTheme.primaryNavy),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    current!.attachmentName!,
+                    style: const TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        Row(
+          children: [
+            OutlinedButton.icon(
+              onPressed: (_busy || _attachmentUploading)
+                  ? null
+                  : _pickAndUploadAttachment,
+              icon: _attachmentUploading
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.upload_file, size: 18),
+              label: Text(hasAttachment ? 'Replace File' : 'Upload File'),
+            ),
+            if (hasAttachment) ...[
+              const SizedBox(width: 12),
+              TextButton(
+                onPressed: (_busy || _attachmentUploading)
+                    ? null
+                    : _removeAttachment,
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                child: const Text('Remove'),
+              ),
+            ],
+          ],
+        ),
       ],
     );
   }
 
   Future<void> _pickAndUploadAttachment() async {
-    final current = _savedRequest ?? widget.initialRequest;
-    final requestId = current?.id;
+    if (!_shouldShowAttachmentSection()) return;
+
+    var current = _savedRequest ?? widget.initialRequest;
+    var requestId = current?.id;
+
     if (requestId == null || requestId.isEmpty) {
-      _showMessage('Save draft first to add an attachment.');
-      return;
+      if (!_formKey.currentState!.validate()) return;
+      if (_startDate == null || _endDate == null) {
+        _showMessage('Please select start and end dates before uploading.');
+        return;
+      }
+      await _submit(isDraft: true);
+      if (!mounted) return;
+      current = _savedRequest ?? widget.initialRequest;
+      requestId = current?.id;
+      if (requestId == null || requestId.isEmpty) {
+        final err = context.read<LeaveProvider>().error;
+        _showMessage(
+          (err != null && err.trim().isNotEmpty)
+              ? err
+              : 'Could not create a draft for your attachment. Try again.',
+        );
+        return;
+      }
     }
 
     final result = await FilePicker.platform.pickFiles(
@@ -1019,6 +1013,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   }
 
   Future<void> _removeAttachment() async {
+    if (!_shouldShowAttachmentSection()) return;
+
     final current = _savedRequest ?? widget.initialRequest;
     final requestId = current?.id;
     if (requestId == null || requestId.isEmpty) return;

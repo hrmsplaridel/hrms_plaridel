@@ -750,19 +750,15 @@ router.post('/submit', protect, async (req, res) => {
       }
 
       // FIX #6 (backend): POST /submit creates a new record — no attachment yet.
-      // Block attachment-required leave types from direct submit. Employee must save draft first.
-      const { getRule: getLeaveRule } = require('./leaveTypeRules');
+      // Block when a required attachment is missing (incl. sick leave ≥5 working days → medical certificate).
+      const { mustBlockMissingAttachment, getRule: getLeaveRule } = require('./leaveTypeRules');
       const submitRule = getLeaveRule(leave_type);
-      if (submitRule && submitRule.requires_attachment) {
-        const needsAttach = leave_type === 'sickLeave'
-          ? (days > (submitRule.requires_attachment_when_over_days || 5))
-          : true;
-        if (needsAttach) {
-          await client.query('ROLLBACK');
-          return res.status(400).json({
-            error: `${leave_type} requires a supporting document. Please save a draft, upload the document, then submit.`,
-          });
-        }
+      const effectiveDays = daysHolidayAwareSubmit ?? days;
+      if (mustBlockMissingAttachment(submitRule, leave_type, effectiveDays, false)) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          error: `${leave_type} requires a supporting document. Please save a draft, upload the document, then submit.`,
+        });
       }
 
       const hasOverlap = await hasOverlappingLeaveRequest(client, userId, startStr, endStr, null);
@@ -961,18 +957,13 @@ router.put('/:id', protect, async (req, res) => {
             [id]
           );
           const hasAttachment = !!(existingRow.rows[0]?.attachment_path);
-          const { getRule } = require('./leaveTypeRules');
+          const { getRule, mustBlockMissingAttachment } = require('./leaveTypeRules');
           const rule = getRule(leave_type);
-          if (rule && rule.requires_attachment && !hasAttachment) {
-            const needsAttach = leave_type === 'sickLeave'
-              ? (days > (rule.requires_attachment_when_over_days || 5))
-              : true;
-            if (needsAttach) {
-              await client.query('ROLLBACK');
-              return res.status(400).json({
-                error: `${leave_type} requires a supporting document before submission. Please upload one first.`,
-              });
-            }
+          if (mustBlockMissingAttachment(rule, leave_type, days, hasAttachment)) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({
+              error: `${leave_type} requires a supporting document before submission. Please upload one first.`,
+            });
           }
 
           // Two-stage workflow: resolve actual target status.

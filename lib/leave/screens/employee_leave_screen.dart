@@ -193,9 +193,8 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
                 onBalanceHistory: () {
                   Navigator.of(context).push(
                     MaterialPageRoute<void>(
-                      builder: (_) => const LeaveBalanceHistoryScreen(
-                        isAdmin: false,
-                      ),
+                      builder: (_) =>
+                          const LeaveBalanceHistoryScreen(isAdmin: false),
                     ),
                   );
                 },
