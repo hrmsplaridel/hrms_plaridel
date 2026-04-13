@@ -21,24 +21,32 @@ class LeaveGeneralInstructionsPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            alignment: WrapAlignment.spaceBetween,
+            runSpacing: 8,
+            spacing: 8,
             children: [
-              Icon(
-                Icons.info_outline_rounded,
-                size: 18,
-                color: const Color(0xFFB45309),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.info_outline_rounded,
+                    size: 18,
+                    color: const Color(0xFFB45309),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Before Filing',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFF92400E),
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              Text(
-                'Before Filing',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: const Color(0xFF92400E),
-                  letterSpacing: 0.3,
-                ),
-              ),
-              const Spacer(),
               // "View Full Guidelines" text button
               _FullGuidelinesTextButton(),
             ],
@@ -323,7 +331,12 @@ class LeaveFullGuidelinesSheet extends StatelessWidget {
             Expanded(
               child: ListView(
                 controller: scrollController,
-                padding: EdgeInsets.fromLTRB(20, 16, 20, mq.padding.bottom + 24),
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  16,
+                  20,
+                  mq.padding.bottom + 24,
+                ),
                 children: [
                   ...LeaveGuidance.fullGuidelines.map(
                     (section) => _GuidelineSectionTile(section: section),
@@ -426,27 +439,30 @@ class _GuidelineSectionTile extends StatelessWidget {
   }
 
   IconData _iconFromName(String name) => switch (name) {
-        'rule' => Icons.rule_rounded,
-        'schedule' => Icons.schedule_rounded,
-        'description' => Icons.description_rounded,
-        'event_available' => Icons.event_available_rounded,
-        'payments' => Icons.payments_rounded,
-        _ => Icons.article_rounded,
-      };
+    'rule' => Icons.rule_rounded,
+    'schedule' => Icons.schedule_rounded,
+    'description' => Icons.description_rounded,
+    'event_available' => Icons.event_available_rounded,
+    'payments' => Icons.payments_rounded,
+    _ => Icons.article_rounded,
+  };
 }
 
 /// A compact scrollable table showing the max days per leave type.
 class _PerTypeQuickReferenceTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final rows = LeaveType.values
-        .where((t) => t.employeeCanFile)
-        .map((t) {
-          final g = LeaveGuidance.forType(t);
-          final limit = g.limits ?? (t.maxDays != null ? '${t.maxDays} days' : 'No fixed limit');
-          return _TableRowData(type: t.displayName, limit: limit, needsDocs: t.requiresAttachment);
-        })
-        .toList();
+    final rows = LeaveType.values.where((t) => t.employeeCanFile).map((t) {
+      final g = LeaveGuidance.forType(t);
+      final limit =
+          g.limits ??
+          (t.maxDays != null ? '${t.maxDays} days' : 'No fixed limit');
+      return _TableRowData(
+        type: t.displayName,
+        limit: limit,
+        needsDocs: t.requiresAttachment,
+      );
+    }).toList();
 
     return Container(
       decoration: BoxDecoration(
@@ -461,7 +477,11 @@ class _PerTypeQuickReferenceTable extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
             child: Row(
               children: [
-                Icon(Icons.table_chart_outlined, color: AppTheme.primaryNavy, size: 18),
+                Icon(
+                  Icons.table_chart_outlined,
+                  color: AppTheme.primaryNavy,
+                  size: 18,
+                ),
                 const SizedBox(width: 8),
                 Text(
                   'Quick Reference',
@@ -522,7 +542,9 @@ class _PerTypeQuickReferenceTable extends StatelessWidget {
             final i = entry.key;
             final row = entry.value;
             return Container(
-              color: i.isOdd ? AppTheme.offWhite.withOpacity(0.5) : AppTheme.white,
+              color: i.isOdd
+                  ? AppTheme.offWhite.withOpacity(0.5)
+                  : AppTheme.white,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -531,14 +553,22 @@ class _PerTypeQuickReferenceTable extends StatelessWidget {
                     flex: 3,
                     child: Text(
                       row.type,
-                      style: TextStyle(fontSize: 12, color: AppTheme.textPrimary, height: 1.4),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.textPrimary,
+                        height: 1.4,
+                      ),
                     ),
                   ),
                   Expanded(
                     flex: 3,
                     child: Text(
                       row.limit,
-                      style: TextStyle(fontSize: 12, color: AppTheme.textPrimary, height: 1.4),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.textPrimary,
+                        height: 1.4,
+                      ),
                     ),
                   ),
                   SizedBox(
@@ -548,7 +578,9 @@ class _PerTypeQuickReferenceTable extends StatelessWidget {
                           ? Icons.check_circle_outline_rounded
                           : Icons.remove_rounded,
                       size: 16,
-                      color: row.needsDocs ? Colors.green.shade600 : Colors.grey.shade400,
+                      color: row.needsDocs
+                          ? Colors.green.shade600
+                          : Colors.grey.shade400,
                     ),
                   ),
                 ],

@@ -434,6 +434,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                           const SizedBox(height: 16),
                           DropdownButtonFormField<LeaveType>(
                             value: _leaveType,
+                            isExpanded: true,
                             decoration: _inputDecoration('Select Leave Type'),
                             items: LeaveType.values
                                 .where(

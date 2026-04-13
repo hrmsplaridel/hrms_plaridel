@@ -171,74 +171,101 @@ class _LoginBackButton extends StatelessWidget {
 class _BrandingSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final w = MediaQuery.sizeOf(context).width;
-    final titleSize = w < 360 ? 24.0 : (w < 400 ? 28.0 : 34.0);
-    final subtitleSize = w < 360 ? 12.0 : 16.0;
-
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          const SizedBox(height: 56),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  width: 92,
-                  height: 92,
-                  color: Colors.white.withOpacity(0.2),
-                  child: Image.asset(
-                    'assets/images/Plaridel Logo.jpg',
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const Icon(
-                      Icons.shield_outlined,
-                      color: Colors.white,
-                      size: 32,
-                    ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final availableWidth = constraints.maxWidth;
+          final isCompact = availableWidth < 340;
+          final titleSize = isCompact
+              ? 22.0
+              : (availableWidth < 400 ? 26.0 : 34.0);
+          final subtitleSize = isCompact
+              ? 11.5
+              : (availableWidth < 400 ? 13.0 : 16.0);
+          final logoSize = isCompact ? 76.0 : 92.0;
+
+          Widget buildLogo() {
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                width: logoSize,
+                height: logoSize,
+                color: Colors.white.withOpacity(0.2),
+                child: Image.asset(
+                  'assets/images/Plaridel Logo.jpg',
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const Icon(
+                    Icons.shield_outlined,
+                    color: Colors.white,
+                    size: 32,
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            );
+          }
+
+          Widget buildTitleBlock({required TextAlign align}) {
+            return Column(
+              crossAxisAlignment: align == TextAlign.center
+                  ? CrossAxisAlignment.center
+                  : CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Municipality of Plaridel',
+                  textAlign: align,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: titleSize,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.3,
+                    height: 1.15,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'HUMAN RESOURCE MANAGEMENT SYSTEM',
+                  textAlign: align,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.95),
+                    fontSize: subtitleSize,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: isCompact ? 0.3 : 0.7,
+                    height: 1.2,
+                  ),
+                  maxLines: isCompact ? 3 : 2,
+                  overflow: TextOverflow.ellipsis,
+                  softWrap: true,
+                ),
+              ],
+            );
+          }
+
+          return Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const SizedBox(height: 56),
+              if (isCompact) ...[
+                buildLogo(),
+                const SizedBox(height: 14),
+                buildTitleBlock(align: TextAlign.center),
+              ] else
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Text(
-                      'Municipality of Plaridel',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: titleSize,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.3,
-                        height: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'HUMAN RESOURCE MANAGEMENT SYSTEM',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.95),
-                        fontSize: subtitleSize,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: w < 360 ? 0.4 : 0.8,
-                        height: 1.2,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.fade,
-                      softWrap: true,
-                    ),
+                    buildLogo(),
+                    const SizedBox(width: 12),
+                    Expanded(child: buildTitleBlock(align: TextAlign.left)),
                   ],
                 ),
-              ),
+              const SizedBox(height: 0),
+              // Removed tagline as requested.
             ],
-          ),
-          const SizedBox(height: 0),
-          // Removed tagline as requested.
-        ],
+          );
+        },
       ),
     );
   }
