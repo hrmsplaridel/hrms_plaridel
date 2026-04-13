@@ -19,6 +19,7 @@ class RspFormHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Stack(
+      clipBehavior: Clip.hardEdge,
       children: [
         // Decorative angular shapes (dark blue top-left, orange bottom-left)
         Positioned(
@@ -38,7 +39,7 @@ class RspFormHeader extends StatelessWidget {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -125,7 +126,7 @@ class RspFormHeader extends StatelessWidget {
                   style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
                 ),
               ],
-              const SizedBox(height: 20),
+              const SizedBox(height: 40),
             ],
           ),
         ),
@@ -338,13 +339,99 @@ class _FooterIcon extends StatelessWidget {
   }
 }
 
-/// Underlined-style decoration for form fields (like the physical form's blank lines).
+/// Vertical gap after stacked [rspUnderlinedField] widgets so outlines don’t touch.
+const double rspFormFieldVerticalGap = 30;
+
+/// Extra space between titled sections (e.g. Qualifications vs Performance).
+const double rspFormSectionGap = 28;
+
+/// Wrap a [TextField] / [TextFormField] that uses [rspUnderlinedField] when stacking vertically.
+class RspSpacedOutlineField extends StatelessWidget {
+  const RspSpacedOutlineField({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: rspFormFieldVerticalGap),
+      child: child,
+    );
+  }
+}
+
+const double _rspFieldRadius = 10;
+
+/// Standard outline field for RSP / L&D forms. Label stays in the upper band of the
+/// border (no overlap with the bottom underline).
 InputDecoration rspUnderlinedField(String label) {
+  final hasLabel = label.trim().isNotEmpty;
   return InputDecoration(
-    labelText: label,
-    labelStyle: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-    border: const UnderlineInputBorder(),
-    contentPadding: const EdgeInsets.only(bottom: 4),
+    labelText: hasLabel ? label : null,
+    floatingLabelBehavior: hasLabel
+        ? FloatingLabelBehavior.always
+        : FloatingLabelBehavior.never,
+    alignLabelWithHint: false,
+    labelStyle: TextStyle(
+      color: AppTheme.textSecondary,
+      fontSize: 14,
+      fontWeight: FontWeight.w500,
+    ),
+    floatingLabelStyle: TextStyle(
+      color: AppTheme.primaryNavy,
+      fontSize: 12.5,
+      fontWeight: FontWeight.w700,
+      height: 1.15,
+    ),
+    filled: true,
+    fillColor: AppTheme.white,
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(_rspFieldRadius),
+      borderSide: BorderSide(color: Colors.grey.shade400),
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(_rspFieldRadius),
+      borderSide: BorderSide(color: Colors.grey.shade300),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(_rspFieldRadius),
+      borderSide: const BorderSide(color: AppTheme.primaryNavy, width: 2),
+    ),
+    contentPadding: const EdgeInsets.fromLTRB(14, 16, 14, 16),
+    isDense: false,
+  );
+}
+
+/// Table / grid cells: column header is the label—only an underline + comfortable padding.
+InputDecoration rspTableCellField({String? hintText}) {
+  final normal = BorderSide(color: Colors.grey.shade400);
+  final enabled = BorderSide(color: Colors.grey.shade300);
+  final focused = BorderSide(color: AppTheme.primaryNavy, width: 2);
+  return InputDecoration(
+    hintText: hintText,
+    hintStyle: TextStyle(color: Colors.grey.shade500, fontSize: 13),
+    isDense: false,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 14),
+    border: UnderlineInputBorder(borderSide: normal),
+    enabledBorder: UnderlineInputBorder(borderSide: enabled),
+    focusedBorder: UnderlineInputBorder(borderSide: focused),
+    disabledBorder: UnderlineInputBorder(borderSide: enabled),
+  );
+}
+
+/// Compact underline for inline sentences (e.g. “Done this __ day of __, __.”).
+InputDecoration rspInlineClauseField({String? hintText}) {
+  final normal = BorderSide(color: Colors.grey.shade400);
+  final enabled = BorderSide(color: Colors.grey.shade300);
+  final focused = BorderSide(color: AppTheme.primaryNavy, width: 2);
+  return InputDecoration(
+    hintText: hintText,
+    hintStyle: TextStyle(color: Colors.grey.shade500, fontSize: 12),
     isDense: true,
+    contentPadding: const EdgeInsets.fromLTRB(2, 2, 2, 8),
+    border: UnderlineInputBorder(borderSide: normal),
+    enabledBorder: UnderlineInputBorder(borderSide: enabled),
+    focusedBorder: UnderlineInputBorder(borderSide: focused),
+    disabledBorder: UnderlineInputBorder(borderSide: enabled),
   );
 }

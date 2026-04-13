@@ -10,8 +10,17 @@ CREATE TABLE IF NOT EXISTS recruitment_applications (
   email TEXT NOT NULL,
   phone TEXT,
   resume_notes TEXT,
+  position_applied_for TEXT,
   attachment_path TEXT,
   attachment_name TEXT,
+  doc_application_letter_path TEXT,
+  doc_application_letter_name TEXT,
+  doc_resume_path TEXT,
+  doc_resume_name TEXT,
+  doc_tor_path TEXT,
+  doc_tor_name TEXT,
+  doc_eligibility_trainings_path TEXT,
+  doc_eligibility_trainings_name TEXT,
   status TEXT NOT NULL DEFAULT 'submitted'
     CHECK (
       status IN (
@@ -24,6 +33,9 @@ CREATE TABLE IF NOT EXISTS recruitment_applications (
         'registered'
       )
     ),
+  final_interview_at TIMESTAMPTZ,
+  final_interview_passed BOOLEAN,
+  hired_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -131,6 +143,20 @@ CREATE INDEX IF NOT EXISTS idx_recruitment_exam_results_application
 CREATE INDEX IF NOT EXISTS idx_recruitment_exam_questions_type
   ON recruitment_exam_questions(exam_type);
 
+-- Per-exam countdown (seconds). 0 = no limit. Seeded for MCQ screening exams.
+CREATE TABLE IF NOT EXISTS recruitment_exam_time_limits (
+  exam_type TEXT PRIMARY KEY,
+  time_limit_seconds INT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+INSERT INTO recruitment_exam_time_limits (exam_type, time_limit_seconds)
+VALUES
+  ('general', 2700),
+  ('math', 2700),
+  ('general_info', 600)
+ON CONFLICT (exam_type) DO NOTHING;
+
 CREATE INDEX IF NOT EXISTS idx_job_vacancy_announcement_updated
   ON job_vacancy_announcement(updated_at DESC);
 
@@ -145,3 +171,26 @@ CREATE INDEX IF NOT EXISTS idx_comparative_assessment_entries_created
 
 CREATE INDEX IF NOT EXISTS idx_promotion_certification_entries_created
   ON promotion_certification_entries(created_at DESC);
+
+-- Upgrade existing DBs (CREATE TABLE IF NOT EXISTS does not add new columns)
+ALTER TABLE recruitment_applications
+  ADD COLUMN IF NOT EXISTS final_interview_at TIMESTAMPTZ;
+ALTER TABLE recruitment_applications
+  ADD COLUMN IF NOT EXISTS final_interview_passed BOOLEAN;
+ALTER TABLE recruitment_applications
+  ADD COLUMN IF NOT EXISTS hired_user_id UUID;
+ALTER TABLE recruitment_applications
+  ADD COLUMN IF NOT EXISTS hr_account_setup_done BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE recruitment_applications
+  ADD COLUMN IF NOT EXISTS position_applied_for TEXT;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_recruitment_applications_hired_user'
+  ) THEN
+    ALTER TABLE recruitment_applications
+      ADD CONSTRAINT fk_recruitment_applications_hired_user
+      FOREIGN KEY (hired_user_id) REFERENCES users(id) ON DELETE SET NULL;
+  END IF;
+END $$;

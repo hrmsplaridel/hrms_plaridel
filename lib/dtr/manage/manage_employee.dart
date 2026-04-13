@@ -7,6 +7,9 @@ import 'package:provider/provider.dart';
 
 import '../../api/client.dart';
 import '../../api/config.dart';
+import '../../data/recruitment_application.dart';
+import '../../providers/recruitment_hire_prefill.dart';
+import '../../widgets/structured_address_fields.dart';
 import '../dtr_provider.dart';
 import '../../landingpage/constants/app_theme.dart';
 
@@ -73,7 +76,9 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   final _middleNameController = TextEditingController();
   final _lastNameController = TextEditingController();
   final _contactController = TextEditingController();
-  final _addressController = TextEditingController();
+  final _streetController = TextEditingController();
+  GlobalKey<StructuredAddressFormState> _addressFormKey =
+      GlobalKey<StructuredAddressFormState>();
 
   String? _privilege;
   String? _suffix;
@@ -83,6 +88,51 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   bool _obscureRepeatPassword = true;
   Uint8List? _selectedImageBytes;
   bool _saving = false;
+  int? _lastAppliedPrefillStamp;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final hire = context.read<RecruitmentHirePrefill>();
+    if (!hire.hasPendingLink) {
+      _lastAppliedPrefillStamp = null;
+      return;
+    }
+    if (hire.prefillStamp == _lastAppliedPrefillStamp) return;
+    _lastAppliedPrefillStamp = hire.prefillStamp;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final h = context.read<RecruitmentHirePrefill>();
+      if (!h.hasPendingLink) return;
+      _applyRecruitmentPrefill(h);
+    });
+  }
+
+  void _applyRecruitmentPrefill(RecruitmentHirePrefill hire) {
+    final em = hire.applicantEmail;
+    if (em != null && em.isNotEmpty) {
+      _emailController.text = em;
+    }
+    final raw = hire.applicantFullName?.trim() ?? '';
+    if (raw.isNotEmpty) {
+      final sp = raw.indexOf(' ');
+      if (sp < 0) {
+        _firstNameController.text = raw;
+        _lastNameController.text = raw;
+      } else {
+        _firstNameController.text = raw.substring(0, sp).trim();
+        _lastNameController.text = raw.substring(sp + 1).trim();
+        if (_lastNameController.text.isEmpty) {
+          _lastNameController.text = _firstNameController.text;
+        }
+      }
+    }
+    final ph = hire.applicantPhone?.trim();
+    if (ph != null && ph.isNotEmpty) {
+      _contactController.text = ph;
+    }
+    setState(() {});
+  }
 
   @override
   void dispose() {
@@ -93,32 +143,74 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     _middleNameController.dispose();
     _lastNameController.dispose();
     _contactController.dispose();
-    _addressController.dispose();
+    _streetController.dispose();
     super.dispose();
   }
 
-  InputDecoration _inputDecoration(String hint) => InputDecoration(
-    hintText: hint,
-    hintStyle: TextStyle(
-      color: AppTheme.textSecondary.withOpacity(0.7),
-      fontSize: 14,
-    ),
-    filled: true,
-    fillColor: AppTheme.white,
-    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: AppTheme.lightGray),
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: AppTheme.lightGray),
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: const BorderSide(color: Color(0xFF4CAF50), width: 1.5),
-    ),
-  );
+  InputDecoration _fieldDecoration(String label, {String? hint}) =>
+      InputDecoration(
+        labelText: label,
+        hintText: hint,
+        floatingLabelBehavior: FloatingLabelBehavior.auto,
+        labelStyle: TextStyle(
+          color: AppTheme.textSecondary.withOpacity(0.9),
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+        ),
+        floatingLabelStyle: TextStyle(
+          color: AppTheme.textPrimary,
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+        ),
+        hintStyle: TextStyle(
+          color: AppTheme.textSecondary.withOpacity(0.65),
+          fontSize: 14,
+        ),
+        filled: true,
+        fillColor: AppTheme.white,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: AppTheme.lightGray),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: AppTheme.lightGray),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: Color(0xFF4CAF50), width: 1.5),
+        ),
+      );
+
+  Widget _paneHeader(String title, String subtitle) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.15,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          subtitle,
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 12.5,
+            height: 1.35,
+          ),
+        ),
+      ],
+    );
+  }
 
   Future<void> _pickImage() async {
     final result = await FilePicker.platform.pickFiles(
@@ -143,8 +235,9 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     _middleNameController.clear();
     _lastNameController.clear();
     _contactController.clear();
-    _addressController.clear();
+    _streetController.clear();
     setState(() {
+      _addressFormKey = GlobalKey<StructuredAddressFormState>();
       _privilege = null;
       _suffix = null;
       _sex = null;
@@ -172,6 +265,8 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
 
     setState(() => _saving = true);
     try {
+      final encodedAddress =
+          _addressFormKey.currentState?.composeEncoded() ?? '';
       final body = <String, dynamic>{
         'email': email,
         'password': password,
@@ -184,8 +279,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           'date_of_birth': _dateOfBirth!.toIso8601String().split('T')[0],
         if (_contactController.text.trim().isNotEmpty)
           'contact_number': _contactController.text.trim(),
-        if (_addressController.text.trim().isNotEmpty)
-          'address': _addressController.text.trim(),
+        if (encodedAddress.isNotEmpty) 'address': encodedAddress,
       };
 
       final res = await ApiClient.instance.post<Map<String, dynamic>>(
@@ -199,6 +293,27 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       }
 
       final userId = data['id'] as String;
+
+      var recruitmentLinkedOk = false;
+      final hire = context.read<RecruitmentHirePrefill>();
+      if (hire.hasPendingLink && hire.applicationId != null) {
+        try {
+          await RecruitmentRepo.instance.linkHiredUser(
+            hire.applicationId!,
+            userId,
+          );
+          hire.clear();
+          _lastAppliedPrefillStamp = null;
+          recruitmentLinkedOk = true;
+        } catch (e) {
+          if (mounted) {
+            _showSnackBar(
+              context,
+              'Account created, but linking to recruitment failed: $e',
+            );
+          }
+        }
+      }
 
       if (_selectedImageBytes != null && _selectedImageBytes!.isNotEmpty) {
         try {
@@ -217,10 +332,17 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         context.read<DtrProvider>().loadEmployees();
       } catch (_) {}
       _clearForm();
-      _showSnackBar(
-        context,
-        'Account created successfully. They can sign in with their email and password.',
-      );
+      if (recruitmentLinkedOk) {
+        _showSnackBar(
+          context,
+          'Account created and linked to recruitment. Applicant is registered; they can sign in with email and password.',
+        );
+      } else {
+        _showSnackBar(
+          context,
+          'Account created successfully. They can sign in with their email and password.',
+        );
+      }
     } on DioException catch (e) {
       if (e.response?.statusCode == 409) {
         if (mounted) _showSnackBar(context, 'Email already registered');
@@ -252,32 +374,100 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.all(24),
+          Consumer<RecruitmentHirePrefill>(
+            builder: (context, hire, _) {
+              if (!hire.hasPendingLink) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 18),
+                child: Material(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.07),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.how_to_reg_rounded,
+                          color: AppTheme.primaryNavy,
+                          size: 22,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'You opened this form from RSP (final interview passed). '
+                            'Email and name are prefilled from the applicant. After you save, their recruitment record is linked automatically.',
+                            style: TextStyle(
+                              fontSize: 13,
+                              height: 1.4,
+                              color: AppTheme.textPrimary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+          DecoratedBox(
+            decoration: const BoxDecoration(
+              color: AppTheme.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+            ),
             child: isNarrow
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _buildAccountSection(),
-                      const SizedBox(height: 24),
-                      _buildPersonalSection(),
-                    ],
+                ? Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildAccountSection(narrow: true),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 20),
+                          child: Divider(
+                            height: 1,
+                            color: Colors.black.withOpacity(0.08),
+                          ),
+                        ),
+                        _buildPersonalSection(),
+                      ],
+                    ),
                   )
-                : Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(child: _buildAccountSection()),
-                      const SizedBox(width: 24),
-                      Expanded(child: _buildPersonalSection()),
-                    ],
+                : IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(24, 24, 20, 24),
+                            child: _buildAccountSection(narrow: false),
+                          ),
+                        ),
+                        VerticalDivider(
+                          width: 1,
+                          thickness: 1,
+                          color: Colors.black.withOpacity(0.08),
+                        ),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 24, 24, 24),
+                            child: _buildPersonalSection(),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
           ),
           Container(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
             decoration: BoxDecoration(
               color: AppTheme.white,
+              border: Border(
+                top: BorderSide(color: Colors.black.withOpacity(0.06)),
+              ),
               borderRadius: const BorderRadius.vertical(
-                bottom: Radius.circular(12),
+                bottom: Radius.circular(16),
               ),
             ),
             child: Row(
@@ -289,8 +479,8 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
                     backgroundColor: AppTheme.primaryNavy,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 24,
-                      vertical: 12,
+                      horizontal: 28,
+                      vertical: 14,
                     ),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10),
@@ -316,269 +506,278 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     );
   }
 
-  Widget _buildAccountSection() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Account Information',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 20),
-          Center(
-            child: _selectedImageBytes != null
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(48),
-                    child: Image.memory(
-                      _selectedImageBytes!,
-                      width: 96,
-                      height: 96,
-                      fit: BoxFit.cover,
-                    ),
-                  )
-                : CircleAvatar(
-                    radius: 48,
-                    backgroundColor: AppTheme.lightGray,
-                    child: Icon(
-                      Icons.person_rounded,
-                      size: 56,
-                      color: AppTheme.textSecondary.withOpacity(0.5),
-                    ),
+  Widget _buildAccountSection({required bool narrow}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _paneHeader(
+          'Account',
+          'Photo and sign-in credentials for the new user.',
+        ),
+        const SizedBox(height: 18),
+        Center(
+          child: _selectedImageBytes != null
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(48),
+                  child: Image.memory(
+                    _selectedImageBytes!,
+                    width: 96,
+                    height: 96,
+                    fit: BoxFit.cover,
                   ),
+                )
+              : CircleAvatar(
+                  radius: 48,
+                  backgroundColor: AppTheme.lightGray,
+                  child: Icon(
+                    Icons.person_rounded,
+                    size: 56,
+                    color: AppTheme.textSecondary.withOpacity(0.5),
+                  ),
+                ),
+        ),
+        const SizedBox(height: 12),
+        Center(
+          child: FilledButton.icon(
+            onPressed: _pickImage,
+            icon: const Icon(Icons.camera_alt_rounded, size: 18),
+            label: const Text('Select Image'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF4CAF50),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              elevation: 0,
+            ),
           ),
-          const SizedBox(height: 12),
-          Center(
-            child: FilledButton.icon(
-              onPressed: _pickImage,
-              icon: const Icon(Icons.camera_alt_rounded, size: 18),
-              label: const Text('Select Image'),
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF4CAF50),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 10,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                elevation: 0,
+        ),
+        const SizedBox(height: 22),
+        TextFormField(
+          controller: _emailController,
+          decoration: _fieldDecoration('Email'),
+          keyboardType: TextInputType.emailAddress,
+          validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+        ),
+        const SizedBox(height: 14),
+        TextFormField(
+          controller: _passwordController,
+          decoration: _fieldDecoration('Password').copyWith(
+            suffixIcon: IconButton(
+              icon: Icon(
+                _obscurePassword
+                    ? Icons.visibility_rounded
+                    : Icons.visibility_off_rounded,
+                size: 20,
+                color: AppTheme.textSecondary,
+              ),
+              onPressed: () =>
+                  setState(() => _obscurePassword = !_obscurePassword),
+            ),
+          ),
+          obscureText: _obscurePassword,
+          validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+        ),
+        const SizedBox(height: 14),
+        TextFormField(
+          controller: _repeatPasswordController,
+          decoration: _fieldDecoration('Repeat password').copyWith(
+            suffixIcon: IconButton(
+              icon: Icon(
+                _obscureRepeatPassword
+                    ? Icons.visibility_rounded
+                    : Icons.visibility_off_rounded,
+                size: 20,
+                color: AppTheme.textSecondary,
+              ),
+              onPressed: () => setState(
+                () => _obscureRepeatPassword = !_obscureRepeatPassword,
               ),
             ),
           ),
-          const SizedBox(height: 24),
-          TextFormField(
-            controller: _emailController,
-            decoration: _inputDecoration('Email'),
-            keyboardType: TextInputType.emailAddress,
-            validator: (v) =>
-                (v == null || v.trim().isEmpty) ? 'Required' : null,
+          obscureText: _obscureRepeatPassword,
+          validator: (v) {
+            if (v == null || v.isEmpty) return 'Required';
+            if (v != _passwordController.text) {
+              return 'Passwords do not match';
+            }
+            return null;
+          },
+        ),
+        const SizedBox(height: 14),
+        DropdownButtonFormField<String>(
+          value: _privilege,
+          isExpanded: true,
+          decoration: _fieldDecoration('Role', hint: 'Admin or Employee'),
+          items: [
+            'Admin',
+            'Employee',
+          ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+          onChanged: (v) => setState(() => _privilege = v),
+          validator: (v) => v == null ? 'Required' : null,
+        ),
+        if (!narrow) const Spacer(),
+        SizedBox(height: narrow ? 14 : 16),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppTheme.primaryNavy.withOpacity(0.06),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppTheme.primaryNavy.withOpacity(0.1)),
           ),
-          const SizedBox(height: 16),
-          TextFormField(
-            controller: _passwordController,
-            decoration: _inputDecoration('Password').copyWith(
-              suffixIcon: IconButton(
-                icon: Icon(
-                  _obscurePassword
-                      ? Icons.visibility_rounded
-                      : Icons.visibility_off_rounded,
-                  size: 20,
-                  color: AppTheme.textSecondary,
-                ),
-                onPressed: () =>
-                    setState(() => _obscurePassword = !_obscurePassword),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.lock_outline_rounded,
+                size: 18,
+                color: AppTheme.primaryNavy.withOpacity(0.85),
               ),
-            ),
-            obscureText: _obscurePassword,
-            validator: (v) =>
-                (v == null || v.trim().isEmpty) ? 'Required' : null,
-          ),
-          const SizedBox(height: 16),
-          TextFormField(
-            controller: _repeatPasswordController,
-            decoration: _inputDecoration('Repeat Password').copyWith(
-              suffixIcon: IconButton(
-                icon: Icon(
-                  _obscureRepeatPassword
-                      ? Icons.visibility_rounded
-                      : Icons.visibility_off_rounded,
-                  size: 20,
-                  color: AppTheme.textSecondary,
-                ),
-                onPressed: () => setState(
-                  () => _obscureRepeatPassword = !_obscureRepeatPassword,
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Passwords are encrypted. The new user signs in with email and password.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.35,
+                    color: AppTheme.textSecondary,
+                  ),
                 ),
               ),
-            ),
-            obscureText: _obscureRepeatPassword,
-            validator: (v) {
-              if (v == null || v.isEmpty) return 'Required';
-              if (v != _passwordController.text) {
-                return 'Passwords do not match';
-              }
-              return null;
-            },
+            ],
           ),
-          const SizedBox(height: 16),
-          Text(
-            'Role',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
-          DropdownButtonFormField<String>(
-            value: _privilege,
-            decoration: _inputDecoration('Select role'),
-            hint: const Text(
-              'Select role',
-              style: TextStyle(color: AppTheme.textSecondary),
-            ),
-            items: [
-              'Admin',
-              'Employee',
-            ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
-            onChanged: (v) => setState(() => _privilege = v),
-            validator: (v) => v == null ? 'Required' : null,
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
   Widget _buildPersonalSection() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Personal Information',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-            ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _paneHeader(
+          'Personal details',
+          'Legal name, demographics, contact, and structured address.',
+        ),
+        const SizedBox(height: 18),
+        Text(
+          'Name',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.4,
           ),
-          const SizedBox(height: 20),
-          TextFormField(
-            controller: _firstNameController,
-            decoration: _inputDecoration('First Name'),
-            validator: (v) =>
-                (v == null || v.trim().isEmpty) ? 'Required' : null,
+        ),
+        const SizedBox(height: 10),
+        TextFormField(
+          controller: _firstNameController,
+          decoration: _fieldDecoration('First name'),
+          textCapitalization: TextCapitalization.words,
+          validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+        ),
+        const SizedBox(height: 14),
+        TextFormField(
+          controller: _middleNameController,
+          decoration: _fieldDecoration('Middle name (optional)'),
+          textCapitalization: TextCapitalization.words,
+        ),
+        const SizedBox(height: 14),
+        TextFormField(
+          controller: _lastNameController,
+          decoration: _fieldDecoration('Last name'),
+          textCapitalization: TextCapitalization.words,
+          validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+        ),
+        const SizedBox(height: 14),
+        DropdownButtonFormField<String>(
+          value: _suffix ?? 'None',
+          isExpanded: true,
+          decoration: _fieldDecoration('Suffix', hint: 'None, Jr., Sr., …'),
+          items: [
+            'None',
+            'Jr.',
+            'Sr.',
+            'II',
+            'III',
+            'IV',
+          ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+          onChanged: (v) => setState(() => _suffix = (v == 'None') ? null : v),
+        ),
+        const SizedBox(height: 20),
+        Text(
+          'Demographics & contact',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.4,
           ),
-          const SizedBox(height: 16),
-          TextFormField(
-            controller: _middleNameController,
-            decoration: _inputDecoration('Middle Name'),
-          ),
-          const SizedBox(height: 16),
-          TextFormField(
-            controller: _lastNameController,
-            decoration: _inputDecoration('Last Name'),
-            validator: (v) =>
-                (v == null || v.trim().isEmpty) ? 'Required' : null,
-          ),
-          const SizedBox(height: 16),
-          DropdownButtonFormField<String>(
-            value: _suffix ?? 'None',
-            decoration: _inputDecoration('Suffix (e.g. Jr., Sr., or None)'),
-            hint: const Text(
-              'Suffix (e.g. Jr., Sr., or None)',
-              style: TextStyle(color: AppTheme.textSecondary),
-            ),
-            items: [
-              'None',
-              'Jr.',
-              'Sr.',
-              'II',
-              'III',
-              'IV',
-            ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
-            onChanged: (v) =>
-                setState(() => _suffix = (v == 'None') ? null : v),
-          ),
-          const SizedBox(height: 16),
-          DropdownButtonFormField<String>(
-            value: _sex,
-            decoration: _inputDecoration('Sex (Male / Female)'),
-            hint: const Text(
-              'Sex (Male / Female)',
-              style: TextStyle(color: AppTheme.textSecondary),
-            ),
-            items: [
-              'Male',
-              'Female',
-            ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
-            onChanged: (v) => setState(() => _sex = v),
-            validator: (v) => v == null ? 'Required' : null,
-          ),
-          const SizedBox(height: 16),
-          InkWell(
-            onTap: () async {
-              final date = await showDatePicker(
-                context: context,
-                initialDate: _dateOfBirth ?? DateTime.now(),
-                firstDate: DateTime(1900),
-                lastDate: DateTime.now(),
-              );
-              if (date != null) setState(() => _dateOfBirth = date);
-            },
-            borderRadius: BorderRadius.circular(8),
-            child: InputDecorator(
-              decoration: _inputDecoration('').copyWith(
-                suffixIcon: Icon(
-                  Icons.calendar_today_rounded,
-                  size: 20,
-                  color: AppTheme.textSecondary,
+        ),
+        const SizedBox(height: 10),
+        DropdownButtonFormField<String>(
+          value: _sex,
+          isExpanded: true,
+          decoration: _fieldDecoration('Sex', hint: 'Male or Female'),
+          items: [
+            'Male',
+            'Female',
+          ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+          onChanged: (v) => setState(() => _sex = v),
+          validator: (v) => v == null ? 'Required' : null,
+        ),
+        const SizedBox(height: 14),
+        InkWell(
+          onTap: () async {
+            final date = await showDatePicker(
+              context: context,
+              initialDate: _dateOfBirth ?? DateTime.now(),
+              firstDate: DateTime(1900),
+              lastDate: DateTime.now(),
+            );
+            if (date != null) setState(() => _dateOfBirth = date);
+          },
+          borderRadius: BorderRadius.circular(10),
+          child: InputDecorator(
+            decoration:
+                _fieldDecoration(
+                  'Date of birth',
+                  hint: 'Tap to open calendar',
+                ).copyWith(
+                  suffixIcon: Icon(
+                    Icons.calendar_today_rounded,
+                    size: 20,
+                    color: AppTheme.textSecondary,
+                  ),
                 ),
-              ),
-              child: Text(
-                _dateOfBirth != null
-                    ? '${_dateOfBirth!.year}-${_dateOfBirth!.month.toString().padLeft(2, '0')}-${_dateOfBirth!.day.toString().padLeft(2, '0')}'
-                    : 'Date of Birth (tap to select)',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: _dateOfBirth != null
-                      ? AppTheme.textPrimary
-                      : AppTheme.textSecondary,
-                ),
+            child: Text(
+              _dateOfBirth != null
+                  ? '${_dateOfBirth!.year}-${_dateOfBirth!.month.toString().padLeft(2, '0')}-${_dateOfBirth!.day.toString().padLeft(2, '0')}'
+                  : 'Tap calendar to choose',
+              style: TextStyle(
+                fontSize: 14,
+                color: _dateOfBirth != null
+                    ? AppTheme.textPrimary
+                    : AppTheme.textSecondary.withOpacity(0.8),
               ),
             ),
           ),
-          const SizedBox(height: 16),
-          TextFormField(
-            controller: _contactController,
-            decoration: _inputDecoration('Contact Number'),
-            keyboardType: TextInputType.phone,
-          ),
-          const SizedBox(height: 16),
-          TextFormField(
-            controller: _addressController,
-            decoration: _inputDecoration('Address'),
-            maxLines: 3,
-          ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 14),
+        TextFormField(
+          controller: _contactController,
+          decoration: _fieldDecoration('Contact number'),
+          keyboardType: TextInputType.phone,
+        ),
+        const SizedBox(height: 20),
+        StructuredAddressForm(
+          key: _addressFormKey,
+          streetController: _streetController,
+          initialRawAddress: null,
+          inputDecoration: _fieldDecoration,
+        ),
+      ],
     );
   }
 }
@@ -1336,7 +1535,9 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
   final _middleNameController = TextEditingController();
   final _lastNameController = TextEditingController();
   final _contactController = TextEditingController();
-  final _addressController = TextEditingController();
+  final _streetController = TextEditingController();
+  final GlobalKey<StructuredAddressFormState> _addressFormKey =
+      GlobalKey<StructuredAddressFormState>();
   final _salaryGradeController = TextEditingController();
   final _biometricIdController = TextEditingController();
 
@@ -1364,7 +1565,6 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
       _middleNameController.text = _profile.middleName!;
     }
     _contactController.text = _profile.contactNumber ?? '';
-    _addressController.text = _profile.address ?? '';
     _salaryGradeController.text = _profile.salaryGrade ?? '';
     _privilege = _profile.role == 'admin' ? 'Admin' : 'Employee';
     _suffix = _profile.suffix;
@@ -1382,8 +1582,9 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
     _middleNameController.dispose();
     _lastNameController.dispose();
     _contactController.dispose();
-    _addressController.dispose();
+    _streetController.dispose();
     _salaryGradeController.dispose();
+    _biometricIdController.dispose();
     super.dispose();
   }
 
@@ -1442,6 +1643,8 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
 
     setState(() => _saving = true);
     try {
+      final encodedAddress =
+          _addressFormKey.currentState?.composeEncoded() ?? '';
       final body = <String, dynamic>{
         'full_name': fullName,
         'role': role,
@@ -1452,8 +1655,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
           'date_of_birth': _dateOfBirth!.toIso8601String().split('T')[0],
         if (_contactController.text.trim().isNotEmpty)
           'contact_number': _contactController.text.trim(),
-        if (_addressController.text.trim().isNotEmpty)
-          'address': _addressController.text.trim(),
+        if (encodedAddress.isNotEmpty) 'address': encodedAddress,
         if (_employmentType != null) 'employment_type': _employmentType,
         if (_salaryGradeController.text.trim().isNotEmpty)
           'salary_grade': _salaryGradeController.text.trim(),
@@ -1826,10 +2028,11 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
             keyboardType: TextInputType.phone,
           ),
           const SizedBox(height: 16),
-          TextFormField(
-            controller: _addressController,
-            decoration: _inputDecoration('Address'),
-            maxLines: 3,
+          StructuredAddressForm(
+            key: _addressFormKey,
+            streetController: _streetController,
+            initialRawAddress: _profile.address,
+            inputDecoration: _inputDecoration,
           ),
           const SizedBox(height: 24),
           Text(

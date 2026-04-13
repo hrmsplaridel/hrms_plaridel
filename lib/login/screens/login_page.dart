@@ -26,6 +26,14 @@ class _LoginPageState extends State<LoginPage> {
   bool _isLoading = false;
 
   @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    _passwordFocusNode.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final isWide = MediaQuery.of(context).size.width > 800;
 
@@ -33,11 +41,24 @@ class _LoginPageState extends State<LoginPage> {
       body: Stack(
         children: [
           Positioned.fill(
-            child: DecoratedBox(
-              decoration: const BoxDecoration(
-                image: DecorationImage(
-                  image: AssetImage('assets/images/Building.jpg'),
-                  fit: BoxFit.cover,
+            child: Image.asset(
+              'assets/images/Building.jpg',
+              fit: BoxFit.cover,
+              width: double.infinity,
+              height: double.infinity,
+              errorBuilder: (_, __, ___) => Container(
+                width: double.infinity,
+                height: double.infinity,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      LoginTheme.brandingGradientStart,
+                      LoginTheme.brandingGradientEnd,
+                      LoginTheme.blueLight.withValues(alpha: 0.85),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -111,13 +132,13 @@ class _LoginPageState extends State<LoginPage> {
       final errorMessage = await auth.login(email, password);
       if (!mounted) return;
       if (errorMessage == null) {
-        final auth = context.read<AuthProvider>();
         final role = auth.user?.role ?? 'employee';
         final isAdmin = role == 'admin';
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString(kLoginAsKey, isAdmin ? 'Admin' : 'Employee');
 
+        if (!mounted) return;
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
             builder: (context) =>
@@ -150,7 +171,7 @@ class _LoginBackButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.25),
+        color: Colors.black.withValues(alpha: 0.25),
         shape: BoxShape.circle,
       ),
       child: IconButton(
@@ -182,7 +203,7 @@ class _BrandingSection extends StatelessWidget {
                 child: Container(
                   width: 92,
                   height: 92,
-                  color: Colors.white.withOpacity(0.2),
+                  color: Colors.white.withValues(alpha: 0.2),
                   child: Image.asset(
                     'assets/images/Plaridel Logo.jpg',
                     fit: BoxFit.cover,
@@ -212,7 +233,7 @@ class _BrandingSection extends StatelessWidget {
                   Text(
                     'HUMAN RESOURCE MANAGEMENT SYSTEM',
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.95),
+                      color: Colors.white.withValues(alpha: 0.95),
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
                       letterSpacing: 0.8,
@@ -263,33 +284,31 @@ class _LoginFormSection extends StatelessWidget {
             child: SingleChildScrollView(
               padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 20),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(
-                  maxWidth: 460,
-                  maxHeight: 500,
-                ),
+                constraints: const BoxConstraints(maxWidth: 460),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(24),
                   child: BackdropFilter(
                     filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
                     child: Container(
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.08),
+                        color: Colors.white.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(24),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF000000).withOpacity(0.12),
+                            color: const Color(0xFF000000).withValues(alpha: 0.12),
                             blurRadius: 18,
                             offset: const Offset(0, 8),
                           ),
                         ],
                       ),
-                      padding: const EdgeInsets.all(24),
+                      padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          const SizedBox(height: 25),
-                          Center(
-                            child: const Text(
+                          const SizedBox(height: 8),
+                          const Center(
+                            child: Text(
                               'Welcome Back!',
                               style: TextStyle(
                                 color: Colors.white,
@@ -303,7 +322,7 @@ class _LoginFormSection extends StatelessWidget {
                             child: Text(
                               'Please login to your account',
                               style: TextStyle(
-                                color: Colors.white.withOpacity(0.9),
+                                color: Colors.white.withValues(alpha: 0.9),
                                 fontSize: 14,
                               ),
                             ),
@@ -311,7 +330,8 @@ class _LoginFormSection extends StatelessWidget {
                           const SizedBox(height: 28),
                           _LoginTextField(
                             controller: emailController,
-                            hint: 'Email',
+                            label: 'Email',
+                            hintText: 'Enter your email',
                             icon: Icons.mail_outline,
                             nextFocusNode: passwordFocusNode,
                           ),
@@ -363,12 +383,12 @@ class _LoginFormSection extends StatelessWidget {
                           const SizedBox(height: 22),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.center,
-                            children: const [
+                            children: [
                               Text(
                                 '© 2026 HRMS',
                                 style: TextStyle(
                                   fontWeight: FontWeight.w600,
-                                  color: Colors.white70,
+                                  color: Colors.white.withValues(alpha: 0.7),
                                   fontSize: 12,
                                 ),
                               ),
@@ -377,7 +397,7 @@ class _LoginFormSection extends StatelessWidget {
                                 '|',
                                 style: TextStyle(
                                   fontWeight: FontWeight.w600,
-                                  color: Colors.white70,
+                                  color: Colors.white.withValues(alpha: 0.7),
                                   fontSize: 12,
                                 ),
                               ),
@@ -386,7 +406,7 @@ class _LoginFormSection extends StatelessWidget {
                                 'Privacy Policy',
                                 style: TextStyle(
                                   fontWeight: FontWeight.w600,
-                                  color: Colors.white70,
+                                  color: Colors.white.withValues(alpha: 0.7),
                                   fontSize: 12,
                                 ),
                               ),
@@ -395,7 +415,7 @@ class _LoginFormSection extends StatelessWidget {
                                 '|',
                                 style: TextStyle(
                                   fontWeight: FontWeight.w600,
-                                  color: Colors.white70,
+                                  color: Colors.white.withValues(alpha: 0.7),
                                   fontSize: 12,
                                 ),
                               ),
@@ -404,7 +424,7 @@ class _LoginFormSection extends StatelessWidget {
                                 'Terms of Use',
                                 style: TextStyle(
                                   fontWeight: FontWeight.w600,
-                                  color: Colors.white70,
+                                  color: Colors.white.withValues(alpha: 0.7),
                                   fontSize: 12,
                                 ),
                               ),
@@ -427,46 +447,82 @@ class _LoginFormSection extends StatelessWidget {
 class _LoginTextField extends StatelessWidget {
   const _LoginTextField({
     required this.controller,
-    required this.hint,
+    required this.label,
+    required this.hintText,
     required this.icon,
     this.nextFocusNode,
   });
 
   final TextEditingController controller;
-  final String hint;
+  final String label;
+  final String hintText;
   final IconData icon;
   final FocusNode? nextFocusNode;
 
+  static const Color _accent = Color(0xFFD65A00);
+
   @override
   Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      textInputAction: TextInputAction.next,
-      onSubmitted: (_) => nextFocusNode?.requestFocus(),
-      decoration: InputDecoration(
-        labelText: hint,
-        hintText: null,
-        labelStyle: const TextStyle(color: Color(0xFFD65A00), fontSize: 12),
-        prefixIcon: Icon(icon, color: const Color(0xFFD65A00), size: 22),
-        filled: true,
-        fillColor: Colors.white,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.white.withOpacity(0.8)),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.95),
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.2,
+          ),
         ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.white.withOpacity(0.8)),
+        const SizedBox(height: 10),
+        TextField(
+          controller: controller,
+          keyboardType: TextInputType.emailAddress,
+          autocorrect: false,
+          textInputAction: TextInputAction.next,
+          onSubmitted: (_) => nextFocusNode?.requestFocus(),
+          textAlignVertical: TextAlignVertical.center,
+          style: const TextStyle(
+            color: Color(0xFF212529),
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+            height: 1.25,
+          ),
+          decoration: InputDecoration(
+            hintText: hintText,
+            hintStyle: TextStyle(
+              color: Colors.grey.shade500,
+              fontSize: 15,
+              fontWeight: FontWeight.w400,
+              height: 1.25,
+            ),
+            floatingLabelBehavior: FloatingLabelBehavior.never,
+            prefixIcon: Icon(icon, color: _accent, size: 22),
+            prefixIconConstraints: const BoxConstraints(
+              minWidth: 48,
+              minHeight: 48,
+              maxHeight: 52,
+            ),
+            filled: true,
+            fillColor: Colors.white,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(color: Colors.grey.shade300),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(color: Colors.grey.shade300),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: _accent, width: 2),
+            ),
+            contentPadding: const EdgeInsets.fromLTRB(0, 14, 16, 14),
+            isDense: true,
+          ),
         ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Colors.white, width: 1.5),
-        ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 14,
-        ),
-      ),
+      ],
     );
   }
 }
@@ -489,53 +545,93 @@ class _PasswordTextField extends StatefulWidget {
 class _PasswordTextFieldState extends State<_PasswordTextField> {
   bool _obscure = true;
 
+  static const Color _accent = Color(0xFFD65A00);
+
   @override
   Widget build(BuildContext context) {
-    return TextField(
-      controller: widget.controller,
-      focusNode: widget.focusNode,
-      obscureText: _obscure,
-      textInputAction: TextInputAction.done,
-      onSubmitted: (_) => widget.onSubmitted?.call(),
-      decoration: InputDecoration(
-        labelText: 'Password',
-        hintText: null,
-        labelStyle: const TextStyle(color: Color(0xFFD65A00), fontSize: 12),
-        prefixIcon: const Icon(
-          Icons.lock_outline,
-          color: Color(0xFFD65A00),
-          size: 22,
-        ),
-        suffixIcon: IconButton(
-          onPressed: () => setState(() => _obscure = !_obscure),
-          icon: Icon(
-            _obscure
-                ? Icons.visibility_off_outlined
-                : Icons.visibility_outlined,
-            color: const Color(0xFFD65A00),
-            size: 22,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Password',
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.95),
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.2,
           ),
-          tooltip: _obscure ? 'Show password' : 'Hide password',
         ),
-        filled: true,
-        fillColor: Colors.white,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.white.withOpacity(0.8)),
+        const SizedBox(height: 10),
+        TextField(
+          controller: widget.controller,
+          focusNode: widget.focusNode,
+          obscureText: _obscure,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => widget.onSubmitted?.call(),
+          textAlignVertical: TextAlignVertical.center,
+          style: const TextStyle(
+            color: Color(0xFF212529),
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+            height: 1.25,
+          ),
+          decoration: InputDecoration(
+            hintText: 'Enter your password',
+            hintStyle: TextStyle(
+              color: Colors.grey.shade500,
+              fontSize: 15,
+              fontWeight: FontWeight.w400,
+              height: 1.25,
+            ),
+            floatingLabelBehavior: FloatingLabelBehavior.never,
+            prefixIcon: const Icon(
+              Icons.lock_outline,
+              color: _accent,
+              size: 22,
+            ),
+            prefixIconConstraints: const BoxConstraints(
+              minWidth: 48,
+              minHeight: 48,
+              maxHeight: 52,
+            ),
+            suffixIcon: IconButton(
+              onPressed: () => setState(() => _obscure = !_obscure),
+              icon: Icon(
+                _obscure
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+                color: _accent,
+                size: 22,
+              ),
+              tooltip: _obscure ? 'Show password' : 'Hide password',
+              style: IconButton.styleFrom(
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+            suffixIconConstraints: const BoxConstraints(
+              minWidth: 48,
+              minHeight: 48,
+              maxHeight: 52,
+            ),
+            filled: true,
+            fillColor: Colors.white,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(color: Colors.grey.shade300),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(color: Colors.grey.shade300),
+            ),
+            focusedBorder: const OutlineInputBorder(
+              borderRadius: BorderRadius.all(Radius.circular(14)),
+              borderSide: BorderSide(color: _accent, width: 2),
+            ),
+            contentPadding: const EdgeInsets.fromLTRB(0, 14, 4, 14),
+            isDense: true,
+          ),
         ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.white.withOpacity(0.8)),
-        ),
-        focusedBorder: const OutlineInputBorder(
-          borderRadius: BorderRadius.all(Radius.circular(12)),
-          borderSide: BorderSide(color: Colors.white, width: 1.5),
-        ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 14,
-        ),
-      ),
+      ],
     );
   }
 }
@@ -559,7 +655,7 @@ class _LoginToHrmsButton extends StatelessWidget {
               : Colors.white70,
           boxShadow: [
             BoxShadow(
-              color: LoginTheme.bluePrimary.withOpacity(0.35),
+              color: LoginTheme.bluePrimary.withValues(alpha: 0.35),
               blurRadius: 8,
               offset: const Offset(0, 4),
             ),
@@ -577,7 +673,9 @@ class _LoginToHrmsButton extends StatelessWidget {
                       height: 24,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          Color(0xFFD65A00),
+                        ),
                       ),
                     )
                   : Text(

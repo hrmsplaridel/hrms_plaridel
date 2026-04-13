@@ -1,4 +1,4 @@
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'rsp_ld_saved_entries_api.dart';
 
 /// One candidate row in the Comparative Assessment table (no pre-filled values).
 class ComparativeAssessmentCandidate {
@@ -114,41 +114,31 @@ class ComparativeAssessmentRepo {
   ComparativeAssessmentRepo._();
   static final ComparativeAssessmentRepo instance = ComparativeAssessmentRepo._();
 
-  SupabaseClient get _client => Supabase.instance.client;
-
   Future<List<ComparativeAssessmentEntry>> list() async {
-    final res = await _client
-        .from(ComparativeAssessmentEntry.tableName)
-        .select()
-        .order('created_at', ascending: false);
-    return (res as List)
-        .map((e) => ComparativeAssessmentEntry.fromJson(Map<String, dynamic>.from(e as Map)))
-        .toList();
+    final rows = await RspLdSavedEntriesApi.listRows(ComparativeAssessmentEntry.tableName);
+    return rows.map(ComparativeAssessmentEntry.fromJson).toList();
   }
 
   Future<ComparativeAssessmentEntry?> get(String id) async {
-    final res = await _client
-        .from(ComparativeAssessmentEntry.tableName)
-        .select()
-        .eq('id', id)
-        .maybeSingle();
-    return res == null ? null : ComparativeAssessmentEntry.fromJson(Map<String, dynamic>.from(res));
+    final row = await RspLdSavedEntriesApi.getRow(ComparativeAssessmentEntry.tableName, id);
+    return row == null ? null : ComparativeAssessmentEntry.fromJson(row);
   }
 
   Future<void> insert(ComparativeAssessmentEntry entry) async {
     final payload = Map<String, dynamic>.from(entry.toJson())..remove('id');
-    await _client.from(ComparativeAssessmentEntry.tableName).insert(payload);
+    await RspLdSavedEntriesApi.insertRow(ComparativeAssessmentEntry.tableName, payload);
   }
 
   Future<void> update(ComparativeAssessmentEntry entry) async {
     if (entry.id == null) return;
-    await _client
-        .from(ComparativeAssessmentEntry.tableName)
-        .update(entry.toJson())
-        .eq('id', entry.id!);
+    await RspLdSavedEntriesApi.updateRow(
+      ComparativeAssessmentEntry.tableName,
+      entry.id!,
+      entry.toJson(),
+    );
   }
 
   Future<void> delete(String id) async {
-    await _client.from(ComparativeAssessmentEntry.tableName).delete().eq('id', id);
+    await RspLdSavedEntriesApi.deleteRow(ComparativeAssessmentEntry.tableName, id);
   }
 }

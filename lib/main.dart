@@ -2,17 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'api/client.dart';
 import 'landingpage/constants/app_theme.dart';
 import 'landingpage/screens/landing_page.dart';
 import 'login/screens/login_page.dart';
 import 'providers/auth_provider.dart';
+import 'providers/recruitment_hire_prefill.dart';
 import 'dtr/dtr_provider.dart';
 import 'docutracker/docutracker_provider.dart';
 import 'leave/leave_provider.dart';
 import 'leave/api_leave_repository.dart';
-import 'supabase/supabase_config.dart';
+import 'data/mis_occ_barangays_loader.dart';
 import 'admin/screens/admin_dashboard.dart';
 import 'employee/screens/employee_dashboard.dart';
 
@@ -29,7 +29,7 @@ final RouteObserver<ModalRoute<void>> routeObserver =
 /// Otherwise: web → LandingPage, mobile → LoginPage.
 Widget _initialHome(AuthProvider auth, String storedLoginAs) {
   if (auth.user != null) {
-    final role = auth.user!.role ?? 'employee';
+    final role = auth.user!.role ?? 'em ployee';
     final isAdmin = role == 'admin';
     return isAdmin ? const AdminDashboard() : const EmployeeDashboard();
   }
@@ -49,16 +49,9 @@ Widget _initialHome(AuthProvider auth, String storedLoginAs) {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  ApiClient.instance.init();
+  await MisOccBarangaysData.load();
 
-  try {
-    await Supabase.initialize(
-      url: SupabaseConfig.url,
-      anonKey: SupabaseConfig.anonKey,
-    );
-  } catch (e) {
-    debugPrint('Supabase init failed: $e');
-  }
+  ApiClient.instance.init();
 
   final auth = AuthProvider();
   await auth.restoreSession();
@@ -85,6 +78,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(
           create: (_) => LeaveProvider(repository: ApiLeaveRepository()),
         ),
+        ChangeNotifierProvider(create: (_) => RecruitmentHirePrefill()),
       ],
       child: MaterialApp(
         title: 'HRMS Plaridel',

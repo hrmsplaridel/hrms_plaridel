@@ -6,7 +6,6 @@ const jwt = require('jsonwebtoken');
 const { execFile } = require('child_process');
 const { pool } = require('../config/db');
 const { isAttachmentPathAllowedInDb } = require('../utils/rspAttachmentPolicy');
-const { fetchSupabaseObjectResponse } = require('../utils/supabaseStorageFetch');
 const {
   resolveLocalRspAttachment,
 } = require('../utils/rspLocalAttachment');
@@ -44,9 +43,7 @@ router.get('/avatar/:userId', async (req, res) => {
 
 /**
  * GET /api/files/recruitment-attachment?token=...&download=1
- * Proxy applicant files from Supabase Storage (same idea as training-report files).
- * Token is minted by GET /api/rsp/storage/view-token (admin only). No Bearer header
- * required — matches how L&D uses Image.network against /api/files/training-report/:id.
+ * Serves files from uploads/rsp-attachments. Token from GET /api/rsp/storage/view-token.
  */
 router.get('/recruitment-attachment', async (req, res) => {
   const token = req.query.token;
@@ -138,81 +135,11 @@ router.get('/recruitment-attachment', async (req, res) => {
       return res.sendFile(path.resolve(localAbs));
     }
 
-    const supabaseUrl = (process.env.SUPABASE_URL || '').trim();
-    const supabaseKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
-    if (!supabaseUrl || !supabaseKey) {
-      return res
-        .status(404)
-        .type('text/plain')
-        .send(
-          'Attachment not found on this server. ' +
-            'Expected: uploads/rsp-attachments/. ' +
-            'Supabase is not configured (set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY).',
-        );
-    }
-
-    const r = await fetchSupabaseObjectResponse(objectPath);
-    if (!r.ok) {
-      const errText = await r.text();
-      console.error(
-        '[files recruitment-attachment] storage',
-        r.status,
-        errText?.slice(0, 200),
-      );
-      return res.status(r.status >= 400 ? r.status : 502).json({
-        error: 'Could not load file from storage',
-        details: errText?.slice(0, 120),
-      });
-    }
-
-    const contentType =
-      r.headers.get('content-type') || 'application/octet-stream';
-    res.setHeader('Content-Type', contentType);
-
-    const safeName = (payload.fn || path.basename(objectPath) || 'attachment')
-      .replace(/[^\w.\- ()]/g, '_')
-      .slice(0, 180);
-    if (asDownload) {
-      res.setHeader(
-        'Content-Disposition',
-        `attachment; filename="${safeName}"`,
-      );
-    } else {
-      res.setHeader('Cache-Control', 'private, max-age=300');
-    }
-
-    const buf = Buffer.from(await r.arrayBuffer());
-
-    // Optional: inline preview conversion for Office docs stored in Supabase.
-    const objectLower = String(objectPath).toLowerCase();
-    const isOfficeDocStored =
-      objectLower.endsWith('.doc') ||
-      objectLower.endsWith('.docx') ||
-      objectLower.endsWith('.xls') ||
-      objectLower.endsWith('.xlsx') ||
-      objectLower.endsWith('.ppt') ||
-      objectLower.endsWith('.pptx');
-    if (asPreview && isOfficeDocStored) {
-      try {
-        const tmpInputExt = path.extname(objectPath).toLowerCase();
-        const pdfBuf = await convertOfficeBytesToPdf(buf, tmpInputExt);
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `inline; filename="${safeName.replace(/\.(docx?|doc)$/i, '.pdf')}"`);
-        return res.send(pdfBuf);
-      } catch (e) {
-        const msg =
-          'Word preview failed (Supabase). ' +
-          'Install LibreOffice (soffice) on the backend server to convert .doc/.docx to PDF.';
-        return res
-          .status(200)
-          .type('text/html')
-          .send(`<html><body><pre>${escapeHtml(msg)}<br/><br/>Error: ${escapeHtml(
-            e?.message ? String(e.message) : String(e),
-          )}</pre></body></html>`);
-      }
-    }
-
-    return res.send(buf);
+    return res.status(404).json({
+      error: 'Attachment not found',
+      details:
+        'File is not under uploads/rsp-attachments/. Upload via the API or restore from backup.',
+    });
   } catch (e) {
     if (e.name === 'JsonWebTokenError' || e.name === 'TokenExpiredError') {
       return res.status(401).json({ error: 'Invalid or expired link' });

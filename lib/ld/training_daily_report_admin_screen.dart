@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../landingpage/constants/app_theme.dart';
 import '../data/training_daily_report.dart';
+import '../landingpage/constants/app_theme.dart';
+import '../widgets/read_only_saved_entry_dialog.dart';
+import '../widgets/training_daily_report_read_only_view.dart';
 
 class TrainingDailyReportAdminScreen extends StatefulWidget {
   const TrainingDailyReportAdminScreen({super.key});
@@ -413,7 +415,26 @@ class _ReportCard extends StatelessWidget {
           const SizedBox(height: 16),
           Row(
             children: [
-              if (onViewFile != null)
+              TextButton.icon(
+                onPressed: () => showReadOnlySavedEntryDialog(
+                  context,
+                  title: 'Training daily report',
+                  previewBuilder: () =>
+                      TrainingDailyReportReadOnlyView(report: r),
+                  contentWidth: 560,
+                ),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.primaryNavy,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                ),
+                icon: const Icon(Icons.article_outlined, size: 18),
+                label: const Text('View form'),
+              ),
+              if (onViewFile != null) ...[
+                const SizedBox(width: 4),
                 TextButton.icon(
                   onPressed: onViewFile,
                   style: TextButton.styleFrom(
@@ -423,9 +444,10 @@ class _ReportCard extends StatelessWidget {
                       vertical: 8,
                     ),
                   ),
-                  icon: const Icon(Icons.visibility_outlined, size: 18),
-                  label: const Text('View file'),
+                  icon: const Icon(Icons.attach_file_rounded, size: 18),
+                  label: const Text('Attachment'),
                 ),
+              ],
               const Spacer(),
               TextButton(
                 onPressed: onMarkSeen,

@@ -24,6 +24,7 @@ function mapDocumentRow(row) {
     file_path: row.file_path,
     file_name: row.file_name,
     created_by: row.created_by,
+    creator_name: row.creator_name,
     current_holder_id: row.current_holder_id,
     current_step: row.current_step,
     status: row.status,
@@ -35,6 +36,31 @@ function mapDocumentRow(row) {
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+}
+
+/** Map Flutter/camelCase status names to DB-friendly values (legacy + snake). */
+function normalizeDocStatus(s) {
+  if (s == null || s === '') return s;
+  const x = String(s).trim();
+  const map = {
+    inReview: 'in_review',
+    inreview: 'in_review',
+    in_review: 'in_review',
+  };
+  return map[x] || x;
+}
+
+async function assertDocumentReadable(req, documentId) {
+  const isAdmin = req.user.role === 'admin';
+  if (isAdmin) return true;
+  const r = await pool.query(
+    `SELECT created_by, current_holder_id FROM docutracker_documents WHERE id = $1`,
+    [documentId]
+  );
+  const row = r.rows[0];
+  if (!row) return false;
+  const uid = req.user.id;
+  return row.created_by === uid || row.current_holder_id === uid;
 }
 
 /**
@@ -69,32 +95,39 @@ router.get('/documents', protect, async (req, res) => {
     let i = 1;
 
     if (type && type !== 'All') {
-      where.push(`document_type = $${i++}`);
+      where.push(`d.document_type = $${i++}`);
       params.push(type);
     }
     if (status && status !== 'All') {
-      where.push(`status = $${i++}`);
-      params.push(status);
+      where.push(`d.status = $${i++}`);
+      params.push(normalizeDocStatus(status));
     }
     if (holderId) {
-      where.push(`current_holder_id = $${i++}`);
+      where.push(`d.current_holder_id = $${i++}`);
       params.push(holderId);
     }
     if (createdBy) {
-      where.push(`created_by = $${i++}`);
+      where.push(`d.created_by = $${i++}`);
       params.push(createdBy);
     }
     if (sourceModule) {
-      where.push(`source_module = $${i++}`);
+      where.push(`d.source_module = $${i++}`);
       params.push(sourceModule);
     }
     if (sourceTable) {
-      where.push(`source_table = $${i++}`);
+      where.push(`d.source_table = $${i++}`);
       params.push(sourceTable);
     }
     if (q) {
-      where.push(`(title ILIKE $${i} OR description ILIKE $${i})`);
+      where.push(`(d.title ILIKE $${i} OR d.description ILIKE $${i})`);
       params.push(`%${q}%`);
+      i += 1;
+    }
+
+    const isAdmin = req.user.role === 'admin';
+    if (!isAdmin) {
+      where.push(`(d.created_by = $${i} OR d.current_holder_id = $${i})`);
+      params.push(req.user.id);
       i += 1;
     }
 
@@ -105,10 +138,11 @@ router.get('/documents', protect, async (req, res) => {
     params.push(limitVal, offsetVal);
 
     const result = await pool.query(
-      `SELECT *
-       FROM docutracker_documents
+      `SELECT d.*, creator.full_name AS creator_name
+       FROM docutracker_documents d
+       LEFT JOIN users creator ON creator.id = d.created_by
        ${whereSql}
-       ORDER BY created_at DESC
+       ORDER BY d.created_at DESC
        LIMIT $${i} OFFSET $${i + 1}`,
       params
     );
@@ -141,6 +175,7 @@ router.get('/documents', protect, async (req, res) => {
  */
 router.post('/documents', protect, async (req, res) => {
   try {
+    const b = req.body || {};
     const {
       document_type,
       title,
@@ -153,7 +188,14 @@ router.post('/documents', protect, async (req, res) => {
       source_table,
       source_record_id,
       source_title,
-    } = req.body || {};
+      document_number,
+      current_step,
+      status,
+      sent_time,
+      reviewed_time,
+      escalation_level,
+      needs_admin_intervention,
+    } = b;
 
     if (!document_type || !title) {
       return res.status(400).json({ error: 'document_type and title are required' });
@@ -164,11 +206,15 @@ router.post('/documents', protect, async (req, res) => {
        (document_type, title, description,
         source_module, source_table, source_record_id, source_title,
         file_path, file_name,
-        created_by, current_holder_id, deadline_time)
+        created_by, current_holder_id, deadline_time,
+        document_number, current_step, status, sent_time, reviewed_time,
+        escalation_level, needs_admin_intervention)
        VALUES ($1, $2, $3,
                $4, $5, $6, $7,
                $8, $9,
-               $10, $11, $12)
+               $10, $11, $12,
+               $13, $14, COALESCE($15, 'pending'), $16, $17,
+               COALESCE($18, 0), COALESCE($19, false))
        RETURNING *`,
       [
         document_type,
@@ -183,6 +229,13 @@ router.post('/documents', protect, async (req, res) => {
         req.user.id,
         current_holder_id || null,
         deadline_time || null,
+        document_number || null,
+        current_step ?? 1,
+        status != null ? normalizeDocStatus(status) : null,
+        sent_time || null,
+        reviewed_time || null,
+        escalation_level ?? null,
+        needs_admin_intervention ?? null,
       ]
     );
 
@@ -204,14 +257,291 @@ router.post('/documents', protect, async (req, res) => {
 });
 
 /**
+ * GET /api/docutracker/next-document-number
+ */
+router.get('/next-document-number', protect, async (_req, res) => {
+  try {
+    const year = new Date().getFullYear();
+    const prefix = `DOC-${year}-`;
+    const result = await pool.query(
+      `SELECT document_number FROM docutracker_documents
+       WHERE document_number LIKE $1
+       ORDER BY document_number DESC
+       LIMIT 1`,
+      [`${prefix}%`]
+    );
+    if (result.rows.length > 0) {
+      const last = String(result.rows[0].document_number || '');
+      const numStr = last.replace(prefix, '');
+      const num = parseInt(numStr, 10) || 0;
+      return res.json({ document_number: `${prefix}${String(num + 1).padStart(4, '0')}` });
+    }
+    return res.json({ document_number: `${prefix}0001` });
+  } catch (err) {
+    console.error('[docutracker GET /next-document-number]', err);
+    res.status(500).json({ error: 'Failed to allocate number' });
+  }
+});
+
+/**
+ * GET /api/docutracker/documents-overdue (admin — escalation worker)
+ */
+router.get('/documents-overdue', protect, requireAdmin, async (_req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT d.*, creator.full_name AS creator_name
+       FROM docutracker_documents d
+       LEFT JOIN users creator ON creator.id = d.created_by
+       WHERE d.deadline_time IS NOT NULL
+         AND d.deadline_time < now()
+         AND d.status NOT IN ('approved', 'rejected', 'cancelled')
+       ORDER BY d.deadline_time ASC`
+    );
+    res.json(result.rows.map(mapDocumentRow));
+  } catch (err) {
+    console.error('[docutracker GET /documents-overdue]', err);
+    res.status(500).json({ error: 'Failed to list overdue documents' });
+  }
+});
+
+/**
+ * GET /api/docutracker/notifications
+ */
+router.get('/notifications', protect, async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 100);
+    const result = await pool.query(
+      `SELECT * FROM docutracker_notifications
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2`,
+      [req.user.id, limit]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[docutracker GET /notifications]', err);
+    res.status(500).json({ error: 'Failed to list notifications' });
+  }
+});
+
+/**
+ * POST /api/docutracker/notifications
+ */
+router.post('/notifications', protect, async (req, res) => {
+  try {
+    const { document_id, user_id, type, title, body, read } = req.body || {};
+    if (!document_id || !user_id || !type) {
+      return res.status(400).json({ error: 'document_id, user_id, and type are required' });
+    }
+    const result = await pool.query(
+      `INSERT INTO docutracker_notifications
+       (document_id, user_id, type, title, body, read)
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6, false))
+       RETURNING *`,
+      [document_id, user_id, type, title || null, body || null, read]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('[docutracker POST /notifications]', err);
+    res.status(500).json({ error: 'Failed to create notification' });
+  }
+});
+
+/**
+ * GET /api/docutracker/escalation-configs
+ */
+router.get('/escalation-configs', protect, async (req, res) => {
+  try {
+    const { document_type, department_id } = req.query;
+    const params = [];
+    const where = [];
+    let i = 1;
+    if (document_type) {
+      where.push(`document_type = $${i++}`);
+      params.push(document_type);
+    }
+    if (department_id) {
+      where.push(`(department_id = $${i}::uuid OR department_id IS NULL)`);
+      params.push(department_id);
+      i += 1;
+    }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const result = await pool.query(
+      `SELECT * FROM docutracker_escalation_configs ${whereSql} ORDER BY document_type, department_id NULLS LAST LIMIT 20`,
+      params
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[docutracker GET /escalation-configs]', err);
+    res.status(500).json({ error: 'Failed to fetch escalation configs' });
+  }
+});
+
+/**
+ * GET /api/docutracker/permission-records (raw rows for DocuTracker setup UI)
+ */
+router.get('/permission-records', protect, requireAdmin, async (req, res) => {
+  try {
+    const { role_id, user_id, document_type } = req.query;
+    const params = [];
+    const where = [];
+    let i = 1;
+    if (role_id) {
+      where.push(`role_id = $${i++}`);
+      params.push(role_id);
+    }
+    if (user_id) {
+      where.push(`user_id = $${i++}::uuid`);
+      params.push(user_id);
+    }
+    if (document_type != null && document_type !== '') {
+      where.push(`document_type = $${i++}`);
+      params.push(document_type);
+    }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const result = await pool.query(
+      `SELECT * FROM docutracker_permissions ${whereSql} ORDER BY document_type, action`,
+      params
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[docutracker GET /permission-records]', err);
+    res.status(500).json({ error: 'Failed to list permission records' });
+  }
+});
+
+/**
+ * GET /api/docutracker/documents/:id/history
+ */
+router.get('/documents/:id/history', protect, async (req, res) => {
+  const { id } = req.params;
+  try {
+    if (!(await assertDocumentReadable(req, id))) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const result = await pool.query(
+      `SELECT * FROM docutracker_document_history
+       WHERE document_id = $1
+       ORDER BY created_at DESC`,
+      [id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[docutracker GET /documents/:id/history]', err);
+    res.status(500).json({ error: 'Failed to fetch history' });
+  }
+});
+
+/**
+ * POST /api/docutracker/documents/:id/history
+ */
+router.post('/documents/:id/history', protect, async (req, res) => {
+  const { id } = req.params;
+  try {
+    if (!(await assertDocumentReadable(req, id))) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const b = req.body || {};
+    const result = await pool.query(
+      `INSERT INTO docutracker_document_history
+       (document_id, action, actor_id, actor_name, from_step, to_step, from_status, to_status, remarks,
+        is_overdue_log, is_escalation_log, escalation_level)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       RETURNING *`,
+      [
+        id,
+        b.action || null,
+        b.actor_id || req.user.id,
+        b.actor_name || null,
+        b.from_step ?? null,
+        b.to_step ?? null,
+        b.from_status != null ? normalizeDocStatus(b.from_status) : null,
+        b.to_status != null ? normalizeDocStatus(b.to_status) : null,
+        b.remarks || null,
+        !!b.is_overdue_log,
+        !!b.is_escalation_log,
+        b.escalation_level ?? null,
+      ]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('[docutracker POST /documents/:id/history]', err);
+    res.status(500).json({ error: 'Failed to add history' });
+  }
+});
+
+/**
+ * PUT /api/docutracker/documents/:id — full update (Flutter client)
+ */
+router.put('/documents/:id', protect, async (req, res) => {
+  const { id } = req.params;
+  const b = req.body || {};
+  try {
+    if (!(await assertDocumentReadable(req, id))) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const result = await pool.query(
+      `UPDATE docutracker_documents SET
+        document_number = COALESCE($1, document_number),
+        document_type = COALESCE($2, document_type),
+        title = COALESCE($3, title),
+        description = $4,
+        file_path = $5,
+        file_name = $6,
+        current_holder_id = $7,
+        current_step = COALESCE($8, current_step),
+        status = COALESCE($9, status),
+        sent_time = $10,
+        deadline_time = $11,
+        reviewed_time = $12,
+        escalation_level = COALESCE($13, escalation_level),
+        needs_admin_intervention = COALESCE($14, needs_admin_intervention),
+        updated_at = now()
+       WHERE id = $15
+       RETURNING *`,
+      [
+        b.document_number ?? null,
+        b.document_type ?? null,
+        b.title ?? null,
+        b.description !== undefined ? b.description : null,
+        b.file_path !== undefined ? b.file_path : null,
+        b.file_name !== undefined ? b.file_name : null,
+        b.current_holder_id !== undefined ? b.current_holder_id : null,
+        b.current_step ?? null,
+        b.status != null ? normalizeDocStatus(b.status) : null,
+        b.sent_time ?? null,
+        b.deadline_time ?? null,
+        b.reviewed_time ?? null,
+        b.escalation_level ?? null,
+        b.needs_admin_intervention !== undefined ? !!b.needs_admin_intervention : null,
+        id,
+      ]
+    );
+    if (!result.rows[0]) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    res.json(mapDocumentRow(result.rows[0]));
+  } catch (err) {
+    console.error('[docutracker PUT /documents/:id]', err);
+    res.status(500).json({ error: 'Failed to update document' });
+  }
+});
+
+/**
  * GET /api/docutracker/documents/:id
  * Returns document + routing records + history.
  */
 router.get('/documents/:id', protect, async (req, res) => {
   const { id } = req.params;
   try {
+    if (!(await assertDocumentReadable(req, id))) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
     const docResult = await pool.query(
-      'SELECT * FROM docutracker_documents WHERE id = $1',
+      `SELECT d.*, creator.full_name AS creator_name
+       FROM docutracker_documents d
+       LEFT JOIN users creator ON creator.id = d.created_by
+       WHERE d.id = $1`,
       [id]
     );
     const docRow = docResult.rows[0];
@@ -288,7 +618,7 @@ router.patch('/documents/:id', protect, async (req, res) => {
 
     if (status !== undefined) {
       updates.push(`status = $${i++}`);
-      values.push(status);
+      values.push(normalizeDocStatus(status));
     }
     if (current_holder_id !== undefined) {
       updates.push(`current_holder_id = $${i++}`);
@@ -386,13 +716,13 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
     const result = await pool.query(
       `INSERT INTO docutracker_routing_configs
        (document_type, steps, review_deadline_hours)
-       VALUES ($1, $2::jsonb, COALESCE($3, review_deadline_hours))
+       VALUES ($1, $2::jsonb, COALESCE($3, 1))
        ON CONFLICT (document_type)
        DO UPDATE SET steps = EXCLUDED.steps,
                      review_deadline_hours = COALESCE(EXCLUDED.review_deadline_hours, docutracker_routing_configs.review_deadline_hours),
                      updated_at = now()
        RETURNING *`,
-      [document_type, JSON.stringify(steps), review_deadline_hours || null]
+      [document_type, JSON.stringify(steps), review_deadline_hours ?? null]
     );
 
     res.status(201).json(result.rows[0]);
@@ -488,24 +818,23 @@ router.get('/permissions', protect, requireAdmin, async (req, res) => {
  */
 router.post('/permissions', protect, requireAdmin, async (req, res) => {
   try {
-    const { user_id, document_type, action, granted } = req.body || {};
+    const { user_id, role_id, document_type, action, granted } = req.body || {};
 
-    if (!user_id || !document_type || !action) {
-      return res
-        .status(400)
-        .json({ error: 'user_id, document_type, and action are required' });
+    if ((!user_id && !role_id) || !document_type || !action) {
+      return res.status(400).json({
+        error: 'document_type and action are required, plus user_id or role_id',
+      });
     }
 
     const grantedBool = !!granted;
 
-    // Check if a permission record already exists
     const existing = await pool.query(
-      `SELECT id
-       FROM docutracker_permissions
-       WHERE user_id = $1
-         AND document_type = $2
-         AND action = $3`,
-      [user_id, document_type, action]
+      user_id
+        ? `SELECT id FROM docutracker_permissions
+           WHERE user_id = $1 AND document_type = $2 AND action = $3`
+        : `SELECT id FROM docutracker_permissions
+           WHERE role_id = $1 AND user_id IS NULL AND document_type = $2 AND action = $3`,
+      user_id ? [user_id, document_type, action] : [role_id, document_type, action]
     );
 
     let row;
@@ -523,10 +852,10 @@ router.post('/permissions', protect, requireAdmin, async (req, res) => {
     } else {
       const insert = await pool.query(
         `INSERT INTO docutracker_permissions
-           (user_id, document_type, action, granted)
-         VALUES ($1, $2, $3, $4)
+           (user_id, role_id, document_type, action, granted)
+         VALUES ($1, $2, $3, $4, $5)
          RETURNING *`,
-        [user_id, document_type, action, grantedBool]
+        [user_id || null, role_id || null, document_type, action, grantedBool]
       );
       row = insert.rows[0];
     }
@@ -534,6 +863,7 @@ router.post('/permissions', protect, requireAdmin, async (req, res) => {
     res.status(201).json({
       id: row.id,
       user_id: row.user_id,
+      role_id: row.role_id,
       document_type: row.document_type,
       action: row.action,
       granted: row.granted,

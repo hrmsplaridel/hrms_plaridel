@@ -23,8 +23,10 @@ const docutrackerRoutes = require('./routes/docutracker');
 const trainingDailyReportsRoutes = require('./routes/trainingDailyReports');
 const rspJobVacanciesRoutes = require('./routes/rspJobVacancies');
 const rspExamQuestionsRoutes = require('./routes/rspExamQuestions');
+const rspExamTimeLimitsRoutes = require('./routes/rspExamTimeLimits');
 const rspApplicationsRoutes = require('./routes/rspApplications');
 const rspStorageRoutes = require('./routes/rspStorage');
+const rspLdSavedEntriesRoutes = require('./routes/rspLdSavedEntries');
 const leaveRoutes = require('./routes/leaveRoutes');
 
 const app = express();
@@ -35,18 +37,9 @@ if (!process.env.JWT_SECRET) {
   console.warn('[warn] JWT_SECRET not set; auth routes will fail. Add JWT_SECRET to .env');
 }
 
-if (
-  !process.env.SUPABASE_URL?.trim() ||
-  !process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
-) {
-  console.warn(
-    '[warn] Supabase storage not configured. RSP files still work from disk at uploads/rsp-attachments/ (see POST /api/rsp/applications/:id/attachment-file). Set SUPABASE_* for cloud bucket.',
-  );
-}
-
-// Middleware
+// Middleware (large limit: RSP/L&D forms e.g. turn-around tables with many JSON rows)
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '15mb' }));
 
 // --- Routes ---
 
@@ -104,8 +97,10 @@ app.use('/api/docutracker', docutrackerRoutes);
 app.use('/api/training-daily-reports', trainingDailyReportsRoutes);
 app.use('/api/rsp/job-vacancies', rspJobVacanciesRoutes);
 app.use('/api/rsp/exam-questions', rspExamQuestionsRoutes);
+app.use('/api/rsp/exam-time-limits', rspExamTimeLimitsRoutes);
 app.use('/api/rsp/applications', rspApplicationsRoutes);
 app.use('/api/rsp/storage', rspStorageRoutes);
+app.use('/api/rsp-ld-saved-entries', rspLdSavedEntriesRoutes);
 app.use('/api/leave', leaveRoutes);
 
 // --- Start server ---
@@ -121,7 +116,10 @@ app.listen(PORT, HOST, () => {
   console.log('  POST /api/upload/avatar  GET /api/files/avatar/:userId');
   console.log('  PUT  /api/rsp/job-vacancies  - update landing page hirings');
   console.log('  PUT  /api/rsp/exam-questions/:examType - admin save exam questions');
+  console.log('  GET  /api/rsp/exam-time-limits - public exam countdown limits');
+  console.log('  PUT  /api/rsp/exam-time-limits - admin set per-exam time limits (seconds)');
   console.log('  DELETE /api/rsp/applications/:applicationId - admin delete applicant');
   console.log('  GET  /api/rsp/storage/view-token - admin token for /api/files/recruitment-attachment');
   console.log('  GET  /api/rsp/storage/signed-url - admin signed attachment URL (service role)');
+  console.log('  API  /api/rsp-ld-saved-entries/:table - RSP/L&D saved forms (admin JWT, PostgreSQL)');
 });

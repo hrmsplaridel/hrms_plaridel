@@ -3,7 +3,6 @@ import '../../data/job_vacancy_announcement.dart';
 import '../../login/screens/login_page.dart';
 import '../../main.dart' as app;
 import '../../recruitment/screens/application_flow_page.dart';
-import '../../recruitment/screens/track_application_page.dart';
 import '../sections/header_section.dart';
 import '../sections/hero_section.dart';
 import '../sections/job_vacancies_section.dart';
@@ -91,32 +90,21 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
   void _onApplyForJob() {
     // No specific vacancy selected; go directly to the recruitment form.
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => const ApplicationFlowPage(),
-      ),
+      MaterialPageRoute(builder: (context) => const ApplicationFlowPage()),
     );
-  }
-
-  void _onTrackApplication() {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (context) => const TrackApplicationPage()),
-    );
-  }
-
-  void _onViewJobVacancies() {
-    _scrollTo(_jobVacanciesKey);
   }
 
   void _onApplyForVacancy(JobVacancyItem vacancy) {
     final selected = (vacancy.headline?.trim().isNotEmpty == true)
         ? vacancy.headline!.trim()
-        : (vacancy.body?.trim().isNotEmpty == true ? vacancy.body!.trim() : null);
+        : (vacancy.body?.trim().isNotEmpty == true
+              ? vacancy.body!.trim()
+              : null);
 
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (context) => ApplicationFlowPage(
-          selectedPositionHeadline: selected,
-        ),
+        builder: (context) =>
+            ApplicationFlowPage(selectedPositionHeadline: selected),
       ),
     );
   }
@@ -153,9 +141,7 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
                 children: [
                   HeroSection(
                     key: _heroKey,
-                    onApplyForJobTap: _onApplyForJob,
-                    onTrackApplicationTap: _onTrackApplication,
-                    onViewJobVacanciesTap: _onViewJobVacancies,
+                    onRecruitmentTap: _onApplyForJob,
                   ),
                   const SizedBox(height: 18),
                   FutureBuilder<JobVacancyAnnouncement>(
@@ -164,7 +150,8 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
                       hasVacancies: true,
                     ),
                     builder: (context, snapshot) {
-                      final a = snapshot.data ??
+                      final a =
+                          snapshot.data ??
                           const JobVacancyAnnouncement(hasVacancies: true);
                       return JobVacanciesSection(
                         key: _jobVacanciesKey,

@@ -21,9 +21,11 @@ AS $$
     WHERE p_path IS NOT NULL
       AND btrim(p_path) <> ''
       AND (
-        -- Primary attachment stored on the application row
-        btrim(p_path) = ra.attachment_path
-        -- Any object under {application_id}/... (multiple files per applicant)
+        btrim(p_path) = btrim(COALESCE(ra.attachment_path, ''))
+        OR btrim(p_path) = btrim(COALESCE(ra.doc_application_letter_path, ''))
+        OR btrim(p_path) = btrim(COALESCE(ra.doc_resume_path, ''))
+        OR btrim(p_path) = btrim(COALESCE(ra.doc_tor_path, ''))
+        OR btrim(p_path) = btrim(COALESCE(ra.doc_eligibility_trainings_path, ''))
         OR btrim(p_path) LIKE ra.id::text || '/%'
       )
   );

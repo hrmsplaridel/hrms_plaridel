@@ -3,19 +3,15 @@ import 'dart:math' as math;
 import '../constants/app_theme.dart';
 import '../widgets/section_container.dart';
 
-/// Hero: Title, subtitle, and primary CTAs. No registration link.
-/// Apply for Job → pre-application form; Track Application Status; View Job Vacancies.
+/// Hero: Title, subtitle, and primary CTA. No registration link.
+/// Opens combined recruitment flow (apply, check status, continue) in one place.
 class HeroSection extends StatelessWidget {
   const HeroSection({
     super.key,
-    this.onApplyForJobTap,
-    this.onTrackApplicationTap,
-    this.onViewJobVacanciesTap,
+    this.onRecruitmentTap,
   });
 
-  final VoidCallback? onApplyForJobTap;
-  final VoidCallback? onTrackApplicationTap;
-  final VoidCallback? onViewJobVacanciesTap;
+  final VoidCallback? onRecruitmentTap;
 
   @override
   Widget build(BuildContext context) {
@@ -39,14 +35,25 @@ class HeroSection extends StatelessWidget {
         child: Stack(
           children: [
             Positioned.fill(
-              child: Container(
-                decoration: const BoxDecoration(
-                  image: DecorationImage(
-                    image: AssetImage('assets/images/Building.jpg'),
-                    // Use `contain` so the image isn't cropped (users asked for fully visible background).
-                    // Fill the full width so there are no left/right gaps.
-                    fit: BoxFit.fitWidth,
-                    alignment: Alignment.center,
+              child: Image.asset(
+                'assets/images/Building.jpg',
+                fit: BoxFit.fitWidth,
+                alignment: Alignment.center,
+                width: double.infinity,
+                height: double.infinity,
+                errorBuilder: (_, __, ___) => Container(
+                  width: double.infinity,
+                  height: double.infinity,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        AppTheme.sectionAlt,
+                        AppTheme.offWhite,
+                        AppTheme.lightGray,
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -109,65 +116,24 @@ class HeroSection extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 40),
-            Wrap(
-              alignment: WrapAlignment.center,
-              spacing: 16,
-              runSpacing: 14,
-              children: [
-                FilledButton.icon(
-                  onPressed: onApplyForJobTap,
-                  icon: const Icon(Icons.how_to_reg, size: 20),
-                  label: const Text('Apply for Job'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primaryNavy,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 28,
-                      vertical: 18,
-                    ),
-                    minimumSize: const Size(0, 52),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    elevation: 2,
-                    shadowColor: AppTheme.primaryNavy.withOpacity(0.35),
-                  ),
+            FilledButton.icon(
+              onPressed: onRecruitmentTap,
+              icon: const Icon(Icons.work_outline_rounded, size: 22),
+              label: const Text('Job application'),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.primaryNavy,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 32,
+                  vertical: 18,
                 ),
-                OutlinedButton.icon(
-                  onPressed: onTrackApplicationTap,
-                  icon: const Icon(Icons.find_in_page_outlined, size: 20),
-                  label: const Text('Track Application Status'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTheme.primaryNavy,
-                    side: const BorderSide(color: AppTheme.primaryNavy, width: 2),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 28,
-                      vertical: 18,
-                    ),
-                    minimumSize: const Size(0, 52),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
+                minimumSize: const Size(0, 52),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
                 ),
-                OutlinedButton.icon(
-                  onPressed: onViewJobVacanciesTap,
-                  icon: const Icon(Icons.work_outline, size: 20),
-                  label: const Text('View Job Vacancies'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTheme.primaryNavy,
-                    side: const BorderSide(color: AppTheme.primaryNavy, width: 2),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 28,
-                      vertical: 18,
-                    ),
-                    minimumSize: const Size(0, 52),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                ),
-              ],
+                elevation: 2,
+                shadowColor: AppTheme.primaryNavy.withValues(alpha: 0.35),
+              ),
             ),
             ],
           ),

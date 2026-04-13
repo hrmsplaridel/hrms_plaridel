@@ -14,6 +14,7 @@ import '../data/performance_evaluation_form.dart';
 import '../data/promotion_certification.dart';
 import '../data/action_brainstorming_coaching.dart';
 import '../data/selection_lineup.dart';
+import '../data/training_daily_report.dart';
 import '../data/training_need_analysis.dart';
 import '../data/turn_around_time.dart';
 
@@ -200,7 +201,7 @@ class FormPdf {
                   pw.TableRow(
                     decoration: const pw.BoxDecoration(color: PdfColors.grey300),
                     children:
-                        ['AREA', 'CORE DISCRIPTION', '5', '4', '3', '2', '1']
+                        ['AREA', 'CORE DESCRIPTION', '5', '4', '3', '2', '1']
                             .map(
                               (h) => pw.Padding(
                                 padding: const pw.EdgeInsets.all(4),
@@ -1489,5 +1490,36 @@ class FormPdf {
       ),
     );
     return doc;
+  }
+
+  /// Simple printable summary for employee training daily reports (L&D).
+  static Future<void> printTrainingDailyReport(TrainingDailyReport r) async {
+    await ensureLogoLoaded();
+    final doc = pw.Document();
+    doc.addPage(
+      pw.Page(
+        pageFormat: pageLetter,
+        build: (ctx) => _formLayout(
+          'TRAINING DAILY REPORT',
+          pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              _row('Employee:', _s(r.employeeName)),
+              _row('Title:', _s(r.title)),
+              pw.SizedBox(height: 8),
+              pw.Text('Description', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+              pw.SizedBox(height: 4),
+              pw.Text(_s(r.description), style: const pw.TextStyle(fontSize: 9)),
+              pw.SizedBox(height: 8),
+              _row('Status:', _s(r.status)),
+              _row('Submitted:', r.submittedAt.toLocal().toString()),
+              if (r.attachmentName != null && r.attachmentName!.trim().isNotEmpty)
+                _row('Attachment:', _s(r.attachmentName)),
+            ],
+          ),
+        ),
+      ),
+    );
+    await printDocument(doc, name: 'training-daily-report.pdf');
   }
 }

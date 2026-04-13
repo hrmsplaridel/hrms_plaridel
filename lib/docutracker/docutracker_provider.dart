@@ -51,10 +51,12 @@ class DocuTrackerProvider extends ChangeNotifier {
 
   /// Step 10: Employee dashboard - incoming (assigned to me, pending/inReview).
   List<DocuTrackerDocument> incomingForUser(String userId) => _documents
-      .where((d) =>
-          d.currentHolderId == userId &&
-          (d.status == DocumentStatus.pending ||
-              d.status == DocumentStatus.inReview))
+      .where(
+        (d) =>
+            d.currentHolderId == userId &&
+            (d.status == DocumentStatus.pending ||
+                d.status == DocumentStatus.inReview),
+      )
       .toList();
 
   /// Step 10: Pending reviews (same as incoming).
@@ -66,24 +68,28 @@ class DocuTrackerProvider extends ChangeNotifier {
     final now = DateTime.now();
     final threshold = now.add(const Duration(hours: 1));
     return _documents
-        .where((d) =>
-            d.currentHolderId == userId &&
-            d.deadlineTime != null &&
-            d.deadlineTime!.isAfter(now) &&
-            d.deadlineTime!.isBefore(threshold) &&
-            d.status != DocumentStatus.approved &&
-            d.status != DocumentStatus.rejected)
+        .where(
+          (d) =>
+              d.currentHolderId == userId &&
+              d.deadlineTime != null &&
+              d.deadlineTime!.isAfter(now) &&
+              d.deadlineTime!.isBefore(threshold) &&
+              d.status != DocumentStatus.approved &&
+              d.status != DocumentStatus.rejected,
+        )
         .toList();
   }
 
   /// Step 10: Overdue documents.
   List<DocuTrackerDocument> get overdueDocuments => _documents
-      .where((d) =>
-          d.status == DocumentStatus.overdue ||
-          (d.deadlineTime != null &&
-              DateTime.now().isAfter(d.deadlineTime!) &&
-              d.status != DocumentStatus.approved &&
-              d.status != DocumentStatus.rejected))
+      .where(
+        (d) =>
+            d.status == DocumentStatus.overdue ||
+            (d.deadlineTime != null &&
+                DateTime.now().isAfter(d.deadlineTime!) &&
+                d.status != DocumentStatus.approved &&
+                d.status != DocumentStatus.rejected),
+      )
       .toList();
 
   /// Step 10: Returned documents.
@@ -92,9 +98,11 @@ class DocuTrackerProvider extends ChangeNotifier {
 
   /// Step 10: Completed documents.
   List<DocuTrackerDocument> get completedDocuments => _documents
-      .where((d) =>
-          d.status == DocumentStatus.approved ||
-          d.status == DocumentStatus.rejected)
+      .where(
+        (d) =>
+            d.status == DocumentStatus.approved ||
+            d.status == DocumentStatus.rejected,
+      )
       .toList();
 
   /// Step 10: Admin - escalated documents.
@@ -219,8 +227,7 @@ class DocuTrackerProvider extends ChangeNotifier {
   /// Load document history for audit trail (Step 9).
   Future<void> loadDocumentHistory(String documentId) async {
     try {
-      _documentHistory =
-          await _repo.listDocumentHistory(documentId);
+      _documentHistory = await _repo.listDocumentHistory(documentId);
       notifyListeners();
     } catch (_) {
       _documentHistory = [];
@@ -277,14 +284,16 @@ class DocuTrackerProvider extends ChangeNotifier {
       final created = await _repo.createDocument(doc);
       if (created != null) {
         _documents = [created, ..._documents];
-        await _repo.addDocumentHistory(DocumentHistoryEntry(
-          documentId: created.id!,
-          action: 'created',
-          actorId: createdBy,
-          toStep: 1,
-          toStatus: DocumentStatus.pending,
-          createdAt: now,
-        ));
+        await _repo.addDocumentHistory(
+          DocumentHistoryEntry(
+            documentId: created.id!,
+            action: 'created',
+            actorId: createdBy,
+            toStep: 1,
+            toStatus: DocumentStatus.pending,
+            createdAt: now,
+          ),
+        );
       }
       _loading = false;
       notifyListeners();
@@ -318,7 +327,9 @@ class DocuTrackerProvider extends ChangeNotifier {
 
       final updated = doc.copyWith(
         currentStep: next != null ? next.$1 : currentStep,
-        status: next != null ? DocumentStatus.forwarded : DocumentStatus.approved,
+        status: next != null
+            ? DocumentStatus.forwarded
+            : DocumentStatus.approved,
         sentTime: now,
         deadlineTime: deadline,
         reviewedTime: now,
@@ -326,17 +337,19 @@ class DocuTrackerProvider extends ChangeNotifier {
       await _repo.updateDocument(updated);
       final idx = _documents.indexWhere((d) => d.id == doc.id);
       if (idx >= 0) _documents[idx] = updated;
-      await _repo.addDocumentHistory(DocumentHistoryEntry(
-        documentId: doc.id!,
-        action: 'forwarded',
-        actorId: actionBy,
-        fromStep: doc.currentStep,
-        toStep: updated.currentStep,
-        fromStatus: doc.status,
-        toStatus: updated.status,
-        remarks: remarks,
-        createdAt: DateTime.now(),
-      ));
+      await _repo.addDocumentHistory(
+        DocumentHistoryEntry(
+          documentId: doc.id!,
+          action: 'forwarded',
+          actorId: actionBy,
+          fromStep: doc.currentStep,
+          toStep: updated.currentStep,
+          fromStatus: doc.status,
+          toStatus: updated.status,
+          remarks: remarks,
+          createdAt: DateTime.now(),
+        ),
+      );
       _loading = false;
       notifyListeners();
       return true;
@@ -349,8 +362,11 @@ class DocuTrackerProvider extends ChangeNotifier {
   }
 
   /// Approve document (Step 8).
-  Future<bool> approveDocument(DocuTrackerDocument doc,
-      {String? remarks, required String actionBy}) async {
+  Future<bool> approveDocument(
+    DocuTrackerDocument doc, {
+    String? remarks,
+    required String actionBy,
+  }) async {
     if (doc.id == null) return false;
     try {
       final now = DateTime.now();
@@ -361,16 +377,18 @@ class DocuTrackerProvider extends ChangeNotifier {
       await _repo.updateDocument(updated);
       final idx = _documents.indexWhere((d) => d.id == doc.id);
       if (idx >= 0) _documents[idx] = updated;
-      await _repo.addDocumentHistory(DocumentHistoryEntry(
-        documentId: doc.id!,
-        action: 'approved',
-        actorId: actionBy,
-        fromStep: doc.currentStep,
-        fromStatus: doc.status,
-        toStatus: DocumentStatus.approved,
-        remarks: remarks,
-        createdAt: now,
-      ));
+      await _repo.addDocumentHistory(
+        DocumentHistoryEntry(
+          documentId: doc.id!,
+          action: 'approved',
+          actorId: actionBy,
+          fromStep: doc.currentStep,
+          fromStatus: doc.status,
+          toStatus: DocumentStatus.approved,
+          remarks: remarks,
+          createdAt: now,
+        ),
+      );
       notifyListeners();
       return true;
     } catch (e) {
@@ -381,8 +399,11 @@ class DocuTrackerProvider extends ChangeNotifier {
   }
 
   /// Reject document (Step 8).
-  Future<bool> rejectDocument(DocuTrackerDocument doc,
-      {String? remarks, required String actionBy}) async {
+  Future<bool> rejectDocument(
+    DocuTrackerDocument doc, {
+    String? remarks,
+    required String actionBy,
+  }) async {
     if (doc.id == null) return false;
     try {
       final now = DateTime.now();
@@ -393,25 +414,30 @@ class DocuTrackerProvider extends ChangeNotifier {
       await _repo.updateDocument(updated);
       final idx = _documents.indexWhere((d) => d.id == doc.id);
       if (idx >= 0) _documents[idx] = updated;
-      await _repo.addDocumentHistory(DocumentHistoryEntry(
-        documentId: doc.id!,
-        action: 'rejected',
-        actorId: actionBy,
-        fromStep: doc.currentStep,
-        fromStatus: doc.status,
-        toStatus: DocumentStatus.rejected,
-        remarks: remarks,
-        createdAt: now,
-      ));
-      if (doc.createdBy != null) {
-        await _repo.addNotification(DocumentNotification(
+      await _repo.addDocumentHistory(
+        DocumentHistoryEntry(
           documentId: doc.id!,
-          userId: doc.createdBy!,
-          type: DocumentNotification.typeRejected,
-          title: 'Document rejected',
-          body: '${doc.title} was rejected${remarks != null ? ': $remarks' : ''}',
+          action: 'rejected',
+          actorId: actionBy,
+          fromStep: doc.currentStep,
+          fromStatus: doc.status,
+          toStatus: DocumentStatus.rejected,
+          remarks: remarks,
           createdAt: now,
-        ));
+        ),
+      );
+      if (doc.createdBy != null) {
+        await _repo.addNotification(
+          DocumentNotification(
+            documentId: doc.id!,
+            userId: doc.createdBy!,
+            type: DocumentNotification.typeRejected,
+            title: 'Document rejected',
+            body:
+                '${doc.title} was rejected${remarks != null ? ': $remarks' : ''}',
+            createdAt: now,
+          ),
+        );
       }
       notifyListeners();
       return true;
@@ -423,8 +449,11 @@ class DocuTrackerProvider extends ChangeNotifier {
   }
 
   /// Return document to previous step (Step 8).
-  Future<bool> returnDocument(DocuTrackerDocument doc,
-      {String? remarks, required String actionBy}) async {
+  Future<bool> returnDocument(
+    DocuTrackerDocument doc, {
+    String? remarks,
+    required String actionBy,
+  }) async {
     if (doc.id == null) return false;
     try {
       final now = DateTime.now();
@@ -438,26 +467,31 @@ class DocuTrackerProvider extends ChangeNotifier {
       await _repo.updateDocument(updated);
       final idx = _documents.indexWhere((d) => d.id == doc.id);
       if (idx >= 0) _documents[idx] = updated;
-      await _repo.addDocumentHistory(DocumentHistoryEntry(
-        documentId: doc.id!,
-        action: 'returned',
-        actorId: actionBy,
-        fromStep: doc.currentStep,
-        toStep: toStep,
-        fromStatus: doc.status,
-        toStatus: DocumentStatus.returned,
-        remarks: remarks,
-        createdAt: now,
-      ));
-      if (doc.createdBy != null) {
-        await _repo.addNotification(DocumentNotification(
+      await _repo.addDocumentHistory(
+        DocumentHistoryEntry(
           documentId: doc.id!,
-          userId: doc.createdBy!,
-          type: DocumentNotification.typeReturned,
-          title: 'Document returned',
-          body: '${doc.title} was returned to you${remarks != null ? ': $remarks' : ''}',
+          action: 'returned',
+          actorId: actionBy,
+          fromStep: doc.currentStep,
+          toStep: toStep,
+          fromStatus: doc.status,
+          toStatus: DocumentStatus.returned,
+          remarks: remarks,
           createdAt: now,
-        ));
+        ),
+      );
+      if (doc.createdBy != null) {
+        await _repo.addNotification(
+          DocumentNotification(
+            documentId: doc.id!,
+            userId: doc.createdBy!,
+            type: DocumentNotification.typeReturned,
+            title: 'Document returned',
+            body:
+                '${doc.title} was returned to you${remarks != null ? ': $remarks' : ''}',
+            createdAt: now,
+          ),
+        );
       }
       notifyListeners();
       return true;
@@ -476,15 +510,17 @@ class DocuTrackerProvider extends ChangeNotifier {
   }) async {
     if (doc.id == null || remarks.trim().isEmpty) return false;
     try {
-      await _repo.addDocumentHistory(DocumentHistoryEntry(
-        documentId: doc.id!,
-        action: 'remark',
-        actorId: actorId,
-        fromStep: doc.currentStep,
-        fromStatus: doc.status,
-        remarks: remarks.trim(),
-        createdAt: DateTime.now(),
-      ));
+      await _repo.addDocumentHistory(
+        DocumentHistoryEntry(
+          documentId: doc.id!,
+          action: 'remark',
+          actorId: actorId,
+          fromStep: doc.currentStep,
+          fromStatus: doc.status,
+          remarks: remarks.trim(),
+          createdAt: DateTime.now(),
+        ),
+      );
       notifyListeners();
       return true;
     } catch (e) {
@@ -511,25 +547,31 @@ class DocuTrackerProvider extends ChangeNotifier {
       final maxLevel = config?.maxEscalationLevel ?? 3;
       final currentLevel = doc.escalationLevel;
       if (currentLevel >= maxLevel) {
-        await _repo.updateDocument(doc.copyWith(
-          status: DocumentStatus.overdue,
-          needsAdminIntervention: true,
-        ));
-        await _repo.addDocumentHistory(DocumentHistoryEntry(
-          documentId: doc.id!,
-          action: 'escalated',
-          fromStatus: doc.status,
-          toStatus: DocumentStatus.overdue,
-          isOverdueLog: true,
-          isEscalationLog: true,
-          escalationLevel: currentLevel,
-          remarks: 'Max escalation level reached. Admin intervention required.',
-          createdAt: DateTime.now(),
-        ));
+        await _repo.updateDocument(
+          doc.copyWith(
+            status: DocumentStatus.overdue,
+            needsAdminIntervention: true,
+          ),
+        );
+        await _repo.addDocumentHistory(
+          DocumentHistoryEntry(
+            documentId: doc.id!,
+            action: 'escalated',
+            fromStatus: doc.status,
+            toStatus: DocumentStatus.overdue,
+            isOverdueLog: true,
+            isEscalationLog: true,
+            escalationLevel: currentLevel,
+            remarks:
+                'Max escalation level reached. Admin intervention required.',
+            createdAt: DateTime.now(),
+          ),
+        );
       } else {
         final docType = documentTypeFromString(doc.documentType);
         final next = getNextStepAssignees(docType, doc.currentStep ?? 1);
-        final deadlineHours = getRoutingConfigForType(docType)?.reviewDeadlineHours ?? 1;
+        final deadlineHours =
+            getRoutingConfigForType(docType)?.reviewDeadlineHours ?? 1;
         final newDeadline = DateTime.now().add(Duration(hours: deadlineHours));
         final updated = doc.copyWith(
           status: DocumentStatus.escalated,
@@ -539,27 +581,32 @@ class DocuTrackerProvider extends ChangeNotifier {
           deadlineTime: newDeadline,
         );
         await _repo.updateDocument(updated);
-        await _repo.addDocumentHistory(DocumentHistoryEntry(
-          documentId: doc.id!,
-          action: 'escalated',
-          fromStep: doc.currentStep,
-          toStep: updated.currentStep,
-          fromStatus: doc.status,
-          toStatus: DocumentStatus.escalated,
-          isOverdueLog: true,
-          isEscalationLog: true,
-          escalationLevel: updated.escalationLevel,
-          remarks: 'Automatically escalated - deadline missed',
-          createdAt: DateTime.now(),
-        ));
-        await _repo.addNotification(DocumentNotification(
-          documentId: doc.id!,
-          userId: doc.currentHolderId ?? doc.createdBy ?? '',
-          type: DocumentNotification.typeOverdue,
-          title: 'Document overdue',
-          body: '${doc.title} was not reviewed in time and has been escalated.',
-          createdAt: DateTime.now(),
-        ));
+        await _repo.addDocumentHistory(
+          DocumentHistoryEntry(
+            documentId: doc.id!,
+            action: 'escalated',
+            fromStep: doc.currentStep,
+            toStep: updated.currentStep,
+            fromStatus: doc.status,
+            toStatus: DocumentStatus.escalated,
+            isOverdueLog: true,
+            isEscalationLog: true,
+            escalationLevel: updated.escalationLevel,
+            remarks: 'Automatically escalated - deadline missed',
+            createdAt: DateTime.now(),
+          ),
+        );
+        await _repo.addNotification(
+          DocumentNotification(
+            documentId: doc.id!,
+            userId: doc.currentHolderId ?? doc.createdBy ?? '',
+            type: DocumentNotification.typeOverdue,
+            title: 'Document overdue',
+            body:
+                '${doc.title} was not reviewed in time and has been escalated.',
+            createdAt: DateTime.now(),
+          ),
+        );
       }
       notifyListeners();
     } catch (_) {}

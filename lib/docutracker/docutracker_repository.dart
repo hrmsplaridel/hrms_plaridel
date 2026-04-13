@@ -1,44 +1,39 @@
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../api/client.dart';
 import 'models/document.dart';
 import 'models/document_history.dart';
 import 'models/document_notification.dart';
+import 'models/document_action.dart';
 import 'models/document_permission.dart';
 import 'models/document_routing_config.dart';
 import 'models/document_status.dart';
 import 'models/escalation_config.dart';
 
-/// Repository for DocuTracker data. Uses Supabase when tables exist;
-/// falls back to in-memory defaults for routing configs.
+/// DocuTracker data via HRMS PostgreSQL API (replaces Supabase client).
 class DocuTrackerRepository {
   DocuTrackerRepository._();
   static final DocuTrackerRepository instance = DocuTrackerRepository._();
 
-  SupabaseClient get _client => Supabase.instance.client;
+  static const _base = '/api/docutracker';
 
-  /// Get routing configs for document types. Uses defaults if no DB table.
   Future<List<DocumentRoutingConfig>> getRoutingConfigs() async {
     try {
-      final res = await _client
-          .from('docutracker_routing_configs')
-          .select()
-          .order('document_type');
-      if (res.isNotEmpty) {
-        return (res)
-            .map(
-              (e) => DocumentRoutingConfig.fromJson(
-                Map<String, dynamic>.from(e as Map),
-              ),
-            )
-            .toList();
-      }
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '$_base/routing-configs',
+      );
+      final list = res.data ?? [];
+      if (list.isEmpty) return DocumentRoutingConfig.defaults;
+      return list
+          .map(
+            (e) => DocumentRoutingConfig.fromJson(
+              Map<String, dynamic>.from(e as Map),
+            ),
+          )
+          .toList();
     } catch (_) {
-      // Table may not exist yet
+      return DocumentRoutingConfig.defaults;
     }
-    return DocumentRoutingConfig.defaults;
   }
 
-  /// List documents visible to user (Step 2: Role-Based Visibility).
-  /// Filters by: assigned to user, user's office, user's department.
   Future<List<DocuTrackerDocument>> listDocumentsForUser({
     required String userId,
     String? userRoleId,
@@ -49,222 +44,209 @@ class DocuTrackerRepository {
     int? limit,
   }) async {
     try {
-      dynamic query = _client
-          .from(DocuTrackerDocument.tableName)
-          .select('*, creator:profiles!created_by(full_name)');
-      // Step 2 & 11: User sees docs they created OR are current holder (in route)
-      query = query.or('created_by.eq.$userId,current_holder_id.eq.$userId');
-      if (documentType != null && documentType.isNotEmpty) {
-        query = query.eq('document_type', documentType);
-      }
-      if (status != null) {
-        query = query.eq('status', status.value);
-      }
-      query = query.order('created_at', ascending: false);
-      if (limit != null) query = query.limit(limit);
-
-      final res = await query;
-      return (res as List).map((e) => _documentFromRow(e)).toList();
+      final qp = <String, dynamic>{
+        if (documentType != null && documentType.isNotEmpty) 'type': documentType,
+        if (status != null) 'status': status.value,
+        if (limit != null) 'limit': limit,
+      };
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '$_base/documents',
+        queryParameters: qp,
+      );
+      final list = res.data ?? [];
+      return list
+          .map(
+            (e) => DocuTrackerDocument.fromJson(
+              Map<String, dynamic>.from(e as Map),
+            ),
+          )
+          .toList();
     } catch (_) {
       return [];
     }
   }
 
-  /// Step 12: Fetch documents past deadline for auto-escalation.
   Future<List<DocuTrackerDocument>> listOverdueForEscalation() async {
     try {
-      final now = DateTime.now().toIso8601String();
-      final res = await _client
-          .from(DocuTrackerDocument.tableName)
-          .select()
-          .lt('deadline_time', now);
-      final list = (res as List)
-          .map((e) => DocuTrackerDocument.fromJson(Map<String, dynamic>.from(e as Map)))
-          .toList();
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '$_base/documents-overdue',
+      );
+      final list = res.data ?? [];
       return list
-          .where((d) =>
-              d.status != DocumentStatus.approved &&
-              d.status != DocumentStatus.rejected)
+          .map(
+            (e) => DocuTrackerDocument.fromJson(
+              Map<String, dynamic>.from(e as Map),
+            ),
+          )
           .toList();
     } catch (_) {
       return [];
     }
   }
 
-  /// List all documents (admin only).
   Future<List<DocuTrackerDocument>> listAllDocuments({
     String? documentType,
     DocumentStatus? status,
     int? limit,
   }) async {
     try {
-      dynamic query = _client
-          .from(DocuTrackerDocument.tableName)
-          .select('*, creator:profiles!created_by(full_name)');
-      if (documentType != null && documentType.isNotEmpty) {
-        query = query.eq('document_type', documentType);
-      }
-      if (status != null) {
-        query = query.eq('status', status.value);
-      }
-      query = query.order('created_at', ascending: false);
-      if (limit != null) query = query.limit(limit);
-
-      final res = await query;
-      return (res as List).map((e) => _documentFromRow(e)).toList();
+      final qp = <String, dynamic>{
+        if (documentType != null && documentType.isNotEmpty) 'type': documentType,
+        if (status != null) 'status': status.value,
+        if (limit != null) 'limit': limit,
+      };
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '$_base/documents',
+        queryParameters: qp,
+      );
+      final list = res.data ?? [];
+      return list
+          .map(
+            (e) => DocuTrackerDocument.fromJson(
+              Map<String, dynamic>.from(e as Map),
+            ),
+          )
+          .toList();
     } catch (_) {
       return [];
     }
   }
 
-  DocuTrackerDocument _documentFromRow(dynamic row) {
-    final m = Map<String, dynamic>.from(row as Map);
-    final creator = m['creator'];
-    if (creator != null && creator is Map) {
-      m['creator_name'] = (creator as Map<String, dynamic>)['full_name'];
-    }
-    m.remove('creator');
-    return DocuTrackerDocument.fromJson(m);
-  }
-
-  /// Get single document by ID.
   Future<DocuTrackerDocument?> getDocument(String id) async {
     try {
-      final res = await _client
-          .from(DocuTrackerDocument.tableName)
-          .select('*, creator:profiles!created_by(full_name)')
-          .eq('id', id)
-          .maybeSingle();
-      if (res == null) return null;
-      return _documentFromRow(res);
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/documents/$id',
+      );
+      final doc = res.data?['document'];
+      if (doc is! Map) return null;
+      return DocuTrackerDocument.fromJson(Map<String, dynamic>.from(doc));
     } catch (_) {
       return null;
     }
   }
 
-  /// Get next document number (Step 9: DOC-YYYY-NNNN).
   Future<String> getNextDocumentNumber() async {
     try {
-      final year = DateTime.now().year;
-      final prefix = 'DOC-$year-';
-      final res = await _client
-          .from(DocuTrackerDocument.tableName)
-          .select('document_number')
-          .like('document_number', '$prefix%')
-          .order('document_number', ascending: false)
-          .limit(1);
-      final list = res as List;
-      if (list.isNotEmpty) {
-        final last = (list.first as Map)['document_number']?.toString() ?? '';
-        final numStr = last.replaceFirst(prefix, '');
-        final num = int.tryParse(numStr) ?? 0;
-        return '$prefix${(num + 1).toString().padLeft(4, '0')}';
-      }
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/next-document-number',
+      );
+      final n = res.data?['document_number']?.toString();
+      if (n != null && n.isNotEmpty) return n;
     } catch (_) {}
     return 'DOC-${DateTime.now().year}-0001';
   }
 
-  /// Create document.
   Future<DocuTrackerDocument?> createDocument(DocuTrackerDocument doc) async {
     try {
       final payload = Map<String, dynamic>.from(doc.toJson())
         ..remove('id')
         ..remove('creator_name')
-        ..remove('assignee_name');
-      final res = await _client
-          .from(DocuTrackerDocument.tableName)
-          .insert(payload)
-          .select()
-          .single();
-      return DocuTrackerDocument.fromJson(Map<String, dynamic>.from(res));
+        ..remove('assignee_name')
+        ..remove('created_at')
+        ..remove('updated_at');
+      final res = await ApiClient.instance.post<Map<String, dynamic>>(
+        '$_base/documents',
+        data: payload,
+      );
+      final row = res.data;
+      if (row == null) return null;
+      return DocuTrackerDocument.fromJson(row);
     } catch (_) {
       return null;
     }
   }
 
-  /// Add document history entry (Step 6 & 9).
   Future<void> addDocumentHistory(DocumentHistoryEntry entry) async {
     try {
-      final payload = Map<String, dynamic>.from(entry.toJson())..remove('id');
-      await _client.from(DocumentHistoryEntry.tableName).insert(payload);
+      final payload = Map<String, dynamic>.from(entry.toJson())
+        ..remove('id')
+        ..remove('created_at');
+      await ApiClient.instance.post<void>(
+        '$_base/documents/${entry.documentId}/history',
+        data: payload,
+      );
     } catch (_) {}
   }
 
-  /// List document history for audit trail (Step 9).
   Future<List<DocumentHistoryEntry>> listDocumentHistory(String documentId) async {
     try {
-      final res = await _client
-          .from(DocumentHistoryEntry.tableName)
-          .select()
-          .eq('document_id', documentId)
-          .order('created_at', ascending: false);
-      return (res as List)
-          .map((e) => DocumentHistoryEntry.fromJson(Map<String, dynamic>.from(e as Map)))
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '$_base/documents/$documentId/history',
+      );
+      final list = res.data ?? [];
+      return list
+          .map(
+            (e) => DocumentHistoryEntry.fromJson(
+              Map<String, dynamic>.from(e as Map),
+            ),
+          )
           .toList();
     } catch (_) {
       return [];
     }
   }
 
-  /// Add notification (Step 7).
   Future<void> addNotification(DocumentNotification notif) async {
     try {
       final payload = Map<String, dynamic>.from(notif.toJson())..remove('id');
-      await _client.from(DocumentNotification.tableName).insert(payload);
+      await ApiClient.instance.post<void>('$_base/notifications', data: payload);
     } catch (_) {}
   }
 
-  /// List notifications for user (Step 7).
   Future<List<DocumentNotification>> listNotificationsForUser(String userId) async {
     try {
-      final res = await _client
-          .from(DocumentNotification.tableName)
-          .select()
-          .eq('user_id', userId)
-          .order('created_at', ascending: false)
-          .limit(50);
-      return (res as List)
-          .map((e) => DocumentNotification.fromJson(Map<String, dynamic>.from(e as Map)))
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '$_base/notifications',
+      );
+      final list = res.data ?? [];
+      return list
+          .map(
+            (e) => DocumentNotification.fromJson(
+              Map<String, dynamic>.from(e as Map),
+            ),
+          )
           .toList();
     } catch (_) {
       return [];
     }
   }
 
-  /// Get escalation config for document type (Step 6).
   Future<EscalationConfig?> getEscalationConfig(
     String documentType, {
     String? departmentId,
   }) async {
     try {
-      dynamic query = _client
-          .from(EscalationConfig.tableName)
-          .select()
-          .eq('document_type', documentType);
-      if (departmentId != null) {
-        query = query.eq('department_id', departmentId);
-      }
-      final res = await query;
-      if (res is List && res.isNotEmpty) {
-        return EscalationConfig.fromJson(Map<String, dynamic>.from(res.first as Map));
-      }
-    } catch (_) {}
-    return null;
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '$_base/escalation-configs',
+        queryParameters: {
+          'document_type': documentType,
+          if (departmentId != null) 'department_id': departmentId,
+        },
+      );
+      final list = res.data ?? [];
+      if (list.isEmpty) return null;
+      return EscalationConfig.fromJson(
+        Map<String, dynamic>.from(list.first as Map),
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
-  /// Update document.
   Future<void> updateDocument(DocuTrackerDocument doc) async {
     if (doc.id == null) return;
-    final payload = Map<String, dynamic>.from(doc.toJson())
-      ..remove('creator_name')
-      ..remove('assignee_name');
-    await _client
-        .from(DocuTrackerDocument.tableName)
-        .update(payload)
-        .eq('id', doc.id!);
+    try {
+      final payload = Map<String, dynamic>.from(doc.toJson())
+        ..remove('creator_name')
+        ..remove('assignee_name')
+        ..remove('created_at');
+      await ApiClient.instance.put<void>(
+        '$_base/documents/${doc.id}',
+        data: payload,
+      );
+    } catch (_) {}
   }
 
-  /// List permissions (Step 4: Admin Privilege Management).
   Future<List<DocumentPermission>> listPermissions({
     String? roleId,
     String? userId,
@@ -272,12 +254,17 @@ class DocuTrackerRepository {
     bool userOnly = false,
   }) async {
     try {
-      dynamic query = _client.from(DocumentPermission.tableName).select();
-      if (roleId != null) query = query.eq('role_id', roleId);
-      if (userId != null) query = query.eq('user_id', userId);
-      if (documentType != null) query = query.eq('document_type', documentType);
-      final res = await query;
-      final perms = (res as List)
+      final qp = <String, dynamic>{};
+      if (roleId != null) qp['role_id'] = roleId;
+      if (userId != null) qp['user_id'] = userId;
+      if (documentType != null) qp['document_type'] = documentType;
+
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '$_base/permission-records',
+        queryParameters: qp,
+      );
+      final list = res.data ?? [];
+      final perms = list
           .map(
             (e) => DocumentPermission.fromJson(
               Map<String, dynamic>.from(e as Map),
@@ -285,37 +272,30 @@ class DocuTrackerRepository {
           )
           .toList();
 
-      // "Per employee only": hide role-based grants from the admin table.
       if (userOnly) {
         return perms.where((p) => p.userId != null).toList();
       }
-
       return perms;
     } catch (_) {
       return [];
     }
   }
 
-  /// Save permission.
   Future<void> savePermission(DocumentPermission perm) async {
     try {
-      final payload = Map<String, dynamic>.from(perm.toJson())..remove('id');
-      if (perm.id != null) {
-        // Avoid attempting to update the primary key.
-        final updatePayload = Map<String, dynamic>.from(payload);
-        await _client
-            .from(DocumentPermission.tableName)
-          .update(updatePayload)
-            .eq('id', perm.id!);
-      } else {
-        await _client.from(DocumentPermission.tableName).insert(payload);
-      }
-    } catch (_) {
-      // Table may not exist
-    }
+      await ApiClient.instance.post<void>(
+        '$_base/permissions',
+        data: {
+          if (perm.userId != null) 'user_id': perm.userId,
+          if (perm.roleId != null) 'role_id': perm.roleId,
+          'document_type': perm.documentType,
+          'action': perm.action.value,
+          'granted': perm.granted,
+        },
+      );
+    } catch (_) {}
   }
 
-  /// Step 11: RBAC - Check if user can access document (in route).
   Future<bool> canAccessDocument({
     required String userId,
     required String documentId,
@@ -332,7 +312,6 @@ class DocuTrackerRepository {
     }
   }
 
-  /// Check if user has permission for action on document type.
   Future<bool> hasPermission({
     required String userId,
     String? roleId,
@@ -340,7 +319,6 @@ class DocuTrackerRepository {
     required String action,
   }) async {
     try {
-      // Check user-specific first
       final userPerms = await listPermissions(
         userId: userId,
         documentType: documentType,
@@ -348,7 +326,6 @@ class DocuTrackerRepository {
       final userAction = userPerms.where((p) => p.action.name == action);
       if (userAction.isNotEmpty) return userAction.first.granted;
 
-      // Then role
       if (roleId != null) {
         final rolePerms = await listPermissions(
           roleId: roleId,
@@ -358,11 +335,6 @@ class DocuTrackerRepository {
         if (roleAction.isNotEmpty) return roleAction.first.granted;
       }
 
-      // Wildcard
-      // Resolve wildcard with the same precedence rules:
-      // 1) user_id wildcard override
-      // 2) role_id wildcard
-      // 3) global wildcard (any role/user)
       final wildUserPerms = await listPermissions(
         userId: userId,
         documentType: '*',
@@ -380,9 +352,11 @@ class DocuTrackerRepository {
       }
 
       final globalWildPerms = await listPermissions(documentType: '*');
-      final globalWildAction = globalWildPerms.where((p) => p.action.name == action);
+      final globalWildAction = globalWildPerms.where(
+        (p) => p.action.name == action,
+      );
       if (globalWildAction.isNotEmpty) return globalWildAction.first.granted;
     } catch (_) {}
-    return true; // Default allow if no permissions table
+    return true;
   }
 }

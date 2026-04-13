@@ -22,7 +22,11 @@ async function isAttachmentPathAllowedInDb(objectPath) {
         FROM public.recruitment_applications ra
         WHERE btrim($1::text) <> ''
           AND (
-            btrim($1::text) = ra.attachment_path
+            btrim($1::text) = btrim(COALESCE(ra.attachment_path, ''))
+            OR btrim($1::text) = btrim(COALESCE(ra.doc_application_letter_path, ''))
+            OR btrim($1::text) = btrim(COALESCE(ra.doc_resume_path, ''))
+            OR btrim($1::text) = btrim(COALESCE(ra.doc_tor_path, ''))
+            OR btrim($1::text) = btrim(COALESCE(ra.doc_eligibility_trainings_path, ''))
             OR btrim($1::text) LIKE ra.id::text || '/%'
           )
       ) AS ok`,

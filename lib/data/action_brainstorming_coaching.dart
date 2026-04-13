@@ -1,4 +1,4 @@
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'rsp_ld_saved_entries_api.dart';
 
 /// One row in the Action Brainstorming and Coaching Worksheet table.
 class ActionBrainstormingRow {
@@ -106,41 +106,31 @@ class ActionBrainstormingRepo {
   ActionBrainstormingRepo._();
   static final ActionBrainstormingRepo instance = ActionBrainstormingRepo._();
 
-  SupabaseClient get _client => Supabase.instance.client;
-
   Future<List<ActionBrainstormingEntry>> list() async {
-    final res = await _client
-        .from(ActionBrainstormingEntry.tableName)
-        .select()
-        .order('created_at', ascending: false);
-    return (res as List)
-        .map((e) => ActionBrainstormingEntry.fromJson(Map<String, dynamic>.from(e as Map)))
-        .toList();
+    final rows = await RspLdSavedEntriesApi.listRows(ActionBrainstormingEntry.tableName);
+    return rows.map(ActionBrainstormingEntry.fromJson).toList();
   }
 
   Future<ActionBrainstormingEntry?> get(String id) async {
-    final res = await _client
-        .from(ActionBrainstormingEntry.tableName)
-        .select()
-        .eq('id', id)
-        .maybeSingle();
-    return res == null ? null : ActionBrainstormingEntry.fromJson(Map<String, dynamic>.from(res));
+    final row = await RspLdSavedEntriesApi.getRow(ActionBrainstormingEntry.tableName, id);
+    return row == null ? null : ActionBrainstormingEntry.fromJson(row);
   }
 
   Future<void> insert(ActionBrainstormingEntry entry) async {
     final payload = Map<String, dynamic>.from(entry.toJson())..remove('id');
-    await _client.from(ActionBrainstormingEntry.tableName).insert(payload);
+    await RspLdSavedEntriesApi.insertRow(ActionBrainstormingEntry.tableName, payload);
   }
 
   Future<void> update(ActionBrainstormingEntry entry) async {
     if (entry.id == null) return;
-    await _client
-        .from(ActionBrainstormingEntry.tableName)
-        .update(entry.toJson())
-        .eq('id', entry.id!);
+    await RspLdSavedEntriesApi.updateRow(
+      ActionBrainstormingEntry.tableName,
+      entry.id!,
+      entry.toJson(),
+    );
   }
 
   Future<void> delete(String id) async {
-    await _client.from(ActionBrainstormingEntry.tableName).delete().eq('id', id);
+    await RspLdSavedEntriesApi.deleteRow(ActionBrainstormingEntry.tableName, id);
   }
 }

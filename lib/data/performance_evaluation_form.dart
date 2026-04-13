@@ -1,4 +1,4 @@
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'rsp_ld_saved_entries_api.dart';
 
 /// One Performance / Functional Evaluation form entry.
 class PerformanceEvaluationEntry {
@@ -78,41 +78,31 @@ class PerformanceEvaluationRepo {
   PerformanceEvaluationRepo._();
   static final PerformanceEvaluationRepo instance = PerformanceEvaluationRepo._();
 
-  SupabaseClient get _client => Supabase.instance.client;
-
   Future<List<PerformanceEvaluationEntry>> list() async {
-    final res = await _client
-        .from(PerformanceEvaluationEntry.tableName)
-        .select()
-        .order('created_at', ascending: false);
-    return (res as List)
-        .map((e) => PerformanceEvaluationEntry.fromJson(Map<String, dynamic>.from(e as Map)))
-        .toList();
+    final rows = await RspLdSavedEntriesApi.listRows(PerformanceEvaluationEntry.tableName);
+    return rows.map(PerformanceEvaluationEntry.fromJson).toList();
   }
 
   Future<PerformanceEvaluationEntry?> get(String id) async {
-    final res = await _client
-        .from(PerformanceEvaluationEntry.tableName)
-        .select()
-        .eq('id', id)
-        .maybeSingle();
-    return res == null ? null : PerformanceEvaluationEntry.fromJson(Map<String, dynamic>.from(res));
+    final row = await RspLdSavedEntriesApi.getRow(PerformanceEvaluationEntry.tableName, id);
+    return row == null ? null : PerformanceEvaluationEntry.fromJson(row);
   }
 
   Future<void> insert(PerformanceEvaluationEntry entry) async {
     final payload = Map<String, dynamic>.from(entry.toJson())..remove('id');
-    await _client.from(PerformanceEvaluationEntry.tableName).insert(payload);
+    await RspLdSavedEntriesApi.insertRow(PerformanceEvaluationEntry.tableName, payload);
   }
 
   Future<void> update(PerformanceEvaluationEntry entry) async {
     if (entry.id == null) return;
-    await _client
-        .from(PerformanceEvaluationEntry.tableName)
-        .update(entry.toJson())
-        .eq('id', entry.id!);
+    await RspLdSavedEntriesApi.updateRow(
+      PerformanceEvaluationEntry.tableName,
+      entry.id!,
+      entry.toJson(),
+    );
   }
 
   Future<void> delete(String id) async {
-    await _client.from(PerformanceEvaluationEntry.tableName).delete().eq('id', id);
+    await RspLdSavedEntriesApi.deleteRow(PerformanceEvaluationEntry.tableName, id);
   }
 }

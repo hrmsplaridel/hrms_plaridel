@@ -29,7 +29,24 @@ class AuthProvider extends ChangeNotifier {
 
   /// Restore session from stored JWT. Call before runApp.
   Future<void> restoreSession() async {
-    final token = await TokenStorage.instance.getToken();
+    String? token;
+    try {
+      final future = TokenStorage.instance.getToken();
+      token = kIsWeb
+          ? await future.timeout(
+              const Duration(seconds: 8),
+              onTimeout: () {
+                debugPrint(
+                  'TokenStorage.getToken timed out on web; continuing without session.',
+                );
+                return null;
+              },
+            )
+          : await future;
+    } catch (e) {
+      debugPrint('TokenStorage.getToken failed: $e');
+      return;
+    }
     if (token == null || token.isEmpty) return;
     try {
       final res = await ApiClient.instance.get<Map<String, dynamic>>('/auth/me');

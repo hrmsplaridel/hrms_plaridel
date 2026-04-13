@@ -1,4 +1,4 @@
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'rsp_ld_saved_entries_api.dart';
 
 /// One applicant row in the Selection Line-up table (no pre-filled values).
 class SelectionLineupApplicant {
@@ -106,41 +106,31 @@ class SelectionLineupRepo {
   SelectionLineupRepo._();
   static final SelectionLineupRepo instance = SelectionLineupRepo._();
 
-  SupabaseClient get _client => Supabase.instance.client;
-
   Future<List<SelectionLineupEntry>> list() async {
-    final res = await _client
-        .from(SelectionLineupEntry.tableName)
-        .select()
-        .order('created_at', ascending: false);
-    return (res as List)
-        .map((e) => SelectionLineupEntry.fromJson(Map<String, dynamic>.from(e as Map)))
-        .toList();
+    final rows = await RspLdSavedEntriesApi.listRows(SelectionLineupEntry.tableName);
+    return rows.map(SelectionLineupEntry.fromJson).toList();
   }
 
   Future<SelectionLineupEntry?> get(String id) async {
-    final res = await _client
-        .from(SelectionLineupEntry.tableName)
-        .select()
-        .eq('id', id)
-        .maybeSingle();
-    return res == null ? null : SelectionLineupEntry.fromJson(Map<String, dynamic>.from(res));
+    final row = await RspLdSavedEntriesApi.getRow(SelectionLineupEntry.tableName, id);
+    return row == null ? null : SelectionLineupEntry.fromJson(row);
   }
 
   Future<void> insert(SelectionLineupEntry entry) async {
     final payload = Map<String, dynamic>.from(entry.toJson())..remove('id');
-    await _client.from(SelectionLineupEntry.tableName).insert(payload);
+    await RspLdSavedEntriesApi.insertRow(SelectionLineupEntry.tableName, payload);
   }
 
   Future<void> update(SelectionLineupEntry entry) async {
     if (entry.id == null) return;
-    await _client
-        .from(SelectionLineupEntry.tableName)
-        .update(entry.toJson())
-        .eq('id', entry.id!);
+    await RspLdSavedEntriesApi.updateRow(
+      SelectionLineupEntry.tableName,
+      entry.id!,
+      entry.toJson(),
+    );
   }
 
   Future<void> delete(String id) async {
-    await _client.from(SelectionLineupEntry.tableName).delete().eq('id', id);
+    await RspLdSavedEntriesApi.deleteRow(SelectionLineupEntry.tableName, id);
   }
 }

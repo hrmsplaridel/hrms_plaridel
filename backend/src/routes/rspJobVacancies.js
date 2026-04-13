@@ -2,6 +2,10 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdminOrSupervisor } = require('../middleware/rbac');
+const {
+  parseMaxApplicants,
+  enrichVacanciesWithApplicationCounts,
+} = require('../utils/jobVacancySlots');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -56,12 +60,22 @@ router.get('/', async (_req, res) => {
       });
     }
 
+    let vacancies = Array.isArray(row.vacancies) ? row.vacancies : [];
+    if (
+      vacancies.length === 0 &&
+      (row.headline != null || row.body != null) &&
+      (String(row.headline || '').trim() || String(row.body || '').trim())
+    ) {
+      vacancies = [{ headline: row.headline, body: row.body }];
+    }
+    vacancies = await enrichVacanciesWithApplicationCounts(vacancies);
+
     res.json({
       id: row.id,
       has_vacancies: row.has_vacancies,
       headline: row.headline,
       body: row.body,
-      vacancies: row.vacancies ?? [],
+      vacancies,
       updated_at: row.updated_at ? row.updated_at.toISOString() : null,
     });
   } catch (err) {
@@ -91,14 +105,20 @@ router.put('/', protect, requireAdminOrSupervisor, async (req, res) => {
     // Expected: [{ headline: '...', body: '...' }, ...]
     const normalizedVacancies = list
       .filter((v) => v && typeof v === 'object')
-      .map((v) => ({
-        headline:
-          typeof v.headline === 'string' && v.headline.trim().length
-            ? v.headline.trim()
-            : null,
-        body:
-          typeof v.body === 'string' && v.body.trim().length ? v.body.trim() : null,
-      }));
+      .map((v) => {
+        const max = parseMaxApplicants(v.max_applicants);
+        return {
+          headline:
+            typeof v.headline === 'string' && v.headline.trim().length
+              ? v.headline.trim()
+              : null,
+          body:
+            typeof v.body === 'string' && v.body.trim().length
+              ? v.body.trim()
+              : null,
+          ...(max != null ? { max_applicants: max } : {}),
+        };
+      });
 
     // Ensure landing-page table exists (idempotent).
     await ensureTable();

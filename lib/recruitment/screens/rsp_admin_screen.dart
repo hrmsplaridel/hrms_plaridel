@@ -1,11 +1,10 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 // ignore: avoid_web_libraries_in_flutter
 import 'dart:html' as html;
 // ignore: avoid_web_libraries_in_flutter
 import 'dart:ui_web' as ui_web;
-import 'package:dio/dio.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../data/applicants_profile.dart';
 import '../../data/bi_form.dart';
@@ -15,23 +14,32 @@ import '../../data/job_vacancy_announcement.dart';
 import '../../data/performance_evaluation_form.dart';
 import '../../data/promotion_certification.dart';
 import '../../data/recruitment_application.dart';
+import '../../data/rsp_screening_scores.dart';
 import '../../data/selection_lineup.dart';
 import '../../data/turn_around_time.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../utils/form_pdf.dart';
 import '../../widgets/feature_card.dart';
+import '../../widgets/read_only_saved_entry_dialog.dart';
 import '../../widgets/rsp_form_header_footer.dart';
+import '../../widgets/rsp_ld_saved_records_browser.dart';
+import '../widgets/rsp_bei_grading_dialog.dart';
+import '../widgets/rsp_final_interview_scheduler.dart';
+import '../../api/user_facing_api_error.dart';
 
 /// RSP module: hub with buttons for each RSP feature (Job Vacancies, Applications & Exam Results).
 class RspAdminContent extends StatefulWidget {
-  const RspAdminContent({super.key});
+  const RspAdminContent({super.key, this.onNavigateToSidebarIndex});
+
+  /// Switch admin sidebar tab (e.g. index `5` = Create Account below DocuTracker).
+  final ValueChanged<int>? onNavigateToSidebarIndex;
 
   @override
   State<RspAdminContent> createState() => _RspAdminContentState();
 }
 
 class _RspAdminContentState extends State<RspAdminContent> {
-  /// 0 = menu, 1 = Job Vacancies, 2 = Applications, 3 = BEI, 4 = General Exam, 5 = Math, 6 = General Info, 7 = BI Form, 8 = Performance Eval, 9 = IDP, 10 = Applicants Profile, 11 = Comparative Assessment, 12 = Promotion Certification, 13 = Selection Line-up, 14 = Turn-Around Time
+  /// 0 = menu, 1 = Job Vacancies, 2 = Applications, … 14 = Turn-Around Time, 15 = Final interview (passed exam)
   int _rspSectionIndex = 0;
 
   @override
@@ -83,6 +91,13 @@ class _RspAdminContentState extends State<RspAdminContent> {
                 subtitle: 'View applicants, attachments, and exam results.',
                 icon: Icons.assignment_rounded,
                 onTap: () => setState(() => _rspSectionIndex = 2),
+              ),
+              FeatureCard(
+                title: 'Final interview (passed exam)',
+                subtitle:
+                    'Set the final interview date and time for applicants who passed the screening exam.',
+                icon: Icons.event_available_rounded,
+                onTap: () => setState(() => _rspSectionIndex = 15),
               ),
               FeatureCard(
                 title: 'BEI / Exam Questions',
@@ -196,8 +211,14 @@ class _RspAdminContentState extends State<RspAdminContent> {
           const _RspPromotionCertificationSection()
         else if (_rspSectionIndex == 13)
           const _RspSelectionLineupSection()
+        else if (_rspSectionIndex == 14)
+          const _RspTurnAroundTimeSection()
+        else if (_rspSectionIndex == 15)
+          RspFinalInterviewScheduler(
+            onGoToCreateAccount: () => widget.onNavigateToSidebarIndex?.call(5),
+          )
         else
-          const _RspTurnAroundTimeSection(),
+          const SizedBox.shrink(),
       ],
     );
   }
@@ -294,9 +315,9 @@ class _RspBeiQuestionsEditorState extends State<_RspBeiQuestionsEditor> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
+        );
         setState(() => _saving = false);
       }
     }
@@ -454,6 +475,165 @@ class _GeneralExamItem {
   int correctIndex;
 }
 
+/// Admin-only: minutes per MCQ exam (0 = no time limit for applicants).
+class _RspExamTimeLimitEditor extends StatefulWidget {
+  const _RspExamTimeLimitEditor({required this.examType});
+  final String examType;
+
+  @override
+  State<_RspExamTimeLimitEditor> createState() => _RspExamTimeLimitEditorState();
+}
+
+class _RspExamTimeLimitEditorState extends State<_RspExamTimeLimitEditor> {
+  final _minutesController = TextEditingController();
+  bool _loading = true;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final limits = await RecruitmentRepo.instance.getExamTimeLimits();
+      if (!mounted) return;
+      final sec = limits[widget.examType] ?? 0;
+      _minutesController.text = sec <= 0 ? '0' : '${(sec + 59) ~/ 60}';
+    } catch (_) {
+      if (mounted) {
+        _minutesController.text = '0';
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _save() async {
+    final parsed = int.tryParse(_minutesController.text.trim());
+    if (parsed == null || parsed < 0 || parsed > 24 * 60) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Enter minutes between 0 (no limit) and 1440 (24 hours).'),
+        ),
+      );
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      await RecruitmentRepo.instance.saveExamTimeLimitSeconds(
+        widget.examType,
+        parsed * 60,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Time limit saved.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _minutesController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Padding(
+        padding: EdgeInsets.only(bottom: 16),
+        child: LinearProgressIndicator(minHeight: 2),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Material(
+        color: AppTheme.primaryNavy.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.timer_outlined, color: AppTheme.primaryNavy, size: 22),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Applicant time limit',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Minutes allowed for this exam (0 = no countdown). Applicants see a timer during the exam.',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                        height: 1.35,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: 88,
+                          child: TextField(
+                            controller: _minutesController,
+                            keyboardType: TextInputType.number,
+                            decoration: InputDecoration(
+                              labelText: 'Minutes',
+                              isDense: true,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              filled: true,
+                              fillColor: AppTheme.white,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        FilledButton.tonal(
+                          onPressed: _saving ? null : _save,
+                          child: _saving
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Text('Save limit'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _RspGeneralExamEditor extends StatefulWidget {
   const _RspGeneralExamEditor();
 
@@ -576,9 +756,9 @@ class _RspGeneralExamEditorState extends State<_RspGeneralExamEditor> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
+        );
         setState(() => _saving = false);
       }
     }
@@ -608,6 +788,8 @@ class _RspGeneralExamEditorState extends State<_RspGeneralExamEditor> {
           'Multiple-choice questions. Edit below; set the correct option per question. Applicants will see these after the BEI.',
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
         ),
+        const SizedBox(height: 16),
+        const _RspExamTimeLimitEditor(examType: 'general'),
         const SizedBox(height: 24),
         Container(
           padding: const EdgeInsets.all(24),
@@ -919,9 +1101,9 @@ class _RspMathExamEditorState extends State<_RspMathExamEditor> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
+        );
         setState(() => _saving = false);
       }
     }
@@ -951,6 +1133,8 @@ class _RspMathExamEditorState extends State<_RspMathExamEditor> {
           'Multiple-choice mathematics questions. Edit below; set the correct option per question. Applicants will see these after the General Exam.',
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
         ),
+        const SizedBox(height: 16),
+        const _RspExamTimeLimitEditor(examType: 'math'),
         const SizedBox(height: 24),
         Container(
           padding: const EdgeInsets.all(24),
@@ -1045,9 +1229,8 @@ class _RspMathExamEditorState extends State<_RspMathExamEditor> {
                                           contentPadding:
                                               const EdgeInsets.symmetric(
                                                 horizontal: 12,
-                                                vertical: 10,
+                                                vertical: 12,
                                               ),
-                                          isDense: true,
                                         ),
                                       ),
                                     ),
@@ -1260,9 +1443,9 @@ class _RspGeneralInfoExamEditorState extends State<_RspGeneralInfoExamEditor> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
+        );
         setState(() => _saving = false);
       }
     }
@@ -1292,6 +1475,8 @@ class _RspGeneralInfoExamEditorState extends State<_RspGeneralInfoExamEditor> {
           'Multiple-choice questions on general information (e.g. constitution, labor). Edit below; set the correct option per question.',
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
         ),
+        const SizedBox(height: 16),
+        const _RspExamTimeLimitEditor(examType: 'general_info'),
         const SizedBox(height: 24),
         Container(
           padding: const EdgeInsets.all(24),
@@ -1386,9 +1571,8 @@ class _RspGeneralInfoExamEditorState extends State<_RspGeneralInfoExamEditor> {
                                           contentPadding:
                                               const EdgeInsets.symmetric(
                                                 horizontal: 12,
-                                                vertical: 10,
+                                                vertical: 12,
                                               ),
-                                          isDense: true,
                                         ),
                                       ),
                                     ),
@@ -1534,6 +1718,36 @@ class _RspBiFormSectionState extends State<_RspBiFormSection> {
     setState(() => _editing = null);
   }
 
+  void _openSavedRecordsBrowser() {
+    showRspLdSavedRecordsBrowser(
+      context,
+      sheetTitle: 'Saved BI records',
+      emptyMessage: 'No BI entries yet. Add an entry first.',
+      loading: _loading,
+      items: _entries
+          .map(
+            (e) => SavedRecordListItem(
+              title: e.applicantName.trim().isEmpty
+                  ? '(No applicant name)'
+                  : e.applicantName,
+              subtitle: '${e.respondentName} · ${e.respondentRelationship}',
+              detailDialogTitle: 'BI form — ${e.applicantName}',
+              previewContentWidth: 920,
+              previewBuilder: () => _BiFormEditor(
+                readOnly: true,
+                entry: e,
+                onSave: (_) {},
+                onCancel: () {},
+                onPrint: (_) async {},
+                onDownloadPdf: (_) async {},
+              ),
+              onPrint: () => _printBi(e),
+            ),
+          )
+          .toList(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -1549,7 +1763,7 @@ class _RspBiFormSectionState extends State<_RspBiFormSection> {
         ),
         const SizedBox(height: 8),
         Text(
-          'Record BI evaluations: applicant and respondent details, plus competency ratings (1â€“5).',
+          'Record BI evaluations: applicant and respondent details, plus competency ratings (1\u20135).',
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
         ),
         const SizedBox(height: 24),
@@ -1576,6 +1790,18 @@ class _RspBiFormSectionState extends State<_RspBiFormSection> {
               onPressed: _loading ? null : _load,
               icon: const Icon(Icons.refresh_rounded, size: 20),
               label: const Text('Refresh'),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
+            ),
+            const SizedBox(width: 4),
+            TextButton.icon(
+              onPressed: _loading ? null : _openSavedRecordsBrowser,
+              icon: const Icon(Icons.folder_open_outlined, size: 20),
+              label: const Text('View records'),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
             ),
           ],
         ),
@@ -1621,9 +1847,9 @@ class _RspBiFormSectionState extends State<_RspBiFormSection> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
+        );
       }
     }
   }
@@ -1687,6 +1913,7 @@ class _BiFormEditor extends StatefulWidget {
   const _BiFormEditor({
     super.key,
     required this.entry,
+    this.readOnly = false,
     required this.onSave,
     required this.onCancel,
     required this.onPrint,
@@ -1694,6 +1921,9 @@ class _BiFormEditor extends StatefulWidget {
   });
 
   final BiFormEntry entry;
+
+  /// When true, same layout as edit mode but fields are not editable and save/cancel are hidden.
+  final bool readOnly;
   final void Function(BiFormEntry) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(BiFormEntry) onPrint;
@@ -1784,12 +2014,14 @@ class _BiFormEditorState extends State<_BiFormEditor> {
   }
 
   void _save() {
+    if (widget.readOnly) return;
     if (!_formKey.currentState!.validate()) return;
     widget.onSave(_buildCurrentEntry());
   }
 
   @override
   Widget build(BuildContext context) {
+    final ro = widget.readOnly;
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -1823,24 +2055,36 @@ class _BiFormEditorState extends State<_BiFormEditor> {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        TextFormField(
-                          controller: _applicantName,
-                          decoration: rspUnderlinedField('Name:'),
-                          validator: (v) =>
-                              v?.trim().isEmpty ?? true ? 'Required' : null,
+                        RspSpacedOutlineField(
+                          child: TextFormField(
+                            controller: _applicantName,
+                            readOnly: ro,
+                            decoration: rspUnderlinedField('Name:'),
+                            validator: (v) =>
+                                v?.trim().isEmpty ?? true ? 'Required' : null,
+                          ),
                         ),
-                        TextFormField(
-                          controller: _applicantDept,
-                          decoration: rspUnderlinedField('Department:'),
+                        RspSpacedOutlineField(
+                          child: TextFormField(
+                            controller: _applicantDept,
+                            readOnly: ro,
+                            decoration: rspUnderlinedField('Department:'),
+                          ),
                         ),
-                        TextFormField(
-                          controller: _applicantPosition,
-                          decoration: rspUnderlinedField('Position:'),
+                        RspSpacedOutlineField(
+                          child: TextFormField(
+                            controller: _applicantPosition,
+                            readOnly: ro,
+                            decoration: rspUnderlinedField('Position:'),
+                          ),
                         ),
-                        TextFormField(
-                          controller: _positionApplied,
-                          decoration: rspUnderlinedField(
-                            'Position Applied for in LGU-Plaridel:',
+                        RspSpacedOutlineField(
+                          child: TextFormField(
+                            controller: _positionApplied,
+                            readOnly: ro,
+                            decoration: rspUnderlinedField(
+                              'Position Applied for in LGU-Plaridel:',
+                            ),
                           ),
                         ),
                       ],
@@ -1860,17 +2104,21 @@ class _BiFormEditorState extends State<_BiFormEditor> {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        TextFormField(
-                          controller: _respondentName,
-                          decoration: rspUnderlinedField('Name:'),
-                          validator: (v) =>
-                              v?.trim().isEmpty ?? true ? 'Required' : null,
+                        RspSpacedOutlineField(
+                          child: TextFormField(
+                            controller: _respondentName,
+                            decoration: rspUnderlinedField('Name:'),
+                            validator: (v) =>
+                                v?.trim().isEmpty ?? true ? 'Required' : null,
+                          ),
                         ),
-                        TextFormField(
-                          controller: _respondentPosition,
-                          decoration: rspUnderlinedField('Position:'),
+                        RspSpacedOutlineField(
+                          child: TextFormField(
+                            controller: _respondentPosition,
+                            decoration: rspUnderlinedField('Position:'),
+                          ),
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 16),
                         Text(
                           'Work relationship to the applicants: (Kindly check the appropriate box)',
                           style: TextStyle(
@@ -1992,7 +2240,7 @@ class _BiFormEditorState extends State<_BiFormEditor> {
                     ),
                     children: [
                       _tableCell('AREA', bold: true),
-                      _tableCell('CORE DISCRIPTION', bold: true),
+                      _tableCell('CORE DESCRIPTION', bold: true),
                       _tableCell('5', bold: true),
                       _tableCell('4', bold: true),
                       _tableCell('3', bold: true),
@@ -2022,27 +2270,45 @@ class _BiFormEditorState extends State<_BiFormEditor> {
               const SizedBox(height: 24),
               const RspFormFooter(),
               const SizedBox(height: 24),
-              Row(
-                children: [
-                  FilledButton(onPressed: _save, child: const Text('Save')),
-                  const SizedBox(width: 12),
-                  TextButton(
-                    onPressed: widget.onCancel,
-                    child: const Text('Cancel'),
+              if (!ro) ...[
+                Row(
+                  children: [
+                    FilledButton(onPressed: _save, child: const Text('Save')),
+                    const SizedBox(width: 12),
+                    TextButton(
+                      onPressed: widget.onCancel,
+                      child: const Text('Cancel'),
+                    ),
+                    const SizedBox(width: 12),
+                    IconButton(
+                      onPressed: () => widget.onPrint(_buildCurrentEntry()),
+                      icon: const Icon(Icons.print_rounded),
+                      tooltip: 'Print',
+                    ),
+                    IconButton(
+                      onPressed: () =>
+                          widget.onDownloadPdf(_buildCurrentEntry()),
+                      icon: const Icon(Icons.picture_as_pdf_rounded),
+                      tooltip: 'Download PDF',
+                    ),
+                  ],
+                ),
+              ] else ...[
+                Text(
+                  widget.entry.createdAt != null
+                      ? 'Created: ${widget.entry.createdAt!.toLocal()}'
+                      : '',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                ),
+                if (widget.entry.updatedAt != null)
+                  Text(
+                    'Last updated: ${widget.entry.updatedAt!.toLocal()}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
-                  const SizedBox(width: 12),
-                  IconButton(
-                    onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                    icon: const Icon(Icons.print_rounded),
-                    tooltip: 'Print',
-                  ),
-                  IconButton(
-                    onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
-                    icon: const Icon(Icons.picture_as_pdf_rounded),
-                    tooltip: 'Download PDF',
-                  ),
-                ],
-              ),
+              ],
             ],
           ),
         ),
@@ -2065,16 +2331,18 @@ class _BiFormEditorState extends State<_BiFormEditor> {
 
   Widget _ratingCell(int rowIndex, int rating) {
     final selected = _ratings[rowIndex] == rating;
+    final cell = Container(
+      alignment: Alignment.center,
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Text(
+        selected ? '/' : '',
+        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+      ),
+    );
+    if (widget.readOnly) return cell;
     return InkWell(
       onTap: () => setState(() => _ratings[rowIndex] = rating),
-      child: Container(
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Text(
-          selected ? '/' : '',
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-        ),
-      ),
+      child: cell,
     );
   }
 }
@@ -2115,6 +2383,22 @@ class _BiFormList extends StatelessWidget {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    TextButton(
+                      onPressed: () => showReadOnlySavedEntryDialog(
+                        context,
+                        title: 'Saved BI form',
+                        previewBuilder: () => _BiFormEditor(
+                          readOnly: true,
+                          entry: e,
+                          onSave: (_) {},
+                          onCancel: () {},
+                          onPrint: (_) async {},
+                          onDownloadPdf: (_) async {},
+                        ),
+                        contentWidth: 920,
+                      ),
+                      child: const Text('View'),
+                    ),
                     TextButton(
                       onPressed: () => onEdit(e),
                       child: const Text('Edit'),
@@ -2222,6 +2506,38 @@ class _RspPerformanceEvaluationSectionState
     setState(() => _editing = null);
   }
 
+  void _openSavedRecordsBrowser() {
+    showRspLdSavedRecordsBrowser(
+      context,
+      sheetTitle: 'Saved performance evaluations',
+      emptyMessage: 'No evaluations yet.',
+      loading: _loading,
+      items: _entries.map((e) {
+        final areas = e.functionalAreas.isEmpty
+            ? '—'
+            : e.functionalAreas.join(', ');
+        final name = (e.applicantName?.trim().isNotEmpty ?? false)
+            ? e.applicantName!
+            : '(No name)';
+        return SavedRecordListItem(
+          title: name,
+          subtitle: areas,
+          detailDialogTitle: 'Performance evaluation — $name',
+          previewContentWidth: 880,
+          previewBuilder: () => _PerformanceFormEditor(
+            readOnly: true,
+            entry: e,
+            onSave: (_) {},
+            onCancel: () {},
+            onPrint: (_) async {},
+            onDownloadPdf: (_) async {},
+          ),
+          onPrint: () => _printPerf(e),
+        );
+      }).toList(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -2264,6 +2580,18 @@ class _RspPerformanceEvaluationSectionState
               onPressed: _loading ? null : _load,
               icon: const Icon(Icons.refresh_rounded, size: 20),
               label: const Text('Refresh'),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
+            ),
+            const SizedBox(width: 4),
+            TextButton.icon(
+              onPressed: _loading ? null : _openSavedRecordsBrowser,
+              icon: const Icon(Icons.folder_open_outlined, size: 20),
+              label: const Text('View records'),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
             ),
           ],
         ),
@@ -2309,9 +2637,9 @@ class _RspPerformanceEvaluationSectionState
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
+        );
       }
     }
   }
@@ -2375,6 +2703,7 @@ class _PerformanceFormEditor extends StatefulWidget {
   const _PerformanceFormEditor({
     super.key,
     required this.entry,
+    this.readOnly = false,
     required this.onSave,
     required this.onCancel,
     required this.onPrint,
@@ -2382,6 +2711,7 @@ class _PerformanceFormEditor extends StatefulWidget {
   });
 
   final PerformanceEvaluationEntry entry;
+  final bool readOnly;
   final void Function(PerformanceEvaluationEntry) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(PerformanceEvaluationEntry) onPrint;
@@ -2457,11 +2787,13 @@ class _PerformanceFormEditorState extends State<_PerformanceFormEditor> {
   }
 
   void _save() {
+    if (widget.readOnly) return;
     widget.onSave(_buildCurrentEntry());
   }
 
   @override
   Widget build(BuildContext context) {
+    final ro = widget.readOnly;
     const options = PerformanceEvaluationEntry.functionalAreaOptions;
     const leftCount = 6; // Left column: first 6; right column: rest + Other
     return Container(
@@ -2508,8 +2840,11 @@ class _PerformanceFormEditorState extends State<_PerformanceFormEditor> {
                             style: const TextStyle(fontSize: 13),
                           ),
                           value: _functionalChecks[i],
-                          onChanged: (v) =>
-                              setState(() => _functionalChecks[i] = v ?? false),
+                          onChanged: ro
+                              ? null
+                              : (v) => setState(
+                                  () => _functionalChecks[i] = v ?? false,
+                                ),
                         ),
                     ],
                   ),
@@ -2527,8 +2862,11 @@ class _PerformanceFormEditorState extends State<_PerformanceFormEditor> {
                             style: const TextStyle(fontSize: 13),
                           ),
                           value: _functionalChecks[i],
-                          onChanged: (v) =>
-                              setState(() => _functionalChecks[i] = v ?? false),
+                          onChanged: ro
+                              ? null
+                              : (v) => setState(
+                                  () => _functionalChecks[i] = v ?? false,
+                                ),
                         ),
                       const SizedBox(height: 8),
                       Text(
@@ -2538,10 +2876,13 @@ class _PerformanceFormEditorState extends State<_PerformanceFormEditor> {
                           fontSize: 13,
                         ),
                       ),
-                      TextFormField(
-                        controller: _otherArea,
-                        decoration: rspUnderlinedField(''),
-                        maxLines: 1,
+                      RspSpacedOutlineField(
+                        child: TextFormField(
+                          controller: _otherArea,
+                          readOnly: ro,
+                          decoration: rspUnderlinedField(''),
+                          maxLines: 1,
+                        ),
                       ),
                     ],
                   ),
@@ -2563,10 +2904,13 @@ class _PerformanceFormEditorState extends State<_PerformanceFormEditor> {
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
             ),
             const SizedBox(height: 6),
-            TextFormField(
-              controller: _perf3Years,
-              decoration: rspUnderlinedField(''),
-              maxLines: 4,
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _perf3Years,
+                readOnly: ro,
+                decoration: rspUnderlinedField(''),
+                maxLines: 4,
+              ),
             ),
             const SizedBox(height: 16),
             Text(
@@ -2574,10 +2918,13 @@ class _PerformanceFormEditorState extends State<_PerformanceFormEditor> {
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
             ),
             const SizedBox(height: 6),
-            TextFormField(
-              controller: _challenges,
-              decoration: rspUnderlinedField(''),
-              maxLines: 4,
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _challenges,
+                readOnly: ro,
+                decoration: rspUnderlinedField(''),
+                maxLines: 4,
+              ),
             ),
             const SizedBox(height: 16),
             Text(
@@ -2585,35 +2932,51 @@ class _PerformanceFormEditorState extends State<_PerformanceFormEditor> {
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
             ),
             const SizedBox(height: 6),
-            TextFormField(
-              controller: _compliance,
-              decoration: rspUnderlinedField(''),
-              maxLines: 4,
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _compliance,
+                readOnly: ro,
+                decoration: rspUnderlinedField(''),
+                maxLines: 4,
+              ),
             ),
             const SizedBox(height: 24),
             const RspFormFooter(),
             const SizedBox(height: 24),
-            Row(
-              children: [
-                FilledButton(onPressed: _save, child: const Text('Save')),
-                const SizedBox(width: 12),
-                TextButton(
-                  onPressed: widget.onCancel,
-                  child: const Text('Cancel'),
+            if (!ro) ...[
+              Row(
+                children: [
+                  FilledButton(onPressed: _save, child: const Text('Save')),
+                  const SizedBox(width: 12),
+                  TextButton(
+                    onPressed: widget.onCancel,
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  IconButton(
+                    onPressed: () => widget.onPrint(_buildCurrentEntry()),
+                    icon: const Icon(Icons.print_rounded),
+                    tooltip: 'Print',
+                  ),
+                  IconButton(
+                    onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
+                    icon: const Icon(Icons.picture_as_pdf_rounded),
+                    tooltip: 'Download PDF',
+                  ),
+                ],
+              ),
+            ] else ...[
+              if (widget.entry.createdAt != null)
+                Text(
+                  'Created: ${widget.entry.createdAt!.toLocal()}',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
-                const SizedBox(width: 12),
-                IconButton(
-                  onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                  icon: const Icon(Icons.print_rounded),
-                  tooltip: 'Print',
+              if (widget.entry.updatedAt != null)
+                Text(
+                  'Last updated: ${widget.entry.updatedAt!.toLocal()}',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
-                IconButton(
-                  onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
-                  icon: const Icon(Icons.picture_as_pdf_rounded),
-                  tooltip: 'Download PDF',
-                ),
-              ],
-            ),
+            ],
           ],
         ),
       ),
@@ -2661,6 +3024,22 @@ class _PerformanceFormList extends StatelessWidget {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    TextButton(
+                      onPressed: () => showReadOnlySavedEntryDialog(
+                        context,
+                        title: 'Saved performance evaluation',
+                        previewBuilder: () => _PerformanceFormEditor(
+                          readOnly: true,
+                          entry: e,
+                          onSave: (_) {},
+                          onCancel: () {},
+                          onPrint: (_) async {},
+                          onDownloadPdf: (_) async {},
+                        ),
+                        contentWidth: 880,
+                      ),
+                      child: const Text('View'),
+                    ),
                     TextButton(
                       onPressed: () => onEdit(e),
                       child: const Text('Edit'),
@@ -2774,9 +3153,9 @@ class _RspIdpSectionState extends State<_RspIdpSection> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
+        );
       }
     }
   }
@@ -2835,6 +3214,36 @@ class _RspIdpSectionState extends State<_RspIdpSection> {
     }
   }
 
+  void _openSavedRecordsBrowser() {
+    showRspLdSavedRecordsBrowser(
+      context,
+      sheetTitle: 'Saved IDP records',
+      emptyMessage: 'No IDP entries yet.',
+      loading: _loading,
+      items: _entries.map((e) {
+        final name = (e.name?.trim().isNotEmpty ?? false)
+            ? e.name!
+            : '(No name)';
+        final sub = '${e.position ?? "—"} · ${e.department ?? "—"}';
+        return SavedRecordListItem(
+          title: name,
+          subtitle: sub,
+          detailDialogTitle: 'IDP — $name',
+          previewContentWidth: 920,
+          previewBuilder: () => _IdpFormEditor(
+            readOnly: true,
+            entry: e,
+            onSave: (_) {},
+            onCancel: () {},
+            onPrint: (_) async {},
+            onDownloadPdf: (_) async {},
+          ),
+          onPrint: () => _printIdp(e),
+        );
+      }).toList(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -2877,6 +3286,18 @@ class _RspIdpSectionState extends State<_RspIdpSection> {
               onPressed: _loading ? null : _load,
               icon: const Icon(Icons.refresh_rounded, size: 20),
               label: const Text('Refresh'),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
+            ),
+            const SizedBox(width: 4),
+            TextButton.icon(
+              onPressed: _loading ? null : _openSavedRecordsBrowser,
+              icon: const Icon(Icons.folder_open_outlined, size: 20),
+              label: const Text('View records'),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
             ),
           ],
         ),
@@ -2911,6 +3332,7 @@ class _IdpFormEditor extends StatefulWidget {
   const _IdpFormEditor({
     super.key,
     required this.entry,
+    this.readOnly = false,
     required this.onSave,
     required this.onCancel,
     required this.onPrint,
@@ -2918,6 +3340,7 @@ class _IdpFormEditor extends StatefulWidget {
   });
 
   final IdpEntry entry;
+  final bool readOnly;
   final void Function(IdpEntry) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(IdpEntry) onPrint;
@@ -3005,10 +3428,12 @@ class _IdpFormEditorState extends State<_IdpFormEditor> {
   }
 
   void _addPlanRow() {
+    if (widget.readOnly) return;
     setState(() => _planRows.add(_rowControllers('', '', '', '')));
   }
 
   void _removePlanRow(int index) {
+    if (widget.readOnly) return;
     if (_planRows.length <= 1) return;
     setState(() {
       for (final c in _planRows[index].values) {
@@ -3109,11 +3534,13 @@ class _IdpFormEditorState extends State<_IdpFormEditor> {
   }
 
   void _save() {
+    if (widget.readOnly) return;
     widget.onSave(_buildCurrentEntry());
   }
 
   @override
   Widget build(BuildContext context) {
+    final ro = widget.readOnly;
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -3129,6 +3556,7 @@ class _IdpFormEditorState extends State<_IdpFormEditor> {
               formTitle: 'INDIVIDUAL DEVELOPMENT PLAN',
               subtitle: 'LOCAL GOVERNMENT UNIT OF PLARIDEL',
             ),
+            const SizedBox(height: 16),
             Text(
               'Personal & position',
               style: TextStyle(
@@ -3137,13 +3565,13 @@ class _IdpFormEditorState extends State<_IdpFormEditor> {
                 fontWeight: FontWeight.w600,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             _field('Name', _controllers[0]),
             _field('Position', _controllers[1]),
             _field('Category', _controllers[2]),
             _field('Division', _controllers[3]),
             _field('Department', _controllers[4]),
-            const SizedBox(height: 20),
+            const SizedBox(height: rspFormSectionGap),
             Text(
               'Qualifications',
               style: TextStyle(
@@ -3152,22 +3580,24 @@ class _IdpFormEditorState extends State<_IdpFormEditor> {
                 fontWeight: FontWeight.w600,
               ),
             ),
+            const SizedBox(height: 12),
             _field('Education', _controllers[5]),
             _field('Experience', _controllers[6]),
             _field('Training', _controllers[7]),
             _field('Eligibility', _controllers[8]),
-            const SizedBox(height: 20),
+            const SizedBox(height: rspFormSectionGap),
             Text(
-              'Succession analysis â€“ target positions',
+              'Succession analysis – target positions',
               style: TextStyle(
                 color: AppTheme.primaryNavy,
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
               ),
             ),
+            const SizedBox(height: 12),
             _field('Target position 1', _controllers[9]),
             _field('Target position 2', _controllers[10]),
-            const SizedBox(height: 20),
+            const SizedBox(height: rspFormSectionGap),
             Text(
               'Performance (avg 2 latest SPMS-IPCR)',
               style: TextStyle(
@@ -3176,22 +3606,27 @@ class _IdpFormEditorState extends State<_IdpFormEditor> {
                 fontWeight: FontWeight.w600,
               ),
             ),
+            const SizedBox(height: 12),
             _field('Average rating', _controllers[11]),
             _field('OPCR', _controllers[12]),
             _field('IPCR', _controllers[13]),
+            const SizedBox(height: 12),
             Wrap(
-              spacing: 8,
+              spacing: 12,
+              runSpacing: 10,
               children: IdpEntry.performanceRatingOptions
                   .map(
                     (v) => ChoiceChip(
                       label: Text(v.replaceAll('_', ' ')),
                       selected: _performanceRating == v,
-                      onSelected: (_) => setState(() => _performanceRating = v),
+                      onSelected: ro
+                          ? null
+                          : (_) => setState(() => _performanceRating = v),
                     ),
                   )
                   .toList(),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: rspFormSectionGap),
             Text(
               'Competence assessment',
               style: TextStyle(
@@ -3200,20 +3635,25 @@ class _IdpFormEditorState extends State<_IdpFormEditor> {
                 fontWeight: FontWeight.w600,
               ),
             ),
+            const SizedBox(height: 12),
             _field('Competency', _controllers[14]),
+            const SizedBox(height: 12),
             Wrap(
-              spacing: 8,
+              spacing: 12,
+              runSpacing: 10,
               children: IdpEntry.competenceRatingOptions
                   .map(
                     (v) => ChoiceChip(
                       label: Text(v[0].toUpperCase() + v.substring(1)),
                       selected: _competenceRating == v,
-                      onSelected: (_) => setState(() => _competenceRating = v),
+                      onSelected: ro
+                          ? null
+                          : (_) => setState(() => _competenceRating = v),
                     ),
                   )
                   .toList(),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: rspFormSectionGap),
             Text(
               'Succession priority',
               style: TextStyle(
@@ -3222,9 +3662,12 @@ class _IdpFormEditorState extends State<_IdpFormEditor> {
                 fontWeight: FontWeight.w600,
               ),
             ),
+            const SizedBox(height: 12),
             _field('Total score', _controllers[15]),
+            const SizedBox(height: 12),
             Wrap(
-              spacing: 8,
+              spacing: 12,
+              runSpacing: 10,
               children: IdpEntry.successionPriorityOptions
                   .map(
                     (v) => ChoiceChip(
@@ -3236,13 +3679,15 @@ class _IdpFormEditorState extends State<_IdpFormEditor> {
                             : 'Priority',
                       ),
                       selected: _successionPriorityRating == v,
-                      onSelected: (_) =>
-                          setState(() => _successionPriorityRating = v),
+                      onSelected: ro
+                          ? null
+                          : (_) =>
+                                setState(() => _successionPriorityRating = v),
                     ),
                   )
                   .toList(),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: rspFormSectionGap),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -3258,76 +3703,67 @@ class _IdpFormEditorState extends State<_IdpFormEditor> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                const SizedBox(width: 8),
-                TextButton.icon(
-                  onPressed: _addPlanRow,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Add row'),
-                ),
+                if (!ro) ...[
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    onPressed: _addPlanRow,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add row'),
+                  ),
+                ],
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 14),
             ...List.generate(_planRows.length, (i) {
               final r = _planRows[i];
               return Padding(
-                padding: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.only(bottom: rspFormFieldVerticalGap),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
                       child: TextFormField(
                         controller: r['objectives'],
-                        decoration: const InputDecoration(
-                          labelText: 'Objectives',
-                          border: OutlineInputBorder(),
-                          isDense: true,
-                        ),
+                        readOnly: ro,
+                        decoration: rspUnderlinedField('Objectives'),
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: TextFormField(
                         controller: r['ld_program'],
-                        decoration: const InputDecoration(
-                          labelText: 'L&D program',
-                          border: OutlineInputBorder(),
-                          isDense: true,
-                        ),
+                        readOnly: ro,
+                        decoration: rspUnderlinedField('L&D program'),
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: TextFormField(
                         controller: r['requirements'],
-                        decoration: const InputDecoration(
-                          labelText: 'Requirements',
-                          border: OutlineInputBorder(),
-                          isDense: true,
-                        ),
+                        readOnly: ro,
+                        decoration: rspUnderlinedField('Requirements'),
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: TextFormField(
                         controller: r['time_frame'],
-                        decoration: const InputDecoration(
-                          labelText: 'Time frame',
-                          border: OutlineInputBorder(),
-                          isDense: true,
-                        ),
+                        readOnly: ro,
+                        decoration: rspUnderlinedField('Time frame'),
                       ),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.remove_circle_outline),
-                      onPressed: _planRows.length > 1
-                          ? () => _removePlanRow(i)
-                          : null,
-                    ),
+                    if (!ro)
+                      IconButton(
+                        icon: const Icon(Icons.remove_circle_outline),
+                        onPressed: _planRows.length > 1
+                            ? () => _removePlanRow(i)
+                            : null,
+                      ),
                   ],
                 ),
               );
             }),
-            const SizedBox(height: 20),
+            const SizedBox(height: rspFormSectionGap),
             Text(
               'Signatures (optional)',
               style: TextStyle(
@@ -3336,6 +3772,7 @@ class _IdpFormEditorState extends State<_IdpFormEditor> {
                 fontWeight: FontWeight.w600,
               ),
             ),
+            const SizedBox(height: 12),
             _field('Prepared by', _controllers[16]),
             _field('Reviewed by', _controllers[17]),
             _field('Noted by', _controllers[18]),
@@ -3343,27 +3780,40 @@ class _IdpFormEditorState extends State<_IdpFormEditor> {
             const SizedBox(height: 24),
             const RspFormFooter(),
             const SizedBox(height: 24),
-            Row(
-              children: [
-                FilledButton(onPressed: _save, child: const Text('Save')),
-                const SizedBox(width: 12),
-                TextButton(
-                  onPressed: widget.onCancel,
-                  child: const Text('Cancel'),
+            if (!ro) ...[
+              Row(
+                children: [
+                  FilledButton(onPressed: _save, child: const Text('Save')),
+                  const SizedBox(width: 12),
+                  TextButton(
+                    onPressed: widget.onCancel,
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  IconButton(
+                    onPressed: () => widget.onPrint(_buildCurrentEntry()),
+                    icon: const Icon(Icons.print_rounded),
+                    tooltip: 'Print',
+                  ),
+                  IconButton(
+                    onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
+                    icon: const Icon(Icons.picture_as_pdf_rounded),
+                    tooltip: 'Download PDF',
+                  ),
+                ],
+              ),
+            ] else ...[
+              if (widget.entry.createdAt != null)
+                Text(
+                  'Created: ${widget.entry.createdAt!.toLocal()}',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
-                const SizedBox(width: 12),
-                IconButton(
-                  onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                  icon: const Icon(Icons.print_rounded),
-                  tooltip: 'Print',
+              if (widget.entry.updatedAt != null)
+                Text(
+                  'Last updated: ${widget.entry.updatedAt!.toLocal()}',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
-                IconButton(
-                  onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
-                  icon: const Icon(Icons.picture_as_pdf_rounded),
-                  tooltip: 'Download PDF',
-                ),
-              ],
-            ),
+            ],
           ],
         ),
       ),
@@ -3371,15 +3821,11 @@ class _IdpFormEditorState extends State<_IdpFormEditor> {
   }
 
   Widget _field(String label, TextEditingController c) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+    return RspSpacedOutlineField(
       child: TextFormField(
         controller: c,
-        decoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
-          isDense: true,
-        ),
+        readOnly: widget.readOnly,
+        decoration: rspUnderlinedField(label),
       ),
     );
   }
@@ -3422,6 +3868,22 @@ class _IdpList extends StatelessWidget {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        TextButton(
+                          onPressed: () => showReadOnlySavedEntryDialog(
+                            context,
+                            title: 'Saved IDP',
+                            previewBuilder: () => _IdpFormEditor(
+                              readOnly: true,
+                              entry: e,
+                              onSave: (_) {},
+                              onCancel: () {},
+                              onPrint: (_) async {},
+                              onDownloadPdf: (_) async {},
+                            ),
+                            contentWidth: 920,
+                          ),
+                          child: const Text('View'),
+                        ),
                         TextButton(
                           onPressed: () => onEdit(e),
                           child: const Text('Edit'),
@@ -3543,9 +4005,9 @@ class _RspApplicantsProfileSectionState
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
+        );
       }
     }
   }
@@ -3604,6 +4066,36 @@ class _RspApplicantsProfileSectionState
     }
   }
 
+  void _openSavedRecordsBrowser() {
+    showRspLdSavedRecordsBrowser(
+      context,
+      sheetTitle: 'Saved applicants profiles',
+      emptyMessage: 'No profiles yet.',
+      loading: _loading,
+      items: _entries.map((e) {
+        final pos = (e.positionAppliedFor?.trim().isNotEmpty ?? false)
+            ? e.positionAppliedFor!
+            : '(No position)';
+        return SavedRecordListItem(
+          title: pos,
+          subtitle:
+              '${e.applicants.length} applicant(s) · Posted ${e.dateOfPosting ?? "—"}',
+          detailDialogTitle: 'Applicants profile — $pos',
+          previewContentWidth: 960,
+          previewBuilder: () => _ApplicantsProfileFormEditor(
+            readOnly: true,
+            entry: e,
+            onSave: (_) {},
+            onCancel: () {},
+            onPrint: (_) async {},
+            onDownloadPdf: (_) async {},
+          ),
+          onPrint: () => _printProfile(e),
+        );
+      }).toList(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -3646,6 +4138,18 @@ class _RspApplicantsProfileSectionState
               onPressed: _loading ? null : _load,
               icon: const Icon(Icons.refresh_rounded, size: 20),
               label: const Text('Refresh'),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
+            ),
+            const SizedBox(width: 4),
+            TextButton.icon(
+              onPressed: _loading ? null : _openSavedRecordsBrowser,
+              icon: const Icon(Icons.folder_open_outlined, size: 20),
+              label: const Text('View records'),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
             ),
           ],
         ),
@@ -3680,6 +4184,7 @@ class _ApplicantsProfileFormEditor extends StatefulWidget {
   const _ApplicantsProfileFormEditor({
     super.key,
     required this.entry,
+    this.readOnly = false,
     required this.onSave,
     required this.onCancel,
     required this.onPrint,
@@ -3687,6 +4192,7 @@ class _ApplicantsProfileFormEditor extends StatefulWidget {
   });
 
   final ApplicantsProfileEntry entry;
+  final bool readOnly;
   final void Function(ApplicantsProfileEntry) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(ApplicantsProfileEntry) onPrint;
@@ -3771,12 +4277,14 @@ class _ApplicantsProfileFormEditorState
   }
 
   void _addApplicant() {
+    if (widget.readOnly) return;
     setState(
       () => _applicantRows.add(_applicantRow('', '', '', '', '', '', '')),
     );
   }
 
   void _removeApplicant(int index) {
+    if (widget.readOnly) return;
     if (_applicantRows.length <= 1) return;
     setState(() {
       for (final c in _applicantRows[index].values) {
@@ -3835,11 +4343,13 @@ class _ApplicantsProfileFormEditorState
   }
 
   void _save() {
+    if (widget.readOnly) return;
     widget.onSave(_buildCurrentEntry());
   }
 
   @override
   Widget build(BuildContext context) {
+    final ro = widget.readOnly;
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -3852,21 +4362,34 @@ class _ApplicantsProfileFormEditorState
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const RspFormHeader(formTitle: 'APPLICANTS PROFILE'),
-            TextFormField(
-              controller: _positionApplied,
-              decoration: rspUnderlinedField('Position Applied for:'),
+            const SizedBox(height: 20),
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _positionApplied,
+                readOnly: ro,
+                decoration: rspUnderlinedField('Position Applied for:'),
+              ),
             ),
-            TextFormField(
-              controller: _minRequirements,
-              decoration: rspUnderlinedField('Minimum Requirements:'),
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _minRequirements,
+                readOnly: ro,
+                decoration: rspUnderlinedField('Minimum Requirements:'),
+              ),
             ),
-            TextFormField(
-              controller: _datePosting,
-              decoration: rspUnderlinedField('Date of Posting:'),
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _datePosting,
+                readOnly: ro,
+                decoration: rspUnderlinedField('Date of Posting:'),
+              ),
             ),
-            TextFormField(
-              controller: _closingDate,
-              decoration: rspUnderlinedField('Closing Date:'),
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _closingDate,
+                readOnly: ro,
+                decoration: rspUnderlinedField('Closing Date:'),
+              ),
             ),
             const SizedBox(height: 20),
             Row(
@@ -3882,12 +4405,14 @@ class _ApplicantsProfileFormEditorState
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                TextButton.icon(
-                  onPressed: _addApplicant,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Add applicant'),
-                ),
+                if (!ro) ...[
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    onPressed: _addApplicant,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add applicant'),
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: 8),
@@ -3913,10 +4438,8 @@ class _ApplicantsProfileFormEditorState
                           width: 120,
                           child: TextFormField(
                             controller: r['name'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3925,10 +4448,8 @@ class _ApplicantsProfileFormEditorState
                           width: 90,
                           child: TextFormField(
                             controller: r['course'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3937,10 +4458,8 @@ class _ApplicantsProfileFormEditorState
                           width: 140,
                           child: TextFormField(
                             controller: r['address'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3949,10 +4468,8 @@ class _ApplicantsProfileFormEditorState
                           width: 50,
                           child: TextFormField(
                             controller: r['sex'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3961,10 +4478,8 @@ class _ApplicantsProfileFormEditorState
                           width: 45,
                           child: TextFormField(
                             controller: r['age'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3973,10 +4488,8 @@ class _ApplicantsProfileFormEditorState
                           width: 90,
                           child: TextFormField(
                             controller: r['civil_status'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3985,23 +4498,23 @@ class _ApplicantsProfileFormEditorState
                           width: 100,
                           child: TextFormField(
                             controller: r['remark_disability'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
                       DataCell(
-                        IconButton(
-                          icon: const Icon(
-                            Icons.remove_circle_outline,
-                            size: 20,
-                          ),
-                          onPressed: _applicantRows.length > 1
-                              ? () => _removeApplicant(i)
-                              : null,
-                        ),
+                        ro
+                            ? const SizedBox(width: 40)
+                            : IconButton(
+                                icon: const Icon(
+                                  Icons.remove_circle_outline,
+                                  size: 20,
+                                ),
+                                onPressed: _applicantRows.length > 1
+                                    ? () => _removeApplicant(i)
+                                    : null,
+                              ),
                       ),
                     ],
                   );
@@ -4023,9 +4536,13 @@ class _ApplicantsProfileFormEditorState
                           fontSize: 13,
                         ),
                       ),
-                      TextFormField(
-                        controller: _preparedBy,
-                        decoration: rspUnderlinedField(''),
+                      const SizedBox(height: 10),
+                      RspSpacedOutlineField(
+                        child: TextFormField(
+                          controller: _preparedBy,
+                          readOnly: ro,
+                          decoration: rspUnderlinedField(''),
+                        ),
                       ),
                       Text(
                         '(e.g. HRMDO Staff)',
@@ -4049,9 +4566,13 @@ class _ApplicantsProfileFormEditorState
                           fontSize: 13,
                         ),
                       ),
-                      TextFormField(
-                        controller: _checkedBy,
-                        decoration: rspUnderlinedField(''),
+                      const SizedBox(height: 10),
+                      RspSpacedOutlineField(
+                        child: TextFormField(
+                          controller: _checkedBy,
+                          readOnly: ro,
+                          decoration: rspUnderlinedField(''),
+                        ),
                       ),
                       Text(
                         '(e.g. HRMDO)',
@@ -4068,27 +4589,40 @@ class _ApplicantsProfileFormEditorState
             const SizedBox(height: 24),
             const RspFormFooter(),
             const SizedBox(height: 24),
-            Row(
-              children: [
-                FilledButton(onPressed: _save, child: const Text('Save')),
-                const SizedBox(width: 12),
-                TextButton(
-                  onPressed: widget.onCancel,
-                  child: const Text('Cancel'),
+            if (!ro) ...[
+              Row(
+                children: [
+                  FilledButton(onPressed: _save, child: const Text('Save')),
+                  const SizedBox(width: 12),
+                  TextButton(
+                    onPressed: widget.onCancel,
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  IconButton(
+                    onPressed: () => widget.onPrint(_buildCurrentEntry()),
+                    icon: const Icon(Icons.print_rounded),
+                    tooltip: 'Print',
+                  ),
+                  IconButton(
+                    onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
+                    icon: const Icon(Icons.picture_as_pdf_rounded),
+                    tooltip: 'Download PDF',
+                  ),
+                ],
+              ),
+            ] else ...[
+              if (widget.entry.createdAt != null)
+                Text(
+                  'Created: ${widget.entry.createdAt!.toLocal()}',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
-                const SizedBox(width: 12),
-                IconButton(
-                  onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                  icon: const Icon(Icons.print_rounded),
-                  tooltip: 'Print',
+              if (widget.entry.updatedAt != null)
+                Text(
+                  'Last updated: ${widget.entry.updatedAt!.toLocal()}',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
-                IconButton(
-                  onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
-                  icon: const Icon(Icons.picture_as_pdf_rounded),
-                  tooltip: 'Download PDF',
-                ),
-              ],
-            ),
+            ],
           ],
         ),
       ),
@@ -4255,9 +4789,9 @@ class _RspComparativeAssessmentSectionState
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
+        );
       }
     }
   }
@@ -4316,6 +4850,35 @@ class _RspComparativeAssessmentSectionState
     }
   }
 
+  void _openSavedRecordsBrowser() {
+    showRspLdSavedRecordsBrowser(
+      context,
+      sheetTitle: 'Saved comparative assessments',
+      emptyMessage: 'No assessments yet.',
+      loading: _loading,
+      items: _entries.map((e) {
+        final pos = e.positionToBeFilled?.trim().isNotEmpty == true
+            ? e.positionToBeFilled!
+            : '(No position)';
+        return SavedRecordListItem(
+          title: pos,
+          subtitle: '${e.candidates.length} candidate(s)',
+          detailDialogTitle: 'Comparative assessment — $pos',
+          previewContentWidth: 960,
+          previewBuilder: () => _ComparativeAssessmentEditor(
+            readOnly: true,
+            entry: e,
+            onSave: (_) {},
+            onCancel: () {},
+            onPrint: (_) async {},
+            onDownloadPdf: (_) async {},
+          ),
+          onPrint: () => _printCa(e),
+        );
+      }).toList(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -4331,7 +4894,7 @@ class _RspComparativeAssessmentSectionState
         ),
         const SizedBox(height: 8),
         Text(
-          'Position, minimum requirements, and candidate comparison table. Form onlyâ€”no names or values pre-filled.',
+          'Position, minimum requirements, and candidate comparison table. Form only\u2014no names or values pre-filled.',
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
         ),
         const SizedBox(height: 24),
@@ -4358,6 +4921,18 @@ class _RspComparativeAssessmentSectionState
               onPressed: _loading ? null : _load,
               icon: const Icon(Icons.refresh_rounded, size: 20),
               label: const Text('Refresh'),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
+            ),
+            const SizedBox(width: 4),
+            TextButton.icon(
+              onPressed: _loading ? null : _openSavedRecordsBrowser,
+              icon: const Icon(Icons.folder_open_outlined, size: 20),
+              label: const Text('View records'),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
             ),
           ],
         ),
@@ -4392,6 +4967,7 @@ class _ComparativeAssessmentEditor extends StatefulWidget {
   const _ComparativeAssessmentEditor({
     super.key,
     required this.entry,
+    this.readOnly = false,
     required this.onSave,
     required this.onCancel,
     required this.onPrint,
@@ -4399,6 +4975,7 @@ class _ComparativeAssessmentEditor extends StatefulWidget {
   });
 
   final ComparativeAssessmentEntry entry;
+  final bool readOnly;
   final void Function(ComparativeAssessmentEntry) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(ComparativeAssessmentEntry) onPrint;
@@ -4482,9 +5059,13 @@ class _ComparativeAssessmentEditorState
     super.dispose();
   }
 
-  void _addRow() =>
-      setState(() => _rows.add(_caRow('', '', '', '', '', '', '', '')));
+  void _addRow() {
+    if (widget.readOnly) return;
+    setState(() => _rows.add(_caRow('', '', '', '', '', '', '', '')));
+  }
+
   void _removeRow(int i) {
+    if (widget.readOnly) return;
     if (_rows.length <= 1) return;
     setState(() {
       for (final c in _rows[i].values) {
@@ -4544,11 +5125,13 @@ class _ComparativeAssessmentEditorState
   }
 
   void _save() {
+    if (widget.readOnly) return;
     widget.onSave(_buildCurrentEntry());
   }
 
   @override
   Widget build(BuildContext context) {
+    final ro = widget.readOnly;
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -4571,9 +5154,12 @@ class _ComparativeAssessmentEditorState
                 fontWeight: FontWeight.w600,
               ),
             ),
-            TextFormField(
-              controller: _position,
-              decoration: rspUnderlinedField(''),
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _position,
+                readOnly: ro,
+                decoration: rspUnderlinedField(''),
+              ),
             ),
             const SizedBox(height: 12),
             Text(
@@ -4585,21 +5171,33 @@ class _ComparativeAssessmentEditorState
               ),
             ),
             const SizedBox(height: 6),
-            TextFormField(
-              controller: _edu,
-              decoration: rspUnderlinedField('EDUCATION :'),
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _edu,
+                readOnly: ro,
+                decoration: rspUnderlinedField('EDUCATION :'),
+              ),
             ),
-            TextFormField(
-              controller: _exp,
-              decoration: rspUnderlinedField('EXPERIENCE :'),
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _exp,
+                readOnly: ro,
+                decoration: rspUnderlinedField('EXPERIENCE :'),
+              ),
             ),
-            TextFormField(
-              controller: _elig,
-              decoration: rspUnderlinedField('ELIGIBILITY :'),
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _elig,
+                readOnly: ro,
+                decoration: rspUnderlinedField('ELIGIBILITY :'),
+              ),
             ),
-            TextFormField(
-              controller: _training,
-              decoration: rspUnderlinedField('TRAINING :'),
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _training,
+                readOnly: ro,
+                decoration: rspUnderlinedField('TRAINING :'),
+              ),
             ),
             const SizedBox(height: 16),
             Row(
@@ -4615,12 +5213,14 @@ class _ComparativeAssessmentEditorState
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                TextButton.icon(
-                  onPressed: _addRow,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Add row'),
-                ),
+                if (!ro) ...[
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    onPressed: _addRow,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add row'),
+                  ),
+                ],
               ],
             ),
             SingleChildScrollView(
@@ -4648,11 +5248,8 @@ class _ComparativeAssessmentEditorState
                           width: 100,
                           child: TextFormField(
                             controller: r['name'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                              hintText: 'Name',
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(hintText: 'Name'),
                           ),
                         ),
                       ),
@@ -4661,10 +5258,8 @@ class _ComparativeAssessmentEditorState
                           width: 120,
                           child: TextFormField(
                             controller: r['present_position_salary'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -4673,10 +5268,8 @@ class _ComparativeAssessmentEditorState
                           width: 90,
                           child: TextFormField(
                             controller: r['education'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -4685,10 +5278,8 @@ class _ComparativeAssessmentEditorState
                           width: 70,
                           child: TextFormField(
                             controller: r['training_hrs'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -4697,10 +5288,8 @@ class _ComparativeAssessmentEditorState
                           width: 100,
                           child: TextFormField(
                             controller: r['related_experience'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -4709,10 +5298,8 @@ class _ComparativeAssessmentEditorState
                           width: 80,
                           child: TextFormField(
                             controller: r['eligibility'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -4721,10 +5308,8 @@ class _ComparativeAssessmentEditorState
                           width: 80,
                           child: TextFormField(
                             controller: r['performance_rating'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -4733,23 +5318,23 @@ class _ComparativeAssessmentEditorState
                           width: 90,
                           child: TextFormField(
                             controller: r['remarks'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
                       DataCell(
-                        IconButton(
-                          icon: const Icon(
-                            Icons.remove_circle_outline,
-                            size: 20,
-                          ),
-                          onPressed: _rows.length > 1
-                              ? () => _removeRow(i)
-                              : null,
-                        ),
+                        ro
+                            ? const SizedBox(width: 40)
+                            : IconButton(
+                                icon: const Icon(
+                                  Icons.remove_circle_outline,
+                                  size: 20,
+                                ),
+                                onPressed: _rows.length > 1
+                                    ? () => _removeRow(i)
+                                    : null,
+                              ),
                       ),
                     ],
                   );
@@ -4757,27 +5342,40 @@ class _ComparativeAssessmentEditorState
               ),
             ),
             const SizedBox(height: 16),
-            Row(
-              children: [
-                FilledButton(onPressed: _save, child: const Text('Save')),
-                const SizedBox(width: 12),
-                TextButton(
-                  onPressed: widget.onCancel,
-                  child: const Text('Cancel'),
+            if (!ro) ...[
+              Row(
+                children: [
+                  FilledButton(onPressed: _save, child: const Text('Save')),
+                  const SizedBox(width: 12),
+                  TextButton(
+                    onPressed: widget.onCancel,
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  IconButton(
+                    onPressed: () => widget.onPrint(_buildCurrentEntry()),
+                    icon: const Icon(Icons.print_rounded),
+                    tooltip: 'Print',
+                  ),
+                  IconButton(
+                    onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
+                    icon: const Icon(Icons.picture_as_pdf_rounded),
+                    tooltip: 'Download PDF',
+                  ),
+                ],
+              ),
+            ] else ...[
+              if (widget.entry.createdAt != null)
+                Text(
+                  'Created: ${widget.entry.createdAt!.toLocal()}',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
-                const SizedBox(width: 12),
-                IconButton(
-                  onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                  icon: const Icon(Icons.print_rounded),
-                  tooltip: 'Print',
+              if (widget.entry.updatedAt != null)
+                Text(
+                  'Last updated: ${widget.entry.updatedAt!.toLocal()}',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
-                IconButton(
-                  onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
-                  icon: const Icon(Icons.picture_as_pdf_rounded),
-                  tooltip: 'Download PDF',
-                ),
-              ],
-            ),
+            ],
           ],
         ),
       ),
@@ -4820,6 +5418,22 @@ class _ComparativeAssessmentList extends StatelessWidget {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        TextButton(
+                          onPressed: () => showReadOnlySavedEntryDialog(
+                            context,
+                            title: 'Saved comparative assessment',
+                            previewBuilder: () => _ComparativeAssessmentEditor(
+                              readOnly: true,
+                              entry: e,
+                              onSave: (_) {},
+                              onCancel: () {},
+                              onPrint: (_) async {},
+                              onDownloadPdf: (_) async {},
+                            ),
+                            contentWidth: 960,
+                          ),
+                          child: const Text('View'),
+                        ),
                         TextButton(
                           onPressed: () => onEdit(e),
                           child: const Text('Edit'),
@@ -4880,7 +5494,7 @@ class _ComparativeAssessmentList extends StatelessWidget {
   }
 }
 
-/// RSP: Promotion Certification / Screening â€” form only, no names/values pre-filled.
+/// RSP: Promotion Certification / Screening — form only, no names/values pre-filled.
 class _RspPromotionCertificationSection extends StatefulWidget {
   const _RspPromotionCertificationSection();
 
@@ -4942,9 +5556,9 @@ class _RspPromotionCertificationSectionState
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
+        );
       }
     }
   }
@@ -5003,6 +5617,35 @@ class _RspPromotionCertificationSectionState
     }
   }
 
+  void _openSavedRecordsBrowser() {
+    showRspLdSavedRecordsBrowser(
+      context,
+      sheetTitle: 'Saved promotion certifications',
+      emptyMessage: 'No certifications yet.',
+      loading: _loading,
+      items: _entries.map((e) {
+        final pos = e.positionForPromotion?.trim().isNotEmpty == true
+            ? e.positionForPromotion!
+            : '(No position)';
+        return SavedRecordListItem(
+          title: pos,
+          subtitle: '${e.candidates.length} candidate(s)',
+          detailDialogTitle: 'Promotion certification — $pos',
+          previewContentWidth: 960,
+          previewBuilder: () => _PromotionCertificationEditor(
+            readOnly: true,
+            entry: e,
+            onSave: (_) {},
+            onCancel: () {},
+            onPrint: (_) async {},
+            onDownloadPdf: (_) async {},
+          ),
+          onPrint: () => _printPc(e),
+        );
+      }).toList(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -5018,7 +5661,7 @@ class _RspPromotionCertificationSectionState
         ),
         const SizedBox(height: 8),
         Text(
-          'Certification that candidate(s) have been screened and found qualified for promotion. Form onlyâ€”no names or values pre-filled.',
+          'Certification that candidate(s) have been screened and found qualified for promotion. Form only—no names or values pre-filled.',
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
         ),
         const SizedBox(height: 24),
@@ -5045,6 +5688,18 @@ class _RspPromotionCertificationSectionState
               onPressed: _loading ? null : _load,
               icon: const Icon(Icons.refresh_rounded, size: 20),
               label: const Text('Refresh'),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
+            ),
+            const SizedBox(width: 4),
+            TextButton.icon(
+              onPressed: _loading ? null : _openSavedRecordsBrowser,
+              icon: const Icon(Icons.folder_open_outlined, size: 20),
+              label: const Text('View records'),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
             ),
           ],
         ),
@@ -5079,6 +5734,7 @@ class _PromotionCertificationEditor extends StatefulWidget {
   const _PromotionCertificationEditor({
     super.key,
     required this.entry,
+    this.readOnly = false,
     required this.onSave,
     required this.onCancel,
     required this.onPrint,
@@ -5086,6 +5742,7 @@ class _PromotionCertificationEditor extends StatefulWidget {
   });
 
   final PromotionCertificationEntry entry;
+  final bool readOnly;
   final void Function(PromotionCertificationEntry) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(PromotionCertificationEntry) onPrint;
@@ -5166,8 +5823,13 @@ class _PromotionCertificationEditorState
     super.dispose();
   }
 
-  void _addRow() => setState(() => _rows.add(_pcRow('', '', '', '', '', '')));
+  void _addRow() {
+    if (widget.readOnly) return;
+    setState(() => _rows.add(_pcRow('', '', '', '', '', '')));
+  }
+
   void _removeRow(int i) {
+    if (widget.readOnly) return;
     if (_rows.length <= 1) return;
     setState(() {
       for (final c in _rows[i].values) {
@@ -5223,11 +5885,13 @@ class _PromotionCertificationEditorState
   }
 
   void _save() {
+    if (widget.readOnly) return;
     widget.onSave(_buildCurrentEntry());
   }
 
   @override
   Widget build(BuildContext context) {
+    final ro = widget.readOnly;
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -5242,15 +5906,20 @@ class _PromotionCertificationEditorState
             const RspFormHeader(
               formTitle: 'Promotion Certification / Screening',
             ),
+            const SizedBox(height: 16),
             Text(
               'Position for promotion:',
               style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
             ),
-            TextFormField(
-              controller: _position,
-              decoration: rspUnderlinedField(''),
+            const SizedBox(height: 8),
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _position,
+                readOnly: ro,
+                decoration: rspUnderlinedField(''),
+              ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: rspFormSectionGap),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -5266,14 +5935,17 @@ class _PromotionCertificationEditorState
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                const SizedBox(width: 8),
-                TextButton.icon(
-                  onPressed: _addRow,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Add row'),
-                ),
+                if (!ro) ...[
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    onPressed: _addRow,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add row'),
+                  ),
+                ],
               ],
             ),
+            const SizedBox(height: 14),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: DataTable(
@@ -5295,11 +5967,8 @@ class _PromotionCertificationEditorState
                           width: 120,
                           child: TextFormField(
                             controller: r['name'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                              hintText: 'Name',
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(hintText: 'Name'),
                           ),
                         ),
                       ),
@@ -5308,10 +5977,8 @@ class _PromotionCertificationEditorState
                           width: 80,
                           child: TextFormField(
                             controller: r['col1'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -5320,10 +5987,8 @@ class _PromotionCertificationEditorState
                           width: 80,
                           child: TextFormField(
                             controller: r['col2'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -5332,10 +5997,8 @@ class _PromotionCertificationEditorState
                           width: 80,
                           child: TextFormField(
                             controller: r['col3'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -5344,10 +6007,8 @@ class _PromotionCertificationEditorState
                           width: 80,
                           child: TextFormField(
                             controller: r['col4'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -5356,80 +6017,111 @@ class _PromotionCertificationEditorState
                           width: 80,
                           child: TextFormField(
                             controller: r['col5'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
                       DataCell(
-                        IconButton(
-                          icon: const Icon(
-                            Icons.remove_circle_outline,
-                            size: 20,
-                          ),
-                          onPressed: _rows.length > 1
-                              ? () => _removeRow(i)
-                              : null,
-                        ),
+                        ro
+                            ? const SizedBox(width: 40)
+                            : IconButton(
+                                icon: const Icon(
+                                  Icons.remove_circle_outline,
+                                  size: 20,
+                                ),
+                                onPressed: _rows.length > 1
+                                    ? () => _removeRow(i)
+                                    : null,
+                              ),
                       ),
                     ],
                   );
                 }),
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: rspFormSectionGap),
             const Text(
               'We hereby certify that the above candidate(s) have been screened and found to be qualified for promotion to the above position.',
-              style: TextStyle(fontSize: 13, fontStyle: FontStyle.italic),
+              style: TextStyle(fontSize: 13, fontStyle: FontStyle.italic, height: 1.45),
             ),
-            const SizedBox(height: 16),
-            Row(
+            const SizedBox(height: 20),
+            Text(
+              'Date of certification',
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 6,
+              runSpacing: 12,
               children: [
                 Text(
-                  'Done this ',
-                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                  'Done this',
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 14,
+                    height: 1.35,
+                  ),
                 ),
                 SizedBox(
-                  width: 60,
+                  width: 52,
                   child: TextFormField(
                     controller: _day,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      border: UnderlineInputBorder(),
-                      hintText: 'day',
-                    ),
+                    readOnly: ro,
+                    style: const TextStyle(fontSize: 14, height: 1.2),
+                    decoration: rspInlineClauseField(hintText: 'day'),
                   ),
                 ),
-                const Text(' day of '),
+                Text(
+                  'day of',
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 14,
+                    height: 1.35,
+                  ),
+                ),
                 SizedBox(
-                  width: 80,
+                  width: 120,
                   child: TextFormField(
                     controller: _month,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      border: UnderlineInputBorder(),
-                      hintText: 'month',
-                    ),
+                    readOnly: ro,
+                    style: const TextStyle(fontSize: 14, height: 1.2),
+                    decoration: rspInlineClauseField(hintText: 'month'),
                   ),
                 ),
-                const Text(', '),
+                Text(
+                  ',',
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 14,
+                    height: 1.35,
+                  ),
+                ),
                 SizedBox(
-                  width: 50,
+                  width: 64,
                   child: TextFormField(
                     controller: _year,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      border: UnderlineInputBorder(),
-                      hintText: 'year',
-                    ),
+                    readOnly: ro,
+                    style: const TextStyle(fontSize: 14, height: 1.2),
+                    decoration: rspInlineClauseField(hintText: 'year'),
                   ),
                 ),
-                const Text('.'),
+                Text(
+                  '.',
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 14,
+                    height: 1.35,
+                  ),
+                ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: rspFormSectionGap),
             Text(
               'Signatory (e.g. Secretariat)',
               style: TextStyle(
@@ -5438,30 +6130,44 @@ class _PromotionCertificationEditorState
                 fontWeight: FontWeight.w600,
               ),
             ),
+            const SizedBox(height: 12),
             _field(_signName, 'Name'),
             _field(_signTitle, 'Title'),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                FilledButton(onPressed: _save, child: const Text('Save')),
-                const SizedBox(width: 12),
-                TextButton(
-                  onPressed: widget.onCancel,
-                  child: const Text('Cancel'),
+            const SizedBox(height: 24),
+            if (!ro) ...[
+              Row(
+                children: [
+                  FilledButton(onPressed: _save, child: const Text('Save')),
+                  const SizedBox(width: 16),
+                  TextButton(
+                    onPressed: widget.onCancel,
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    onPressed: () => widget.onPrint(_buildCurrentEntry()),
+                    icon: const Icon(Icons.print_rounded),
+                    tooltip: 'Print',
+                  ),
+                  IconButton(
+                    onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
+                    icon: const Icon(Icons.picture_as_pdf_rounded),
+                    tooltip: 'Download PDF',
+                  ),
+                ],
+              ),
+            ] else ...[
+              if (widget.entry.createdAt != null)
+                Text(
+                  'Created: ${widget.entry.createdAt!.toLocal()}',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
-                const SizedBox(width: 12),
-                IconButton(
-                  onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                  icon: const Icon(Icons.print_rounded),
-                  tooltip: 'Print',
+              if (widget.entry.updatedAt != null)
+                Text(
+                  'Last updated: ${widget.entry.updatedAt!.toLocal()}',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
-                IconButton(
-                  onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
-                  icon: const Icon(Icons.picture_as_pdf_rounded),
-                  tooltip: 'Download PDF',
-                ),
-              ],
-            ),
+            ],
           ],
         ),
       ),
@@ -5469,15 +6175,11 @@ class _PromotionCertificationEditorState
   }
 
   Widget _field(TextEditingController c, String label) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+    return RspSpacedOutlineField(
       child: TextFormField(
         controller: c,
-        decoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
-          isDense: true,
-        ),
+        readOnly: widget.readOnly,
+        decoration: rspUnderlinedField(label),
       ),
     );
   }
@@ -5518,6 +6220,22 @@ class _PromotionCertificationList extends StatelessWidget {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        TextButton(
+                          onPressed: () => showReadOnlySavedEntryDialog(
+                            context,
+                            title: 'Saved promotion certification',
+                            previewBuilder: () => _PromotionCertificationEditor(
+                              readOnly: true,
+                              entry: e,
+                              onSave: (_) {},
+                              onCancel: () {},
+                              onPrint: (_) async {},
+                              onDownloadPdf: (_) async {},
+                            ),
+                            contentWidth: 960,
+                          ),
+                          child: const Text('View'),
+                        ),
                         TextButton(
                           onPressed: () => onEdit(e),
                           child: const Text('Edit'),
@@ -5639,9 +6357,9 @@ class _RspSelectionLineupSectionState
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
+        );
       }
     }
   }
@@ -5700,6 +6418,35 @@ class _RspSelectionLineupSectionState
     }
   }
 
+  void _openSavedRecordsBrowser() {
+    showRspLdSavedRecordsBrowser(
+      context,
+      sheetTitle: 'Saved selection line-ups',
+      emptyMessage: 'No line-ups yet.',
+      loading: _loading,
+      items: _entries.map((e) {
+        final pos = e.vacantPosition?.trim().isNotEmpty == true
+            ? e.vacantPosition!
+            : '(No position)';
+        return SavedRecordListItem(
+          title: pos,
+          subtitle: '${e.date ?? "—"} · ${e.applicants.length} applicant(s)',
+          detailDialogTitle: 'Selection line-up — $pos',
+          previewContentWidth: 1000,
+          previewBuilder: () => _SelectionLineupEditor(
+            readOnly: true,
+            entry: e,
+            onSave: (_) {},
+            onCancel: () {},
+            onPrint: (_) async {},
+            onDownloadPdf: (_) async {},
+          ),
+          onPrint: () => _printSl(e),
+        );
+      }).toList(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -5715,7 +6462,7 @@ class _RspSelectionLineupSectionState
         ),
         const SizedBox(height: 8),
         Text(
-          'Date, name of agency/office, vacant position, item no., and applicants table (name, education, experience, training, eligibility). Form onlyâ€”no pre-filled names.',
+          'Date, name of agency/office, vacant position, item no., and applicants table (name, education, experience, training, eligibility). Form only\u2014no pre-filled names.',
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
         ),
         const SizedBox(height: 24),
@@ -5742,6 +6489,18 @@ class _RspSelectionLineupSectionState
               onPressed: _loading ? null : _load,
               icon: const Icon(Icons.refresh_rounded, size: 20),
               label: const Text('Refresh'),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
+            ),
+            const SizedBox(width: 4),
+            TextButton.icon(
+              onPressed: _loading ? null : _openSavedRecordsBrowser,
+              icon: const Icon(Icons.folder_open_outlined, size: 20),
+              label: const Text('View records'),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
             ),
           ],
         ),
@@ -5776,6 +6535,7 @@ class _SelectionLineupEditor extends StatefulWidget {
   const _SelectionLineupEditor({
     super.key,
     required this.entry,
+    this.readOnly = false,
     required this.onSave,
     required this.onCancel,
     required this.onPrint,
@@ -5783,6 +6543,7 @@ class _SelectionLineupEditor extends StatefulWidget {
   });
 
   final SelectionLineupEntry entry;
+  final bool readOnly;
   final void Function(SelectionLineupEntry) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(SelectionLineupEntry) onPrint;
@@ -5914,11 +6675,13 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
   }
 
   void _save() {
+    if (widget.readOnly) return;
     widget.onSave(_buildCurrentEntry());
   }
 
   @override
   Widget build(BuildContext context) {
+    final ro = widget.readOnly;
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -5931,44 +6694,62 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const RspFormHeader(formTitle: 'SELECTION LINE-UP'),
+            const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 SizedBox(
                   width: 180,
-                  child: TextFormField(
-                    controller: _date,
-                    decoration: rspUnderlinedField('Date'),
+                  child: RspSpacedOutlineField(
+                    child: TextFormField(
+                      controller: _date,
+                      readOnly: ro,
+                      decoration: rspUnderlinedField('Date'),
+                    ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 20),
             Text(
               'Name of Agency/Office:',
               style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
             ),
-            TextFormField(
-              controller: _agency,
-              decoration: rspUnderlinedField(''),
+            const SizedBox(height: 8),
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _agency,
+                readOnly: ro,
+                decoration: rspUnderlinedField(''),
+              ),
             ),
+            const SizedBox(height: 4),
             Text(
               'Vacant Position:',
               style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
             ),
-            TextFormField(
-              controller: _position,
-              decoration: rspUnderlinedField(''),
+            const SizedBox(height: 8),
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _position,
+                readOnly: ro,
+                decoration: rspUnderlinedField(''),
+              ),
             ),
+            const SizedBox(height: 4),
             Text(
               'Item No.:',
               style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
             ),
-            TextFormField(
-              controller: _itemNo,
-              decoration: rspUnderlinedField(''),
+            const SizedBox(height: 8),
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _itemNo,
+                readOnly: ro,
+                decoration: rspUnderlinedField(''),
+              ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: rspFormSectionGap),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -5984,14 +6765,17 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                const SizedBox(width: 8),
-                TextButton.icon(
-                  onPressed: _addRow,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Add applicant'),
-                ),
+                if (!ro) ...[
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    onPressed: _addRow,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add applicant'),
+                  ),
+                ],
               ],
             ),
+            const SizedBox(height: 14),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: DataTable(
@@ -6012,11 +6796,8 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
                           width: 140,
                           child: TextFormField(
                             controller: r['name'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                              hintText: 'Name',
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(hintText: 'Name'),
                           ),
                         ),
                       ),
@@ -6025,10 +6806,8 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
                           width: 120,
                           child: TextFormField(
                             controller: r['education'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -6037,10 +6816,8 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
                           width: 120,
                           child: TextFormField(
                             controller: r['experience'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -6049,10 +6826,8 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
                           width: 100,
                           child: TextFormField(
                             controller: r['training'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -6061,30 +6836,30 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
                           width: 100,
                           child: TextFormField(
                             controller: r['eligibility'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
                       DataCell(
-                        IconButton(
-                          icon: const Icon(
-                            Icons.remove_circle_outline,
-                            size: 20,
-                          ),
-                          onPressed: _rows.length > 1
-                              ? () => _removeRow(i)
-                              : null,
-                        ),
+                        ro
+                            ? const SizedBox(width: 40)
+                            : IconButton(
+                                icon: const Icon(
+                                  Icons.remove_circle_outline,
+                                  size: 20,
+                                ),
+                                onPressed: _rows.length > 1
+                                    ? () => _removeRow(i)
+                                    : null,
+                              ),
                       ),
                     ],
                   );
                 }),
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: rspFormSectionGap),
             Text(
               'Prepared by',
               style: TextStyle(
@@ -6093,30 +6868,44 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
                 fontWeight: FontWeight.w600,
               ),
             ),
+            const SizedBox(height: 12),
             _field(_preparedName, 'Name'),
             _field(_preparedTitle, 'Title'),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                FilledButton(onPressed: _save, child: const Text('Save')),
-                const SizedBox(width: 12),
-                TextButton(
-                  onPressed: widget.onCancel,
-                  child: const Text('Cancel'),
+            const SizedBox(height: 24),
+            if (!ro) ...[
+              Row(
+                children: [
+                  FilledButton(onPressed: _save, child: const Text('Save')),
+                  const SizedBox(width: 16),
+                  TextButton(
+                    onPressed: widget.onCancel,
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    onPressed: () => widget.onPrint(_buildCurrentEntry()),
+                    icon: const Icon(Icons.print_rounded),
+                    tooltip: 'Print',
+                  ),
+                  IconButton(
+                    onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
+                    icon: const Icon(Icons.picture_as_pdf_rounded),
+                    tooltip: 'Download PDF',
+                  ),
+                ],
+              ),
+            ] else ...[
+              if (widget.entry.createdAt != null)
+                Text(
+                  'Created: ${widget.entry.createdAt!.toLocal()}',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
-                const SizedBox(width: 12),
-                IconButton(
-                  onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                  icon: const Icon(Icons.print_rounded),
-                  tooltip: 'Print',
+              if (widget.entry.updatedAt != null)
+                Text(
+                  'Last updated: ${widget.entry.updatedAt!.toLocal()}',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
-                IconButton(
-                  onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
-                  icon: const Icon(Icons.picture_as_pdf_rounded),
-                  tooltip: 'Download PDF',
-                ),
-              ],
-            ),
+            ],
           ],
         ),
       ),
@@ -6124,15 +6913,11 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
   }
 
   Widget _field(TextEditingController c, String label) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+    return RspSpacedOutlineField(
       child: TextFormField(
         controller: c,
-        decoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
-          isDense: true,
-        ),
+        readOnly: widget.readOnly,
+        decoration: rspUnderlinedField(label),
       ),
     );
   }
@@ -6175,6 +6960,22 @@ class _SelectionLineupList extends StatelessWidget {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        TextButton(
+                          onPressed: () => showReadOnlySavedEntryDialog(
+                            context,
+                            title: 'Saved selection line-up',
+                            previewBuilder: () => _SelectionLineupEditor(
+                              readOnly: true,
+                              entry: e,
+                              onSave: (_) {},
+                              onCancel: () {},
+                              onPrint: (_) async {},
+                              onDownloadPdf: (_) async {},
+                            ),
+                            contentWidth: 1000,
+                          ),
+                          child: const Text('View'),
+                        ),
                         TextButton(
                           onPressed: () => onEdit(e),
                           child: const Text('Edit'),
@@ -6295,9 +7096,9 @@ class _RspTurnAroundTimeSectionState extends State<_RspTurnAroundTimeSection> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
+        );
       }
     }
   }
@@ -6356,6 +7157,35 @@ class _RspTurnAroundTimeSectionState extends State<_RspTurnAroundTimeSection> {
     }
   }
 
+  void _openSavedRecordsBrowser() {
+    showRspLdSavedRecordsBrowser(
+      context,
+      sheetTitle: 'Saved turn-around time records',
+      emptyMessage: 'No entries yet.',
+      loading: _loading,
+      items: _entries.map((e) {
+        final pos = e.position?.trim().isNotEmpty == true
+            ? e.position!
+            : '(No position)';
+        return SavedRecordListItem(
+          title: pos,
+          subtitle: '${e.office ?? "—"} · ${e.applicants.length} applicant(s)',
+          detailDialogTitle: 'Turn-around time — $pos',
+          previewContentWidth: 1200,
+          previewBuilder: () => _TurnAroundTimeEditor(
+            readOnly: true,
+            entry: e,
+            onSave: (_) {},
+            onCancel: () {},
+            onPrint: (_) async {},
+            onDownloadPdf: (_) async {},
+          ),
+          onPrint: () => _printTat(e),
+        );
+      }).toList(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -6398,6 +7228,18 @@ class _RspTurnAroundTimeSectionState extends State<_RspTurnAroundTimeSection> {
               onPressed: _loading ? null : _load,
               icon: const Icon(Icons.refresh_rounded, size: 20),
               label: const Text('Refresh'),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
+            ),
+            const SizedBox(width: 4),
+            TextButton.icon(
+              onPressed: _loading ? null : _openSavedRecordsBrowser,
+              icon: const Icon(Icons.folder_open_outlined, size: 20),
+              label: const Text('View records'),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
             ),
           ],
         ),
@@ -6432,6 +7274,7 @@ class _TurnAroundTimeEditor extends StatefulWidget {
   const _TurnAroundTimeEditor({
     super.key,
     required this.entry,
+    this.readOnly = false,
     required this.onSave,
     required this.onCancel,
     required this.onPrint,
@@ -6439,6 +7282,7 @@ class _TurnAroundTimeEditor extends StatefulWidget {
   });
 
   final TurnAroundTimeEntry entry;
+  final bool readOnly;
   final void Function(TurnAroundTimeEntry) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(TurnAroundTimeEntry) onPrint;
@@ -6452,6 +7296,7 @@ class _TurnAroundTimeEditorState extends State<_TurnAroundTimeEditor> {
   late List<TextEditingController> _header;
   late List<TextEditingController> _signatory;
   late List<Map<String, TextEditingController>> _rows;
+  final ScrollController _applicantsTableHScroll = ScrollController();
 
   static const List<String> _rowKeys = [
     'name',
@@ -6610,11 +7455,13 @@ class _TurnAroundTimeEditorState extends State<_TurnAroundTimeEditor> {
   }
 
   void _save() {
+    if (widget.readOnly) return;
     widget.onSave(_buildCurrentEntry());
   }
 
   @override
   Widget build(BuildContext context) {
+    final ro = widget.readOnly;
     const labels = [
       'Name of Applicant',
       'Date of Initial Assesment',
@@ -6656,9 +7503,12 @@ class _TurnAroundTimeEditorState extends State<_TurnAroundTimeEditor> {
                         fontSize: 13,
                       ),
                     ),
-                    TextFormField(
-                      controller: _header[0],
-                      decoration: rspUnderlinedField(''),
+                    RspSpacedOutlineField(
+                      child: TextFormField(
+                        controller: _header[0],
+                        readOnly: ro,
+                        decoration: rspUnderlinedField(''),
+                      ),
                     ),
                     Text(
                       'Office:',
@@ -6668,9 +7518,12 @@ class _TurnAroundTimeEditorState extends State<_TurnAroundTimeEditor> {
                         fontSize: 13,
                       ),
                     ),
-                    TextFormField(
-                      controller: _header[1],
-                      decoration: rspUnderlinedField(''),
+                    RspSpacedOutlineField(
+                      child: TextFormField(
+                        controller: _header[1],
+                        readOnly: ro,
+                        decoration: rspUnderlinedField(''),
+                      ),
                     ),
                     Text(
                       'No. of Vacant Position:',
@@ -6680,9 +7533,12 @@ class _TurnAroundTimeEditorState extends State<_TurnAroundTimeEditor> {
                         fontSize: 13,
                       ),
                     ),
-                    TextFormField(
-                      controller: _header[2],
-                      decoration: rspUnderlinedField(''),
+                    RspSpacedOutlineField(
+                      child: TextFormField(
+                        controller: _header[2],
+                        readOnly: ro,
+                        decoration: rspUnderlinedField(''),
+                      ),
                     ),
                     Text(
                       'Date of Publication:',
@@ -6692,9 +7548,12 @@ class _TurnAroundTimeEditorState extends State<_TurnAroundTimeEditor> {
                         fontSize: 13,
                       ),
                     ),
-                    TextFormField(
-                      controller: _header[3],
-                      decoration: rspUnderlinedField(''),
+                    RspSpacedOutlineField(
+                      child: TextFormField(
+                        controller: _header[3],
+                        readOnly: ro,
+                        decoration: rspUnderlinedField(''),
+                      ),
                     ),
                     Text(
                       'End Search:',
@@ -6704,9 +7563,12 @@ class _TurnAroundTimeEditorState extends State<_TurnAroundTimeEditor> {
                         fontSize: 13,
                       ),
                     ),
-                    TextFormField(
-                      controller: _header[4],
-                      decoration: rspUnderlinedField(''),
+                    RspSpacedOutlineField(
+                      child: TextFormField(
+                        controller: _header[4],
+                        readOnly: ro,
+                        decoration: rspUnderlinedField(''),
+                      ),
                     ),
                     Text(
                       'Q.S.:',
@@ -6716,9 +7578,12 @@ class _TurnAroundTimeEditorState extends State<_TurnAroundTimeEditor> {
                         fontSize: 13,
                       ),
                     ),
-                    TextFormField(
-                      controller: _header[5],
-                      decoration: rspUnderlinedField(''),
+                    RspSpacedOutlineField(
+                      child: TextFormField(
+                        controller: _header[5],
+                        readOnly: ro,
+                        decoration: rspUnderlinedField(''),
+                      ),
                     ),
                   ],
                 ),
@@ -6740,59 +7605,109 @@ class _TurnAroundTimeEditorState extends State<_TurnAroundTimeEditor> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                const SizedBox(width: 8),
-                TextButton.icon(
-                  onPressed: _addRow,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Add applicant'),
-                ),
+                if (!ro) ...[
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    onPressed: _addRow,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add applicant'),
+                  ),
+                ],
               ],
             ),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
-                columns: [
-                  for (var i = 0; i < _rowKeys.length; i++)
-                    DataColumn(
-                      label: Text(
-                        labels[i],
-                        style: const TextStyle(fontSize: 11),
+            const SizedBox(height: 6),
+            Text(
+              'Scroll horizontally to see all columns.',
+              style: TextStyle(
+                fontSize: 12,
+                color: AppTheme.textSecondary,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+            const SizedBox(height: 8),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                return SizedBox(
+                  width: constraints.maxWidth,
+                  child: ScrollConfiguration(
+                    behavior: const MaterialScrollBehavior().copyWith(
+                      dragDevices: {
+                        PointerDeviceKind.touch,
+                        PointerDeviceKind.mouse,
+                        PointerDeviceKind.trackpad,
+                        PointerDeviceKind.stylus,
+                      },
+                    ),
+                    child: Scrollbar(
+                      controller: _applicantsTableHScroll,
+                      thumbVisibility: true,
+                      trackVisibility: kIsWeb,
+                      thickness: kIsWeb ? 8 : null,
+                      radius: const Radius.circular(4),
+                      child: SingleChildScrollView(
+                        controller: _applicantsTableHScroll,
+                        scrollDirection: Axis.horizontal,
+                        primary: false,
+                        physics: const ClampingScrollPhysics(),
+                        child: DataTable(
+                          horizontalMargin: 12,
+                          columnSpacing: 16,
+                          columns: [
+                            for (var i = 0; i < _rowKeys.length; i++)
+                              DataColumn(
+                                label: ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    minWidth: 100,
+                                    maxWidth: 140,
+                                  ),
+                                  child: Text(
+                                    labels[i],
+                                    style: const TextStyle(fontSize: 11),
+                                    softWrap: true,
+                                    maxLines: 3,
+                                    overflow: TextOverflow.fade,
+                                  ),
+                                ),
+                              ),
+                            const DataColumn(label: Text('')),
+                          ],
+                          rows: List.generate(_rows.length, (i) {
+                            final r = _rows[i];
+                            return DataRow(
+                              cells: [
+                                for (final k in _rowKeys)
+                                  DataCell(
+                                    SizedBox(
+                                      width: 104,
+                                      child: TextFormField(
+                                        controller: r[k],
+                                        readOnly: ro,
+                                        decoration: rspTableCellField(),
+                                      ),
+                                    ),
+                                  ),
+                                DataCell(
+                                  ro
+                                      ? const SizedBox(width: 40)
+                                      : IconButton(
+                                          icon: const Icon(
+                                            Icons.remove_circle_outline,
+                                            size: 20,
+                                          ),
+                                          onPressed: _rows.length > 1
+                                              ? () => _removeRow(i)
+                                              : null,
+                                        ),
+                                ),
+                              ],
+                            );
+                          }),
+                        ),
                       ),
                     ),
-                  const DataColumn(label: Text('')),
-                ],
-                rows: List.generate(_rows.length, (i) {
-                  final r = _rows[i];
-                  return DataRow(
-                    cells: [
-                      for (final k in _rowKeys)
-                        DataCell(
-                          SizedBox(
-                            width: 90,
-                            child: TextFormField(
-                              controller: r[k],
-                              decoration: const InputDecoration(
-                                isDense: true,
-                                border: OutlineInputBorder(),
-                              ),
-                            ),
-                          ),
-                        ),
-                      DataCell(
-                        IconButton(
-                          icon: const Icon(
-                            Icons.remove_circle_outline,
-                            size: 20,
-                          ),
-                          onPressed: _rows.length > 1
-                              ? () => _removeRow(i)
-                              : null,
-                        ),
-                      ),
-                    ],
-                  );
-                }),
-              ),
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 16),
             Text(
@@ -6808,27 +7723,40 @@ class _TurnAroundTimeEditorState extends State<_TurnAroundTimeEditor> {
             _f(_signatory[2], 'Noted by (name)'),
             _f(_signatory[3], 'Noted by (title)'),
             const SizedBox(height: 16),
-            Row(
-              children: [
-                FilledButton(onPressed: _save, child: const Text('Save')),
-                const SizedBox(width: 12),
-                TextButton(
-                  onPressed: widget.onCancel,
-                  child: const Text('Cancel'),
+            if (!ro) ...[
+              Row(
+                children: [
+                  FilledButton(onPressed: _save, child: const Text('Save')),
+                  const SizedBox(width: 12),
+                  TextButton(
+                    onPressed: widget.onCancel,
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  IconButton(
+                    onPressed: () => widget.onPrint(_buildCurrentEntry()),
+                    icon: const Icon(Icons.print_rounded),
+                    tooltip: 'Print',
+                  ),
+                  IconButton(
+                    onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
+                    icon: const Icon(Icons.picture_as_pdf_rounded),
+                    tooltip: 'Download PDF',
+                  ),
+                ],
+              ),
+            ] else ...[
+              if (widget.entry.createdAt != null)
+                Text(
+                  'Created: ${widget.entry.createdAt!.toLocal()}',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
-                const SizedBox(width: 12),
-                IconButton(
-                  onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                  icon: const Icon(Icons.print_rounded),
-                  tooltip: 'Print',
+              if (widget.entry.updatedAt != null)
+                Text(
+                  'Last updated: ${widget.entry.updatedAt!.toLocal()}',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
-                IconButton(
-                  onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
-                  icon: const Icon(Icons.picture_as_pdf_rounded),
-                  tooltip: 'Download PDF',
-                ),
-              ],
-            ),
+            ],
           ],
         ),
       ),
@@ -6836,15 +7764,11 @@ class _TurnAroundTimeEditorState extends State<_TurnAroundTimeEditor> {
   }
 
   Widget _f(TextEditingController c, String label) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+    return RspSpacedOutlineField(
       child: TextFormField(
         controller: c,
-        decoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
-          isDense: true,
-        ),
+        readOnly: widget.readOnly,
+        decoration: rspUnderlinedField(label),
       ),
     );
   }
@@ -6887,6 +7811,22 @@ class _TurnAroundTimeList extends StatelessWidget {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        TextButton(
+                          onPressed: () => showReadOnlySavedEntryDialog(
+                            context,
+                            title: 'Saved turn-around time',
+                            previewBuilder: () => _TurnAroundTimeEditor(
+                              readOnly: true,
+                              entry: e,
+                              onSave: (_) {},
+                              onCancel: () {},
+                              onPrint: (_) async {},
+                              onDownloadPdf: (_) async {},
+                            ),
+                            contentWidth: 1200,
+                          ),
+                          child: const Text('View'),
+                        ),
                         TextButton(
                           onPressed: () => onEdit(e),
                           child: const Text('Edit'),
@@ -6951,12 +7891,15 @@ class _TurnAroundTimeList extends StatelessWidget {
 class _VacancyFormItem {
   _VacancyFormItem()
     : headline = TextEditingController(),
-      body = TextEditingController();
+      body = TextEditingController(),
+      maxApplicants = TextEditingController();
   final TextEditingController headline;
   final TextEditingController body;
+  final TextEditingController maxApplicants;
   void dispose() {
     headline.dispose();
     body.dispose();
+    maxApplicants.dispose();
   }
 }
 
@@ -6985,6 +7928,8 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
           final item = _VacancyFormItem();
           item.headline.text = v.headline ?? '';
           item.body.text = v.body ?? '';
+          item.maxApplicants.text =
+              v.maxApplicants != null ? '${v.maxApplicants}' : '';
           next.add(item);
         }
       } else {
@@ -7058,12 +8003,21 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
     try {
       final list = _vacancies
           .map(
-            (v) => JobVacancyItem(
-              headline: v.headline.text.trim().isEmpty
-                  ? null
-                  : v.headline.text.trim(),
-              body: v.body.text.trim().isEmpty ? null : v.body.text.trim(),
-            ),
+            (v) {
+              final rawMax = v.maxApplicants.text.trim();
+              int? maxParsed;
+              if (rawMax.isNotEmpty) {
+                maxParsed = int.tryParse(rawMax);
+                if (maxParsed != null && maxParsed < 1) maxParsed = null;
+              }
+              return JobVacancyItem(
+                headline: v.headline.text.trim().isEmpty
+                    ? null
+                    : v.headline.text.trim(),
+                body: v.body.text.trim().isEmpty ? null : v.body.text.trim(),
+                maxApplicants: maxParsed,
+              );
+            },
           )
           .toList();
       final a = JobVacancyAnnouncement(
@@ -7084,19 +8038,9 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
       }
     } catch (e) {
       if (mounted) {
-        String message = 'Failed to save: $e';
-        if (e is DioException) {
-          final data = e.response?.data;
-          if (data is Map) {
-            final details = data['details'] ?? data['error'];
-            if (details != null) {
-              message = 'Failed to save: ${details.toString()}';
-            }
-          }
-        }
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(message)));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
+        );
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -7322,6 +8266,44 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
                                 ),
                                 maxLines: 3,
                               ),
+                              const SizedBox(height: 14),
+                              Text(
+                                'Max applicants (optional)',
+                                style: TextStyle(
+                                  color: AppTheme.textSecondary,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Counts only applicants still in process. Document declined, exam failed, final interview failed, or hired (registered) frees a slot.',
+                                style: TextStyle(
+                                  color: AppTheme.textSecondary.withOpacity(0.9),
+                                  fontSize: 11.5,
+                                  height: 1.35,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              TextField(
+                                controller: v.maxApplicants,
+                                onChanged: (_) => setState(() {}),
+                                keyboardType: TextInputType.number,
+                                decoration: InputDecoration(
+                                  hintText:
+                                      'Leave blank for no limit (e.g. 50)',
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  filled: true,
+                                  fillColor: Colors.white,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 12,
+                                  ),
+                                ),
+                                maxLines: 1,
+                              ),
                             ],
                           ),
                         ),
@@ -7375,33 +8357,421 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   List<RecruitmentApplication> _applications = [];
   Map<String, RecruitmentExamResult> _examResults = {};
 
-  /// All files in storage per applicationId so admin can see every file (not just DB primary).
-  Map<String, List<({String path, String fileName})>> _storageFilesByAppId = {};
   bool _loading = true;
   bool _syncing = false;
   final ScrollController _horizontalScrollController = ScrollController();
 
-  double? _scoreFromSelectedAndCorrect({
-    required Map<String, dynamic> section,
-  }) {
-    final correctRaw = section['correct'];
-    final selectedRaw = section['selected'];
-    if (correctRaw is! List || selectedRaw is! List) return null;
-    final correct = correctRaw
-        .map((e) => e is num ? e.toInt() : int.tryParse(e.toString()) ?? -1)
-        .toList();
-    final selected = selectedRaw
-        .map((e) => e is num ? e.toInt() : int.tryParse(e.toString()) ?? -1)
-        .toList();
-    if (correct.isEmpty) return null;
+  static Map<String, dynamic>? _examAnswersSubsection(
+    Map<String, dynamic>? answersJson,
+    String key,
+  ) {
+    if (answersJson == null) return null;
+    final v = answersJson[key];
+    if (v is Map<String, dynamic>) return v;
+    if (v is Map) return Map<String, dynamic>.from(v);
+    return null;
+  }
 
-    int total = correct.length;
-    int correctCount = 0;
-    for (int i = 0; i < total; i++) {
-      final chosen = i < selected.length ? selected[i] : -1;
-      if (chosen == correct[i]) correctCount++;
+  double? _sectionScorePercent(
+    Map<String, dynamic>? answersJson,
+    String sectionKey,
+  ) {
+    final section = _examAnswersSubsection(answersJson, sectionKey);
+    if (section == null) return null;
+    return RspScreeningScores.mcqSectionPercent(section);
+  }
+
+  double? _beiSectionScorePercent(Map<String, dynamic>? answersJson) {
+    final bei = _examAnswersSubsection(answersJson, 'bei');
+    if (bei == null) return null;
+    return RspScreeningScores.beiSectionPercent(bei);
+  }
+
+  bool _hasBeiAnswers(RecruitmentExamResult exam) {
+    final bei = _examAnswersSubsection(exam.answersJson, 'bei');
+    final a = bei?['answers'];
+    return a is List && a.isNotEmpty;
+  }
+
+  Future<void> _openBeiGrading(
+    BuildContext context,
+    RecruitmentApplication app,
+    RecruitmentExamResult exam,
+  ) async {
+    await showRspBeiGradingDialog(
+      context: context,
+      applicant: app,
+      exam: exam,
+      onSaved: _load,
+    );
+  }
+
+  static const Color _kPassBg = Color(0xFFE8F5E9);
+  static const Color _kPassFg = Color(0xFF1B5E20);
+  static const Color _kPassBorder = Color(0xFF43A047);
+  static const Color _kFailBg = Color(0xFFFFEBEE);
+  static const Color _kFailFg = Color(0xFFB71C1C);
+  static const Color _kFailBorder = Color(0xFFE57373);
+
+  static TextStyle _scoreBreakdownScoreStyle({
+    required bool isNA,
+    double? value,
+  }) {
+    final tabular = [const FontFeature.tabularFigures()];
+    if (isNA) {
+      return TextStyle(
+        fontSize: 13,
+        fontFeatures: tabular,
+        color: AppTheme.textSecondary.withValues(alpha: 0.85),
+        fontStyle: FontStyle.italic,
+      );
     }
-    return (correctCount / total) * 100.0;
+    final passSection = value != null && value >= 60;
+    return TextStyle(
+      fontSize: 14,
+      fontWeight: FontWeight.w700,
+      fontFeatures: tabular,
+      color: passSection ? _kPassFg : _kFailFg,
+    );
+  }
+
+  static Widget _scoreBreakdownStatusPill({
+    required RecruitmentExamResult? exam,
+  }) {
+    if (exam == null) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: AppTheme.lightGray,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+        ),
+        child: Text(
+          'No exam',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: AppTheme.textSecondary.withValues(alpha: 0.9),
+          ),
+        ),
+      );
+    }
+    final pass = exam.passed;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: pass ? _kPassBg : _kFailBg,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: pass ? _kPassBorder : _kFailBorder, width: 1),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            pass ? Icons.check_circle_rounded : Icons.cancel_rounded,
+            size: 16,
+            color: pass ? _kPassFg : _kFailFg,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            pass ? 'Passed' : 'Failed',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+              color: pass ? _kPassFg : _kFailFg,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _scoreBreakdownGuideBullet(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '•',
+            style: TextStyle(
+              color: AppTheme.primaryNavy,
+              fontWeight: FontWeight.w900,
+              fontSize: 14,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.45,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _scoreBreakdownSidePanel() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppTheme.primaryNavy.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.07)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.info_outline_rounded,
+                size: 22,
+                color: AppTheme.primaryNavy,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Scoring guide',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _scoreBreakdownGuideBullet(
+            'General, Math, and General information columns are filled automatically from the applicant’s multiple-choice answers.',
+          ),
+          _scoreBreakdownGuideBullet(
+            'BEI shows an average only after every behavioral question is scored (0–100). Use the grade icon in this table or Grade BEI on the main applications list.',
+          ),
+          _scoreBreakdownGuideBullet(
+            'Overall screening % averages all sections that apply. Pass / fail uses a 60% cutoff on that overall value.',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScoreBreakdownDataTable(BuildContext dialogContext) {
+    final borderColor = Colors.black.withValues(alpha: 0.08);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppTheme.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: borderColor),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Scrollbar(
+          thumbVisibility: true,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.vertical,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: DataTable(
+                columnSpacing: 28,
+                horizontalMargin: 16,
+                headingRowHeight: 48,
+                dataRowMinHeight: 52,
+                dataRowMaxHeight: 72,
+                border: TableBorder(
+                  top: BorderSide(color: borderColor),
+                  bottom: BorderSide(color: borderColor),
+                  horizontalInside: BorderSide(color: borderColor),
+                ),
+                dividerThickness: 0,
+                headingRowColor: WidgetStateProperty.all(
+                  AppTheme.primaryNavy.withValues(alpha: 0.08),
+                ),
+                headingTextStyle: TextStyle(
+                  color: AppTheme.primaryNavy,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 12,
+                  letterSpacing: 0.2,
+                ),
+                dataTextStyle: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 13,
+                ),
+                columns: [
+                  const DataColumn(label: Text('Applicant')),
+                  const DataColumn(label: Text('Position')),
+                  const DataColumn(label: Text('General'), numeric: true),
+                  const DataColumn(label: Text('Math'), numeric: true),
+                  const DataColumn(label: Text('Gen. info'), numeric: true),
+                  const DataColumn(label: Text('BEI'), numeric: true),
+                  const DataColumn(
+                    label: Text('Grade'),
+                  ),
+                  const DataColumn(label: Text('Result')),
+                ],
+                rows: _applications.map((app) {
+                  final exam = _examResults[app.id.toLowerCase()];
+                  double? generalScore;
+                  double? mathScore;
+                  double? infoScore;
+                  double? beiScore;
+                  final answersJson = exam?.answersJson;
+                  if (answersJson != null) {
+                    generalScore = _sectionScorePercent(answersJson, 'general');
+                    mathScore = _sectionScorePercent(answersJson, 'math');
+                    infoScore = _sectionScorePercent(
+                      answersJson,
+                      'general_info',
+                    );
+                    beiScore = _beiSectionScorePercent(answersJson);
+                  }
+
+                  String scoreLabel(double? v) =>
+                      v == null ? '—' : '${v.toStringAsFixed(0)}%';
+
+                  final canGradeBei =
+                      exam != null && _hasBeiAnswers(exam);
+
+                  return DataRow(
+                    cells: [
+                      DataCell(
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(
+                            minWidth: 150,
+                            maxWidth: 220,
+                          ),
+                          child: Text(
+                            app.fullName,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            softWrap: true,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ),
+                      DataCell(
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(
+                            minWidth: 80,
+                            maxWidth: 140,
+                          ),
+                          child: Text(
+                            (app.positionAppliedFor != null &&
+                                    app.positionAppliedFor!.trim().isNotEmpty)
+                                ? app.positionAppliedFor!.trim()
+                                : '—',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            softWrap: true,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: AppTheme.textSecondary.withValues(
+                                alpha: 0.95,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      DataCell(
+                        Text(
+                          scoreLabel(generalScore),
+                          textAlign: TextAlign.end,
+                          style: _scoreBreakdownScoreStyle(
+                            isNA: generalScore == null,
+                            value: generalScore,
+                          ),
+                        ),
+                      ),
+                      DataCell(
+                        Text(
+                          scoreLabel(mathScore),
+                          textAlign: TextAlign.end,
+                          style: _scoreBreakdownScoreStyle(
+                            isNA: mathScore == null,
+                            value: mathScore,
+                          ),
+                        ),
+                      ),
+                      DataCell(
+                        Text(
+                          scoreLabel(infoScore),
+                          textAlign: TextAlign.end,
+                          style: _scoreBreakdownScoreStyle(
+                            isNA: infoScore == null,
+                            value: infoScore,
+                          ),
+                        ),
+                      ),
+                      DataCell(
+                        Text(
+                          scoreLabel(beiScore),
+                          textAlign: TextAlign.end,
+                          style: _scoreBreakdownScoreStyle(
+                            isNA: beiScore == null,
+                            value: beiScore,
+                          ),
+                        ),
+                      ),
+                      DataCell(
+                        Center(
+                          child: canGradeBei
+                              ? IconButton(
+                                  tooltip: 'Grade BEI',
+                                  icon: Icon(
+                                    Icons.rate_review_outlined,
+                                    color: AppTheme.primaryNavy,
+                                    size: 22,
+                                  ),
+                                  onPressed: () {
+                                    showRspBeiGradingDialog(
+                                      context: dialogContext,
+                                      applicant: app,
+                                      exam: exam,
+                                      onSaved: _load,
+                                    );
+                                  },
+                                )
+                              : Tooltip(
+                                  message: 'No BEI answers on file',
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(8),
+                                    child: Icon(
+                                      Icons.remove_rounded,
+                                      size: 20,
+                                      color: AppTheme.textSecondary
+                                          .withValues(alpha: 0.3),
+                                    ),
+                                  ),
+                                ),
+                        ),
+                      ),
+                      DataCell(
+                        _scoreBreakdownStatusPill(exam: exam),
+                      ),
+                    ],
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _showApplicantScoreBreakdownDialog() async {
@@ -7409,107 +8779,113 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
       context: context,
       builder: (ctx) {
         final hasData = _applications.isNotEmpty;
+        final borderColor = Colors.black.withValues(alpha: 0.08);
         return AlertDialog(
-          title: const Text('Applicant Score Breakdown'),
-          content: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 980, maxHeight: 460),
-            child: hasData
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(14),
-                    child: Scrollbar(
-                      thumbVisibility: true,
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.vertical,
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: DataTable(
-                            columnSpacing: 28,
-                            headingRowHeight: 44,
-                            dataRowMinHeight: 46,
-                            dataRowMaxHeight: 54,
-                            headingRowColor: MaterialStateProperty.all(
-                              AppTheme.primaryNavy.withOpacity(0.06),
-                            ),
-                            headingTextStyle: TextStyle(
-                              color: AppTheme.primaryNavy,
-                              fontWeight: FontWeight.w800,
-                            ),
-                            columns: const [
-                              DataColumn(label: Text('Applicant')),
-                              DataColumn(label: Text('General %')),
-                              DataColumn(label: Text('Math %')),
-                              DataColumn(label: Text('General Info %')),
-                              DataColumn(label: Text('Passed')),
-                            ],
-                            rows: _applications.map((app) {
-                              final exam = _examResults[app.id];
-                              double? generalScore;
-                              double? mathScore;
-                              double? infoScore;
-                              final answersJson = exam?.answersJson;
-                              if (answersJson != null) {
-                                final generalSection = answersJson['general'];
-                                final mathSection = answersJson['math'];
-                                final infoSection = answersJson['general_info'];
-                                if (generalSection is Map<String, dynamic>) {
-                                  generalScore = _scoreFromSelectedAndCorrect(
-                                    section: generalSection,
-                                  );
-                                }
-                                if (mathSection is Map<String, dynamic>) {
-                                  mathScore = _scoreFromSelectedAndCorrect(
-                                    section: mathSection,
-                                  );
-                                }
-                                if (infoSection is Map<String, dynamic>) {
-                                  infoScore = _scoreFromSelectedAndCorrect(
-                                    section: infoSection,
-                                  );
-                                }
-                              }
-
-                              final passedText = exam == null
-                                  ? 'N/A'
-                                  : (exam.passed ? 'Passed' : 'Failed');
-                              String scoreText(double? v) => v == null
-                                  ? 'N/A'
-                                  : '${v.toStringAsFixed(0)}%';
-
-                              return DataRow(
-                                cells: [
-                                  DataCell(
-                                    Text(
-                                      app.fullName,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      softWrap: true,
-                                    ),
+          backgroundColor: AppTheme.offWhite,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          titlePadding: const EdgeInsets.fromLTRB(24, 22, 24, 8),
+          contentPadding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Applicant score breakdown',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Summary of screening scores by section. Grade BEI from the icon column when answers exist.',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 13,
+                  height: 1.35,
+                ),
+              ),
+            ],
+          ),
+          content: hasData
+              ? Builder(
+                  builder: (_) {
+                    final mq = MediaQuery.sizeOf(ctx);
+                    final contentWidth = (mq.width - 48).clamp(280.0, 1120.0);
+                    final contentHeight = (mq.height * 0.58).clamp(300.0, 560.0);
+                    final useWide = contentWidth >= 760;
+                    final table = _buildScoreBreakdownDataTable(ctx);
+                    final side = _scoreBreakdownSidePanel();
+                    return SizedBox(
+                      width: contentWidth,
+                      height: contentHeight,
+                      child: useWide
+                          ? Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Expanded(
+                                  flex: 13,
+                                  child: table,
+                                ),
+                                VerticalDivider(
+                                  width: 1,
+                                  thickness: 1,
+                                  color: borderColor,
+                                ),
+                                Expanded(
+                                  flex: 9,
+                                  child: SingleChildScrollView(
+                                    padding: const EdgeInsets.only(left: 14),
+                                    child: side,
                                   ),
-                                  DataCell(Text(scoreText(generalScore))),
-                                  DataCell(Text(scoreText(mathScore))),
-                                  DataCell(Text(scoreText(infoScore))),
-                                  DataCell(Text(passedText)),
+                                ),
+                              ],
+                            )
+                          : SingleChildScrollView(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  table,
+                                  const SizedBox(height: 16),
+                                  side,
                                 ],
-                              );
-                            }).toList(),
-                          ),
-                        ),
-                      ),
-                    ),
-                  )
-                : const Center(
+                              ),
+                            ),
+                    );
+                  },
+                )
+              : SizedBox(
+                  width: 320,
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
                     child: Text(
                       'No applicants yet.',
+                      textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 14,
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.textSecondary.withValues(alpha: 0.9),
                       ),
                     ),
                   ),
-          ),
+                ),
           actions: [
-            TextButton(
+            FilledButton(
               onPressed: () => Navigator.of(ctx).pop(),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.primaryNavy,
+                foregroundColor: AppTheme.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
               child: const Text('Close'),
             ),
           ],
@@ -7536,25 +8912,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
       final apps = await RecruitmentRepo.instance.listApplications();
       final results = await RecruitmentRepo.instance
           .getExamResultsByApplication();
-      Map<String, List<({String path, String fileName})>> byApp = {};
-      try {
-        final entries = await RecruitmentRepo.instance
-            .listStorageAttachmentPaths();
-        for (final e in entries) {
-          final id = e['applicationId']!;
-          byApp.putIfAbsent(id, () => []).add((
-            path: e['path']!,
-            fileName: e['fileName']!,
-          ));
-        }
-      } catch (_) {
-        // e.g. not authenticated; keep byApp empty and fall back to DB attachment
-      }
       if (mounted) {
         setState(() {
           _applications = apps;
           _examResults = results;
-          _storageFilesByAppId = byApp;
           _loading = false;
         });
       }
@@ -7568,8 +8929,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     if (!mounted) return;
     setState(() {
       _applications.removeWhere((a) => a.id == applicationId);
-      _examResults.remove(applicationId);
-      _storageFilesByAppId.remove(applicationId);
+      _examResults.remove(applicationId.toLowerCase());
     });
 
     try {
@@ -7580,7 +8940,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
       ).showSnackBar(const SnackBar(content: Text('Applicant deleted.')));
     } catch (e) {
       if (!mounted) return;
-      // Roll back by reloading from backend/Supabase.
+      // Roll back by reloading from backend.
       setState(() => {});
       ScaffoldMessenger.of(
         context,
@@ -7589,47 +8949,96 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     }
   }
 
-  /// Sync attachment paths from storage into DB for applications that have no path yet (e.g. upload succeeded but DB update failed before RLS fix).
-  /// Requires admin to be authenticated with Supabase Auth so storage list (SELECT) is allowed.
+  Future<void> _confirmDeleteApplicantRow(
+    BuildContext context,
+    RecruitmentApplication app,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Delete applicant?'),
+          content: Text(
+            'This will permanently remove ${app.fullName} and their exam results.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFC62828),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true || !mounted) return;
+    await _deleteApplicant(app.id);
+  }
+
+  Future<void> _showEditApplicantDialog(RecruitmentApplication app) async {
+    final result =
+        await showDialog<({String fullName, String email, String? phone})?>(
+      context: context,
+      builder: (ctx) => _EditApplicantBasicDialog(app: app),
+    );
+    if (result == null || !mounted) return;
+    try {
+      final updated = await RecruitmentRepo.instance.updateApplicationBasicInfo(
+        app.id,
+        fullName: result.fullName,
+        email: result.email,
+        phone: result.phone,
+      );
+      if (!mounted) return;
+      setState(() {
+        final i = _applications.indexWhere((a) => a.id == app.id);
+        if (i >= 0) _applications[i] = updated;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Applicant details saved.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to save: $e')),
+      );
+    }
+  }
+
+  /// Sync attachment paths from server disk into DB for applications missing paths.
   Future<void> _syncAttachmentsFromStorage() async {
     if (_syncing) return;
     setState(() => _syncing = true);
     try {
-      // Guard: ensure admin has a valid Supabase Auth session (required for storage list on private bucket).
-      final session = Supabase.instance.client.auth.currentSession;
-      if (session == null) {
-        if (mounted) {
-          setState(() => _syncing = false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Admin not authenticated with Supabase Auth. Please log in again.',
-              ),
-              backgroundColor: Color(0xFFC62828),
-            ),
-          );
-        }
-        debugPrint(
-          'Sync attachments: no Supabase Auth session (currentUser/session is null).',
-        );
-        return;
-      }
-      debugPrint(
-        'Sync attachments: listing storage bucket as authenticated user.',
-      );
       final entries = await RecruitmentRepo.instance
           .listStorageAttachmentPaths();
       debugPrint(
-        'Sync attachments: listed ${entries.length} file(s) in storage.',
+        'Sync attachments: listed ${entries.length} file(s) on server.',
       );
       int linked = 0;
       for (final e in entries) {
-        final ok = await RecruitmentRepo.instance
-            .setApplicationAttachmentIfMissing(
-              e['applicationId']!,
-              e['path']!,
-              e['fileName']!,
-            );
+        final fileName = e['fileName']!;
+        final kind = RspApplicationDocKind.fromStorageFileName(fileName);
+        final ok = kind != null
+            ? await RecruitmentRepo.instance
+                  .setApplicationTypedAttachmentIfMissing(
+                    e['applicationId']!,
+                    e['path']!,
+                    fileName,
+                    kind,
+                  )
+            : await RecruitmentRepo.instance.setApplicationAttachmentIfMissing(
+                e['applicationId']!,
+                e['path']!,
+                fileName,
+              );
         if (ok) linked++;
       }
       if (mounted) {
@@ -7655,11 +9064,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
         final message = e.toString().replaceFirst('Exception: ', '');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              message.contains(RecruitmentRepo.kErrorNotAuthenticated)
-                  ? 'Admin not authenticated with Supabase Auth. Please log in again.'
-                  : 'Sync failed: $message',
-            ),
+            content: Text('Sync failed: $message'),
             backgroundColor: const Color(0xFFC62828),
           ),
         );
@@ -7783,7 +9188,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                     final scrollWidth = constraints.maxWidth.isFinite
                         ? constraints.maxWidth
                         : MediaQuery.sizeOf(context).width;
-                    const fixedTableWidth = 1498.0;
+                    const fixedTableWidth = 2234.0;
                     final tableWidth = scrollWidth > fixedTableWidth
                         ? scrollWidth
                         : fixedTableWidth;
@@ -7807,11 +9212,16 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                   0: const FixedColumnWidth(160),
                                   1: const FixedColumnWidth(260),
                                   2: const FixedColumnWidth(140),
-                                  3: const FixedColumnWidth(170),
-                                  4: const FixedColumnWidth(76),
-                                  5: const FixedColumnWidth(64),
-                                  6: const FixedColumnWidth(380),
-                                  7: const FixedColumnWidth(248),
+                                  3: const FixedColumnWidth(200),
+                                  4: const FixedColumnWidth(170),
+                                  5: const FixedColumnWidth(76),
+                                  6: const FixedColumnWidth(108),
+                                  7: const FixedColumnWidth(188),
+                                  8: const FixedColumnWidth(188),
+                                  9: const FixedColumnWidth(188),
+                                  10: const FixedColumnWidth(200),
+                                  11: const FixedColumnWidth(248),
+                                  12: const FixedColumnWidth(108),
                                 },
                                 defaultVerticalAlignment:
                                     TableCellVerticalAlignment.middle,
@@ -7859,6 +9269,16 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         ),
                                       ),
                                       _tableCell(
+                                        200,
+                                        const Text(
+                                          'Position applied',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ),
+                                      _tableCell(
                                         170,
                                         const Text(
                                           'Status',
@@ -7879,9 +9299,29 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         ),
                                       ),
                                       _tableCell(
-                                        64,
+                                        108,
                                         const Text(
-                                          'Score',
+                                          'Score / BEI',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ),
+                                      _tableCell(
+                                        188,
+                                        const Text(
+                                          'Application letter',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ),
+                                      _tableCell(
+                                        188,
+                                        const Text(
+                                          'Resume',
                                           style: TextStyle(
                                             fontWeight: FontWeight.w700,
                                             fontSize: 13,
@@ -7889,12 +9329,22 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         ),
                                       ),
                                       _tableCell(
-                                        380,
+                                        188,
                                         const Text(
-                                          'Attachment',
+                                          'TOR',
                                           style: TextStyle(
                                             fontWeight: FontWeight.w700,
                                             fontSize: 13,
+                                          ),
+                                        ),
+                                      ),
+                                      _tableCell(
+                                        200,
+                                        const Text(
+                                          'Eligibility / trainings (prelim.)',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 11,
                                           ),
                                         ),
                                       ),
@@ -7908,10 +9358,21 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                           ),
                                         ),
                                       ),
+                                      _tableCell(
+                                        108,
+                                        const Text(
+                                          'Actions',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ),
                                     ],
                                   ),
                                   ..._applications.map((app) {
-                                    final exam = _examResults[app.id];
+                                    final exam =
+                                        _examResults[app.id.toLowerCase()];
                                     final textStyle = TextStyle(
                                       fontSize: 13,
                                       color: AppTheme.textPrimary,
@@ -7954,6 +9415,26 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                           ),
                                         ),
                                         _tableCell(
+                                          200,
+                                          Tooltip(
+                                            message:
+                                                app.positionAppliedFor ?? _kNa,
+                                            child: Text(
+                                              (app.positionAppliedFor != null &&
+                                                      app.positionAppliedFor!
+                                                          .trim()
+                                                          .isNotEmpty)
+                                                  ? app.positionAppliedFor!
+                                                      .trim()
+                                                  : _kNa,
+                                              style: textStyle,
+                                              overflow: TextOverflow.ellipsis,
+                                              maxLines: 2,
+                                              softWrap: true,
+                                            ),
+                                          ),
+                                        ),
+                                        _tableCell(
                                           170,
                                           Tooltip(
                                             message: app.status,
@@ -7977,12 +9458,66 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                           ),
                                         ),
                                         _tableCell(
-                                          64,
-                                          Text(
-                                            exam == null
-                                                ? _kNa
-                                                : '${exam.scorePercent.toStringAsFixed(0)}%',
-                                            style: textStyle,
+                                          108,
+                                          exam == null
+                                              ? Text(_kNa, style: textStyle)
+                                              : Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Text(
+                                                      '${exam.scorePercent.toStringAsFixed(0)}%',
+                                                      style: textStyle,
+                                                    ),
+                                                    if (_hasBeiAnswers(exam))
+                                                      TextButton(
+                                                        style: TextButton
+                                                            .styleFrom(
+                                                          padding:
+                                                              EdgeInsets.zero,
+                                                          minimumSize:
+                                                              Size.zero,
+                                                          tapTargetSize:
+                                                              MaterialTapTargetSize
+                                                                  .shrinkWrap,
+                                                          foregroundColor:
+                                                              AppTheme
+                                                                  .primaryNavy,
+                                                        ),
+                                                        onPressed: () =>
+                                                            _openBeiGrading(
+                                                          context,
+                                                          app,
+                                                          exam,
+                                                        ),
+                                                        child: const Text(
+                                                          'Grade BEI',
+                                                          style: TextStyle(
+                                                            fontSize: 11,
+                                                            fontWeight:
+                                                                FontWeight.w600,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                  ],
+                                                ),
+                                        ),
+                                        TableCell(
+                                          verticalAlignment:
+                                              TableCellVerticalAlignment.middle,
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 10,
+                                              vertical: 8,
+                                            ),
+                                            child: _TypedDocAdminCell(
+                                              app: app,
+                                              kind: RspApplicationDocKind
+                                                  .applicationLetter,
+                                              onFileRemoved: _load,
+                                            ),
                                           ),
                                         ),
                                         TableCell(
@@ -7990,13 +9525,44 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                               TableCellVerticalAlignment.middle,
                                           child: Padding(
                                             padding: const EdgeInsets.symmetric(
-                                              horizontal: 14,
+                                              horizontal: 10,
                                               vertical: 8,
                                             ),
-                                            child: _AttachmentCell(
+                                            child: _TypedDocAdminCell(
                                               app: app,
-                                              storageFiles:
-                                                  _storageFilesByAppId[app.id],
+                                              kind:
+                                                  RspApplicationDocKind.resume,
+                                              onFileRemoved: _load,
+                                            ),
+                                          ),
+                                        ),
+                                        TableCell(
+                                          verticalAlignment:
+                                              TableCellVerticalAlignment.middle,
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 10,
+                                              vertical: 8,
+                                            ),
+                                            child: _TypedDocAdminCell(
+                                              app: app,
+                                              kind: RspApplicationDocKind.tor,
+                                              onFileRemoved: _load,
+                                            ),
+                                          ),
+                                        ),
+                                        TableCell(
+                                          verticalAlignment:
+                                              TableCellVerticalAlignment.middle,
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 10,
+                                              vertical: 8,
+                                            ),
+                                            child: _TypedDocAdminCell(
+                                              app: app,
+                                              kind: RspApplicationDocKind
+                                                  .eligibilityTrainings,
                                               onFileRemoved: _load,
                                             ),
                                           ),
@@ -8020,6 +9586,53 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                             ),
                                           ),
                                         ),
+                                        _tableCell(
+                                          108,
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              IconButton(
+                                                onPressed: () =>
+                                                    _showEditApplicantDialog(
+                                                  app,
+                                                ),
+                                                icon: const Icon(
+                                                  Icons.edit_outlined,
+                                                  size: 20,
+                                                ),
+                                                tooltip: 'Edit name, email, phone',
+                                                style: IconButton.styleFrom(
+                                                  foregroundColor:
+                                                      AppTheme.primaryNavy,
+                                                  padding:
+                                                      const EdgeInsets.all(6),
+                                                  minimumSize:
+                                                      const Size(32, 32),
+                                                ),
+                                              ),
+                                              IconButton(
+                                                onPressed: () =>
+                                                    _confirmDeleteApplicantRow(
+                                                  context,
+                                                  app,
+                                                ),
+                                                icon: const Icon(
+                                                  Icons.delete_outline_rounded,
+                                                  size: 20,
+                                                ),
+                                                tooltip: 'Delete applicant',
+                                                style: IconButton.styleFrom(
+                                                  foregroundColor:
+                                                      const Color(0xFFC62828),
+                                                  padding:
+                                                      const EdgeInsets.all(6),
+                                                  minimumSize:
+                                                      const Size(32, 32),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
                                       ],
                                     );
                                   }),
@@ -8038,17 +9651,128 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   }
 }
 
-/// Shows all attachments for an application (from storage). Falls back to DB primary or "No file".
-/// Expands row only when there are multiple files (or long content); single file stays compact.
-class _AttachmentCell extends StatelessWidget {
-  const _AttachmentCell({
+class _EditApplicantBasicDialog extends StatefulWidget {
+  const _EditApplicantBasicDialog({required this.app});
+
+  final RecruitmentApplication app;
+
+  @override
+  State<_EditApplicantBasicDialog> createState() =>
+      _EditApplicantBasicDialogState();
+}
+
+class _EditApplicantBasicDialogState extends State<_EditApplicantBasicDialog> {
+  late final TextEditingController _name;
+  late final TextEditingController _email;
+  late final TextEditingController _phone;
+  final _formKey = GlobalKey<FormState>();
+
+  @override
+  void initState() {
+    super.initState();
+    _name = TextEditingController(text: widget.app.fullName);
+    _email = TextEditingController(text: widget.app.email);
+    _phone = TextEditingController(text: widget.app.phone ?? '');
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _email.dispose();
+    _phone.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    final ph = _phone.text.trim();
+    Navigator.of(context).pop((
+      fullName: _name.text.trim(),
+      email: _email.text.trim(),
+      phone: ph.isEmpty ? null : ph,
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Edit applicant'),
+      content: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextFormField(
+                controller: _name,
+                decoration: const InputDecoration(
+                  labelText: 'Full name',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                textInputAction: TextInputAction.next,
+                validator: (v) =>
+                    v == null || v.trim().isEmpty ? 'Required' : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _email,
+                decoration: const InputDecoration(
+                  labelText: 'Email',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                keyboardType: TextInputType.emailAddress,
+                textInputAction: TextInputAction.next,
+                validator: (v) {
+                  if (v == null || v.trim().isEmpty) return 'Required';
+                  if (!v.contains('@')) return 'Enter a valid email';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _phone,
+                decoration: const InputDecoration(
+                  labelText: 'Phone (optional)',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                keyboardType: TextInputType.phone,
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _save,
+          style: FilledButton.styleFrom(
+            backgroundColor: AppTheme.primaryNavy,
+            foregroundColor: Colors.white,
+          ),
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
+}
+
+/// One required document slot in the admin table (DB path + optional legacy resume).
+class _TypedDocAdminCell extends StatelessWidget {
+  const _TypedDocAdminCell({
     required this.app,
-    required this.storageFiles,
+    required this.kind,
     this.onFileRemoved,
   });
 
   final RecruitmentApplication app;
-  final List<({String path, String fileName})>? storageFiles;
+  final RspApplicationDocKind kind;
   final VoidCallback? onFileRemoved;
 
   /// Display name for storage files like "1736123456_0_Resume.pdf" -> "Resume.pdf"
@@ -8067,55 +9791,35 @@ class _AttachmentCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final files = storageFiles ?? [];
-    if (files.isNotEmpty) {
-      // Expand row only when multiple files (or many files); single file = compact row
-      final shouldExpand = files.length > 1;
-      const minHeight = 48.0;
-      const maxHeight = 320.0;
-      const padding = 24.0;
-      final contentHeight = shouldExpand
-          ? (files.length * 36.0 + padding).clamp(minHeight, maxHeight)
-          : minHeight;
-      final useScroll = files.length > 8;
-      final column = Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: files
-            .map(
-              (f) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: _AttachmentRow(
-                  path: f.path,
-                  fileName: displayName(f.fileName),
-                  onRemove: onFileRemoved != null
-                      ? () => _removeFile(context, f.path, onFileRemoved!)
-                      : null,
-                ),
-              ),
-            )
-            .toList(),
-      );
-      return SizedBox(
-        width: 360,
-        height: contentHeight,
-        child: useScroll ? SingleChildScrollView(child: column) : column,
-      );
+    var path = app.docPath(kind);
+    var name = app.docDisplayName(kind);
+    if (path == null &&
+        name == null &&
+        kind == RspApplicationDocKind.resume &&
+        app.attachmentPath != null &&
+        app.attachmentName != null) {
+      path = app.attachmentPath;
+      name = app.attachmentName;
     }
-    if (app.attachmentPath != null && app.attachmentName != null) {
+    if (path != null && name != null && path.isNotEmpty) {
+      final p = path;
+      final n = name;
       return _AttachmentRow(
-        path: app.attachmentPath!,
-        fileName: displayName(app.attachmentName!),
-        onRemove: null,
+        path: p,
+        fileName: displayName(n),
+        onRemove: onFileRemoved != null
+            ? () => _removeFile(context, p, onFileRemoved!)
+            : null,
       );
     }
     return Tooltip(
-      message: 'No file attached or sync from storage to see uploaded files.',
+      message:
+          'No file for this document type. Use "Sync attachments from storage" if uploads exist only in the bucket.',
       child: Text(
         'No file',
         style: TextStyle(
           color: Theme.of(context).colorScheme.outline,
-          fontSize: 13,
+          fontSize: 12,
         ),
       ),
     );

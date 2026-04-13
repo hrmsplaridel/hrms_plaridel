@@ -1,8 +1,11 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
-import '../landingpage/constants/app_theme.dart';
 import '../data/training_daily_report.dart';
+import '../landingpage/constants/app_theme.dart';
+import '../widgets/read_only_saved_entry_dialog.dart';
+import '../widgets/rsp_form_header_footer.dart';
+import '../widgets/training_daily_report_read_only_view.dart';
 
 class TrainingDailyReportEmployeeScreen extends StatefulWidget {
   const TrainingDailyReportEmployeeScreen({super.key});
@@ -148,40 +151,43 @@ class _TrainingDailyReportEmployeeScreenState
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              TextField(
-                controller: _titleController,
-                decoration: InputDecoration(
-                  labelText: 'Report title',
-                  hintText: 'e.g. Orientation on HRIS and records filing',
-                  prefixIcon: const Icon(Icons.article_outlined),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _descriptionController,
-                maxLines: 5,
-                decoration: InputDecoration(
-                  labelText: 'Description',
-                  hintText:
-                      'Provide details about the tasks, tools used, and what you learned.',
-                  alignLabelWithHint: true,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
+              RspSpacedOutlineField(
+                child: TextField(
+                  controller: _titleController,
+                  decoration: InputDecoration(
+                    labelText: 'Report title',
+                    hintText: 'e.g. Orientation on HRIS and records filing',
+                    prefixIcon: const Icon(Icons.article_outlined),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
+              RspSpacedOutlineField(
+                child: TextField(
+                  controller: _descriptionController,
+                  maxLines: 5,
+                  decoration: InputDecoration(
+                    labelText: 'Description',
+                    hintText:
+                        'Provide details about the tasks, tools used, and what you learned.',
+                    alignLabelWithHint: true,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: rspFormFieldVerticalGap),
               GestureDetector(
                 onTap: _pickFile,
                 child: Container(
@@ -318,6 +324,8 @@ class _TrainingDailyReportEmployeeScreenState
                             color: AppTheme.textSecondary,
                             fontSize: 12,
                           ),
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 4),
                         Text(
@@ -325,6 +333,20 @@ class _TrainingDailyReportEmployeeScreenState
                           style: TextStyle(
                             color: AppTheme.textSecondary,
                             fontSize: 11,
+                          ),
+                        ),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton.icon(
+                            onPressed: () => showReadOnlySavedEntryDialog(
+                              context,
+                              title: 'Submitted report',
+                              previewBuilder: () =>
+                                  TrainingDailyReportReadOnlyView(report: r),
+                              contentWidth: 560,
+                            ),
+                            icon: const Icon(Icons.visibility_outlined, size: 18),
+                            label: const Text('View full entry'),
                           ),
                         ),
                       ],

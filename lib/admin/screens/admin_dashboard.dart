@@ -12,7 +12,10 @@ import '../../../landingpage/constants/app_theme.dart';
 import '../../../landingpage/screens/landing_page.dart';
 import '../../../login/screens/login_page.dart';
 import '../../../utils/form_pdf.dart';
+import '../../../widgets/read_only_saved_entry_dialog.dart';
 import '../../../widgets/rsp_form_header_footer.dart';
+import '../../../widgets/rsp_ld_saved_records_browser.dart';
+import '../../../widgets/training_daily_report_read_only_view.dart';
 import '../../../widgets/user_avatar.dart';
 import '../../shared/screens/profile_and_settings_page.dart';
 import '../../../dtr/dtr_main.dart';
@@ -33,6 +36,7 @@ import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
 import '../../../recruitment/screens/rsp_admin_screen.dart';
 import '../../../widgets/feature_card.dart';
+import '../../../api/user_facing_api_error.dart';
 
 /// Dashboard accent colors for summary cards and accents (orange theme).
 class _DashboardColors {
@@ -103,7 +107,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
               child: SafeArea(
                 child: _Sidebar(
                   selectedIndex: _selectedNavIndex,
-                  avatarPath: avatarPath,
+                  displayName: displayName,
+                  email: email,
                   onTap: (i) {
                     setState(() {
                       _selectedNavIndex = i;
@@ -122,7 +127,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
           if (isWide)
             _Sidebar(
               selectedIndex: _selectedNavIndex,
-              avatarPath: avatarPath,
+              displayName: displayName,
+              email: email,
               onTap: (i) {
                 setState(() {
                   _selectedNavIndex = i;
@@ -169,7 +175,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               searchQuery: _dashboardSearchQuery,
                             )
                           : _selectedNavIndex == 1
-                          ? const RspAdminContent()
+                          ? RspAdminContent(
+                              onNavigateToSidebarIndex: (i) => setState(
+                                () => _selectedNavIndex = i,
+                              ),
+                            )
                           : _selectedNavIndex == 2
                           ? const _LdContent()
                           : _selectedNavIndex == 3
@@ -196,122 +206,118 @@ class _AdminDashboardState extends State<AdminDashboard> {
 class _Sidebar extends StatelessWidget {
   const _Sidebar({
     required this.selectedIndex,
-    this.avatarPath,
+    required this.displayName,
+    required this.email,
     required this.onTap,
   });
 
   final int selectedIndex;
-  final String? avatarPath;
+  final String displayName;
+  final String email;
   final ValueChanged<int> onTap;
+
+  static Widget _sealAvatar({double size = 48}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.asset(
+          'assets/images/Plaridel Logo.jpg',
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Container(
+            width: size,
+            height: size,
+            color: Colors.white,
+            child: Icon(
+              Icons.account_balance_rounded,
+              color: AppTheme.primaryNavy,
+              size: size * 0.5,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    final year = DateTime.now().year;
     return Container(
-      width: 272,
+      width: 288,
       decoration: BoxDecoration(
         color: AppTheme.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 20,
-            offset: const Offset(2, 0),
-          ),
-          BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 6,
-            offset: const Offset(1, 0),
+            color: Colors.black.withValues(alpha: 0.07),
+            blurRadius: 24,
+            offset: const Offset(4, 0),
           ),
         ],
       ),
       child: Column(
         children: [
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
           Container(
-            margin: const EdgeInsets.symmetric(horizontal: 14),
-            padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 18),
             decoration: BoxDecoration(
-              color: AppTheme.primaryNavy,
-              borderRadius: BorderRadius.circular(16),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  AppTheme.primaryNavy,
+                  AppTheme.primaryNavyDark,
+                ],
+              ),
+              borderRadius: BorderRadius.circular(18),
               boxShadow: [
                 BoxShadow(
-                  color: AppTheme.primaryNavy.withOpacity(0.4),
-                  blurRadius: 20,
-                  offset: const Offset(0, 4),
-                ),
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.08),
-                  blurRadius: 12,
-                  offset: const Offset(0, 2),
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.35),
+                  blurRadius: 18,
+                  offset: const Offset(0, 6),
                 ),
               ],
             ),
             child: Row(
               children: [
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.white, width: 2),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
-                        blurRadius: 6,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.asset(
-                      'assets/images/Plaridel Logo.jpg',
-                      width: 48,
-                      height: 48,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
-                        width: 48,
-                        height: 48,
-                        color: AppTheme.primaryNavy,
-                        child: const Icon(
-                          Icons.shield_rounded,
-                          color: Colors.white,
-                          size: 28,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+                _sealAvatar(size: 52),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Municipality of Plaridel',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w800,
-                            height: 1.2,
-                          ),
+                      Text(
+                        'Municipality of Plaridel',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          height: 1.2,
+                          letterSpacing: -0.2,
                         ),
                       ),
-                      const SizedBox(height: 2),
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'HUMAN RESOURCE MANAGEMENT SYSTEM',
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.95),
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.4,
-                            height: 1.2,
-                          ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'HUMAN RESOURCE MANAGEMENT SYSTEM',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.92),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.6,
+                          height: 1.25,
                         ),
                       ),
                     ],
@@ -320,7 +326,7 @@ class _Sidebar extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 24),
           Expanded(
             child: SingleChildScrollView(
               child: Column(
@@ -366,18 +372,22 @@ class _Sidebar extends StatelessWidget {
               ),
             ),
           ),
-          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Divider(height: 1, thickness: 1, color: AppTheme.lightGray),
+          ),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
             child: Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                color: AppTheme.offWhite,
-                borderRadius: BorderRadius.circular(12),
+                color: const Color(0xFFF1F3F5),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppTheme.lightGray),
               ),
               child: Row(
                 children: [
-                  UserAvatar(avatarPath: avatarPath, radius: 22),
+                  _sealAvatar(size: 40),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -385,18 +395,24 @@ class _Sidebar extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          'Admin',
+                          displayName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: AppTheme.textPrimary,
                             fontWeight: FontWeight.w700,
                             fontSize: 14,
                           ),
                         ),
+                        const SizedBox(height: 2),
                         Text(
-                          'System Administrator',
+                          email.isNotEmpty ? email : 'System Administrator',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: AppTheme.textSecondary,
                             fontSize: 12,
+                            height: 1.2,
                           ),
                         ),
                       ],
@@ -406,50 +422,76 @@ class _Sidebar extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 12),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
             child: Wrap(
               alignment: WrapAlignment.center,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 0,
               children: [
                 Text(
-                  'Â© 2026 HRMS',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                  '\u00a9 $year HRMS',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 11,
+                    height: 1.2,
+                  ),
                 ),
-                Text(
-                  ' Â· ',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Text(
+                    '\u00b7',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.textSecondary.withValues(alpha: 0.7),
+                    ),
+                  ),
                 ),
                 TextButton(
                   onPressed: () {},
                   style: TextButton.styleFrom(
                     minimumSize: Size.zero,
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 0),
                   ),
                   child: Text(
                     'Privacy',
-                    style: TextStyle(fontSize: 11, color: AppTheme.primaryNavy),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.primaryNavy,
+                    ),
                   ),
                 ),
-                Text(
-                  ' Â· ',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Text(
+                    '\u00b7',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.textSecondary.withValues(alpha: 0.7),
+                    ),
+                  ),
                 ),
                 TextButton(
                   onPressed: () {},
                   style: TextButton.styleFrom(
                     minimumSize: Size.zero,
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 0),
                   ),
                   child: Text(
                     'Terms',
-                    style: TextStyle(fontSize: 11, color: AppTheme.primaryNavy),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.primaryNavy,
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 16),
         ],
       ),
     );
@@ -475,62 +517,70 @@ class _NavTile extends StatefulWidget {
 class _NavTileState extends State<_NavTile> {
   bool _hover = false;
 
+  static const _activeFill = Color(0xFFFFF0E6);
+
   @override
   Widget build(BuildContext context) {
-    final active = widget.selected || _hover;
+    final iconColor = widget.selected
+        ? AppTheme.primaryNavy
+        : (_hover ? AppTheme.primaryNavy.withValues(alpha: 0.88) : AppTheme.textSecondary);
+    final labelColor = widget.selected
+        ? AppTheme.primaryNavy
+        : (_hover ? AppTheme.textPrimary : AppTheme.textSecondary);
+
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          child: Material(
-            color: widget.selected
-                ? AppTheme.primaryNavy.withOpacity(0.1)
-                : (_hover
-                      ? AppTheme.primaryNavy.withOpacity(0.06)
-                      : Colors.transparent),
-            borderRadius: BorderRadius.circular(12),
-            child: InkWell(
-              onTap: widget.onTap,
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 14,
-                ),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  border: widget.selected
-                      ? Border(
-                          left: BorderSide(
-                            color: AppTheme.primaryNavy,
-                            width: 3,
-                          ),
-                        )
-                      : null,
-                ),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onTap,
+            borderRadius: BorderRadius.circular(14),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              decoration: BoxDecoration(
+                color: widget.selected
+                    ? _activeFill
+                    : (_hover ? AppTheme.primaryNavy.withValues(alpha: 0.05) : Colors.transparent),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              // IntrinsicHeight: sidebar nav lives in a scroll view (unbounded height).
+              // Row + CrossAxisAlignment.stretch needs a finite max height on the cross axis.
+              child: IntrinsicHeight(
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Icon(
-                      widget.icon,
-                      size: 23,
-                      color: active
-                          ? AppTheme.primaryNavy
-                          : AppTheme.textSecondary,
-                    ),
-                    const SizedBox(width: 16),
-                    Text(
-                      widget.label,
-                      style: TextStyle(
-                        color: active
-                            ? AppTheme.primaryNavy
-                            : AppTheme.textPrimary,
-                        fontWeight: widget.selected
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                        fontSize: 15,
+                    if (widget.selected)
+                      Container(
+                        width: 4,
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryNavy,
+                          borderRadius: const BorderRadius.horizontal(left: Radius.circular(14)),
+                        ),
+                      ),
+                    Expanded(
+                      child: Padding(
+                        padding: EdgeInsets.fromLTRB(widget.selected ? 12 : 16, 13, 16, 13),
+                        child: Row(
+                          children: [
+                            Icon(widget.icon, size: 22, color: iconColor),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Text(
+                                widget.label,
+                                style: TextStyle(
+                                  color: labelColor,
+                                  fontWeight: widget.selected ? FontWeight.w700 : FontWeight.w500,
+                                  fontSize: 15,
+                                  letterSpacing: -0.1,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -2350,19 +2400,20 @@ class _AdminSignUpContent extends StatelessWidget {
         ),
         const SizedBox(height: 24),
         Container(
-          constraints: const BoxConstraints(maxWidth: 900),
+          constraints: const BoxConstraints(maxWidth: 1040),
           decoration: BoxDecoration(
-            color: const Color(0xFFF5F7F5),
+            color: const Color(0xFFF0F3F1),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: Colors.black.withOpacity(0.06)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 20,
-                offset: const Offset(0, 4),
+                color: Colors.black.withOpacity(0.06),
+                blurRadius: 24,
+                offset: const Offset(0, 6),
               ),
             ],
           ),
+          clipBehavior: Clip.antiAlias,
           child: const AddEmployeeForm(),
         ),
       ],
@@ -2519,7 +2570,7 @@ class _TrainingNeedAnalysisSectionState
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+        ).showSnackBar(SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')));
       }
     }
   }
@@ -2578,6 +2629,34 @@ class _TrainingNeedAnalysisSectionState
     }
   }
 
+  void _openSavedRecordsBrowser() {
+    showRspLdSavedRecordsBrowser(
+      context,
+      sheetTitle: 'Saved Training Need Analysis reports',
+      emptyMessage: 'No reports yet.',
+      loading: _loading,
+      items: _entries.map((e) {
+        final cy = e.cyYear ?? '—';
+        final dept = e.department ?? '—';
+        return SavedRecordListItem(
+          title: 'CY $cy — $dept',
+          subtitle: '${e.rows.length} table row(s)',
+          detailDialogTitle: 'Training Need Analysis — CY $cy',
+          previewContentWidth: 1100,
+          previewBuilder: () => _TrainingNeedAnalysisFormEditor(
+            readOnly: true,
+            entry: e,
+            onSave: (_) {},
+            onCancel: () {},
+            onPrint: (_) async {},
+            onDownloadPdf: (_) async {},
+          ),
+          onPrint: () => _printTna(e),
+        );
+      }).toList(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -2620,6 +2699,14 @@ class _TrainingNeedAnalysisSectionState
               onPressed: _loading ? null : _load,
               icon: const Icon(Icons.refresh_rounded, size: 20),
               label: const Text('Refresh'),
+              style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
+            ),
+            const SizedBox(width: 4),
+            TextButton.icon(
+              onPressed: _loading ? null : _openSavedRecordsBrowser,
+              icon: const Icon(Icons.folder_open_outlined, size: 20),
+              label: const Text('View records'),
+              style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
             ),
           ],
         ),
@@ -2687,6 +2774,28 @@ class _LdTrainingReportsSectionState extends State<_LdTrainingReportsSection> {
       if (!mounted) return;
       setState(() => _loading = false);
     }
+  }
+
+  void _openSavedRecordsBrowser() {
+    showRspLdSavedRecordsBrowser(
+      context,
+      sheetTitle: 'Training daily reports (list)',
+      emptyMessage:
+          'No reports for the current search. Clear search and refresh, or wait for employees to submit.',
+      loading: _loading,
+      items: _reports
+          .map(
+            (r) => SavedRecordListItem(
+              title: '${r.employeeName ?? "Employee"} — ${r.title}',
+              subtitle: '${r.submittedAt.toLocal()} · ${r.status}',
+              detailDialogTitle: 'Training daily report — ${r.title}',
+              previewContentWidth: 560,
+              previewBuilder: () => TrainingDailyReportReadOnlyView(report: r),
+              onPrint: () => FormPdf.printTrainingDailyReport(r),
+            ),
+          )
+          .toList(),
+    );
   }
 
   Future<void> _markSeen(TrainingDailyReport report) async {
@@ -2783,6 +2892,13 @@ class _LdTrainingReportsSectionState extends State<_LdTrainingReportsSection> {
                 foregroundColor: AppTheme.textPrimary,
               ),
               icon: const Icon(Icons.refresh_rounded, size: 22),
+            ),
+            const SizedBox(width: 4),
+            TextButton.icon(
+              onPressed: _loading ? null : _openSavedRecordsBrowser,
+              icon: const Icon(Icons.folder_open_outlined, size: 20),
+              label: const Text('View records'),
+              style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
             ),
           ],
         ),
@@ -3081,6 +3197,7 @@ class _TrainingNeedAnalysisFormEditor extends StatefulWidget {
   const _TrainingNeedAnalysisFormEditor({
     super.key,
     required this.entry,
+    this.readOnly = false,
     required this.onSave,
     required this.onCancel,
     required this.onPrint,
@@ -3088,6 +3205,7 @@ class _TrainingNeedAnalysisFormEditor extends StatefulWidget {
   });
 
   final TrainingNeedAnalysisEntry entry;
+  final bool readOnly;
   final void Function(TrainingNeedAnalysisEntry) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(TrainingNeedAnalysisEntry) onPrint;
@@ -3156,9 +3274,13 @@ class _TrainingNeedAnalysisFormEditorState
     super.dispose();
   }
 
-  void _addRow() =>
-      setState(() => _rows.add(_rowControllers('', '', '', '', '', '')));
+  void _addRow() {
+    if (widget.readOnly) return;
+    setState(() => _rows.add(_rowControllers('', '', '', '', '', '')));
+  }
+
   void _removeRow(int i) {
+    if (widget.readOnly) return;
     if (_rows.length <= 1) return;
     setState(() {
       for (final c in _rows[i].values) {
@@ -3206,10 +3328,14 @@ class _TrainingNeedAnalysisFormEditorState
     );
   }
 
-  void _save() => widget.onSave(_buildCurrentEntry());
+  void _save() {
+    if (widget.readOnly) return;
+    widget.onSave(_buildCurrentEntry());
+  }
 
   @override
   Widget build(BuildContext context) {
+    final ro = widget.readOnly;
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -3231,13 +3357,19 @@ class _TrainingNeedAnalysisFormEditorState
               ),
             ),
             const SizedBox(height: 12),
-            TextFormField(
-              controller: _cyYear,
-              decoration: rspUnderlinedField('FOR CY (e.g. 2025):'),
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _cyYear,
+                readOnly: ro,
+                decoration: rspUnderlinedField('FOR CY (e.g. 2025):'),
+              ),
             ),
-            TextFormField(
-              controller: _department,
-              decoration: rspUnderlinedField('DEPARTMENT:'),
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _department,
+                readOnly: ro,
+                decoration: rspUnderlinedField('DEPARTMENT:'),
+              ),
             ),
             const SizedBox(height: 20),
             Row(
@@ -3253,12 +3385,14 @@ class _TrainingNeedAnalysisFormEditorState
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                TextButton.icon(
-                  onPressed: _addRow,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Add row'),
-                ),
+                if (!ro) ...[
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    onPressed: _addRow,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add row'),
+                  ),
+                ],
               ],
             ),
             SingleChildScrollView(
@@ -3282,10 +3416,8 @@ class _TrainingNeedAnalysisFormEditorState
                           width: 140,
                           child: TextFormField(
                             controller: r['name_position'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3294,10 +3426,8 @@ class _TrainingNeedAnalysisFormEditorState
                           width: 120,
                           child: TextFormField(
                             controller: r['goal'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3306,10 +3436,8 @@ class _TrainingNeedAnalysisFormEditorState
                           width: 120,
                           child: TextFormField(
                             controller: r['behavior'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3318,10 +3446,8 @@ class _TrainingNeedAnalysisFormEditorState
                           width: 120,
                           child: TextFormField(
                             controller: r['skills_knowledge'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3330,10 +3456,8 @@ class _TrainingNeedAnalysisFormEditorState
                           width: 120,
                           child: TextFormField(
                             controller: r['need_for_training'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3342,23 +3466,23 @@ class _TrainingNeedAnalysisFormEditorState
                           width: 140,
                           child: TextFormField(
                             controller: r['training_recommendations'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
                       DataCell(
-                        IconButton(
-                          icon: const Icon(
-                            Icons.remove_circle_outline,
-                            size: 20,
-                          ),
-                          onPressed: _rows.length > 1
-                              ? () => _removeRow(i)
-                              : null,
-                        ),
+                        ro
+                            ? const SizedBox(width: 40)
+                            : IconButton(
+                                icon: const Icon(
+                                  Icons.remove_circle_outline,
+                                  size: 20,
+                                ),
+                                onPressed: _rows.length > 1
+                                    ? () => _removeRow(i)
+                                    : null,
+                              ),
                       ),
                     ],
                   );
@@ -3368,27 +3492,40 @@ class _TrainingNeedAnalysisFormEditorState
             const SizedBox(height: 24),
             const RspFormFooter(),
             const SizedBox(height: 24),
-            Row(
-              children: [
-                FilledButton(onPressed: _save, child: const Text('Save')),
-                const SizedBox(width: 12),
-                TextButton(
-                  onPressed: widget.onCancel,
-                  child: const Text('Cancel'),
+            if (!ro) ...[
+              Row(
+                children: [
+                  FilledButton(onPressed: _save, child: const Text('Save')),
+                  const SizedBox(width: 12),
+                  TextButton(
+                    onPressed: widget.onCancel,
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  IconButton(
+                    onPressed: () => widget.onPrint(_buildCurrentEntry()),
+                    icon: const Icon(Icons.print_rounded),
+                    tooltip: 'Print',
+                  ),
+                  IconButton(
+                    onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
+                    icon: const Icon(Icons.picture_as_pdf_rounded),
+                    tooltip: 'Download PDF',
+                  ),
+                ],
+              ),
+            ] else ...[
+              if (widget.entry.createdAt != null)
+                Text(
+                  'Created: ${widget.entry.createdAt!.toLocal()}',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
-                const SizedBox(width: 12),
-                IconButton(
-                  onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                  icon: const Icon(Icons.print_rounded),
-                  tooltip: 'Print',
+              if (widget.entry.updatedAt != null)
+                Text(
+                  'Last updated: ${widget.entry.updatedAt!.toLocal()}',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
-                IconButton(
-                  onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
-                  icon: const Icon(Icons.picture_as_pdf_rounded),
-                  tooltip: 'Download PDF',
-                ),
-              ],
-            ),
+            ],
           ],
         ),
       ),
@@ -3432,6 +3569,22 @@ class _TrainingNeedAnalysisList extends StatelessWidget {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    TextButton(
+                      onPressed: () => showReadOnlySavedEntryDialog(
+                        context,
+                        title: 'Saved training need analysis',
+                        previewBuilder: () => _TrainingNeedAnalysisFormEditor(
+                          readOnly: true,
+                          entry: e,
+                          onSave: (_) {},
+                          onCancel: () {},
+                          onPrint: (_) async {},
+                          onDownloadPdf: (_) async {},
+                        ),
+                        contentWidth: 1100,
+                      ),
+                      child: const Text('View'),
+                    ),
                     TextButton(
                       onPressed: () => onEdit(e),
                       child: const Text('Edit'),
@@ -3552,7 +3705,7 @@ class _ActionBrainstormingSectionState
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+        ).showSnackBar(SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')));
       }
     }
   }
@@ -3614,6 +3767,33 @@ class _ActionBrainstormingSectionState
     }
   }
 
+  void _openSavedRecordsBrowser() {
+    showRspLdSavedRecordsBrowser(
+      context,
+      sheetTitle: 'Saved Action Brainstorming worksheets',
+      emptyMessage: 'No worksheets yet.',
+      loading: _loading,
+      items: _entries.map((e) {
+        final dept = e.department?.trim().isNotEmpty == true ? e.department! : '(No department)';
+        return SavedRecordListItem(
+          title: dept,
+          subtitle: '${e.date ?? "—"} · ${e.rows.length} row(s)',
+          detailDialogTitle: 'Action Brainstorming — $dept',
+          previewContentWidth: 1280,
+          previewBuilder: () => _ActionBrainstormingFormEditor(
+            readOnly: true,
+            entry: e,
+            onSave: (_) {},
+            onCancel: () {},
+            onPrint: (_) async {},
+            onDownloadPdf: (_) async {},
+          ),
+          onPrint: () => _printAb(e),
+        );
+      }).toList(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -3656,6 +3836,14 @@ class _ActionBrainstormingSectionState
               onPressed: _loading ? null : _load,
               icon: const Icon(Icons.refresh_rounded, size: 20),
               label: const Text('Refresh'),
+              style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
+            ),
+            const SizedBox(width: 4),
+            TextButton.icon(
+              onPressed: _loading ? null : _openSavedRecordsBrowser,
+              icon: const Icon(Icons.folder_open_outlined, size: 20),
+              label: const Text('View records'),
+              style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
             ),
           ],
         ),
@@ -3690,6 +3878,7 @@ class _ActionBrainstormingFormEditor extends StatefulWidget {
   const _ActionBrainstormingFormEditor({
     super.key,
     required this.entry,
+    this.readOnly = false,
     required this.onSave,
     required this.onCancel,
     required this.onPrint,
@@ -3697,6 +3886,7 @@ class _ActionBrainstormingFormEditor extends StatefulWidget {
   });
 
   final ActionBrainstormingEntry entry;
+  final bool readOnly;
   final void Function(ActionBrainstormingEntry) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(ActionBrainstormingEntry) onPrint;
@@ -3779,9 +3969,13 @@ class _ActionBrainstormingFormEditorState
     super.dispose();
   }
 
-  void _addRow() =>
-      setState(() => _rows.add(_rowCtrl('', '', '', '', '', '', '')));
+  void _addRow() {
+    if (widget.readOnly) return;
+    setState(() => _rows.add(_rowCtrl('', '', '', '', '', '', '')));
+  }
+
   void _removeRow(int i) {
+    if (widget.readOnly) return;
     if (_rows.length <= 1) return;
     setState(() {
       for (final c in _rows[i].values) {
@@ -3837,10 +4031,14 @@ class _ActionBrainstormingFormEditorState
     );
   }
 
-  void _save() => widget.onSave(_buildCurrentEntry());
+  void _save() {
+    if (widget.readOnly) return;
+    widget.onSave(_buildCurrentEntry());
+  }
 
   @override
   Widget build(BuildContext context) {
+    final ro = widget.readOnly;
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -3855,20 +4053,27 @@ class _ActionBrainstormingFormEditorState
             const RspFormHeader(
               formTitle: 'ACTION BRAINSTORMING AND COACHING WORKSHEET',
             ),
-            TextFormField(
-              controller: _department,
-              decoration: rspUnderlinedField('DEPARTMENT:'),
+            const SizedBox(height: 16),
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _department,
+                readOnly: ro,
+                decoration: rspUnderlinedField('DEPARTMENT:'),
+              ),
             ),
-            TextFormField(
-              controller: _date,
-              decoration: rspUnderlinedField('DATE:'),
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _date,
+                readOnly: ro,
+                decoration: rspUnderlinedField('DATE:'),
+              ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 20),
             Text(
               'Instruction: Use the worksheet to brainstorm/coach staff of the new ideas to move the department closer to department goal.',
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 22),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -3882,12 +4087,14 @@ class _ActionBrainstormingFormEditorState
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                TextButton.icon(
-                  onPressed: _addRow,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Add row'),
-                ),
+                if (!ro) ...[
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    onPressed: _addRow,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add row'),
+                  ),
+                ],
               ],
             ),
             SingleChildScrollView(
@@ -3914,10 +4121,8 @@ class _ActionBrainstormingFormEditorState
                           width: 100,
                           child: TextFormField(
                             controller: r['name'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3926,10 +4131,8 @@ class _ActionBrainstormingFormEditorState
                           width: 100,
                           child: TextFormField(
                             controller: r['stop_doing'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3938,10 +4141,8 @@ class _ActionBrainstormingFormEditorState
                           width: 100,
                           child: TextFormField(
                             controller: r['do_less_of'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3950,10 +4151,8 @@ class _ActionBrainstormingFormEditorState
                           width: 100,
                           child: TextFormField(
                             controller: r['keep_doing'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3962,10 +4161,8 @@ class _ActionBrainstormingFormEditorState
                           width: 100,
                           child: TextFormField(
                             controller: r['do_more_of'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3974,10 +4171,8 @@ class _ActionBrainstormingFormEditorState
                           width: 100,
                           child: TextFormField(
                             controller: r['start_doing'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3986,23 +4181,23 @@ class _ActionBrainstormingFormEditorState
                           width: 100,
                           child: TextFormField(
                             controller: r['goal'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
                       DataCell(
-                        IconButton(
-                          icon: const Icon(
-                            Icons.remove_circle_outline,
-                            size: 20,
-                          ),
-                          onPressed: _rows.length > 1
-                              ? () => _removeRow(i)
-                              : null,
-                        ),
+                        ro
+                            ? const SizedBox(width: 40)
+                            : IconButton(
+                                icon: const Icon(
+                                  Icons.remove_circle_outline,
+                                  size: 20,
+                                ),
+                                onPressed: _rows.length > 1
+                                    ? () => _removeRow(i)
+                                    : null,
+                              ),
                       ),
                     ],
                   );
@@ -4024,9 +4219,12 @@ class _ActionBrainstormingFormEditorState
                           fontSize: 13,
                         ),
                       ),
-                      TextFormField(
-                        controller: _certifiedBy,
-                        decoration: rspUnderlinedField(''),
+                      RspSpacedOutlineField(
+                        child: TextFormField(
+                          controller: _certifiedBy,
+                          readOnly: ro,
+                          decoration: rspUnderlinedField(''),
+                        ),
                       ),
                       Text(
                         'Department Head',
@@ -4050,9 +4248,12 @@ class _ActionBrainstormingFormEditorState
                           fontSize: 13,
                         ),
                       ),
-                      TextFormField(
-                        controller: _certificationDate,
-                        decoration: rspUnderlinedField(''),
+                      RspSpacedOutlineField(
+                        child: TextFormField(
+                          controller: _certificationDate,
+                          readOnly: ro,
+                          decoration: rspUnderlinedField(''),
+                        ),
                       ),
                     ],
                   ),
@@ -4062,27 +4263,40 @@ class _ActionBrainstormingFormEditorState
             const SizedBox(height: 24),
             const RspFormFooter(),
             const SizedBox(height: 24),
-            Row(
-              children: [
-                FilledButton(onPressed: _save, child: const Text('Save')),
-                const SizedBox(width: 12),
-                TextButton(
-                  onPressed: widget.onCancel,
-                  child: const Text('Cancel'),
+            if (!ro) ...[
+              Row(
+                children: [
+                  FilledButton(onPressed: _save, child: const Text('Save')),
+                  const SizedBox(width: 12),
+                  TextButton(
+                    onPressed: widget.onCancel,
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  IconButton(
+                    onPressed: () => widget.onPrint(_buildCurrentEntry()),
+                    icon: const Icon(Icons.print_rounded),
+                    tooltip: 'Print',
+                  ),
+                  IconButton(
+                    onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
+                    icon: const Icon(Icons.picture_as_pdf_rounded),
+                    tooltip: 'Download PDF',
+                  ),
+                ],
+              ),
+            ] else ...[
+              if (widget.entry.createdAt != null)
+                Text(
+                  'Created: ${widget.entry.createdAt!.toLocal()}',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
-                const SizedBox(width: 12),
-                IconButton(
-                  onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                  icon: const Icon(Icons.print_rounded),
-                  tooltip: 'Print',
+              if (widget.entry.updatedAt != null)
+                Text(
+                  'Last updated: ${widget.entry.updatedAt!.toLocal()}',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
-                IconButton(
-                  onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
-                  icon: const Icon(Icons.picture_as_pdf_rounded),
-                  tooltip: 'Download PDF',
-                ),
-              ],
-            ),
+            ],
           ],
         ),
       ),
@@ -4126,6 +4340,22 @@ class _ActionBrainstormingList extends StatelessWidget {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    TextButton(
+                      onPressed: () => showReadOnlySavedEntryDialog(
+                        context,
+                        title: 'Saved action brainstorming worksheet',
+                        previewBuilder: () => _ActionBrainstormingFormEditor(
+                          readOnly: true,
+                          entry: e,
+                          onSave: (_) {},
+                          onCancel: () {},
+                          onPrint: (_) async {},
+                          onDownloadPdf: (_) async {},
+                        ),
+                        contentWidth: 1280,
+                      ),
+                      child: const Text('View'),
+                    ),
                     TextButton(
                       onPressed: () => onEdit(e),
                       child: const Text('Edit'),

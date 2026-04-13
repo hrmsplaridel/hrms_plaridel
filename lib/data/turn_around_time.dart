@@ -1,4 +1,4 @@
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'rsp_ld_saved_entries_api.dart';
 
 /// One applicant row in the Turn-Around Time table (no pre-filled values).
 class TurnAroundTimeApplicant {
@@ -142,41 +142,27 @@ class TurnAroundTimeRepo {
   TurnAroundTimeRepo._();
   static final TurnAroundTimeRepo instance = TurnAroundTimeRepo._();
 
-  SupabaseClient get _client => Supabase.instance.client;
-
   Future<List<TurnAroundTimeEntry>> list() async {
-    final res = await _client
-        .from(TurnAroundTimeEntry.tableName)
-        .select()
-        .order('created_at', ascending: false);
-    return (res as List)
-        .map((e) => TurnAroundTimeEntry.fromJson(Map<String, dynamic>.from(e as Map)))
-        .toList();
+    final rows = await RspLdSavedEntriesApi.listRows(TurnAroundTimeEntry.tableName);
+    return rows.map(TurnAroundTimeEntry.fromJson).toList();
   }
 
   Future<TurnAroundTimeEntry?> get(String id) async {
-    final res = await _client
-        .from(TurnAroundTimeEntry.tableName)
-        .select()
-        .eq('id', id)
-        .maybeSingle();
-    return res == null ? null : TurnAroundTimeEntry.fromJson(Map<String, dynamic>.from(res));
+    final row = await RspLdSavedEntriesApi.getRow(TurnAroundTimeEntry.tableName, id);
+    return row == null ? null : TurnAroundTimeEntry.fromJson(row);
   }
 
   Future<void> insert(TurnAroundTimeEntry entry) async {
     final payload = Map<String, dynamic>.from(entry.toJson())..remove('id');
-    await _client.from(TurnAroundTimeEntry.tableName).insert(payload);
+    await RspLdSavedEntriesApi.insertRow(TurnAroundTimeEntry.tableName, payload);
   }
 
   Future<void> update(TurnAroundTimeEntry entry) async {
     if (entry.id == null) return;
-    await _client
-        .from(TurnAroundTimeEntry.tableName)
-        .update(entry.toJson())
-        .eq('id', entry.id!);
+    await RspLdSavedEntriesApi.updateRow(TurnAroundTimeEntry.tableName, entry.id!, entry.toJson());
   }
 
   Future<void> delete(String id) async {
-    await _client.from(TurnAroundTimeEntry.tableName).delete().eq('id', id);
+    await RspLdSavedEntriesApi.deleteRow(TurnAroundTimeEntry.tableName, id);
   }
 }
