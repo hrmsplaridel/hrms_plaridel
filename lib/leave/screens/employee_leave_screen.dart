@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -7,8 +9,15 @@ import '../leave_provider.dart';
 import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
+import 'leave_balance_history_screen.dart';
+import 'leave_request_form_screen.dart';
+import '../utils/leave_request_pdf.dart';
+import '../utils/responsive_leave_form_host.dart';
 import '../widgets/leave_balance_card.dart';
-import '../widgets/leave_request_card.dart';
+import '../widgets/history_timeline.dart';
+import '../widgets/leave_card.dart';
+import '../widgets/leave_status_chip.dart';
+import '../widgets/my_leave_loading_skeleton.dart';
 
 /// Employee-facing leave screen.
 ///
@@ -17,10 +26,7 @@ import '../widgets/leave_request_card.dart';
 /// - pending/upcoming requests
 /// - recent leave request history
 class EmployeeLeaveScreen extends StatefulWidget {
-  const EmployeeLeaveScreen({
-    super.key,
-    this.onFileLeavePressed,
-  });
+  const EmployeeLeaveScreen({super.key, this.onFileLeavePressed});
 
   final VoidCallback? onFileLeavePressed;
 
@@ -28,8 +34,10 @@ class EmployeeLeaveScreen extends StatefulWidget {
   State<EmployeeLeaveScreen> createState() => _EmployeeLeaveScreenState();
 }
 
-class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen> {
+class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
+    with WidgetsBindingObserver {
   bool _initialized = false;
+  Timer? _autoRefreshTimer;
 
   @override
   void didChangeDependencies() {
@@ -42,6 +50,36 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen> {
       if (userId == null || userId.isEmpty) return;
       context.read<LeaveProvider>().loadMyLeaveData(userId);
     });
+    WidgetsBinding.instance.addObserver(this);
+    _startAutoRefresh();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _autoRefreshTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshMyLeaveData();
+    }
+  }
+
+  void _startAutoRefresh() {
+    _autoRefreshTimer?.cancel();
+    _autoRefreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      _refreshMyLeaveData();
+    });
+  }
+
+  Future<void> _refreshMyLeaveData() async {
+    if (!mounted) return;
+    final userId = context.read<AuthProvider>().user?.id;
+    if (userId == null || userId.isEmpty) return;
+    await context.read<LeaveProvider>().loadMyLeaveData(userId);
   }
 
   @override
@@ -53,6 +91,10 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen> {
         : 'Employee';
     final width = MediaQuery.of(context).size.width;
     final compact = width < 820;
+    final showLeaveSkeleton =
+        provider.loading &&
+        provider.balances.isEmpty &&
+        provider.requests.isEmpty;
 
     final totalAvailable = provider.balances.fold<double>(
       0,
@@ -82,84 +124,236 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen> {
           ),
         ],
         const SizedBox(height: 24),
-        compact
-            ? Column(
-                children: [
-                  _SummaryCard(
-                    title: 'Available Credits',
-                    value: totalAvailable.toStringAsFixed(1),
-                    subtitle: 'Across tracked leave balances',
-                    icon: Icons.account_balance_wallet_rounded,
-                  ),
-                  const SizedBox(height: 16),
-                  _SummaryCard(
-                    title: 'Pending Requests',
-                    value: '${provider.pendingCount}',
-                    subtitle: '${totalPendingDays.toStringAsFixed(1)} day(s) awaiting review',
-                    icon: Icons.pending_actions_rounded,
-                  ),
-                  const SizedBox(height: 16),
-                  _SummaryCard(
-                    title: 'Next Approved Leave',
-                    value: nextApproved?.leaveType.displayName ?? 'None',
-                    subtitle: _approvedLeaveSubtitle(nextApproved),
-                    icon: Icons.event_available_rounded,
-                  ),
-                ],
-              )
-            : Row(
-                children: [
-                  Expanded(
-                    child: _SummaryCard(
+        if (showLeaveSkeleton)
+          MyLeaveLoadingSkeleton(compact: compact)
+        else ...[
+          compact
+              ? Column(
+                  children: [
+                    _SummaryCard(
                       title: 'Available Credits',
                       value: totalAvailable.toStringAsFixed(1),
                       subtitle: 'Across tracked leave balances',
                       icon: Icons.account_balance_wallet_rounded,
                     ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: _SummaryCard(
+                    const SizedBox(height: 16),
+                    _SummaryCard(
                       title: 'Pending Requests',
                       value: '${provider.pendingCount}',
-                      subtitle: '${totalPendingDays.toStringAsFixed(1)} day(s) awaiting review',
+                      subtitle:
+                          '${totalPendingDays.toStringAsFixed(1)} day(s) awaiting review',
                       icon: Icons.pending_actions_rounded,
                     ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: _SummaryCard(
+                    const SizedBox(height: 16),
+                    _SummaryCard(
                       title: 'Next Approved Leave',
                       value: nextApproved?.leaveType.displayName ?? 'None',
                       subtitle: _approvedLeaveSubtitle(nextApproved),
                       icon: Icons.event_available_rounded,
                     ),
-                  ),
-                ],
+                  ],
+                )
+              : Row(
+                  children: [
+                    Expanded(
+                      child: _SummaryCard(
+                        title: 'Available Credits',
+                        value: totalAvailable.toStringAsFixed(1),
+                        subtitle: 'Across tracked leave balances',
+                        icon: Icons.account_balance_wallet_rounded,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: _SummaryCard(
+                        title: 'Pending Requests',
+                        value: '${provider.pendingCount}',
+                        subtitle:
+                            '${totalPendingDays.toStringAsFixed(1)} day(s) awaiting review',
+                        icon: Icons.pending_actions_rounded,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: _SummaryCard(
+                        title: 'Next Approved Leave',
+                        value: nextApproved?.leaveType.displayName ?? 'None',
+                        subtitle: _approvedLeaveSubtitle(nextApproved),
+                        icon: Icons.event_available_rounded,
+                      ),
+                    ),
+                  ],
+                ),
+          const SizedBox(height: 24),
+          Column(
+            children: [
+              _BalancesPanel(
+                balances: provider.balances,
+                loading: provider.loading,
+                onBalanceHistory: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          const LeaveBalanceHistoryScreen(isAdmin: false),
+                    ),
+                  );
+                },
               ),
-        const SizedBox(height: 24),
-        Column(
-          children: [
-            _BalancesPanel(
-              balances: provider.balances,
-              loading: provider.loading,
-            ),
-            const SizedBox(height: 16),
-            _RequestsPanel(
-              requests: provider.requests,
-              loading: provider.loading,
-            ),
-          ],
-        ),
+              const SizedBox(height: 16),
+              _RequestsPanel(
+                requests: provider.requests,
+                loading: provider.loading,
+                onEdit: (request) => _editRequest(context, request),
+                onCancel: (request) => _cancelRequest(context, request),
+                onPrint: _printLeaveForm,
+              ),
+            ],
+          ),
+        ],
       ],
     );
   }
 
   String _approvedLeaveSubtitle(LeaveRequest? request) {
-    if (request == null || request.startDate == null || request.endDate == null) {
+    if (request == null ||
+        request.startDate == null ||
+        request.endDate == null) {
       return 'No approved upcoming leave yet';
     }
     return '${_formatDate(request.startDate!)} to ${_formatDate(request.endDate!)}';
+  }
+
+  Future<void> _editRequest(BuildContext context, LeaveRequest request) async {
+    final provider = context.read<LeaveProvider>();
+    final result = await openResponsiveLeaveFormHost<String?>(
+      context: context,
+      builder: (_) =>
+          _buildEditLeaveRequestForm(provider: provider, request: request),
+    );
+    if (!mounted || result == null) return;
+    if (result != kLeaveFormResultDraftSaved &&
+        result != kLeaveFormResultSubmitted) {
+      return;
+    }
+    final userId = context.read<AuthProvider>().user?.id;
+    if (userId != null && userId.isNotEmpty) {
+      await context.read<LeaveProvider>().loadMyLeaveData(userId);
+    }
+    if (!mounted) return;
+    showLeaveFormSuccessSnackBar(context, result);
+  }
+
+  Widget _buildEditLeaveRequestForm({
+    required LeaveProvider provider,
+    required LeaveRequest request,
+  }) {
+    return LeaveRequestFormScreen(
+      initialRequest: request,
+      onSaveDraft: (updated) async {
+        final saved = updated.id == null || updated.id!.isEmpty
+            ? await provider.saveDraft(updated)
+            : await provider.updateRequest(
+                updated.copyWith(
+                  // Backend does NOT allow returned -> draft.
+                  // Keep status as returned when editing a returned request.
+                  status: request.status == LeaveRequestStatus.returned
+                      ? LeaveRequestStatus.returned
+                      : LeaveRequestStatus.draft,
+                ),
+              );
+        return saved != null;
+      },
+      onSubmitRequest: (updated) async {
+        // For draft/returned edits, resubmission updates the same request to pending.
+        final saved = updated.id == null || updated.id!.isEmpty
+            ? await provider.submitRequest(updated)
+            : await provider.updateRequest(
+                updated.copyWith(status: LeaveRequestStatus.pending),
+              );
+        return saved != null;
+      },
+    );
+  }
+
+  /// Opens the system print / save-PDF dialog with the official leave form PDF.
+  Future<void> _printLeaveForm(LeaveRequest request) async {
+    final provider = context.read<LeaveProvider>();
+    if (!mounted) return;
+    try {
+      LeaveRequest target = request;
+      final id = request.id;
+      if (id != null && id.isNotEmpty) {
+        final fresh = await provider.refreshRequestById(id);
+        if (fresh != null) target = fresh;
+      }
+
+      final balances = await provider.fetchBalancesForUser(target.userId);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Preparing print...')));
+
+      await LeaveRequestPdf.printLeaveRequest(
+        request: target,
+        balances: balances,
+        name: 'Leave_Application_${target.id ?? target.userId}.pdf',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
+    }
+  }
+
+  Future<void> _cancelRequest(
+    BuildContext context,
+    LeaveRequest request,
+  ) async {
+    final auth = context.read<AuthProvider>();
+    final userId = auth.user?.id;
+    if (userId == null || userId.isEmpty) return;
+    final requestId = request.id;
+    if (requestId == null || requestId.isEmpty) return;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cancel leave request?'),
+        content: const Text(
+          'This will cancel the request. You can file a new request anytime.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('No'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Yes, cancel'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    final updated = await context.read<LeaveProvider>().cancelRequest(
+      requestId: requestId,
+      userId: userId,
+    );
+    if (!mounted) return;
+    final provider = context.read<LeaveProvider>();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          updated != null
+              ? 'Leave request cancelled.'
+              : (provider.error ?? 'Cancel failed.'),
+        ),
+      ),
+    );
+    await provider.loadMyLeaveData(userId);
   }
 }
 
@@ -314,10 +508,12 @@ class _BalancesPanel extends StatelessWidget {
   const _BalancesPanel({
     required this.balances,
     required this.loading,
+    required this.onBalanceHistory,
   });
 
   final List<LeaveBalance> balances;
   final bool loading;
+  final VoidCallback onBalanceHistory;
 
   @override
   Widget build(BuildContext context) {
@@ -325,67 +521,1030 @@ class _BalancesPanel extends StatelessWidget {
       title: 'Leave Balances',
       subtitle: 'Available and pending credits per leave type.',
       icon: Icons.account_balance_wallet_rounded,
+      headerTrailing: OutlinedButton.icon(
+        onPressed: onBalanceHistory,
+        icon: const Icon(Icons.receipt_long_outlined, size: 18),
+        label: const Text('Balance History'),
+      ),
       child: loading && balances.isEmpty
           ? const _CenteredState(message: 'Loading leave balances...')
           : balances.isEmpty
-              ? const _CenteredState(message: 'No leave balances available yet.')
-              : LayoutBuilder(
-                  builder: (context, constraints) {
-                    final crossAxisCount = constraints.maxWidth < 600
-                        ? 1
-                        : (constraints.maxWidth < 960 ? 2 : 3);
-                    final cardWidth =
-                        (constraints.maxWidth - (crossAxisCount - 1) * 12) /
-                            crossAxisCount;
-                    return Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
-                      children: balances
-                          .map(
-                            (balance) => SizedBox(
-                              width: cardWidth,
-                              child: LeaveBalanceCard(balance: balance),
-                            ),
-                          )
-                          .toList(),
-                    );
-                  },
-                ),
+          ? const _CenteredState(message: 'No leave balances available yet.')
+          : LayoutBuilder(
+              builder: (context, constraints) {
+                final crossAxisCount = constraints.maxWidth < 600
+                    ? 1
+                    : (constraints.maxWidth < 960 ? 2 : 3);
+                final cardWidth =
+                    (constraints.maxWidth - (crossAxisCount - 1) * 12) /
+                    crossAxisCount;
+                return Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: balances
+                      .map(
+                        (balance) => SizedBox(
+                          width: cardWidth,
+                          child: LeaveBalanceCard(balance: balance),
+                        ),
+                      )
+                      .toList(),
+                );
+              },
+            ),
     );
   }
 }
 
-class _RequestsPanel extends StatelessWidget {
+class _RequestsPanel extends StatefulWidget {
   const _RequestsPanel({
     required this.requests,
     required this.loading,
+    required this.onEdit,
+    required this.onCancel,
+    required this.onPrint,
   });
 
   final List<LeaveRequest> requests;
   final bool loading;
+  final ValueChanged<LeaveRequest> onEdit;
+  final ValueChanged<LeaveRequest> onCancel;
+  final ValueChanged<LeaveRequest> onPrint;
+
+  @override
+  State<_RequestsPanel> createState() => _RequestsPanelState();
+}
+
+class _RequestsPanelState extends State<_RequestsPanel> {
+  late final ScrollController _requestsScrollController;
+  String? _selectedRequestKey;
+  LeaveRequestStatus? _selectedStatus;
+  DateTime? _fromDate;
+  DateTime? _toDate;
+  String _searchQuery = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _requestsScrollController = ScrollController();
+  }
+
+  @override
+  void dispose() {
+    _requestsScrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.sizeOf(context).height;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final maxListHeight = screenWidth < 600
+        ? (screenHeight * 0.38).clamp(260.0, 420.0)
+        : screenWidth < 1024
+        ? (screenHeight * 0.5).clamp(320.0, 560.0)
+        : (screenHeight * 0.58).clamp(380.0, 700.0);
+    final filteredRequests = _filteredRequests;
+    final useScrollableList = filteredRequests.length > 3;
+    LeaveRequest? selectedRequest;
+    for (final item in filteredRequests) {
+      if (_requestKey(item) == _selectedRequestKey) {
+        selectedRequest = item;
+        break;
+      }
+    }
+
     return _SectionCard(
       title: 'My Requests',
       subtitle: 'Recent leave applications and their current status.',
       icon: Icons.event_note_rounded,
-      child: loading && requests.isEmpty
+      headerTrailing: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          OutlinedButton(
+            onPressed: selectedRequest == null
+                ? null
+                : () => _showDetails(context, selectedRequest!),
+            child: const Text('View Details'),
+          ),
+          OutlinedButton(
+            onPressed: selectedRequest == null
+                ? null
+                : () => _showHistory(context, selectedRequest!),
+            child: const Text('View History'),
+          ),
+        ],
+      ),
+      child: widget.loading && widget.requests.isEmpty
           ? const _CenteredState(message: 'Loading leave requests...')
-          : requests.isEmpty
-              ? const _CenteredState(
-                  message: 'No leave requests yet. Start by filing your first leave request.',
-                )
-              : Column(
-                  children: requests
-                      .map(
-                        (request) => Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: LeaveRequestCard(request: request),
-                        ),
-                      )
-                      .toList(),
+          : widget.requests.isEmpty
+          ? const _CenteredState(
+              message:
+                  'No leave requests yet. Start by filing your first leave request.',
+            )
+          : filteredRequests.isEmpty
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _LeaveRequestsFiltersBar(
+                  selectedStatus: _selectedStatus,
+                  fromDate: _fromDate,
+                  toDate: _toDate,
+                  searchQuery: _searchQuery,
+                  visibleCount: filteredRequests.length,
+                  totalCount: widget.requests.length,
+                  onSearchChanged: (value) =>
+                      setState(() => _searchQuery = value),
+                  onStatusChanged: (status) =>
+                      setState(() => _selectedStatus = status),
+                  onPickFromDate: () => _pickFilterDate(isFrom: true),
+                  onPickToDate: () => _pickFilterDate(isFrom: false),
+                  onClearFilters: _clearFilters,
                 ),
+                const SizedBox(height: 12),
+                const _CenteredState(
+                  message: 'No leave requests match the current filters.',
+                ),
+              ],
+            )
+          : !useScrollableList
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _LeaveRequestsFiltersBar(
+                  selectedStatus: _selectedStatus,
+                  fromDate: _fromDate,
+                  toDate: _toDate,
+                  searchQuery: _searchQuery,
+                  visibleCount: filteredRequests.length,
+                  totalCount: widget.requests.length,
+                  onSearchChanged: (value) =>
+                      setState(() => _searchQuery = value),
+                  onStatusChanged: (status) =>
+                      setState(() => _selectedStatus = status),
+                  onPickFromDate: () => _pickFilterDate(isFrom: true),
+                  onPickToDate: () => _pickFilterDate(isFrom: false),
+                  onClearFilters: _clearFilters,
+                ),
+                const SizedBox(height: 12),
+                ...List.generate(filteredRequests.length, (index) {
+                  final request = filteredRequests[index];
+                  return Padding(
+                    padding: EdgeInsets.only(
+                      bottom: index == filteredRequests.length - 1 ? 0 : 12,
+                    ),
+                    child: _EmployeeRequestItem(
+                      request: request,
+                      isSelected: _requestKey(request) == _selectedRequestKey,
+                      onTap: () => _toggleSelection(request),
+                    ),
+                  );
+                }),
+              ],
+            )
+          : ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: maxListHeight),
+              child: Scrollbar(
+                controller: _requestsScrollController,
+                thumbVisibility: true,
+                child: ListView(
+                  controller: _requestsScrollController,
+                  primary: false,
+                  physics: const BouncingScrollPhysics(
+                    parent: AlwaysScrollableScrollPhysics(),
+                  ),
+                  children: [
+                    _LeaveRequestsFiltersBar(
+                      selectedStatus: _selectedStatus,
+                      fromDate: _fromDate,
+                      toDate: _toDate,
+                      searchQuery: _searchQuery,
+                      visibleCount: filteredRequests.length,
+                      totalCount: widget.requests.length,
+                      onSearchChanged: (value) =>
+                          setState(() => _searchQuery = value),
+                      onStatusChanged: (status) =>
+                          setState(() => _selectedStatus = status),
+                      onPickFromDate: () => _pickFilterDate(isFrom: true),
+                      onPickToDate: () => _pickFilterDate(isFrom: false),
+                      onClearFilters: _clearFilters,
+                    ),
+                    const SizedBox(height: 12),
+                    ...List.generate(filteredRequests.length, (index) {
+                      final request = filteredRequests[index];
+                      return Padding(
+                        padding: EdgeInsets.only(
+                          bottom: index == filteredRequests.length - 1 ? 0 : 12,
+                        ),
+                        child: _EmployeeRequestItem(
+                          request: request,
+                          isSelected:
+                              _requestKey(request) == _selectedRequestKey,
+                          onTap: () => _toggleSelection(request),
+                        ),
+                      );
+                    }),
+                  ],
+                ),
+              ),
+            ),
+    );
+  }
+
+  List<LeaveRequest> get _filteredRequests {
+    return widget.requests.where((request) {
+      if (_searchQuery.trim().isNotEmpty) {
+        final q = _searchQuery.trim().toLowerCase();
+        final text =
+            '${request.leaveType.displayName} ${request.reason ?? ''} ${request.status.displayName} ${request.employeeName ?? ''}'
+                .toLowerCase();
+        if (!text.contains(q)) return false;
+      }
+      if (_selectedStatus != null) {
+        final status = request.status;
+        if (_selectedStatus == LeaveRequestStatus.pending) {
+          if (!status.isPending) return false;
+        } else if (_selectedStatus == LeaveRequestStatus.rejected) {
+          if (!status.isRejected) return false;
+        } else if (status != _selectedStatus) {
+          return false;
+        }
+      }
+      if (_fromDate != null && request.startDate != null) {
+        final d = _dateOnly(request.startDate!);
+        if (d.isBefore(_dateOnly(_fromDate!))) return false;
+      }
+      if (_toDate != null && request.endDate != null) {
+        final d = _dateOnly(request.endDate!);
+        if (d.isAfter(_dateOnly(_toDate!))) return false;
+      }
+      return true;
+    }).toList();
+  }
+
+  void _toggleSelection(LeaveRequest request) {
+    final key = _requestKey(request);
+    setState(() {
+      _selectedRequestKey = _selectedRequestKey == key ? null : key;
+    });
+  }
+
+  String _requestKey(LeaveRequest request) {
+    return request.id ??
+        '${request.createdAt?.toIso8601String() ?? ''}-${request.startDate?.toIso8601String() ?? ''}-${request.endDate?.toIso8601String() ?? ''}-${request.leaveType.displayName}';
+  }
+
+  DateTime _dateOnly(DateTime value) =>
+      DateTime(value.year, value.month, value.day);
+
+  Future<void> _pickFilterDate({required bool isFrom}) async {
+    final initial = isFrom
+        ? (_fromDate ?? DateTime.now())
+        : (_toDate ?? _fromDate ?? DateTime.now());
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (picked == null) return;
+    setState(() {
+      if (isFrom) {
+        _fromDate = picked;
+        if (_toDate != null && _toDate!.isBefore(_fromDate!)) {
+          _toDate = _fromDate;
+        }
+      } else {
+        _toDate = picked;
+        if (_fromDate != null && _fromDate!.isAfter(_toDate!)) {
+          _fromDate = _toDate;
+        }
+      }
+    });
+  }
+
+  void _clearFilters() {
+    setState(() {
+      _searchQuery = '';
+      _selectedStatus = null;
+      _fromDate = null;
+      _toDate = null;
+    });
+  }
+
+  void _showDetails(BuildContext context, LeaveRequest request) {
+    final canEdit =
+        request.status == LeaveRequestStatus.draft ||
+        request.status == LeaveRequestStatus.returned ||
+        request.status == LeaveRequestStatus.rejectedByDepartmentHead ||
+        request.status == LeaveRequestStatus.rejectedByHr;
+
+    showDialog<void>(
+      context: context,
+      builder: (_) => _EmployeeLeaveDetailsDialog(
+        request: request,
+        canEdit: canEdit,
+        onEdit: () => widget.onEdit(request),
+        onPrint: () => widget.onPrint(request),
+      ),
+    );
+  }
+
+  void _showHistory(BuildContext context, LeaveRequest request) {
+    final reviewed = request.reviewedAt;
+    final reviewer = (request.reviewerName ?? '').trim().isNotEmpty
+        ? request.reviewerName!.trim()
+        : 'Approver';
+
+    final events = [
+      LeaveHistoryEvent(
+        label: 'Submitted',
+        dateTime: request.dateFiled ?? request.createdAt,
+        actor: request.employeeName ?? 'Employee',
+        remarks: request.reason,
+      ),
+      LeaveHistoryEvent(
+        label: 'Approved by Department Head',
+        dateTime:
+            request.status == LeaveRequestStatus.pendingHr ||
+                request.status == LeaveRequestStatus.approved
+            ? reviewed
+            : null,
+        actor: reviewer,
+        completed:
+            request.status == LeaveRequestStatus.pendingHr ||
+            request.status == LeaveRequestStatus.approved,
+      ),
+      LeaveHistoryEvent(
+        label: 'Forwarded to HR',
+        dateTime:
+            request.status == LeaveRequestStatus.pendingHr ||
+                request.status == LeaveRequestStatus.approved
+            ? reviewed
+            : null,
+        actor: reviewer,
+        completed:
+            request.status == LeaveRequestStatus.pendingHr ||
+            request.status == LeaveRequestStatus.approved,
+      ),
+      LeaveHistoryEvent(
+        label: 'Approved by HR',
+        dateTime: request.status == LeaveRequestStatus.approved
+            ? reviewed
+            : null,
+        actor: reviewer,
+        remarks: request.hrRemarks,
+        completed: request.status == LeaveRequestStatus.approved,
+      ),
+    ];
+
+    showDialog<void>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Leave Request History'),
+        content: SizedBox(width: 560, child: HistoryTimeline(events: events)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LeaveRequestsFiltersBar extends StatelessWidget {
+  const _LeaveRequestsFiltersBar({
+    required this.selectedStatus,
+    required this.fromDate,
+    required this.toDate,
+    required this.searchQuery,
+    required this.visibleCount,
+    required this.totalCount,
+    required this.onSearchChanged,
+    required this.onStatusChanged,
+    required this.onPickFromDate,
+    required this.onPickToDate,
+    required this.onClearFilters,
+  });
+
+  final LeaveRequestStatus? selectedStatus;
+  final DateTime? fromDate;
+  final DateTime? toDate;
+  final String searchQuery;
+  final int visibleCount;
+  final int totalCount;
+  final ValueChanged<String> onSearchChanged;
+  final ValueChanged<LeaveRequestStatus?> onStatusChanged;
+  final VoidCallback onPickFromDate;
+  final VoidCallback onPickToDate;
+  final VoidCallback onClearFilters;
+
+  @override
+  Widget build(BuildContext context) {
+    const border = Color(0xFFD7DCE2);
+    const activePill = Color(0xFF123B6D);
+    const inactiveText = Color(0xFF2D3640);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            SizedBox(
+              width: 240,
+              height: 36,
+              child: TextFormField(
+                key: ValueKey(searchQuery),
+                initialValue: searchQuery,
+                onChanged: onSearchChanged,
+                style: const TextStyle(
+                  color: Color(0xFF2D3640),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+                decoration: _filterDecoration(
+                  hintText: 'Search',
+                  borderColor: border,
+                  suffixIcon: const Icon(
+                    Icons.search_rounded,
+                    size: 20,
+                    color: Color(0xFF8792A0),
+                  ),
+                ),
+              ),
+            ),
+            _dateButton(
+              label: fromDate == null ? 'From' : _formatDate(fromDate!),
+              onPressed: onPickFromDate,
+              borderColor: border,
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 2),
+              child: Text(
+                '-',
+                style: TextStyle(
+                  color: Color(0xFF7F8895),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+            _dateButton(
+              label: toDate == null ? 'To' : _formatDate(toDate!),
+              onPressed: onPickToDate,
+              borderColor: border,
+            ),
+            _statusChip(
+              label: 'All',
+              selected: selectedStatus == null,
+              onTap: () => onStatusChanged(null),
+              selectedColor: activePill,
+              unselectedTextColor: inactiveText,
+            ),
+            _statusChip(
+              label: 'Pending',
+              selected: selectedStatus == LeaveRequestStatus.pending,
+              onTap: () => onStatusChanged(LeaveRequestStatus.pending),
+              selectedColor: activePill,
+              unselectedTextColor: inactiveText,
+            ),
+            _statusChip(
+              label: 'Approved',
+              selected: selectedStatus == LeaveRequestStatus.approved,
+              onTap: () => onStatusChanged(LeaveRequestStatus.approved),
+              selectedColor: activePill,
+              unselectedTextColor: inactiveText,
+            ),
+            _statusChip(
+              label: 'Rejected',
+              selected: selectedStatus == LeaveRequestStatus.rejected,
+              onTap: () => onStatusChanged(LeaveRequestStatus.rejected),
+              selectedColor: activePill,
+              unselectedTextColor: inactiveText,
+            ),
+            _statusChip(
+              label: 'Cancelled',
+              selected: selectedStatus == LeaveRequestStatus.cancelled,
+              onTap: () => onStatusChanged(LeaveRequestStatus.cancelled),
+              selectedColor: activePill,
+              unselectedTextColor: inactiveText,
+            ),
+            TextButton(
+              onPressed: onClearFilters,
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF1A568B),
+                textStyle: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                minimumSize: const Size(0, 36),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text('Clear'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '$visibleCount of $totalCount',
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _dateButton({
+    required String label,
+    required VoidCallback onPressed,
+    required Color borderColor,
+  }) {
+    return SizedBox(
+      height: 36,
+      child: OutlinedButton.icon(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFF556070),
+          side: BorderSide(color: borderColor),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+        icon: const Icon(
+          Icons.calendar_today_rounded,
+          size: 16,
+          color: Color(0xFF8A95A3),
+        ),
+        label: Text(label),
+      ),
+    );
+  }
+
+  Widget _statusChip({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+    required Color selectedColor,
+    required Color unselectedTextColor,
+  }) {
+    return SizedBox(
+      height: 36,
+      child: TextButton(
+        onPressed: onTap,
+        style: TextButton.styleFrom(
+          backgroundColor: selected ? selectedColor : const Color(0xFFF7F8FA),
+          foregroundColor: selected ? Colors.white : unselectedTextColor,
+          side: const BorderSide(color: Color(0xFFDDE2E8)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          minimumSize: const Size(0, 36),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+        ),
+        child: Text(label),
+      ),
+    );
+  }
+
+  InputDecoration _filterDecoration({
+    required String hintText,
+    required Color borderColor,
+    Widget? suffixIcon,
+  }) {
+    return InputDecoration(
+      hintText: hintText,
+      hintStyle: const TextStyle(
+        color: Color(0xFF8D96A3),
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+      ),
+      suffixIcon: suffixIcon,
+      isDense: true,
+      filled: true,
+      fillColor: Colors.white,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: borderColor),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: Color(0xFF123B6D), width: 1.2),
+      ),
+    );
+  }
+}
+
+class _EmployeeRequestItem extends StatelessWidget {
+  const _EmployeeRequestItem({
+    required this.request,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  final LeaveRequest request;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return LeaveCard(
+      request: request,
+      onTap: onTap,
+      isSelected: isSelected,
+      showActions: false,
+      onViewDetails: () {},
+      onViewHistory: () {},
+      onCancel: null,
+    );
+  }
+}
+
+/// Employee “view details” dialog — compact width, status chip, scrollable body.
+class _EmployeeLeaveDetailsDialog extends StatelessWidget {
+  const _EmployeeLeaveDetailsDialog({
+    required this.request,
+    required this.canEdit,
+    required this.onEdit,
+    required this.onPrint,
+  });
+
+  final LeaveRequest request;
+  final bool canEdit;
+  final VoidCallback onEdit;
+  final VoidCallback onPrint;
+
+  String get _leaveTypeText {
+    if (request.leaveType == LeaveType.others) {
+      final custom = request.customLeaveTypeText?.trim();
+      if (custom != null && custom.isNotEmpty) {
+        return '${request.leaveType.displayName} · $custom';
+      }
+    }
+    return request.leaveType.displayName;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screen = MediaQuery.sizeOf(context);
+    final maxW = (screen.width - 40).clamp(300.0, 420.0);
+    final bodyMaxH = (screen.height * 0.52).clamp(220.0, 420.0);
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 22),
+      clipBehavior: Clip.antiAlias,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxW),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 8, 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      Icons.event_available_rounded,
+                      color: AppTheme.primaryNavy,
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Leave details',
+                          style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.2,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        LeaveStatusChip(status: request.status),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
+            ),
+            Divider(height: 1, color: Colors.black.withValues(alpha: 0.06)),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: bodyMaxH),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _LeaveDetailTile(
+                      icon: Icons.category_outlined,
+                      label: 'Leave type',
+                      value: _leaveTypeText,
+                    ),
+                    _LeaveDetailTile(
+                      icon: Icons.date_range_rounded,
+                      label: 'Date range',
+                      value: _formatLeaveRequestRange(request),
+                    ),
+                    _LeaveDetailTile(
+                      icon: Icons.timelapse_rounded,
+                      label: 'Working days',
+                      value:
+                          request.workingDaysApplied?.toStringAsFixed(1) ?? '—',
+                    ),
+                    _LeaveDetailTile(
+                      icon: Icons.send_rounded,
+                      label: 'Submitted',
+                      value: request.dateFiled != null
+                          ? _formatDate(request.dateFiled!)
+                          : '—',
+                    ),
+                    if ((request.officeDepartment ?? '').trim().isNotEmpty)
+                      _LeaveDetailTile(
+                        icon: Icons.apartment_rounded,
+                        label: 'Office / department',
+                        value: request.officeDepartment!.trim(),
+                      ),
+                    _LeaveDetailTile(
+                      icon: Icons.swap_horiz_rounded,
+                      label: 'Commutation',
+                      value: request.commutation.displayName,
+                    ),
+                    if ((request.reason ?? '').trim().isNotEmpty)
+                      _LeaveDetailReasonCard(text: request.reason!.trim()),
+                    if ((request.disapprovalReason ?? '').trim().isNotEmpty)
+                      _LeaveDetailNotice(
+                        icon: Icons.info_outline_rounded,
+                        title: 'Decision note',
+                        body: request.disapprovalReason!.trim(),
+                        tone: _LeaveNoticeTone.warning,
+                      ),
+                    if ((request.hrRemarks ?? '').trim().isNotEmpty &&
+                        request.status == LeaveRequestStatus.approved)
+                      _LeaveDetailNotice(
+                        icon: Icons.check_circle_outline_rounded,
+                        title: 'HR remarks',
+                        body: request.hrRemarks!.trim(),
+                        tone: _LeaveNoticeTone.neutral,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            Divider(height: 1, color: Colors.black.withValues(alpha: 0.06)),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+              child: Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (canEdit)
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        onEdit();
+                      },
+                      icon: const Icon(Icons.edit_rounded, size: 18),
+                      label: const Text('Edit'),
+                    ),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      onPrint();
+                    },
+                    icon: const Icon(Icons.print_rounded, size: 18),
+                    label: const Text('Print'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Done'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LeaveDetailTile extends StatelessWidget {
+  const _LeaveDetailTile({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppTheme.offWhite,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              icon,
+              size: 20,
+              color: AppTheme.primaryNavy.withValues(alpha: 0.85),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    value,
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LeaveDetailReasonCard extends StatelessWidget {
+  const _LeaveDetailReasonCard({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppTheme.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.notes_rounded,
+                  size: 18,
+                  color: AppTheme.textSecondary,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Reason',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              text,
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 14,
+                height: 1.45,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+enum _LeaveNoticeTone { neutral, warning }
+
+class _LeaveDetailNotice extends StatelessWidget {
+  const _LeaveDetailNotice({
+    required this.icon,
+    required this.title,
+    required this.body,
+    required this.tone,
+  });
+
+  final IconData icon;
+  final String title;
+  final String body;
+  final _LeaveNoticeTone tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final (bg, border, iconC) = switch (tone) {
+      _LeaveNoticeTone.warning => (
+        Colors.red.shade50,
+        Colors.red.shade100,
+        Colors.red.shade800,
+      ),
+      _LeaveNoticeTone.neutral => (
+        AppTheme.offWhite,
+        Colors.black.withValues(alpha: 0.08),
+        AppTheme.primaryNavy,
+      ),
+    };
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 18, color: iconC),
+                const SizedBox(width: 6),
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              body,
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -396,12 +1555,14 @@ class _SectionCard extends StatelessWidget {
     required this.subtitle,
     required this.icon,
     required this.child,
+    this.headerTrailing,
   });
 
   final String title;
   final String subtitle;
   final IconData icon;
   final Widget child;
+  final Widget? headerTrailing;
 
   @override
   Widget build(BuildContext context) {
@@ -451,6 +1612,15 @@ class _SectionCard extends StatelessWidget {
                   ],
                 ),
               ),
+              if (headerTrailing != null) ...[
+                const SizedBox(width: 12),
+                Flexible(
+                  child: Align(
+                    alignment: Alignment.topRight,
+                    child: headerTrailing!,
+                  ),
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 20),
@@ -479,20 +1649,14 @@ class _CenteredState extends StatelessWidget {
       child: Text(
         message,
         textAlign: TextAlign.center,
-        style: TextStyle(
-          color: AppTheme.textSecondary,
-          fontSize: 14,
-        ),
+        style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
       ),
     );
   }
 }
 
 class _ErrorBanner extends StatelessWidget {
-  const _ErrorBanner({
-    required this.message,
-    required this.onDismiss,
-  });
+  const _ErrorBanner({required this.message, required this.onDismiss});
 
   final String message;
   final VoidCallback onDismiss;
@@ -514,10 +1678,7 @@ class _ErrorBanner extends StatelessWidget {
           Expanded(
             child: Text(
               message,
-              style: TextStyle(
-                color: Colors.red.shade900,
-                fontSize: 13,
-              ),
+              style: TextStyle(color: Colors.red.shade900, fontSize: 13),
             ),
           ),
           IconButton(
@@ -547,4 +1708,9 @@ String _formatDate(DateTime value) {
     'Dec',
   ];
   return '${months[value.month - 1]} ${value.day}, ${value.year}';
+}
+
+String _formatLeaveRequestRange(LeaveRequest request) {
+  if (request.startDate == null || request.endDate == null) return '—';
+  return '${_formatDate(request.startDate!)} – ${_formatDate(request.endDate!)}';
 }

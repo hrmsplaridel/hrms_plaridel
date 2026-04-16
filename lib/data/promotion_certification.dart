@@ -1,4 +1,4 @@
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'rsp_ld_saved_entries_api.dart';
 
 /// One candidate row in the Promotion Certification table (name + 5 columns; no pre-filled values).
 class PromotionCertificationCandidate {
@@ -110,41 +110,31 @@ class PromotionCertificationRepo {
   PromotionCertificationRepo._();
   static final PromotionCertificationRepo instance = PromotionCertificationRepo._();
 
-  SupabaseClient get _client => Supabase.instance.client;
-
   Future<List<PromotionCertificationEntry>> list() async {
-    final res = await _client
-        .from(PromotionCertificationEntry.tableName)
-        .select()
-        .order('created_at', ascending: false);
-    return (res as List)
-        .map((e) => PromotionCertificationEntry.fromJson(Map<String, dynamic>.from(e as Map)))
-        .toList();
+    final rows = await RspLdSavedEntriesApi.listRows(PromotionCertificationEntry.tableName);
+    return rows.map(PromotionCertificationEntry.fromJson).toList();
   }
 
   Future<PromotionCertificationEntry?> get(String id) async {
-    final res = await _client
-        .from(PromotionCertificationEntry.tableName)
-        .select()
-        .eq('id', id)
-        .maybeSingle();
-    return res == null ? null : PromotionCertificationEntry.fromJson(Map<String, dynamic>.from(res));
+    final row = await RspLdSavedEntriesApi.getRow(PromotionCertificationEntry.tableName, id);
+    return row == null ? null : PromotionCertificationEntry.fromJson(row);
   }
 
   Future<void> insert(PromotionCertificationEntry entry) async {
     final payload = Map<String, dynamic>.from(entry.toJson())..remove('id');
-    await _client.from(PromotionCertificationEntry.tableName).insert(payload);
+    await RspLdSavedEntriesApi.insertRow(PromotionCertificationEntry.tableName, payload);
   }
 
   Future<void> update(PromotionCertificationEntry entry) async {
     if (entry.id == null) return;
-    await _client
-        .from(PromotionCertificationEntry.tableName)
-        .update(entry.toJson())
-        .eq('id', entry.id!);
+    await RspLdSavedEntriesApi.updateRow(
+      PromotionCertificationEntry.tableName,
+      entry.id!,
+      entry.toJson(),
+    );
   }
 
   Future<void> delete(String id) async {
-    await _client.from(PromotionCertificationEntry.tableName).delete().eq('id', id);
+    await RspLdSavedEntriesApi.deleteRow(PromotionCertificationEntry.tableName, id);
   }
 }

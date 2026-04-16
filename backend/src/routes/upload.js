@@ -11,11 +11,17 @@ const router = express.Router();
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
 const AVATAR_SUBDIR = 'avatars';
+const TRAINING_REPORT_SUBDIR = 'training-reports';
 
 // Ensure upload directory exists
 const avatarDir = path.join(UPLOAD_DIR, AVATAR_SUBDIR);
 if (!fs.existsSync(avatarDir)) {
   fs.mkdirSync(avatarDir, { recursive: true });
+}
+
+const trainingReportDir = path.join(UPLOAD_DIR, TRAINING_REPORT_SUBDIR);
+if (!fs.existsSync(trainingReportDir)) {
+  fs.mkdirSync(trainingReportDir, { recursive: true });
 }
 
 const storage = multer.diskStorage({
@@ -32,6 +38,30 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
   fileFilter: (_req, file, cb) => {
     const allowed = /\.(jpg|jpeg|png|gif|webp)$/i.test(file.originalname);
+    cb(null, allowed);
+  },
+});
+
+// Separate storage for training report attachments (images + documents)
+const trainingStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, trainingReportDir),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname) || '.dat';
+    const safeExt = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.pdf', '.doc', '.docx']
+            .includes(ext.toLowerCase())
+      ? ext
+      : '.dat';
+    cb(null, `${uuidv4()}${safeExt}`);
+  },
+});
+
+const trainingUpload = multer({
+  storage: trainingStorage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (_req, file, cb) => {
+    const allowed = /\.(jpg|jpeg|png|gif|webp|pdf|doc|docx)$/i.test(
+      file.originalname
+    );
     cb(null, allowed);
   },
 });
@@ -100,3 +130,32 @@ router.post(
 );
 
 module.exports = router;
+
+/**
+ * POST /api/upload/training-report
+ * multipart/form-data: file (image or document)
+ * Returns relative path and metadata; caller links it to a report row.
+ */
+router.post(
+  '/training-report',
+  authMiddleware,
+  trainingUpload.single('file'),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+      }
+
+      const relPath = `${TRAINING_REPORT_SUBDIR}/${req.file.filename}`;
+
+      res.json({
+        path: relPath,
+        originalName: req.file.originalname,
+        mimeType: req.file.mimetype,
+      });
+    } catch (err) {
+      console.error('[upload training-report]', err);
+      res.status(500).json({ error: 'Failed to upload training report file' });
+    }
+  }
+);

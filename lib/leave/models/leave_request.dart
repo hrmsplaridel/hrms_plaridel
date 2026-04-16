@@ -3,24 +3,58 @@ import 'leave_type.dart';
 /// Workflow status for one leave request.
 enum LeaveRequestStatus {
   draft,
-  pending,
+  pending, // legacy alias for pendingHr
+  pendingDepartmentHead, // awaiting department head
+  pendingHr, // awaiting HR/admin
+  rejectedByDepartmentHead, // department head rejected
+  rejectedByHr, // HR/admin rejected
   returned,
   approved,
-  rejected,
+  rejected, // legacy single-stage rejection
   cancelled,
 }
 
 extension LeaveRequestStatusExtension on LeaveRequestStatus {
-  String get value => name;
+  /// Return the snake_case value for API serialization.
+  String get value => switch (this) {
+    LeaveRequestStatus.draft => 'draft',
+    LeaveRequestStatus.pending => 'pending',
+    LeaveRequestStatus.pendingDepartmentHead => 'pending_department_head',
+    LeaveRequestStatus.pendingHr => 'pending_hr',
+    LeaveRequestStatus.rejectedByDepartmentHead =>
+      'rejected_by_department_head',
+    LeaveRequestStatus.rejectedByHr => 'rejected_by_hr',
+    LeaveRequestStatus.returned => 'returned',
+    LeaveRequestStatus.approved => 'approved',
+    LeaveRequestStatus.rejected => 'rejected',
+    LeaveRequestStatus.cancelled => 'cancelled',
+  };
 
   String get displayName => switch (this) {
-        LeaveRequestStatus.draft => 'Draft',
-        LeaveRequestStatus.pending => 'Pending',
-        LeaveRequestStatus.returned => 'Returned',
-        LeaveRequestStatus.approved => 'Approved',
-        LeaveRequestStatus.rejected => 'Rejected',
-        LeaveRequestStatus.cancelled => 'Cancelled',
-      };
+    LeaveRequestStatus.draft => 'Draft',
+    LeaveRequestStatus.pending => 'Pending',
+    LeaveRequestStatus.pendingDepartmentHead => 'Pending Department Head',
+    LeaveRequestStatus.pendingHr => 'Pending HR',
+    LeaveRequestStatus.rejectedByDepartmentHead =>
+      'Rejected by Department Head',
+    LeaveRequestStatus.rejectedByHr => 'Rejected by HR',
+    LeaveRequestStatus.returned => 'Returned',
+    LeaveRequestStatus.approved => 'Approved',
+    LeaveRequestStatus.rejected => 'Rejected',
+    LeaveRequestStatus.cancelled => 'Cancelled',
+  };
+
+  /// Whether this status is any kind of pending (useful for filtering).
+  bool get isPending =>
+      this == LeaveRequestStatus.pending ||
+      this == LeaveRequestStatus.pendingDepartmentHead ||
+      this == LeaveRequestStatus.pendingHr;
+
+  /// Whether this status is any kind of rejection.
+  bool get isRejected =>
+      this == LeaveRequestStatus.rejected ||
+      this == LeaveRequestStatus.rejectedByDepartmentHead ||
+      this == LeaveRequestStatus.rejectedByHr;
 }
 
 LeaveRequestStatus leaveRequestStatusFromString(String? s) {
@@ -35,18 +69,15 @@ LeaveRequestStatus leaveRequestStatusFromString(String? s) {
 }
 
 /// Section 6.D in the official form.
-enum LeaveCommutationOption {
-  notRequested,
-  requested,
-}
+enum LeaveCommutationOption { notRequested, requested }
 
 extension LeaveCommutationOptionExtension on LeaveCommutationOption {
   String get value => name;
 
   String get displayName => switch (this) {
-        LeaveCommutationOption.notRequested => 'Not Requested',
-        LeaveCommutationOption.requested => 'Requested',
-      };
+    LeaveCommutationOption.notRequested => 'Not Requested',
+    LeaveCommutationOption.requested => 'Requested',
+  };
 }
 
 LeaveCommutationOption leaveCommutationOptionFromString(String? s) {
@@ -99,6 +130,8 @@ class LeaveRequest {
     this.approvedOtherDetails,
     this.reviewerId,
     this.reviewerName,
+    this.reviewerRole,
+    this.reviewerTitle,
     this.reviewedAt,
     this.createdAt,
     this.updatedAt,
@@ -147,6 +180,8 @@ class LeaveRequest {
   final String? approvedOtherDetails;
   final String? reviewerId;
   final String? reviewerName;
+  final String? reviewerRole;
+  final String? reviewerTitle;
   final DateTime? reviewedAt;
 
   final DateTime? createdAt;
@@ -197,12 +232,12 @@ class LeaveRequest {
       recommendationRemarks: json['recommendation_remarks']?.toString(),
       disapprovalReason: json['disapproval_reason']?.toString(),
       approvedDaysWithPay: _parseDouble(json['approved_days_with_pay']),
-      approvedDaysWithoutPay: _parseDouble(
-        json['approved_days_without_pay'],
-      ),
+      approvedDaysWithoutPay: _parseDouble(json['approved_days_without_pay']),
       approvedOtherDetails: json['approved_other_details']?.toString(),
       reviewerId: json['reviewer_id']?.toString(),
       reviewerName: json['reviewer_name']?.toString(),
+      reviewerRole: json['reviewer_role']?.toString(),
+      reviewerTitle: json['reviewer_title']?.toString(),
       reviewedAt: _parseDateTime(json['reviewed_at']),
       createdAt: _parseDateTime(json['created_at']),
       updatedAt: _parseDateTime(json['updated_at']),
@@ -245,6 +280,8 @@ class LeaveRequest {
       'approved_other_details': _trimOrNull(approvedOtherDetails),
       'reviewer_id': reviewerId,
       'reviewer_name': _trimOrNull(reviewerName),
+      'reviewer_role': _trimOrNull(reviewerRole),
+      'reviewer_title': _trimOrNull(reviewerTitle),
       'reviewed_at': reviewedAt?.toIso8601String(),
       'updated_at': DateTime.now().toIso8601String(),
     };
@@ -285,6 +322,8 @@ class LeaveRequest {
     String? approvedOtherDetails,
     String? reviewerId,
     String? reviewerName,
+    String? reviewerRole,
+    String? reviewerTitle,
     DateTime? reviewedAt,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -326,6 +365,8 @@ class LeaveRequest {
       approvedOtherDetails: approvedOtherDetails ?? this.approvedOtherDetails,
       reviewerId: reviewerId ?? this.reviewerId,
       reviewerName: reviewerName ?? this.reviewerName,
+      reviewerRole: reviewerRole ?? this.reviewerRole,
+      reviewerTitle: reviewerTitle ?? this.reviewerTitle,
       reviewedAt: reviewedAt ?? this.reviewedAt,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -339,12 +380,23 @@ class LeaveRequest {
 
   static DateTime? _parseDate(dynamic value) {
     if (value == null) return null;
-    return DateTime.tryParse(value.toString());
+    final s = value.toString().trim();
+    if (s.isEmpty) return null;
+    // Pure YYYY-MM-DD check.
+    if (RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(s)) {
+      try {
+        final p = s.split('-').map(int.parse).toList();
+        return DateTime(p[0], p[1], p[2]);
+      } catch (_) {}
+    }
+    return DateTime.tryParse(s);
   }
 
   static DateTime? _parseDateTime(dynamic value) {
     if (value == null) return null;
-    return DateTime.tryParse(value.toString());
+    final s = value.toString().trim();
+    if (s.isEmpty) return null;
+    return DateTime.tryParse(s);
   }
 
   static String? _dateOnly(DateTime? value) {

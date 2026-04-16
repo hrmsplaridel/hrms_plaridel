@@ -26,31 +26,48 @@ class _DtrMainState extends State<DtrMain> {
   Widget build(BuildContext context) {
     final useSidebarNav = widget.section != null;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'DTR',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
+    return SizedBox(
+      width: double.infinity,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'DTR',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    useSidebarNav
+                        ? 'Daily Time Record.'
+                        : 'Daily Time Record. Choose a feature below.',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          useSidebarNav
-              ? 'Daily Time Record.'
-              : 'Daily Time Record. Choose a feature below.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-        ),
-        if (!useSidebarNav) ...[
+          if (!useSidebarNav) ...[
+            const SizedBox(height: 24),
+            _buildSectionNav(),
+          ],
           const SizedBox(height: 24),
-          _buildSectionNav(),
+          _buildContent(),
         ],
-        const SizedBox(height: 24),
-        _buildContent(),
-      ],
+      ),
     );
   }
 
@@ -103,9 +120,9 @@ class _DtrMainState extends State<DtrMain> {
   }
 
   static IconData _iconForSection(DtrSection section) => switch (section) {
-        DtrSection.timeLogs => Icons.schedule_rounded,
-        DtrSection.reports => Icons.summarize_rounded,
-      };
+    DtrSection.timeLogs => Icons.schedule_rounded,
+    DtrSection.reports => Icons.summarize_rounded,
+  };
 
   Widget _buildContent() {
     return ConstrainedBox(

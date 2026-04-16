@@ -13,4 +13,8 @@ class ApiConfig {
     const url = String.fromEnvironment('API_BASE_URL', defaultValue: '');
     return url.isNotEmpty ? url : 'http://localhost:3000';
   }
+
+  /// Recruitment attachments are always stored on the API under `uploads/rsp-attachments`.
+  /// Kept for compatibility; always true (external object storage is not used).
+  static bool get useLocalRspStorage => true;
 }

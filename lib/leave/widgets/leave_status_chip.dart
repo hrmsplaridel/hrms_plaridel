@@ -6,9 +6,11 @@ class LeaveStatusChip extends StatelessWidget {
   const LeaveStatusChip({
     super.key,
     required this.status,
+    this.label,
   });
 
   final LeaveRequestStatus status;
+  final String? label;
 
   @override
   Widget build(BuildContext context) {
@@ -17,6 +19,22 @@ class LeaveStatusChip extends StatelessWidget {
       LeaveRequestStatus.pending => (
           Colors.orange.shade100,
           Colors.orange.shade900,
+        ),
+      LeaveRequestStatus.pendingDepartmentHead => (
+          Colors.amber.shade100,
+          Colors.amber.shade900,
+        ),
+      LeaveRequestStatus.pendingHr => (
+          Colors.orange.shade100,
+          Colors.orange.shade900,
+        ),
+      LeaveRequestStatus.rejectedByDepartmentHead => (
+          Colors.red.shade50,
+          Colors.red.shade800,
+        ),
+      LeaveRequestStatus.rejectedByHr => (
+          Colors.red.shade100,
+          Colors.red.shade900,
         ),
       LeaveRequestStatus.returned => (
           Colors.blue.shade100,
@@ -43,7 +61,7 @@ class LeaveStatusChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
-        status.displayName,
+        label ?? status.displayName,
         style: TextStyle(
           color: fg,
           fontSize: 12,

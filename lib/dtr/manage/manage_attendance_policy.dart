@@ -6,24 +6,44 @@ import '../../landingpage/constants/app_theme.dart';
 class _PolicyRecord {
   const _PolicyRecord({
     required this.id,
-    required this.name,
+    required this.policyName,
     this.description,
-    required this.gracePeriodMinutes,
-    this.maxLatePerMonthMinutes,
-    this.lateDeductionRule,
-    this.absentDeductionRule,
-    this.undertimeRule,
+    required this.workHoursPerDay,
+    required this.useEquivalentDayConversion,
+
+    required this.deductLate,
+    this.maxLateMinutesPerMonth,
+    required this.convertLateToEquivalentDay,
+
+    required this.deductUndertime,
+    required this.convertUndertimeToEquivalentDay,
+
+    required this.absentEqualsFullDayDeduction,
+
+    required this.combineLateAndUndertime,
+    required this.deductionMultiplier,
     required this.isDefault,
     required this.isActive,
   });
   final String id;
-  final String name;
+  final String policyName;
   final String? description;
-  final int gracePeriodMinutes;
-  final int? maxLatePerMonthMinutes;
-  final String? lateDeductionRule;
-  final String? absentDeductionRule;
-  final String? undertimeRule;
+
+  final double workHoursPerDay;
+  final bool useEquivalentDayConversion;
+
+  final bool deductLate;
+  final int? maxLateMinutesPerMonth;
+  final bool convertLateToEquivalentDay;
+
+  final bool deductUndertime;
+  final bool convertUndertimeToEquivalentDay;
+
+  final bool absentEqualsFullDayDeduction;
+
+  final bool combineLateAndUndertime;
+  final double deductionMultiplier;
+
   final bool isDefault;
   final bool isActive;
 }
@@ -39,11 +59,26 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
   final _searchController = TextEditingController();
   final _nameController = TextEditingController();
   final _descriptionController = TextEditingController();
-  final _graceController = TextEditingController(text: '0');
-  final _maxLateController = TextEditingController();
-  final _lateRuleController = TextEditingController();
-  final _absentRuleController = TextEditingController();
-  final _undertimeRuleController = TextEditingController();
+
+  // Computation settings
+  final _workHoursPerDayController = TextEditingController(text: '8');
+  bool _useEquivalentDayConversion = true;
+
+  // Late settings
+  bool _deductLate = false;
+  final _maxLateMinutesPerMonthController = TextEditingController();
+  bool _convertLateToEquivalentDay = true;
+
+  // Undertime settings
+  bool _deductUndertime = true;
+  bool _convertUndertimeToEquivalentDay = true;
+
+  // Absence settings
+  bool _absentEqualsFullDayDeduction = true;
+
+  // Advanced settings
+  bool _combineLateAndUndertime = false;
+  final _deductionMultiplierController = TextEditingController(text: '1.0');
 
   String _statusFilter = 'Active';
   List<_PolicyRecord> _policies = [];
@@ -63,12 +98,25 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
     _searchController.dispose();
     _nameController.dispose();
     _descriptionController.dispose();
-    _graceController.dispose();
-    _maxLateController.dispose();
-    _lateRuleController.dispose();
-    _absentRuleController.dispose();
-    _undertimeRuleController.dispose();
+    _workHoursPerDayController.dispose();
+    _maxLateMinutesPerMonthController.dispose();
+    _deductionMultiplierController.dispose();
     super.dispose();
+  }
+
+  String? _validateForm() {
+    final workHours = double.tryParse(_workHoursPerDayController.text.trim());
+    if (workHours == null || workHours <= 0) return 'Work Hours Per Day must be greater than 0.';
+
+    final maxLateRaw = _maxLateMinutesPerMonthController.text.trim();
+    if (maxLateRaw.isNotEmpty) {
+      final maxLate = int.tryParse(maxLateRaw);
+      if (maxLate == null || maxLate < 0) return 'Max Late Minutes Per Month must be empty or >= 0.';
+    }
+
+    final mult = double.tryParse(_deductionMultiplierController.text.trim());
+    if (mult == null || mult <= 0) return 'Deduction Multiplier must be greater than 0.';
+    return null;
   }
 
   Future<void> _loadPolicies() async {
@@ -81,15 +129,29 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       final data = res.data ?? [];
       _policies = (data).map((e) {
         final m = e as Map<String, dynamic>;
+        final maxLate = m['max_late_minutes_per_month'];
         return _PolicyRecord(
           id: m['id'] as String,
-          name: m['name'] as String? ?? '',
+          policyName: (m['policy_name'] as String?) ??
+              (m['name'] as String? ?? ''),
           description: m['description'] as String?,
-          gracePeriodMinutes: (m['grace_period_minutes'] as num?)?.toInt() ?? 0,
-          maxLatePerMonthMinutes: (m['max_late_per_month_minutes'] as num?)?.toInt(),
-          lateDeductionRule: m['late_deduction_rule'] as String?,
-          absentDeductionRule: m['absent_deduction_rule'] as String?,
-          undertimeRule: m['undertime_rule'] as String?,
+          workHoursPerDay: (m['work_hours_per_day'] as num?)?.toDouble() ?? 8.0,
+          useEquivalentDayConversion:
+              m['use_equivalent_day_conversion'] as bool? ?? true,
+          deductLate: m['deduct_late'] as bool? ?? false,
+          maxLateMinutesPerMonth:
+              maxLate == null ? null : (maxLate as num?)?.toInt(),
+          convertLateToEquivalentDay:
+              m['convert_late_to_equivalent_day'] as bool? ?? true,
+          deductUndertime: m['deduct_undertime'] as bool? ?? true,
+          convertUndertimeToEquivalentDay:
+              m['convert_undertime_to_equivalent_day'] as bool? ?? true,
+          absentEqualsFullDayDeduction:
+              m['absent_equals_full_day_deduction'] as bool? ?? true,
+          combineLateAndUndertime:
+              m['combine_late_and_undertime'] as bool? ?? false,
+          deductionMultiplier:
+              (m['deduction_multiplier'] as num?)?.toDouble() ?? 1.0,
           isDefault: m['is_default'] as bool? ?? false,
           isActive: m['is_active'] as bool? ?? true,
         );
@@ -104,13 +166,29 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
   void _selectPolicy(_PolicyRecord p) {
     setState(() {
       _selectedPolicy = p;
-      _nameController.text = p.name;
+      _nameController.text = p.policyName;
       _descriptionController.text = p.description ?? '';
-      _graceController.text = p.gracePeriodMinutes.toString();
-      _maxLateController.text = p.maxLatePerMonthMinutes?.toString() ?? '';
-      _lateRuleController.text = p.lateDeductionRule ?? '';
-      _absentRuleController.text = p.absentDeductionRule ?? '';
-      _undertimeRuleController.text = p.undertimeRule ?? '';
+
+      _workHoursPerDayController.text =
+          p.workHoursPerDay.toStringAsFixed(p.workHoursPerDay % 1 == 0 ? 0 : 2);
+      _useEquivalentDayConversion = p.useEquivalentDayConversion;
+
+      _deductLate = p.deductLate;
+      _maxLateMinutesPerMonthController.text =
+          p.maxLateMinutesPerMonth?.toString() ?? '';
+      _convertLateToEquivalentDay = p.convertLateToEquivalentDay;
+
+      _deductUndertime = p.deductUndertime;
+      _convertUndertimeToEquivalentDay = p.convertUndertimeToEquivalentDay;
+
+      _absentEqualsFullDayDeduction = p.absentEqualsFullDayDeduction;
+
+      _combineLateAndUndertime = p.combineLateAndUndertime;
+      _deductionMultiplierController.text =
+          p.deductionMultiplier.toStringAsFixed(
+            p.deductionMultiplier % 1 == 0 ? 0 : 3,
+          );
+
       _isDefault = p.isDefault;
       _isActive = p.isActive;
     });
@@ -121,11 +199,21 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       _selectedPolicy = null;
       _nameController.clear();
       _descriptionController.clear();
-      _graceController.text = '0';
-      _maxLateController.clear();
-      _lateRuleController.clear();
-      _absentRuleController.clear();
-      _undertimeRuleController.clear();
+      _workHoursPerDayController.text = '8';
+      _useEquivalentDayConversion = true;
+
+      _deductLate = false;
+      _maxLateMinutesPerMonthController.clear();
+      _convertLateToEquivalentDay = true;
+
+      _deductUndertime = true;
+      _convertUndertimeToEquivalentDay = true;
+
+      _absentEqualsFullDayDeduction = true;
+
+      _combineLateAndUndertime = false;
+      _deductionMultiplierController.text = '1.0';
+
       _isDefault = false;
       _isActive = true;
     });
@@ -139,17 +227,37 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       );
       return;
     }
+    final validation = _validateForm();
+    if (validation != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(validation)));
+      return;
+    }
     try {
       await ApiClient.instance.post(
         '/api/attendance-policies',
         data: {
-          'name': name,
-          'description': _descriptionController.text.trim().isEmpty ? null : _descriptionController.text.trim(),
-          'grace_period_minutes': int.tryParse(_graceController.text) ?? 0,
-          'max_late_per_month_minutes': _maxLateController.text.trim().isEmpty ? null : int.tryParse(_maxLateController.text),
-          'late_deduction_rule': _lateRuleController.text.trim().isEmpty ? null : _lateRuleController.text.trim(),
-          'absent_deduction_rule': _absentRuleController.text.trim().isEmpty ? null : _absentRuleController.text.trim(),
-          'undertime_rule': _undertimeRuleController.text.trim().isEmpty ? null : _undertimeRuleController.text.trim(),
+          'policy_name': name,
+          'description': _descriptionController.text.trim().isEmpty
+              ? null
+              : _descriptionController.text.trim(),
+          'work_hours_per_day':
+              double.tryParse(_workHoursPerDayController.text.trim()) ?? 8,
+          'use_equivalent_day_conversion': _useEquivalentDayConversion,
+          'deduct_late': _deductLate,
+          'max_late_minutes_per_month':
+              _maxLateMinutesPerMonthController.text.trim().isEmpty
+                  ? null
+                  : int.tryParse(_maxLateMinutesPerMonthController.text.trim()),
+          'convert_late_to_equivalent_day': _convertLateToEquivalentDay,
+          'deduct_undertime': _deductUndertime,
+          'convert_undertime_to_equivalent_day':
+              _convertUndertimeToEquivalentDay,
+          'absent_equals_full_day_deduction': _absentEqualsFullDayDeduction,
+          'combine_late_and_undertime': _combineLateAndUndertime,
+          'deduction_multiplier':
+              double.tryParse(_deductionMultiplierController.text.trim()) ??
+                  1.0,
           'is_default': _isDefault,
           'is_active': _isActive,
         },
@@ -182,17 +290,37 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       );
       return;
     }
+    final validation = _validateForm();
+    if (validation != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(validation)));
+      return;
+    }
     try {
       await ApiClient.instance.put(
         '/api/attendance-policies/${p.id}',
         data: {
-          'name': name,
-          'description': _descriptionController.text.trim().isEmpty ? null : _descriptionController.text.trim(),
-          'grace_period_minutes': int.tryParse(_graceController.text) ?? 0,
-          'max_late_per_month_minutes': _maxLateController.text.trim().isEmpty ? null : int.tryParse(_maxLateController.text),
-          'late_deduction_rule': _lateRuleController.text.trim().isEmpty ? null : _lateRuleController.text.trim(),
-          'absent_deduction_rule': _absentRuleController.text.trim().isEmpty ? null : _absentRuleController.text.trim(),
-          'undertime_rule': _undertimeRuleController.text.trim().isEmpty ? null : _undertimeRuleController.text.trim(),
+          'policy_name': name,
+          'description': _descriptionController.text.trim().isEmpty
+              ? null
+              : _descriptionController.text.trim(),
+          'work_hours_per_day':
+              double.tryParse(_workHoursPerDayController.text.trim()) ?? 8,
+          'use_equivalent_day_conversion': _useEquivalentDayConversion,
+          'deduct_late': _deductLate,
+          'max_late_minutes_per_month':
+              _maxLateMinutesPerMonthController.text.trim().isEmpty
+                  ? null
+                  : int.tryParse(_maxLateMinutesPerMonthController.text.trim()),
+          'convert_late_to_equivalent_day': _convertLateToEquivalentDay,
+          'deduct_undertime': _deductUndertime,
+          'convert_undertime_to_equivalent_day':
+              _convertUndertimeToEquivalentDay,
+          'absent_equals_full_day_deduction': _absentEqualsFullDayDeduction,
+          'combine_late_and_undertime': _combineLateAndUndertime,
+          'deduction_multiplier':
+              double.tryParse(_deductionMultiplierController.text.trim()) ??
+                  1.0,
           'is_default': _isDefault,
           'is_active': _isActive,
         },
@@ -217,7 +345,9 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Deactivate policy?'),
-        content: Text('"${p.name}" will no longer appear in active lists.'),
+        content: Text(
+          '"${p.policyName}" will no longer appear in active lists.',
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
           FilledButton(
@@ -250,7 +380,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
     final isNarrow = w < 700;
     final search = _searchController.text.toLowerCase();
     final filtered = _policies.where((p) =>
-        p.name.toLowerCase().contains(search) ||
+        p.policyName.toLowerCase().contains(search) ||
         (p.description ?? '').toLowerCase().contains(search)).toList();
 
     return Column(
@@ -342,7 +472,10 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
                   selectedTileColor: AppTheme.primaryNavy.withOpacity(0.08),
                   title: Row(
                     children: [
-                      Text(p.name, style: TextStyle(fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                      Text(p.policyName,
+                          style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.textPrimary)),
                       if (p.isDefault) ...[
                         const SizedBox(width: 8),
                         Container(
@@ -357,7 +490,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
                     ],
                   ),
                   subtitle: Text(
-                    'Grace: ${p.gracePeriodMinutes} min',
+                    'Work hours/day: ${p.workHoursPerDay % 1 == 0 ? p.workHoursPerDay.toStringAsFixed(0) : p.workHoursPerDay.toStringAsFixed(2)}',
                     style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
                   ),
                   onTap: () => _selectPolicy(p),
@@ -381,41 +514,15 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _label('Policy name'),
+          _sectionTitle('Basic Info'),
+          const SizedBox(height: 12),
+          _label('Policy Name'),
           const SizedBox(height: 6),
           TextFormField(controller: _nameController, decoration: _decoration('Name')),
           const SizedBox(height: 16),
           _label('Description'),
           const SizedBox(height: 6),
           TextFormField(controller: _descriptionController, decoration: _decoration('Description'), maxLines: 2),
-          const SizedBox(height: 16),
-          _label('Grace period (minutes)'),
-          const SizedBox(height: 6),
-          TextFormField(
-            controller: _graceController,
-            keyboardType: TextInputType.number,
-            decoration: _decoration('0'),
-          ),
-          const SizedBox(height: 16),
-          _label('Max late per month (minutes, optional)'),
-          const SizedBox(height: 6),
-          TextFormField(
-            controller: _maxLateController,
-            keyboardType: TextInputType.number,
-            decoration: _decoration('Optional'),
-          ),
-          const SizedBox(height: 16),
-          _label('Late deduction rule (optional)'),
-          const SizedBox(height: 6),
-          TextFormField(controller: _lateRuleController, decoration: _decoration('e.g. Half day deduction'), maxLines: 2),
-          const SizedBox(height: 16),
-          _label('Absent deduction rule (optional)'),
-          const SizedBox(height: 6),
-          TextFormField(controller: _absentRuleController, decoration: _decoration('e.g. Full day deduction'), maxLines: 2),
-          const SizedBox(height: 16),
-          _label('Undertime rule (optional)'),
-          const SizedBox(height: 6),
-          TextFormField(controller: _undertimeRuleController, decoration: _decoration('Optional'), maxLines: 2),
           const SizedBox(height: 16),
           Row(
             children: [
@@ -437,32 +544,150 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
               const Text('Active'),
             ],
           ),
+
           const SizedBox(height: 24),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
+          _sectionTitle('Computation Settings'),
+          const SizedBox(height: 12),
+          _label('Work Hours Per Day'),
+          const SizedBox(height: 6),
+          TextFormField(
+            controller: _workHoursPerDayController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: _decoration('8'),
+          ),
+          const SizedBox(height: 12),
+          _switchTile(
+            title: 'Use Equivalent Day Conversion',
+            value: _useEquivalentDayConversion,
+            onChanged: (v) => setState(() => _useEquivalentDayConversion = v),
+          ),
+
+          const SizedBox(height: 24),
+          _sectionTitle('Late Settings'),
+          const SizedBox(height: 12),
+          _switchTile(
+            title: 'Deduct Late',
+            value: _deductLate,
+            onChanged: (v) => setState(() => _deductLate = v),
+          ),
+          const SizedBox(height: 12),
+          _label('Max Late Minutes Per Month'),
+          const SizedBox(height: 6),
+          TextFormField(
+            controller: _maxLateMinutesPerMonthController,
+            keyboardType: TextInputType.number,
+            decoration: _decoration('Optional'),
+          ),
+          const SizedBox(height: 12),
+          _switchTile(
+            title: 'Convert Late to Equivalent Day',
+            value: _convertLateToEquivalentDay,
+            onChanged: (v) => setState(() => _convertLateToEquivalentDay = v),
+          ),
+
+          const SizedBox(height: 24),
+          _sectionTitle('Undertime Settings'),
+          const SizedBox(height: 12),
+          _switchTile(
+            title: 'Deduct Undertime',
+            value: _deductUndertime,
+            onChanged: (v) => setState(() => _deductUndertime = v),
+          ),
+          const SizedBox(height: 12),
+          _switchTile(
+            title: 'Convert Undertime to Equivalent Day',
+            value: _convertUndertimeToEquivalentDay,
+            onChanged: (v) =>
+                setState(() => _convertUndertimeToEquivalentDay = v),
+          ),
+
+          const SizedBox(height: 24),
+          _sectionTitle('Absence Settings'),
+          const SizedBox(height: 12),
+          _switchTile(
+            title: 'Absent Equals Full Day Deduction',
+            value: _absentEqualsFullDayDeduction,
+            onChanged: (v) =>
+                setState(() => _absentEqualsFullDayDeduction = v),
+          ),
+
+          const SizedBox(height: 24),
+          _sectionTitle('Advanced Settings'),
+          const SizedBox(height: 12),
+          _switchTile(
+            title: 'Combine Late and Undertime',
+            value: _combineLateAndUndertime,
+            onChanged: (v) => setState(() => _combineLateAndUndertime = v),
+          ),
+          const SizedBox(height: 12),
+          _label('Deduction Multiplier'),
+          const SizedBox(height: 6),
+          TextFormField(
+            controller: _deductionMultiplierController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: _decoration('1.0'),
+          ),
+
+          const SizedBox(height: 24),
+          Row(
             children: [
-              FilledButton.icon(
-                onPressed: _addPolicy,
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Add Policy'),
-                style: FilledButton.styleFrom(backgroundColor: const Color(0xFF4CAF50), foregroundColor: Colors.white),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _addPolicy,
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('Add Policy'),
+                  style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF4CAF50),
+                      foregroundColor: Colors.white),
+                ),
               ),
-              OutlinedButton.icon(
-                onPressed: _selectedPolicy != null ? _updatePolicy : null,
-                icon: const Icon(Icons.edit_rounded, size: 18),
-                label: const Text('Update'),
-              ),
-              FilledButton.icon(
-                onPressed: _selectedPolicy != null ? _deactivatePolicy : null,
-                icon: const Icon(Icons.person_off_rounded, size: 18),
-                label: const Text('Deactivate'),
-                style: FilledButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _selectedPolicy != null ? _updatePolicy : null,
+                  icon: const Icon(Icons.edit_rounded, size: 18),
+                  label: const Text('Update'),
+                ),
               ),
             ],
           ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _selectedPolicy != null ? _deactivatePolicy : null,
+            icon: const Icon(Icons.person_off_rounded, size: 18),
+            label: const Text('Deactivate'),
+            style: FilledButton.styleFrom(
+                backgroundColor: Colors.red, foregroundColor: Colors.white),
+          ),
         ],
       ),
+    );
+  }
+
+  Widget _sectionTitle(String text) => Text(
+        text,
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w800,
+          color: AppTheme.textPrimary,
+        ),
+      );
+
+  Widget _switchTile({
+    required String title,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return Row(
+      children: [
+        Switch(
+          value: value,
+          onChanged: onChanged,
+          activeColor: AppTheme.primaryNavy,
+        ),
+        const SizedBox(width: 8),
+        Expanded(child: Text(title)),
+      ],
     );
   }
 

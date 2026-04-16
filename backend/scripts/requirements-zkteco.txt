@@ -1,0 +1,3 @@
+# For zkteco_python_proof.py and zkteco-sync-py.py
+pyzk>=0.9
+requests>=2.28.0

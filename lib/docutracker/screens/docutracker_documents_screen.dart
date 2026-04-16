@@ -5,7 +5,9 @@ import '../../providers/auth_provider.dart';
 import '../../widgets/rsp_form_header_footer.dart';
 import '../docutracker_provider.dart';
 import '../docutracker_styles.dart';
+import '../docutracker_repository.dart';
 import '../models/document.dart';
+import '../models/document_action.dart';
 import '../models/document_status.dart';
 import '../models/document_type.dart';
 import 'docutracker_document_detail_screen.dart';
@@ -26,6 +28,7 @@ class _DocuTrackerDocumentsScreenState
     extends State<DocuTrackerDocumentsScreen> {
   String? _filterType;
   DocumentStatus? _filterStatus;
+  bool? _canCreateDocuments;
 
   @override
   void initState() {
@@ -44,6 +47,20 @@ class _DocuTrackerDocumentsScreenState
       documentType: _filterType,
       status: _filterStatus,
     );
+
+    // Map "Job posting" permission to the ability to create documents.
+    final repo = DocuTrackerRepository.instance;
+    final userId = auth.user?.id ?? '';
+    final roleId = auth.user?.role;
+    final canCreate = await repo.hasPermission(
+      userId: userId,
+      roleId: roleId,
+      documentType: '*',
+      action: DocumentAction.delete.name,
+    );
+
+    if (!mounted) return;
+    setState(() => _canCreateDocuments = canCreate);
   }
 
   @override
@@ -173,7 +190,9 @@ class _DocuTrackerDocumentsScreenState
           )
         else if (provider.documents.isEmpty)
           _EmptyState(
-            onCreateTap: () => _showCreateDialog(context, auth, provider),
+            onCreateTap: _canCreateDocuments == true
+                ? () => _showCreateDialog(context, auth, provider)
+                : null,
           )
         else
           _DocumentList(
@@ -331,9 +350,9 @@ class _DocuTrackerDocumentsScreenState
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.onCreateTap});
+  const _EmptyState({this.onCreateTap});
 
-  final VoidCallback onCreateTap;
+  final VoidCallback? onCreateTap;
 
   @override
   Widget build(BuildContext context) {
@@ -360,7 +379,9 @@ class _EmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Create a document to start the workflow.',
+              onCreateTap != null
+                  ? 'Create a document to start the workflow.'
+                  : 'You do not have access to create documents.',
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
             ),
             const SizedBox(height: 24),

@@ -2,17 +2,38 @@ import 'package:flutter/foundation.dart';
 
 import 'leave_repository.dart';
 import 'models/leave_balance.dart';
+import 'models/leave_balance_ledger.dart';
 import 'models/leave_request.dart';
 import 'models/leave_type.dart';
+
+/// Mandatory/forced leave has no separate balance row; it uses vacation credits (CSC).
+List<LeaveBalance> _filterDisplayBalances(List<LeaveBalance> raw) {
+  return raw
+      .where((b) => b.leaveType != LeaveType.mandatoryForcedLeave)
+      .toList();
+}
 
 /// State management for the leave module.
 ///
 /// The provider depends only on the [LeaveRepository] contract, so the UI can
 /// stay unchanged if the backend later switches from Supabase to a custom API.
 class LeaveProvider extends ChangeNotifier {
-  LeaveProvider({required LeaveRepository repository}) : _repository = repository;
+  LeaveProvider({
+    required LeaveRepository repository,
+    this.onMutation,
+  }) : _repository = repository;
 
   final LeaveRepository _repository;
+
+  /// Called after successful leave API actions so the UI can refresh in-app notifications (badge).
+  final void Function()? onMutation;
+
+  void _notifyMutation() {
+    try {
+      onMutation?.call();
+    } catch (_) {}
+  }
+  LeaveRepository get repository => _repository;
 
   List<LeaveRequest> _requests = [];
   List<LeaveBalance> _balances = [];
@@ -38,13 +59,11 @@ class LeaveProvider extends ChangeNotifier {
   LeaveRequestStatus? get filterStatus => _filterStatus;
   LeaveType? get filterLeaveType => _filterLeaveType;
 
-  List<LeaveRequest> get pendingRequests => _requests
-      .where((r) => r.status == LeaveRequestStatus.pending)
-      .toList();
+  List<LeaveRequest> get pendingRequests =>
+      _requests.where((r) => r.status.isPending).toList();
 
-  List<LeaveRequest> get approvedRequests => _requests
-      .where((r) => r.status == LeaveRequestStatus.approved)
-      .toList();
+  List<LeaveRequest> get approvedRequests =>
+      _requests.where((r) => r.status == LeaveRequestStatus.approved).toList();
 
   List<LeaveRequest> get upcomingApprovedRequests {
     final today = DateTime.now();
@@ -69,10 +88,7 @@ class LeaveProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setFilters({
-    LeaveRequestStatus? status,
-    LeaveType? leaveType,
-  }) {
+  void setFilters({LeaveRequestStatus? status, LeaveType? leaveType}) {
     _filterStatus = status;
     _filterLeaveType = leaveType;
     notifyListeners();
@@ -86,9 +102,19 @@ class LeaveProvider extends ChangeNotifier {
 
   LeaveBalance? balanceForType(LeaveType leaveType) {
     try {
-      return _balances.firstWhere((b) => b.leaveType == leaveType);
+      final ledger = leaveType.balanceLedgerType;
+      return _balances.firstWhere((b) => b.leaveType == ledger);
     } catch (_) {
       return null;
+    }
+  }
+
+  /// Fetches leave balances for a user (e.g. for admin approval dialog).
+  Future<List<LeaveBalance>> fetchBalancesForUser(String userId) async {
+    try {
+      return await _repository.getBalancesForUser(userId);
+    } catch (_) {
+      return [];
     }
   }
 
@@ -147,7 +173,8 @@ class LeaveProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
     try {
-      _balances = await _repository.getBalancesForUser(userId);
+      final raw = await _repository.getBalancesForUser(userId);
+      _balances = _filterDisplayBalances(raw);
     } catch (e) {
       _balances = [];
       _error = e.toString();
@@ -166,12 +193,9 @@ class LeaveProvider extends ChangeNotifier {
         status: _filterStatus,
       );
       final balancesFuture = _repository.getBalancesForUser(userId);
-      final results = await Future.wait([
-        requestsFuture,
-        balancesFuture,
-      ]);
+      final results = await Future.wait([requestsFuture, balancesFuture]);
       _requests = results[0] as List<LeaveRequest>;
-      _balances = results[1] as List<LeaveBalance>;
+      _balances = _filterDisplayBalances(results[1] as List<LeaveBalance>);
     } catch (e) {
       _requests = [];
       _balances = [];
@@ -195,6 +219,22 @@ class LeaveProvider extends ChangeNotifier {
     } finally {
       _loading = false;
       notifyListeners();
+    }
+  }
+
+  /// Refetches a request by ID without setting loading state (e.g. for admin
+  /// to get latest attachment). Updates _selectedRequest and upserts into list.
+  Future<LeaveRequest?> refreshRequestById(String requestId) async {
+    try {
+      final fresh = await _repository.getRequestById(requestId);
+      if (fresh != null) {
+        _selectedRequest = fresh;
+        _upsertRequest(fresh);
+        notifyListeners();
+      }
+      return fresh;
+    } catch (_) {
+      return null;
     }
   }
 
@@ -224,9 +264,14 @@ class LeaveProvider extends ChangeNotifier {
       final saved = await _repository.submitRequest(request);
       _selectedRequest = saved;
       _upsertRequest(saved);
+      _notifyMutation();
       return saved;
     } catch (e) {
-      _error = e.toString();
+      _error =
+          e is Exception &&
+              e.toString().replaceFirst('Exception: ', '').isNotEmpty
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
       return null;
     } finally {
       _submitting = false;
@@ -242,6 +287,7 @@ class LeaveProvider extends ChangeNotifier {
       final saved = await _repository.updateRequest(request);
       _selectedRequest = saved;
       _upsertRequest(saved);
+      _notifyMutation();
       return saved;
     } catch (e) {
       _error = e.toString();
@@ -268,9 +314,12 @@ class LeaveProvider extends ChangeNotifier {
       );
       _selectedRequest = updated;
       _upsertRequest(updated);
+      _notifyMutation();
       return updated;
     } catch (e) {
-      _error = e.toString();
+      _error = e is Exception && e.toString().startsWith('Exception: ')
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
       return null;
     } finally {
       _reviewing = false;
@@ -284,11 +333,46 @@ class LeaveProvider extends ChangeNotifier {
     notifyListeners();
     try {
       final updated = await _repository.approveRequest(input);
-      _selectedRequest = updated;
-      _upsertRequest(updated);
-      return updated;
+      final merged = updated.copyWith(
+        reviewerName: updated.reviewerName ?? input.reviewerName,
+        reviewerRole: updated.reviewerRole ?? input.reviewerRole,
+        reviewerTitle: updated.reviewerTitle ?? input.reviewerTitle,
+      );
+      _selectedRequest = merged;
+      _upsertRequest(merged);
+      _notifyMutation();
+      return merged;
     } catch (e) {
-      _error = e.toString();
+      _error = e is Exception && e.toString().startsWith('Exception: ')
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
+      return null;
+    } finally {
+      _reviewing = false;
+      notifyListeners();
+    }
+  }
+
+  /// #15: Revoke approval — reverses balance deduction + clears DTR entries.
+  Future<LeaveRequest?> revokeApproval(LeaveReviewDecisionInput input) async {
+    _reviewing = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final updated = await _repository.revokeApproval(input);
+      final merged = updated.copyWith(
+        reviewerName: updated.reviewerName ?? input.reviewerName,
+        reviewerRole: updated.reviewerRole ?? input.reviewerRole,
+        reviewerTitle: updated.reviewerTitle ?? input.reviewerTitle,
+      );
+      _selectedRequest = merged;
+      _upsertRequest(merged);
+      _notifyMutation();
+      return merged;
+    } catch (e) {
+      _error = e is Exception && e.toString().startsWith('Exception: ')
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
       return null;
     } finally {
       _reviewing = false;
@@ -302,9 +386,15 @@ class LeaveProvider extends ChangeNotifier {
     notifyListeners();
     try {
       final updated = await _repository.returnRequest(input);
-      _selectedRequest = updated;
-      _upsertRequest(updated);
-      return updated;
+      final merged = updated.copyWith(
+        reviewerName: updated.reviewerName ?? input.reviewerName,
+        reviewerRole: updated.reviewerRole ?? input.reviewerRole,
+        reviewerTitle: updated.reviewerTitle ?? input.reviewerTitle,
+      );
+      _selectedRequest = merged;
+      _upsertRequest(merged);
+      _notifyMutation();
+      return merged;
     } catch (e) {
       _error = e.toString();
       return null;
@@ -320,14 +410,61 @@ class LeaveProvider extends ChangeNotifier {
     notifyListeners();
     try {
       final updated = await _repository.rejectRequest(input);
-      _selectedRequest = updated;
-      _upsertRequest(updated);
-      return updated;
+      final merged = updated.copyWith(
+        reviewerName: updated.reviewerName ?? input.reviewerName,
+        reviewerRole: updated.reviewerRole ?? input.reviewerRole,
+        reviewerTitle: updated.reviewerTitle ?? input.reviewerTitle,
+      );
+      _selectedRequest = merged;
+      _upsertRequest(merged);
+      _notifyMutation();
+      return merged;
     } catch (e) {
       _error = e.toString();
       return null;
     } finally {
       _reviewing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ForcedLeaveDeductionResult?> applyForcedLeaveDeduction(
+    ForcedLeaveDeductionInput input,
+  ) async {
+    _reviewing = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final result = await _repository.applyForcedLeaveDeduction(input);
+      _notifyMutation();
+      return result;
+    } catch (e) {
+      _error = e is Exception && e.toString().startsWith('Exception: ')
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
+      return null;
+    } finally {
+      _reviewing = false;
+      notifyListeners();
+    }
+  }
+
+  /// Admin/HR: create or overwrite one [LeaveBalance] row for an employee.
+  Future<LeaveBalance?> upsertBalance(LeaveBalance balance) async {
+    _submitting = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final saved = await _repository.upsertBalance(balance);
+      _notifyMutation();
+      return saved;
+    } catch (e) {
+      _error = e is Exception && e.toString().startsWith('Exception: ')
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
+      return null;
+    } finally {
+      _submitting = false;
       notifyListeners();
     }
   }
@@ -376,6 +513,14 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
+  Future<List<int>?> getAttachmentBytes(String requestId) async {
+    try {
+      return await _repository.getAttachmentBytes(requestId);
+    } catch (_) {
+      return null;
+    }
+  }
+
   void _upsertRequest(LeaveRequest request) {
     final index = _requests.indexWhere((r) => r.id == request.id);
     if (index >= 0) {
@@ -383,5 +528,108 @@ class LeaveProvider extends ChangeNotifier {
     } else {
       _requests = [request, ..._requests];
     }
+  }
+
+  // ---- Department Head workflow ----
+
+  /// Cache for the department-head check result.
+  Map<String, dynamic>? _deptHeadCheck;
+  Map<String, dynamic>? get deptHeadCheck => _deptHeadCheck;
+  bool get isDeptHead => _deptHeadCheck?['isDeptHead'] == true;
+
+  /// Check if the current user is a department head.
+  Future<bool> checkIsDepartmentHead() async {
+    try {
+      _deptHeadCheck = await _repository.checkIsDepartmentHead();
+      notifyListeners();
+      return isDeptHead;
+    } catch (_) {
+      _deptHeadCheck = null;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Load leave requests pending department head approval.
+  Future<void> loadDepartmentHeadRequests() async {
+    _loading = true;
+    _error = null;
+    notifyListeners();
+    try {
+      _requests = await _repository.listDepartmentHeadRequests();
+    } catch (e) {
+      _requests = [];
+      _error = e.toString();
+    }
+    _loading = false;
+    notifyListeners();
+  }
+
+  Future<LeaveRequest?> departmentHeadApprove(LeaveReviewDecisionInput input) async {
+    _reviewing = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final updated = await _repository.departmentHeadApprove(input);
+      _selectedRequest = updated;
+      _upsertRequest(updated);
+      _notifyMutation();
+      return updated;
+    } catch (e) {
+      _error = e is Exception && e.toString().startsWith('Exception: ')
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
+      return null;
+    } finally {
+      _reviewing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<LeaveRequest?> departmentHeadReject(LeaveReviewDecisionInput input) async {
+    _reviewing = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final updated = await _repository.departmentHeadReject(input);
+      _selectedRequest = updated;
+      _upsertRequest(updated);
+      _notifyMutation();
+      return updated;
+    } catch (e) {
+      _error = e is Exception && e.toString().startsWith('Exception: ')
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
+      return null;
+    } finally {
+      _reviewing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<LeaveRequest?> departmentHeadReturn(LeaveReviewDecisionInput input) async {
+    _reviewing = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final updated = await _repository.departmentHeadReturn(input);
+      _selectedRequest = updated;
+      _upsertRequest(updated);
+      _notifyMutation();
+      return updated;
+    } catch (e) {
+      _error = e is Exception && e.toString().startsWith('Exception: ')
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
+      return null;
+    } finally {
+      _reviewing = false;
+      notifyListeners();
+    }
+  }
+
+  /// Balance movement audit (does not mutate provider list state).
+  Future<LeaveLedgerResult> fetchLeaveLedger(LeaveLedgerQuery query) async {
+    return _repository.getLeaveLedger(query);
   }
 }

@@ -1,11 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../dtr_provider.dart';
+import '../widgets/dtr_attendance_analytics_section.dart';
 import '../widgets/dtr_summary_card.dart';
-import '../widgets/dtr_recent_activity.dart';
 
-/// DTR admin dashboard: summary cards + recent activity.
+/// DTR admin dashboard: summary cards.
 class DtrDashboard extends StatefulWidget {
   const DtrDashboard({super.key});
 
@@ -14,16 +16,35 @@ class DtrDashboard extends StatefulWidget {
 }
 
 class _DtrDashboardState extends State<DtrDashboard> {
+  Timer? _pollingTimer;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+    _pollingTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!mounted) return;
+      final dtr = context.read<DtrProvider>();
+      if (dtr.loading) return;
+      _load();
+    });
+  }
+
+  @override
+  void dispose() {
+    _pollingTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _load() async {
+    if (!mounted) return;
     final dtr = context.read<DtrProvider>();
+    if (dtr.loading) return;
     await dtr.loadSummary();
-    await dtr.loadTimeRecordsForAdmin(limit: 20);
+    if (!mounted) return;
+    if (!dtr.dashboardAnalyticsLoading) {
+      await dtr.loadTimeRecordsForAdmin(forDashboardAnalytics: true);
+    }
   }
 
   @override
@@ -53,7 +74,7 @@ class _DtrDashboardState extends State<DtrDashboard> {
     final cardLeave = DtrSummaryCard(
       title: 'On Leave Today',
       subtitle: 'Approved leave',
-      value: s.onLeaveToday != null ? '${s.onLeaveToday}' : '—',
+      value: '${s.onLeaveToday}',
       icon: Icons.event_busy_rounded,
       backgroundColor: const Color(0xFFFFE0B2),
       iconColor: const Color(0xFFFF9800),
@@ -61,7 +82,7 @@ class _DtrDashboardState extends State<DtrDashboard> {
     final cardPending = DtrSummaryCard(
       title: 'Pending Approval',
       subtitle: 'Awaiting review',
-      value: s.pendingApproval != null ? '${s.pendingApproval}' : '—',
+      value: '${s.pendingApproval}',
       icon: Icons.pending_actions_rounded,
       backgroundColor: AppTheme.white,
       iconColor: AppTheme.primaryNavy,
@@ -162,8 +183,7 @@ class _DtrDashboardState extends State<DtrDashboard> {
           ),
         ],
         cards,
-        const SizedBox(height: 24),
-        DtrRecentActivity(records: dtr.timeRecords, loading: dtr.loading),
+        const DtrAttendanceAnalyticsSection(),
       ],
     );
   }

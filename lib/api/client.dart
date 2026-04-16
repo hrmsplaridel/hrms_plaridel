@@ -4,12 +4,15 @@ import 'config.dart';
 import 'token_storage.dart';
 
 /// HTTP client for the HRMS backend API.
-/// Attaches JWT from [TokenStorage] to every request.
+/// Attaches access JWT from [TokenStorage] and refreshes via [POST /auth/refresh] on 401.
 class ApiClient {
   ApiClient._();
   static final ApiClient instance = ApiClient._();
 
   late final Dio _dio;
+
+  /// Single in-flight refresh so concurrent 401s share one refresh call.
+  static Future<bool>? _refreshInFlight;
 
   Dio get dio => _dio;
 
@@ -30,13 +33,95 @@ class ApiClient {
         return handler.next(options);
       },
       onError: (error, handler) async {
-        if (error.response?.statusCode == 401) {
-          await TokenStorage.instance.clearToken();
-          // Caller can listen to 401 and navigate to login if needed.
+        final status = error.response?.statusCode;
+        final opts = error.requestOptions;
+
+        if (status != 401) {
+          return handler.next(error);
         }
-        return handler.next(error);
+        if (opts.extra['skipAuthRefresh'] == true) {
+          return handler.next(error);
+        }
+
+        final path = opts.path;
+        if (path == '/auth/refresh' ||
+            path == '/auth/login' ||
+            path == '/auth/register') {
+          await TokenStorage.instance.clearAllTokens();
+          return handler.next(error);
+        }
+        if (opts.extra['_authRetried'] == true) {
+          await TokenStorage.instance.clearAllTokens();
+          return handler.next(error);
+        }
+
+        final refreshed = await _refreshSessionShared();
+        if (!refreshed) {
+          await TokenStorage.instance.clearAllTokens();
+          return handler.next(error);
+        }
+
+        final access = await TokenStorage.instance.getToken();
+        if (access == null || access.isEmpty) {
+          await TokenStorage.instance.clearAllTokens();
+          return handler.next(error);
+        }
+
+        final next = opts.copyWith(
+          headers: Map<String, dynamic>.from(opts.headers)
+            ..['Authorization'] = 'Bearer $access',
+          extra: Map<String, dynamic>.from(opts.extra)..['_authRetried'] = true,
+        );
+
+        try {
+          final response = await _dio.fetch(next);
+          return handler.resolve(response);
+        } catch (e) {
+          if (e is DioException) {
+            return handler.next(e);
+          }
+          rethrow;
+        }
       },
     ));
+  }
+
+  static Future<bool> _refreshSessionShared() {
+    _refreshInFlight ??= _performRefresh().whenComplete(() => _refreshInFlight = null);
+    return _refreshInFlight!;
+  }
+
+  static Future<bool> _performRefresh() async {
+    final refresh = await TokenStorage.instance.getRefreshToken();
+    if (refresh == null || refresh.isEmpty) return false;
+
+    try {
+      final plain = Dio(BaseOptions(
+        baseUrl: ApiConfig.baseUrl,
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 15),
+        headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+      ));
+
+      final res = await plain.post<Map<String, dynamic>>(
+        '/auth/refresh',
+        data: {'refreshToken': refresh},
+      );
+
+      final data = res.data;
+      if (data == null) return false;
+      final access = data['token'] as String?;
+      final newRefresh = data['refreshToken'] as String?;
+      if (access == null || access.isEmpty) return false;
+
+      await TokenStorage.instance.setTokens(
+        access: access,
+        refresh: newRefresh,
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// GET request. [path] is relative to base URL (e.g. '/auth/me').

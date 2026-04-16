@@ -1,30 +1,16 @@
 import 'package:flutter/material.dart';
+
 import '../../../landingpage/constants/app_theme.dart';
 
-/// Reusable settings content (sections only, no scaffold). Used in [SettingsPage] and [ProfileAndSettingsPage].
+/// Reusable settings content (sections only, no scaffold).
+/// Currently simplified: we hide all advanced settings.
 class SettingsContent extends StatelessWidget {
   const SettingsContent({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _SettingsSection(
-          title: 'Preferences',
-          children: [
-            ListTile(
-              leading: Icon(Icons.notifications_outlined, color: AppTheme.primaryNavy),
-              title: Text('Notifications', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w500)),
-              subtitle: Text('Email and in-app notifications', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
-              trailing: const Icon(Icons.chevron_right_rounded, color: AppTheme.textSecondary),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              onTap: () {},
-            ),
-          ],
-        ),
-      ],
-    );
+    // Empty placeholder so the Profile & Settings page only shows profile info.
+    return const SizedBox.shrink();
   }
 }
 
@@ -55,31 +41,4 @@ class SettingsPage extends StatelessWidget {
   }
 }
 
-class _SettingsSection extends StatelessWidget {
-  const _SettingsSection({required this.title, required this.children});
-
-  final String title;
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 12),
-          child: Text(title, style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.w600)),
-        ),
-        Container(
-          decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 12, offset: const Offset(0, 2))],
-          ),
-          child: Column(children: children),
-        ),
-      ],
-    );
-  }
-}
+// _SettingsSection removed since all advanced settings were hidden.

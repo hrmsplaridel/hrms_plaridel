@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 
 import '../api/app_user.dart';
 import '../api/client.dart';
+import '../api/config.dart';
 import '../api/token_storage.dart';
 
 /// Central auth state. Uses API (JWT) instead of Supabase.
@@ -28,10 +29,29 @@ class AuthProvider extends ChangeNotifier {
 
   /// Restore session from stored JWT. Call before runApp.
   Future<void> restoreSession() async {
-    final token = await TokenStorage.instance.getToken();
+    String? token;
+    try {
+      final future = TokenStorage.instance.getToken();
+      token = kIsWeb
+          ? await future.timeout(
+              const Duration(seconds: 8),
+              onTimeout: () {
+                debugPrint(
+                  'TokenStorage.getToken timed out on web; continuing without session.',
+                );
+                return null;
+              },
+            )
+          : await future;
+    } catch (e) {
+      debugPrint('TokenStorage.getToken failed: $e');
+      return;
+    }
     if (token == null || token.isEmpty) return;
     try {
-      final res = await ApiClient.instance.get<Map<String, dynamic>>('/auth/me');
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/auth/me',
+      );
       final data = res.data;
       if (data != null) {
         _user = AppUser.fromJson(data);
@@ -39,28 +59,29 @@ class AuthProvider extends ChangeNotifier {
       }
     } on DioException catch (e) {
       if (e.response?.statusCode == 401 || e.response?.statusCode == 403) {
-        await TokenStorage.instance.clearToken();
+        await TokenStorage.instance.clearAllTokens();
       }
     } catch (_) {
-      await TokenStorage.instance.clearToken();
+      await TokenStorage.instance.clearAllTokens();
     }
   }
 
-  /// Login with email and password. Stores JWT and sets user.
-  /// Returns true on success, false on failure.
-  Future<bool> login(String email, String password) async {
+  /// Login with email and password. Stores access + refresh tokens and sets user.
+  /// Returns `null` on success, or an error message String on failure.
+  Future<String?> login(String email, String password) async {
     try {
       final res = await ApiClient.instance.post<Map<String, dynamic>>(
         '/auth/login',
         data: {'email': email.trim(), 'password': password},
       );
       final data = res.data;
-      if (data == null) return false;
+      if (data == null) return 'Invalid email or password';
 
       final token = data['token'] as String?;
-      if (token == null || token.isEmpty) return false;
+      if (token == null || token.isEmpty) return 'Invalid email or password';
 
-      await TokenStorage.instance.setToken(token);
+      final refresh = data['refreshToken'] as String?;
+      await TokenStorage.instance.setTokens(access: token, refresh: refresh);
 
       final userData = data['user'] as Map<String, dynamic>?;
       if (userData != null) {
@@ -69,20 +90,31 @@ class AuthProvider extends ChangeNotifier {
         await refreshUser();
       }
       notifyListeners();
-      return true;
+      return null;
     } on DioException catch (e) {
       debugPrint('AuthProvider.login error: ${e.response?.data}');
-      return false;
+      final body = e.response?.data;
+      if (body is Map && body['error'] is String) {
+        return body['error'] as String;
+      }
+      if (e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout) {
+        return 'Cannot reach server. Is the backend running on ${ApiConfig.baseUrl}?';
+      }
+      return 'Login failed. Please try again.';
     } catch (e) {
       debugPrint('AuthProvider.login error: $e');
-      return false;
+      return 'Login failed. Please try again.';
     }
   }
 
   /// Refetch current user from API (e.g. after updating profile or avatar).
   Future<void> refreshUser() async {
     try {
-      final res = await ApiClient.instance.get<Map<String, dynamic>>('/auth/me');
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/auth/me',
+      );
       final data = res.data;
       if (data != null) {
         final newUser = AppUser.fromJson(data);
@@ -99,7 +131,17 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> signOut() async {
-    await TokenStorage.instance.clearToken();
+    final refresh = await TokenStorage.instance.getRefreshToken();
+    if (refresh != null && refresh.isNotEmpty) {
+      try {
+        await ApiClient.instance.post<void>(
+          '/auth/logout',
+          data: {'refreshToken': refresh},
+          options: Options(extra: {'skipAuthRefresh': true}),
+        );
+      } catch (_) {}
+    }
+    await TokenStorage.instance.clearAllTokens();
     _user = null;
     notifyListeners();
   }

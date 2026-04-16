@@ -32,7 +32,7 @@ router.get('/', protect, async (req, res) => {
     else if (status === 'Inactive') where = 'WHERE is_active = false';
 
     const result = await pool.query(
-      `SELECT id, shift_number, name, start_time, end_time, grace_period_minutes, working_days, is_active
+      `SELECT id, shift_number, name, start_time, end_time, break_end, grace_period_minutes, working_days, is_active
        FROM shifts ${where}
        ORDER BY name`
     );
@@ -42,6 +42,7 @@ router.get('/', protect, async (req, res) => {
       name: r.name,
       start_time: r.start_time,
       end_time: r.end_time,
+      break_end: r.break_end,
       grace_period_minutes: r.grace_period_minutes ?? 0,
       working_days: r.working_days && Array.isArray(r.working_days)
         ? r.working_days.map((d) => (typeof d === 'number' ? d : parseInt(d, 10)))
@@ -57,20 +58,21 @@ router.get('/', protect, async (req, res) => {
 // POST /api/shifts - create (admin only)
 router.post('/', protect, requireAdmin, async (req, res) => {
   try {
-    const { name, start_time, end_time, grace_period_minutes, working_days, is_active = true } = req.body;
+    const { name, start_time, end_time, break_end, grace_period_minutes, working_days, is_active = true } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Name is required' });
     }
     const st = parseTime(start_time) || '09:00:00';
     const et = parseTime(end_time) || '17:00:00';
+    const be = break_end != null && break_end !== '' ? parseTime(break_end) : null;
     const grace = grace_period_minutes != null ? Math.max(0, parseInt(grace_period_minutes, 10) || 0) : 0;
     const wd = parseWorkingDays(working_days) || [1, 2, 3, 4, 5];
 
     const result = await pool.query(
-      `INSERT INTO shifts (name, start_time, end_time, grace_period_minutes, working_days, is_active)
-       VALUES ($1, $2::time, $3::time, $4, $5::int[], $6)
-       RETURNING id, shift_number, name, start_time, end_time, grace_period_minutes, working_days, is_active`,
-      [name.trim(), st, et, grace, wd, !!is_active]
+      `INSERT INTO shifts (name, start_time, end_time, break_end, grace_period_minutes, working_days, is_active)
+       VALUES ($1, $2::time, $3::time, $4::time, $5, $6::int[], $7)
+       RETURNING id, shift_number, name, start_time, end_time, break_end, grace_period_minutes, working_days, is_active`,
+      [name.trim(), st, et, be, grace, wd, !!is_active]
     );
     const r = result.rows[0];
     res.status(201).json({
@@ -79,6 +81,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       name: r.name,
       start_time: r.start_time,
       end_time: r.end_time,
+      break_end: r.break_end,
       grace_period_minutes: r.grace_period_minutes ?? 0,
       working_days: r.working_days && Array.isArray(r.working_days)
         ? r.working_days.map((d) => (typeof d === 'number' ? d : parseInt(d, 10)))
@@ -95,7 +98,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 router.put('/:id', protect, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, start_time, end_time, grace_period_minutes, working_days, is_active } = req.body;
+    const { name, start_time, end_time, break_end, grace_period_minutes, working_days, is_active } = req.body;
 
     const updates = [];
     const values = [];
@@ -104,6 +107,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     if (name !== undefined) { updates.push(`name = $${i++}`); values.push(name.trim()); }
     if (start_time !== undefined) { updates.push(`start_time = $${i++}::time`); values.push(parseTime(start_time) || '09:00:00'); }
     if (end_time !== undefined) { updates.push(`end_time = $${i++}::time`); values.push(parseTime(end_time) || '17:00:00'); }
+    if (break_end !== undefined) { updates.push(`break_end = $${i++}::time`); values.push(break_end != null && break_end !== '' ? parseTime(break_end) : null); }
     if (grace_period_minutes !== undefined) { updates.push(`grace_period_minutes = $${i++}`); values.push(Math.max(0, parseInt(grace_period_minutes, 10) || 0)); }
     if (working_days !== undefined) {
       const wd = parseWorkingDays(working_days) || [1, 2, 3, 4, 5];
@@ -120,7 +124,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
     const result = await pool.query(
       `UPDATE shifts SET ${updates.join(', ')} WHERE id = $${i}
-       RETURNING id, shift_number, name, start_time, end_time, grace_period_minutes, working_days, is_active`,
+       RETURNING id, shift_number, name, start_time, end_time, break_end, grace_period_minutes, working_days, is_active`,
       values
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Shift not found' });
@@ -131,6 +135,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       name: r.name,
       start_time: r.start_time,
       end_time: r.end_time,
+      break_end: r.break_end,
       grace_period_minutes: r.grace_period_minutes ?? 0,
       working_days: r.working_days && Array.isArray(r.working_days)
         ? r.working_days.map((d) => (typeof d === 'number' ? d : parseInt(d, 10)))

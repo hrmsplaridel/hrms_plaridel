@@ -1,20 +1,28 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../data/job_vacancy_announcement.dart';
 import '../../../data/recruitment_application.dart';
 import '../../../data/action_brainstorming_coaching.dart';
 import '../../../data/training_need_analysis.dart';
+import '../../../data/training_daily_report.dart';
 import '../../../landingpage/constants/app_theme.dart';
 import '../../../landingpage/screens/landing_page.dart';
 import '../../../login/screens/login_page.dart';
 import '../../../utils/form_pdf.dart';
+import '../../../widgets/read_only_saved_entry_dialog.dart';
 import '../../../widgets/rsp_form_header_footer.dart';
+import '../../../widgets/rsp_ld_saved_records_browser.dart';
+import '../../../widgets/training_daily_report_read_only_view.dart';
 import '../../../widgets/user_avatar.dart';
 import '../../shared/screens/profile_and_settings_page.dart';
 import '../../../dtr/dtr_main.dart';
 import '../../../dtr/dtr_provider.dart';
+import '../../../dtr/widgets/real_time_clock.dart';
 import '../../../dtr/screens/dtr_dashboard.dart';
 import '../../../dtr/dtr_routes.dart';
 import '../../../dtr/manage/manage_employee.dart';
@@ -24,12 +32,22 @@ import '../../../dtr/manage/manage_position.dart';
 import '../../../dtr/manage/manage_shift.dart';
 import '../../../dtr/manage/manage_holiday.dart';
 import '../../../dtr/manage/manage_attendance_policy.dart';
-import '../../../dtr/manage/manage_attendance_adjustment.dart';
+import '../../../dtr/manage/manage_biometric_devices.dart';
 import '../../../docutracker/docutracker_main.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
+import '../../../leave/leave_provider.dart';
+import '../../../leave/models/leave_request.dart';
+import '../../../leave/screens/employee_leave_screen.dart';
+import '../../../leave/screens/leave_request_form_screen.dart';
+import '../../../leave/utils/responsive_leave_form_host.dart';
+import '../../../locator/screens/admin_locator_management_screen.dart';
 import '../../../recruitment/screens/rsp_admin_screen.dart';
 import '../../../widgets/feature_card.dart';
+import '../../../notifications/notification_provider.dart';
+import '../../../notifications/notification_tap_result.dart';
+import '../../../notifications/open_notifications_panel.dart';
+import '../../../employee/screens/employee_dashboard.dart';
 
 /// Dashboard accent colors for summary cards and accents (orange theme).
 class _DashboardColors {
@@ -41,6 +59,17 @@ class _DashboardColors {
   static const Color accentAmber = Color(0xFFFF9800);
 }
 
+enum AdminMenu {
+  dashboard,
+  myAttendance,
+  myLeave,
+  dtr,
+  rsp,
+  ld,
+  docutracker,
+  createAccount,
+}
+
 /// Admin dashboard matching reference layout; features only from existing system:
 /// Dashboard, Job Vacancies (Hiring), Recruitment (Applications).
 class AdminDashboard extends StatefulWidget {
@@ -50,16 +79,157 @@ class AdminDashboard extends StatefulWidget {
   State<AdminDashboard> createState() => _AdminDashboardState();
 }
 
-class _AdminDashboardState extends State<AdminDashboard> {
-  int _selectedNavIndex = 0;
-  static const _navItems = [
-    'Dashboard',
-    'RSP',
-    'L&D',
-    'DTR',
-    'DocuTracker',
-    'Create Account',
-  ];
+class _AdminDashboardState extends State<AdminDashboard>
+    with WidgetsBindingObserver {
+  AdminMenu _selectedMenu = AdminMenu.dashboard;
+  final GlobalKey<_DtrContentState> _dtrContentKey =
+      GlobalKey<_DtrContentState>();
+  final TextEditingController _dashboardSearchController =
+      TextEditingController();
+  String _dashboardSearchQuery = '';
+
+  Timer? _notificationPollTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<NotificationProvider>().refreshUnreadCount();
+      _notificationPollTimer?.cancel();
+      _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+        if (!mounted) return;
+        context.read<NotificationProvider>().refreshUnreadCount();
+      });
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      context.read<NotificationProvider>().refreshUnreadCount();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _notificationPollTimer?.cancel();
+    _dashboardSearchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _handleOpenNotifications() async {
+    final result = await openNotificationsPanel(context);
+    if (!mounted) return;
+    await context.read<NotificationProvider>().refreshUnreadCount();
+    if (!mounted) return;
+    _applyNotificationTapResult(result);
+  }
+
+  void _applyNotificationTapResult(NotificationTapResult? result) {
+    if (result == null) return;
+    switch (result.kind) {
+      case NotificationTapKind.adminDtrLeaveManagement:
+        setState(() => _selectedMenu = AdminMenu.dtr);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _dtrContentKey.currentState?.openLeaveManagement();
+        });
+        break;
+      case NotificationTapKind.adminDtrLocatorManagement:
+        setState(() => _selectedMenu = AdminMenu.dtr);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _dtrContentKey.currentState?.openLocatorManagement();
+        });
+        break;
+      case NotificationTapKind.none:
+      case NotificationTapKind.employeeLeaveApprovals:
+      case NotificationTapKind.employeeLeaveRequests:
+      case NotificationTapKind.employeeLocatorApprovals:
+      case NotificationTapKind.employeeLocatorRequests:
+      case NotificationTapKind.employeeMyAttendance:
+        break;
+    }
+  }
+
+  void _onMenuSelected(AdminMenu menu) {
+    setState(() {
+      _selectedMenu = menu;
+      if (menu != AdminMenu.dashboard) {
+        _dashboardSearchController.clear();
+        _dashboardSearchQuery = '';
+      }
+    });
+  }
+
+  /// Same flow as [LeaveMain] — admin My Portal must pass a handler or File Leave stays disabled.
+  Future<void> _openMyLeaveRequestForm() async {
+    final result = await openResponsiveLeaveFormHost<String?>(
+      context: context,
+      builder: (_) => _buildAdminLeaveRequestForm(),
+    );
+    if (!mounted || result == null) return;
+    if (result != kLeaveFormResultDraftSaved &&
+        result != kLeaveFormResultSubmitted) {
+      return;
+    }
+    final userId = context.read<AuthProvider>().user?.id;
+    if (userId != null && userId.isNotEmpty) {
+      await context.read<LeaveProvider>().loadMyLeaveData(userId);
+    }
+    if (!mounted) return;
+    showLeaveFormSuccessSnackBar(context, result);
+  }
+
+  Widget _buildAdminLeaveRequestForm() {
+    return LeaveRequestFormScreen(
+      onSaveDraft: (LeaveRequest request) async {
+        final provider = context.read<LeaveProvider>();
+        if (request.id != null && request.id!.isNotEmpty) {
+          final updated = await provider.updateRequest(request);
+          return updated != null;
+        }
+        final saved = await provider.saveDraft(request);
+        return saved != null;
+      },
+      onSubmitRequest: (LeaveRequest request) async {
+        final provider = context.read<LeaveProvider>();
+        if (request.id != null && request.id!.isNotEmpty) {
+          final updated = await provider.updateRequest(
+            request.copyWith(status: LeaveRequestStatus.pending),
+          );
+          return updated != null;
+        }
+        final saved = await provider.submitRequest(request);
+        return saved != null;
+      },
+    );
+  }
+
+  Widget _buildContent(String displayName) {
+    switch (_selectedMenu) {
+      case AdminMenu.dashboard:
+        return _DashboardContent(searchQuery: _dashboardSearchQuery);
+      case AdminMenu.myAttendance:
+        return EmployeeAttendanceOverviewSection(
+          displayName: displayName,
+          adminPortal: true,
+        );
+      case AdminMenu.myLeave:
+        return EmployeeLeaveScreen(onFileLeavePressed: _openMyLeaveRequestForm);
+      case AdminMenu.dtr:
+        return _DtrContent(key: _dtrContentKey);
+      case AdminMenu.rsp:
+        return const RspAdminContent();
+      case AdminMenu.ld:
+        return const _LdContent();
+      case AdminMenu.docutracker:
+        return const DocuTrackerMain(isAdmin: true);
+      case AdminMenu.createAccount:
+        return const _AdminSignUpContent();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -82,16 +252,19 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final contentPadding = width > 900 ? 24.0 : (width > 600 ? 20.0 : 16.0);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF0F2F5),
+      // Light orange background for the main admin dashboard.
+      backgroundColor: const Color(0xFFFFF3E0),
       drawer: isWide
           ? null
           : Drawer(
               child: SafeArea(
                 child: _Sidebar(
-                  selectedIndex: _selectedNavIndex,
+                  selectedMenu: _selectedMenu,
                   avatarPath: avatarPath,
-                  onTap: (i) {
-                    setState(() => _selectedNavIndex = i);
+                  email: email,
+                  displayName: displayName,
+                  onTap: (menu) {
+                    _onMenuSelected(menu);
                     if (context.mounted) Navigator.of(context).pop();
                   },
                 ),
@@ -101,9 +274,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
         children: [
           if (isWide)
             _Sidebar(
-              selectedIndex: _selectedNavIndex,
+              selectedMenu: _selectedMenu,
               avatarPath: avatarPath,
-              onTap: (i) => setState(() => _selectedNavIndex = i),
+              email: email,
+              displayName: displayName,
+              onTap: _onMenuSelected,
             ),
           Expanded(
             child: Container(
@@ -126,25 +301,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     displayName: displayName,
                     avatarPath: avatarPath,
                     showMenuButton: !isWide,
+                    searchEnabled: _selectedMenu == AdminMenu.dashboard,
+                    searchController: _dashboardSearchController,
+                    searchQuery: _dashboardSearchQuery,
+                    onSearchChanged: (value) {
+                      setState(() => _dashboardSearchQuery = value);
+                    },
+                    onOpenNotifications: _handleOpenNotifications,
                   ),
                   Expanded(
                     child: SingleChildScrollView(
                       padding: EdgeInsets.all(contentPadding),
-                      child: _selectedNavIndex == 0
-                          ? const _DashboardContent()
-                          : _selectedNavIndex == 1
-                          ? const RspAdminContent()
-                          : _selectedNavIndex == 2
-                          ? const _LdContent()
-                          : _selectedNavIndex == 3
-                          ? const _DtrContent()
-                          : _selectedNavIndex == 4
-                          ? const DocuTrackerMain(isAdmin: true)
-                          : _selectedNavIndex == 5
-                          ? const _AdminSignUpContent()
-                          : _PlaceholderContent(
-                              title: _navItems[_selectedNavIndex],
-                            ),
+                      child: _buildContent(displayName),
                     ),
                   ),
                 ],
@@ -159,123 +327,121 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
 class _Sidebar extends StatelessWidget {
   const _Sidebar({
-    required this.selectedIndex,
+    required this.selectedMenu,
     this.avatarPath,
+    required this.email,
+    required this.displayName,
     required this.onTap,
   });
 
-  final int selectedIndex;
+  final AdminMenu selectedMenu;
   final String? avatarPath;
-  final ValueChanged<int> onTap;
+  final String email;
+  final String displayName;
+  final ValueChanged<AdminMenu> onTap;
+
+  static Widget _sealAvatar({double size = 48}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.asset(
+          'assets/images/Plaridel Logo.jpg',
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Container(
+            width: size,
+            height: size,
+            color: Colors.white,
+            child: Icon(
+              Icons.account_balance_rounded,
+              color: AppTheme.primaryNavy,
+              size: size * 0.5,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    final year = DateTime.now().year;
     return Container(
-      width: 272,
+      width: 288,
       decoration: BoxDecoration(
         color: AppTheme.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 20,
-            offset: const Offset(2, 0),
-          ),
-          BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 6,
-            offset: const Offset(1, 0),
+            color: Colors.black.withValues(alpha: 0.07),
+            blurRadius: 24,
+            offset: const Offset(4, 0),
           ),
         ],
       ),
       child: Column(
         children: [
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
           Container(
-            margin: const EdgeInsets.symmetric(horizontal: 14),
-            padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 18),
             decoration: BoxDecoration(
-              color: AppTheme.primaryNavy,
-              borderRadius: BorderRadius.circular(16),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  AppTheme.primaryNavy,
+                  AppTheme.primaryNavyDark,
+                ],
+              ),
+              borderRadius: BorderRadius.circular(18),
               boxShadow: [
                 BoxShadow(
-                  color: AppTheme.primaryNavy.withOpacity(0.4),
-                  blurRadius: 20,
-                  offset: const Offset(0, 4),
-                ),
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.08),
-                  blurRadius: 12,
-                  offset: const Offset(0, 2),
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.35),
+                  blurRadius: 18,
+                  offset: const Offset(0, 6),
                 ),
               ],
             ),
             child: Row(
               children: [
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.white, width: 2),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
-                        blurRadius: 6,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.asset(
-                      'assets/images/Plaridel Logo.jpg',
-                      width: 48,
-                      height: 48,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
-                        width: 48,
-                        height: 48,
-                        color: AppTheme.primaryNavy,
-                        child: const Icon(
-                          Icons.shield_rounded,
-                          color: Colors.white,
-                          size: 28,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+                _sealAvatar(size: 52),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Municipality of Plaridel',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w800,
-                            height: 1.2,
-                          ),
+                      Text(
+                        'Municipality of Plaridel',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          height: 1.2,
+                          letterSpacing: -0.2,
                         ),
                       ),
-                      const SizedBox(height: 2),
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'HUMAN RESOURCE MANAGEMENT SYSTEM',
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.95),
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.4,
-                            height: 1.2,
-                          ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'HUMAN RESOURCE MANAGEMENT SYSTEM',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.92),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.6,
+                          height: 1.25,
                         ),
                       ),
                     ],
@@ -284,7 +450,7 @@ class _Sidebar extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 24),
           Expanded(
             child: SingleChildScrollView(
               child: Column(
@@ -293,55 +459,73 @@ class _Sidebar extends StatelessWidget {
                   _NavTile(
                     icon: Icons.dashboard_rounded,
                     label: 'Dashboard',
-                    selected: selectedIndex == 0,
-                    onTap: () => onTap(0),
+                    selected: selectedMenu == AdminMenu.dashboard,
+                    onTap: () => onTap(AdminMenu.dashboard),
                   ),
+                  const _SidebarSectionLabel('MY PORTAL'),
+                  _NavTile(
+                    icon: Icons.schedule_rounded,
+                    label: 'My Attendance',
+                    selected: selectedMenu == AdminMenu.myAttendance,
+                    onTap: () => onTap(AdminMenu.myAttendance),
+                  ),
+                  _NavTile(
+                    icon: Icons.event_note_rounded,
+                    label: 'My Leave',
+                    selected: selectedMenu == AdminMenu.myLeave,
+                    onTap: () => onTap(AdminMenu.myLeave),
+                  ),
+                  const _SidebarSectionLabel('MANAGEMENT'),
                   _NavTile(
                     icon: Icons.how_to_reg_rounded,
                     label: 'RSP',
-                    selected: selectedIndex == 1,
-                    onTap: () => onTap(1),
+                    selected: selectedMenu == AdminMenu.rsp,
+                    onTap: () => onTap(AdminMenu.rsp),
                   ),
                   _NavTile(
                     icon: Icons.school_rounded,
                     label: 'L&D',
-                    selected: selectedIndex == 2,
-                    onTap: () => onTap(2),
+                    selected: selectedMenu == AdminMenu.ld,
+                    onTap: () => onTap(AdminMenu.ld),
                   ),
                   _NavTile(
                     icon: Icons.access_time_rounded,
                     label: 'DTR',
-                    selected: selectedIndex == 3,
-                    onTap: () => onTap(3),
+                    selected: selectedMenu == AdminMenu.dtr,
+                    onTap: () => onTap(AdminMenu.dtr),
                   ),
                   _NavTile(
                     icon: Icons.folder_rounded,
                     label: 'DocuTracker',
-                    selected: selectedIndex == 4,
-                    onTap: () => onTap(4),
+                    selected: selectedMenu == AdminMenu.docutracker,
+                    onTap: () => onTap(AdminMenu.docutracker),
                   ),
                   _NavTile(
                     icon: Icons.person_add_rounded,
                     label: 'Create Account',
-                    selected: selectedIndex == 5,
-                    onTap: () => onTap(5),
+                    selected: selectedMenu == AdminMenu.createAccount,
+                    onTap: () => onTap(AdminMenu.createAccount),
                   ),
                 ],
               ),
             ),
           ),
-          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Divider(height: 1, thickness: 1, color: AppTheme.lightGray),
+          ),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
             child: Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                color: AppTheme.offWhite,
-                borderRadius: BorderRadius.circular(12),
+                color: const Color(0xFFF1F3F5),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppTheme.lightGray),
               ),
               child: Row(
                 children: [
-                  UserAvatar(avatarPath: avatarPath, radius: 22),
+                  _sealAvatar(size: 40),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -349,18 +533,24 @@ class _Sidebar extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          'Admin',
+                          displayName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: AppTheme.textPrimary,
                             fontWeight: FontWeight.w700,
                             fontSize: 14,
                           ),
                         ),
+                        const SizedBox(height: 2),
                         Text(
-                          'System Administrator',
+                          email.isNotEmpty ? email : 'System Administrator',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: AppTheme.textSecondary,
                             fontSize: 12,
+                            height: 1.2,
                           ),
                         ),
                       ],
@@ -370,51 +560,102 @@ class _Sidebar extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 12),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
             child: Wrap(
               alignment: WrapAlignment.center,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 0,
               children: [
                 Text(
-                  'Â© 2026 HRMS',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                  '\u00a9 $year HRMS',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 11,
+                    height: 1.2,
+                  ),
                 ),
-                Text(
-                  ' Â· ',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Text(
+                    '\u00b7',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.textSecondary.withValues(alpha: 0.7),
+                    ),
+                  ),
                 ),
                 TextButton(
                   onPressed: () {},
                   style: TextButton.styleFrom(
                     minimumSize: Size.zero,
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 0),
                   ),
                   child: Text(
                     'Privacy',
-                    style: TextStyle(fontSize: 11, color: AppTheme.primaryNavy),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.primaryNavy,
+                    ),
                   ),
                 ),
-                Text(
-                  ' Â· ',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Text(
+                    '\u00b7',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.textSecondary.withValues(alpha: 0.7),
+                    ),
+                  ),
                 ),
                 TextButton(
                   onPressed: () {},
                   style: TextButton.styleFrom(
                     minimumSize: Size.zero,
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 0),
                   ),
                   child: Text(
                     'Terms',
-                    style: TextStyle(fontSize: 11, color: AppTheme.primaryNavy),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.primaryNavy,
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 16),
         ],
+      ),
+    );
+  }
+}
+
+class _SidebarSectionLabel extends StatelessWidget {
+  const _SidebarSectionLabel(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(30, 18, 30, 8),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          label,
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.9,
+          ),
+        ),
       ),
     );
   }
@@ -439,62 +680,70 @@ class _NavTile extends StatefulWidget {
 class _NavTileState extends State<_NavTile> {
   bool _hover = false;
 
+  static const _activeFill = Color(0xFFFFF0E6);
+
   @override
   Widget build(BuildContext context) {
-    final active = widget.selected || _hover;
+    final iconColor = widget.selected
+        ? AppTheme.primaryNavy
+        : (_hover ? AppTheme.primaryNavy.withValues(alpha: 0.88) : AppTheme.textSecondary);
+    final labelColor = widget.selected
+        ? AppTheme.primaryNavy
+        : (_hover ? AppTheme.textPrimary : AppTheme.textSecondary);
+
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          child: Material(
-            color: widget.selected
-                ? AppTheme.primaryNavy.withOpacity(0.1)
-                : (_hover
-                      ? AppTheme.primaryNavy.withOpacity(0.06)
-                      : Colors.transparent),
-            borderRadius: BorderRadius.circular(12),
-            child: InkWell(
-              onTap: widget.onTap,
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 14,
-                ),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  border: widget.selected
-                      ? Border(
-                          left: BorderSide(
-                            color: AppTheme.primaryNavy,
-                            width: 3,
-                          ),
-                        )
-                      : null,
-                ),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onTap,
+            borderRadius: BorderRadius.circular(14),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              decoration: BoxDecoration(
+                color: widget.selected
+                    ? _activeFill
+                    : (_hover ? AppTheme.primaryNavy.withValues(alpha: 0.05) : Colors.transparent),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              // IntrinsicHeight: sidebar nav lives in a scroll view (unbounded height).
+              // Row + CrossAxisAlignment.stretch needs a finite max height on the cross axis.
+              child: IntrinsicHeight(
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Icon(
-                      widget.icon,
-                      size: 23,
-                      color: active
-                          ? AppTheme.primaryNavy
-                          : AppTheme.textSecondary,
-                    ),
-                    const SizedBox(width: 16),
-                    Text(
-                      widget.label,
-                      style: TextStyle(
-                        color: active
-                            ? AppTheme.primaryNavy
-                            : AppTheme.textPrimary,
-                        fontWeight: widget.selected
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                        fontSize: 15,
+                    if (widget.selected)
+                      Container(
+                        width: 4,
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryNavy,
+                          borderRadius: const BorderRadius.horizontal(left: Radius.circular(14)),
+                        ),
+                      ),
+                    Expanded(
+                      child: Padding(
+                        padding: EdgeInsets.fromLTRB(widget.selected ? 12 : 16, 13, 16, 13),
+                        child: Row(
+                          children: [
+                            Icon(widget.icon, size: 22, color: iconColor),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Text(
+                                widget.label,
+                                style: TextStyle(
+                                  color: labelColor,
+                                  fontWeight: widget.selected ? FontWeight.w700 : FontWeight.w500,
+                                  fontSize: 15,
+                                  letterSpacing: -0.1,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -514,12 +763,24 @@ class _TopBar extends StatelessWidget {
     required this.displayName,
     this.avatarPath,
     this.showMenuButton = false,
+    this.searchEnabled = false,
+    required this.searchController,
+    required this.searchQuery,
+    required this.onSearchChanged,
+    required this.onOpenNotifications,
   });
 
   final String email;
   final String displayName;
   final String? avatarPath;
   final bool showMenuButton;
+
+  /// Dashboard tab only — search filters overview sections.
+  final bool searchEnabled;
+  final TextEditingController searchController;
+  final String searchQuery;
+  final ValueChanged<String> onSearchChanged;
+  final Future<void> Function() onOpenNotifications;
 
   @override
   Widget build(BuildContext context) {
@@ -559,11 +820,11 @@ class _TopBar extends StatelessWidget {
             ),
           if (showMenuButton && !isCompact) const SizedBox(width: 12),
           Expanded(
-            child: isCompact
+            child: !searchEnabled
                 ? const SizedBox.shrink()
                 : Container(
                     height: 48,
-                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
                     decoration: BoxDecoration(
                       color: AppTheme.offWhite,
                       borderRadius: BorderRadius.circular(24),
@@ -583,50 +844,105 @@ class _TopBar extends StatelessWidget {
                           size: 22,
                           color: AppTheme.textSecondary.withOpacity(0.8),
                         ),
-                        const SizedBox(width: 14),
-                        Text(
-                          'Search dashboard...',
-                          style: TextStyle(
-                            color: AppTheme.textSecondary.withOpacity(0.9),
-                            fontSize: 14,
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextField(
+                            controller: searchController,
+                            onChanged: onSearchChanged,
+                            textInputAction: TextInputAction.search,
+                            style: TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: isCompact ? 13 : 14,
+                            ),
+                            decoration: InputDecoration(
+                              isDense: true,
+                              border: InputBorder.none,
+                              hintText: 'Search dashboard...',
+                              hintStyle: TextStyle(
+                                color: AppTheme.textSecondary.withOpacity(0.85),
+                                fontSize: isCompact ? 13 : 14,
+                              ),
+                              contentPadding: EdgeInsets.zero,
+                            ),
                           ),
                         ),
+                        if (searchQuery.isNotEmpty)
+                          IconButton(
+                            icon: Icon(
+                              Icons.close_rounded,
+                              size: 20,
+                              color: AppTheme.textSecondary.withOpacity(0.8),
+                            ),
+                            tooltip: 'Clear',
+                            onPressed: () {
+                              searchController.clear();
+                              onSearchChanged('');
+                            },
+                            style: IconButton.styleFrom(
+                              padding: EdgeInsets.zero,
+                              minimumSize: const Size(32, 32),
+                            ),
+                          ),
                       ],
                     ),
                   ),
           ),
-          if (isCompact) const Spacer(),
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              IconButton(
-                icon: Icon(
-                  Icons.notifications_outlined,
-                  color: AppTheme.textPrimary,
-                  size: isCompact ? 24 : 26,
-                ),
-                onPressed: () {},
-                style: IconButton.styleFrom(
-                  backgroundColor: AppTheme.offWhite,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+          if (!searchEnabled) const Spacer(),
+          Consumer<NotificationProvider>(
+            builder: (context, np, _) {
+              final c = np.unreadCount;
+              return Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      Icons.notifications_outlined,
+                      color: AppTheme.textPrimary,
+                      size: isCompact ? 24 : 26,
+                    ),
+                    tooltip: 'Notifications',
+                    onPressed: () {
+                      onOpenNotifications();
+                    },
+                    style: IconButton.styleFrom(
+                      backgroundColor: AppTheme.offWhite,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              Positioned(
-                right: 6,
-                top: 6,
-                child: Container(
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE53935),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 1.5),
-                  ),
-                ),
-              ),
-            ],
+                  if (c > 0)
+                    Positioned(
+                      right: -2,
+                      top: -2,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 1,
+                        ),
+                        constraints: const BoxConstraints(
+                          minWidth: 18,
+                          minHeight: 18,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE53935),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.white, width: 1),
+                        ),
+                        child: Text(
+                          c > 99 ? '99+' : '$c',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
           SizedBox(width: isCompact ? 6 : 12),
           _AdminDropdown(
@@ -818,7 +1134,20 @@ class _AdminDropdown extends StatelessWidget {
 }
 
 class _DashboardContent extends StatelessWidget {
-  const _DashboardContent();
+  const _DashboardContent({required this.searchQuery});
+
+  /// Filters which overview blocks are shown (Dashboard tab only).
+  final String searchQuery;
+
+  static bool _sectionVisible(String query, List<String> keywords) {
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return true;
+    for (final k in keywords) {
+      final kl = k.toLowerCase();
+      if (kl.contains(q) || q.contains(kl)) return true;
+    }
+    return false;
+  }
 
   static String _formatDate(DateTime d) {
     const days = [
@@ -851,232 +1180,366 @@ class _DashboardContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final isNarrow = MediaQuery.of(context).size.width < 500;
     final now = DateTime.now();
+    final q = searchQuery;
+
+    final showWelcome = _sectionVisible(q, [
+      'welcome',
+      'overview',
+      'hello',
+      'admin',
+      'dashboard',
+      'hr',
+      'activities',
+      'latest',
+      'date',
+      'back',
+    ]);
+    final showSummary = _sectionVisible(q, [
+      'summary',
+      'applicant',
+      'applications',
+      'pending',
+      'vacancy',
+      'vacancies',
+      'hiring',
+      'job',
+      'jobs',
+      'new',
+      'metric',
+      'stats',
+      'open',
+      'closed',
+      'status',
+      'card',
+    ]);
+    final showDocu = _sectionVisible(q, [
+      'docu',
+      'tracker',
+      'document',
+      'docutracker',
+    ]);
+    final showDtr = _sectionVisible(q, [
+      'dtr',
+      'time',
+      'record',
+      'attendance',
+      'clock',
+      'daily',
+      'employee',
+      'biometric',
+      'device',
+    ]);
+    final showAnnouncements = _sectionVisible(q, [
+      'announcement',
+      'announcements',
+      'landing',
+      'news',
+    ]);
+    final showRecruitment = _sectionVisible(q, [
+      'recruit',
+      'recruitment',
+      'rsp',
+      'overview',
+      'hiring',
+    ]);
+    final showPending = _sectionVisible(q, [
+      'pending',
+      'application',
+      'review',
+      'submitted',
+      'declined',
+      'approved',
+      'applicant',
+    ]);
+
+    final anySection =
+        showWelcome ||
+        showSummary ||
+        showDocu ||
+        showDtr ||
+        showAnnouncements ||
+        showRecruitment ||
+        showPending;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          padding: EdgeInsets.all(isNarrow ? 20 : 28),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                AppTheme.primaryNavy.withOpacity(0.1),
-                AppTheme.primaryNavy.withOpacity(0.04),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: AppTheme.primaryNavy.withOpacity(0.15),
-              width: 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: AppTheme.primaryNavy.withOpacity(0.06),
-                blurRadius: 24,
-                offset: const Offset(0, 8),
+        if (q.trim().isNotEmpty && !anySection)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 20),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF3E0),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.orange.withOpacity(0.35)),
               ),
-              BoxShadow(
-                color: Colors.black.withOpacity(0.03),
-                blurRadius: 12,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: isNarrow
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _formatDate(now),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.search_off_rounded,
+                    color: AppTheme.textSecondary,
+                    size: 22,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Walang tumugma sa “$q”. Subukan: docu, dtr, recruit, pending, time, announcement…',
                       style: TextStyle(
                         color: AppTheme.textSecondary,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
+                        fontSize: 13,
+                        height: 1.35,
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primaryNavy.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Icon(
-                            Icons.waving_hand_rounded,
-                            color: AppTheme.primaryNavy,
-                            size: 26,
-                          ),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Welcome back, Admin!- Hello Boi Paldooooooooooo',
-                                style: TextStyle(
-                                  color: AppTheme.textPrimary,
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: -0.3,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                "Here's the latest overview of the HR activities.",
-                                style: TextStyle(
-                                  color: AppTheme.textSecondary,
-                                  fontSize: 14,
-                                  height: 1.4,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                )
-              : Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primaryNavy.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppTheme.primaryNavy.withOpacity(0.08),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: Icon(
-                        Icons.waving_hand_rounded,
-                        color: AppTheme.primaryNavy,
-                        size: 32,
-                      ),
-                    ),
-                    const SizedBox(width: 24),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _formatDate(now),
-                            style: TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Welcome back, Admin!',
-                            style: TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: 28,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -0.5,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            "Here's the latest overview of the HR activities.",
-                            style: TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 15,
-                              height: 1.5,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        if (showWelcome)
+          Container(
+            padding: EdgeInsets.all(isNarrow ? 20 : 28),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  AppTheme.primaryNavy.withOpacity(0.1),
+                  AppTheme.primaryNavy.withOpacity(0.04),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: AppTheme.primaryNavy.withOpacity(0.15),
+                width: 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.primaryNavy.withOpacity(0.06),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
                 ),
-        ),
-        const SizedBox(height: 32),
-        const _SummaryCards(),
-        const SizedBox(height: 28),
-        Text(
-          'DocuTracker',
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            color: AppTheme.textPrimary,
-            letterSpacing: -0.2,
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.03),
+                  blurRadius: 12,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: isNarrow
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _formatDate(now),
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryNavy.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Icon(
+                              Icons.waving_hand_rounded,
+                              color: AppTheme.primaryNavy,
+                              size: 26,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Welcome back, Admin!- Hello Boi Paldooooooooooo',
+                                  style: TextStyle(
+                                    color: AppTheme.textPrimary,
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -0.3,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  "Here's the latest overview of the HR activities.",
+                                  style: TextStyle(
+                                    color: AppTheme.textSecondary,
+                                    fontSize: 14,
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  )
+                : Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryNavy.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppTheme.primaryNavy.withOpacity(0.08),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          Icons.waving_hand_rounded,
+                          color: AppTheme.primaryNavy,
+                          size: 32,
+                        ),
+                      ),
+                      const SizedBox(width: 24),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _formatDate(now),
+                              style: TextStyle(
+                                color: AppTheme.textSecondary,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Welcome back, Admin!',
+                              style: TextStyle(
+                                color: AppTheme.textPrimary,
+                                fontSize: 28,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.5,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              "Here's the latest overview of the HR activities.",
+                              style: TextStyle(
+                                color: AppTheme.textSecondary,
+                                fontSize: 15,
+                                height: 1.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
           ),
-        ),
-        const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.06),
-                blurRadius: 20,
-                offset: const Offset(0, 4),
-              ),
-              BoxShadow(
-                color: Colors.black.withOpacity(0.02),
-                blurRadius: 16,
-                offset: const Offset(0, 2),
-              ),
-            ],
+        if (showWelcome && showSummary) const SizedBox(height: 32),
+        if (showSummary) const _SummaryCards(),
+        if ((showWelcome || showSummary) && showDocu)
+          const SizedBox(height: 28),
+        if (showDocu) ...[
+          Text(
+            'DocuTracker',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.textPrimary,
+              letterSpacing: -0.2,
+            ),
           ),
-          child: const DocuTrackerDashboardScreen(
-            isAdmin: true,
-            showTitle: false,
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: AppTheme.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.black.withOpacity(0.06)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.06),
+                  blurRadius: 20,
+                  offset: const Offset(0, 4),
+                ),
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.02),
+                  blurRadius: 16,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: const DocuTrackerDashboardScreen(
+              isAdmin: true,
+              showTitle: false,
+            ),
           ),
-        ),
-        const SizedBox(height: 28),
-        // DTR snapshot (same cards + recent activity as DTR dashboard),
-        // embedded directly in the main admin dashboard.
-        Text(
-          'Daily Time Record',
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            color: AppTheme.textPrimary,
-            letterSpacing: -0.2,
+        ],
+        if ((showWelcome || showSummary || showDocu) && showDtr)
+          const SizedBox(height: 28),
+        if (showDtr) ...[
+          Text(
+            'Daily Time Record',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.textPrimary,
+              letterSpacing: -0.2,
+            ),
           ),
-        ),
-        const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.06),
-                blurRadius: 20,
-                offset: const Offset(0, 4),
-              ),
-              BoxShadow(
-                color: Colors.black.withOpacity(0.02),
-                blurRadius: 16,
-                offset: const Offset(0, 2),
-              ),
-            ],
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: AppTheme.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.black.withOpacity(0.06)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.06),
+                  blurRadius: 20,
+                  offset: const Offset(0, 4),
+                ),
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.02),
+                  blurRadius: 16,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: const DtrDashboard(),
           ),
-          child: const DtrDashboard(),
-        ),
-        const SizedBox(height: 28),
-        _AnnouncementsCard(),
-        const SizedBox(height: 28),
-        _RecruitmentOverviewCard(),
-        const SizedBox(height: 28),
-        _PendingApplicationsCard(),
+        ],
+        if ((showWelcome || showSummary || showDocu || showDtr) &&
+            showAnnouncements)
+          const SizedBox(height: 28),
+        if (showAnnouncements) _AnnouncementsCard(),
+        if ((showWelcome ||
+                showSummary ||
+                showDocu ||
+                showDtr ||
+                showAnnouncements) &&
+            showRecruitment)
+          const SizedBox(height: 28),
+        if (showRecruitment) _RecruitmentOverviewCard(),
+        if ((showWelcome ||
+                showSummary ||
+                showDocu ||
+                showDtr ||
+                showAnnouncements ||
+                showRecruitment) &&
+            showPending)
+          const SizedBox(height: 28),
+        if (showPending) _PendingApplicationsCard(),
         const SizedBox(height: 32),
       ],
     );
@@ -1917,7 +2380,7 @@ class _TableHeader extends StatelessWidget {
 
 /// DTR module: hub with feature cards (like RSP). Choose a feature below.
 class _DtrContent extends StatefulWidget {
-  const _DtrContent();
+  const _DtrContent({super.key});
 
   @override
   State<_DtrContent> createState() => _DtrContentState();
@@ -1925,130 +2388,202 @@ class _DtrContent extends StatefulWidget {
 
 class _DtrContentState extends State<_DtrContent> {
   /// 0 = menu, 1 = Time Logs, 2 = Reports, 3 = Employees, 4 = Assignment,
-  /// 5 = Department, 6 = Position, 7 = Shift, 8 = Leave Management
+  /// 5 = Department, 6 = Position, 7 = Shift, 8 = Leave Management,
+  /// 9–10 = Holiday / Policy via [_ManageContent], 11 = Biometric Devices,
+  /// 12 = Locator Slip Management
   int _dtrSectionIndex = 0;
+
+  /// When opening **Assignment** from Employees, pre-select this employee once.
+  String? _prefillAssignmentEmployeeId;
+
+  /// Opens **Leave Management** (same as tapping the DTR hub card). Used after notification taps.
+  void openLeaveManagement() {
+    if (!mounted) return;
+    setState(() => _dtrSectionIndex = 8);
+  }
+
+  /// Opens **Locator Slip Management** (notification deep-link).
+  void openLocatorManagement() {
+    if (!mounted) return;
+    setState(() => _dtrSectionIndex = 12);
+  }
+
+  void _goToAssignmentWithEmployee(String employeeId) {
+    if (!mounted) return;
+    setState(() {
+      _prefillAssignmentEmployeeId = employeeId;
+      _dtrSectionIndex = 4;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (_dtrSectionIndex != 0) ...[
-          TextButton.icon(
-            onPressed: () => setState(() => _dtrSectionIndex = 0),
-            icon: const Icon(Icons.arrow_back_rounded, size: 20),
-            label: const Text('Back to DTR'),
-            style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
-          ),
-          const SizedBox(height: 16),
-        ],
-        if (_dtrSectionIndex == 0) ...[
-          Text(
-            'DTR',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 24,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.3,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Daily Time Record. Choose a feature below.',
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 14,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 24),
-          Wrap(
-            spacing: 16,
-            runSpacing: 16,
+    return SizedBox(
+      width: double.infinity,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              FeatureCard(
-                title: 'Time Logs',
-                subtitle:
-                    'Manage and correct daily time-in/out records. Add, edit, or delete entries.',
-                icon: Icons.schedule_rounded,
-                onTap: () => setState(() => _dtrSectionIndex = 1),
-              ),
-              FeatureCard(
-                title: 'Reports',
-                subtitle: 'View attendance and tardiness reports.',
-                icon: Icons.summarize_rounded,
-                onTap: () => setState(() => _dtrSectionIndex = 2),
-              ),
-              FeatureCard(
-                title: 'Employees',
-                subtitle: 'Manage employee profiles and accounts.',
-                icon: Icons.people_rounded,
-                onTap: () => setState(() => _dtrSectionIndex = 3),
-              ),
-              FeatureCard(
-                title: 'Assignment',
-                subtitle:
-                    'Assign employees to departments, positions, and shifts.',
-                icon: Icons.assignment_rounded,
-                onTap: () => setState(() => _dtrSectionIndex = 4),
-              ),
-              FeatureCard(
-                title: 'Department',
-                subtitle: 'Manage departments.',
-                icon: Icons.business_rounded,
-                onTap: () => setState(() => _dtrSectionIndex = 5),
-              ),
-              FeatureCard(
-                title: 'Position',
-                subtitle: 'Manage positions.',
-                icon: Icons.work_rounded,
-                onTap: () => setState(() => _dtrSectionIndex = 6),
-              ),
-              FeatureCard(
-                title: 'Shift',
-                subtitle: 'Manage work shifts and schedules.',
-                icon: Icons.access_time_rounded,
-                onTap: () => setState(() => _dtrSectionIndex = 7),
-              ),
-              FeatureCard(
-                title: 'Leave Management',
-                subtitle:
-                    'Review employee leave requests, approvals, and leave-related records.',
-                icon: Icons.event_note_rounded,
-                onTap: () => setState(() => _dtrSectionIndex = 8),
-              ),
-              FeatureCard(
-                title: 'Holiday Management',
-                subtitle:
-                    'Define regular, special, and local holidays for DTR and payroll.',
-                icon: Icons.calendar_today_rounded,
-                onTap: () => setState(() => _dtrSectionIndex = 9),
-              ),
-              FeatureCard(
-                title: 'Attendance Policy',
-                subtitle:
-                    'Set grace period, late/absent/undertime rules, and default policy.',
-                icon: Icons.policy_rounded,
-                onTap: () => setState(() => _dtrSectionIndex = 10),
-              ),
-              FeatureCard(
-                title: 'Attendance Adjustment',
-                subtitle:
-                    'Review and approve or reject DTR correction requests.',
-                icon: Icons.edit_calendar_rounded,
-                onTap: () => setState(() => _dtrSectionIndex = 11),
-              ),
+              if (_dtrSectionIndex != 0) ...[
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => setState(() => _dtrSectionIndex = 0),
+                    icon: const Icon(Icons.arrow_back_rounded, size: 20),
+                    label: const Text('Back to DTR'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppTheme.primaryNavy,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              if (_dtrSectionIndex == 0) ...[
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'DTR',
+                          style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Daily Time Record. Choose a feature below.',
+                          style: TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 14,
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const RealTimeClock(),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                Wrap(
+                  spacing: 16,
+                  runSpacing: 16,
+                  children: [
+                    FeatureCard(
+                      title: 'Time Logs',
+                      subtitle:
+                          'Manage and correct daily time-in/out records. Add, edit, or delete entries.',
+                      icon: Icons.schedule_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 1),
+                    ),
+                    FeatureCard(
+                      title: 'Reports',
+                      subtitle: 'View attendance and tardiness reports.',
+                      icon: Icons.summarize_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 2),
+                    ),
+                    FeatureCard(
+                      title: 'Employees',
+                      subtitle: 'Manage employee profiles and accounts.',
+                      icon: Icons.people_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 3),
+                    ),
+                    FeatureCard(
+                      title: 'Assignment',
+                      subtitle:
+                          'Assign employees to departments, positions, and shifts.',
+                      icon: Icons.assignment_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 4),
+                    ),
+                    FeatureCard(
+                      title: 'Department',
+                      subtitle: 'Manage departments.',
+                      icon: Icons.business_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 5),
+                    ),
+                    FeatureCard(
+                      title: 'Position',
+                      subtitle: 'Manage positions.',
+                      icon: Icons.work_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 6),
+                    ),
+                    FeatureCard(
+                      title: 'Shift',
+                      subtitle: 'Manage work shifts and schedules.',
+                      icon: Icons.access_time_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 7),
+                    ),
+                    FeatureCard(
+                      title: 'Leave Management',
+                      subtitle:
+                          'Review employee leave requests, approvals, and leave-related records.',
+                      icon: Icons.event_note_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 8),
+                    ),
+                    FeatureCard(
+                      title: 'Locator Slip Management',
+                      subtitle:
+                          'Review locator slip approvals, department-head endorsements, and HR final decisions.',
+                      icon: Icons.pin_drop_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 12),
+                    ),
+                    FeatureCard(
+                      title: 'Holiday Management',
+                      subtitle:
+                          'Define regular, special, and local holidays for DTR and payroll.',
+                      icon: Icons.calendar_today_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 9),
+                    ),
+                    FeatureCard(
+                      title: 'Attendance Policy',
+                      subtitle:
+                          'Set grace period, late/absent/undertime rules, and default policy.',
+                      icon: Icons.policy_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 10),
+                    ),
+                    FeatureCard(
+                      title: 'Biometric Devices',
+                      subtitle:
+                          'Register and manage biometric time clocks linked to your database.',
+                      icon: Icons.fingerprint_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 11),
+                    ),
+                  ],
+                ),
+              ] else if (_dtrSectionIndex == 1)
+                DtrMain(section: DtrSection.timeLogs)
+              else if (_dtrSectionIndex == 2)
+                DtrMain(section: DtrSection.reports)
+              else if (_dtrSectionIndex == 8)
+                const LeaveMain(isAdmin: true)
+              else if (_dtrSectionIndex == 11)
+                const ManageBiometricDevices()
+              else if (_dtrSectionIndex == 12)
+                const AdminLocatorManagementScreen()
+              else
+                _ManageContent(
+                  subIndex: _dtrSectionIndex - 3,
+                  onOpenAssignmentForEmployee: _goToAssignmentWithEmployee,
+                  prefillAssignmentEmployeeId: _dtrSectionIndex == 4
+                      ? _prefillAssignmentEmployeeId
+                      : null,
+                  onPrefillAssignmentConsumed: () {
+                    if (_prefillAssignmentEmployeeId != null) {
+                      setState(() => _prefillAssignmentEmployeeId = null);
+                    }
+                  },
+                ),
             ],
-          ),
-        ] else if (_dtrSectionIndex == 1)
-          DtrMain(section: DtrSection.timeLogs)
-        else if (_dtrSectionIndex == 2)
-          DtrMain(section: DtrSection.reports)
-        else if (_dtrSectionIndex == 8)
-          const LeaveMain(isAdmin: true)
-        else
-          _ManageContent(subIndex: _dtrSectionIndex - 3),
-      ],
+          );
+        },
+      ),
     );
   }
 }
@@ -2106,19 +2641,20 @@ class _AdminSignUpContent extends StatelessWidget {
         ),
         const SizedBox(height: 24),
         Container(
-          constraints: const BoxConstraints(maxWidth: 900),
+          constraints: const BoxConstraints(maxWidth: 1040),
           decoration: BoxDecoration(
-            color: const Color(0xFFF5F7F5),
+            color: const Color(0xFFF0F3F1),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: Colors.black.withOpacity(0.06)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 20,
-                offset: const Offset(0, 4),
+                color: Colors.black.withOpacity(0.06),
+                blurRadius: 24,
+                offset: const Offset(0, 6),
               ),
             ],
           ),
+          clipBehavior: Clip.antiAlias,
           child: const AddEmployeeForm(),
         ),
       ],
@@ -2147,9 +2683,12 @@ class _LdContentState extends State<_LdContent> {
             onPressed: () => setState(() => _ldSectionIndex = 0),
             icon: const Icon(Icons.arrow_back_rounded, size: 20),
             label: const Text('Back to L&D'),
-            style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.primaryNavy,
+              padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+            ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
         ],
         if (_ldSectionIndex == 0) ...[
           Text(
@@ -2189,12 +2728,21 @@ class _LdContentState extends State<_LdContent> {
                 icon: Icons.lightbulb_outline_rounded,
                 onTap: () => setState(() => _ldSectionIndex = 2),
               ),
+              FeatureCard(
+                title: 'Training Daily Reports (Monitoring)',
+                subtitle:
+                    'Monitor daily reports submitted by employees under training, with attachments and status.',
+                icon: Icons.assignment_turned_in_outlined,
+                onTap: () => setState(() => _ldSectionIndex = 3),
+              ),
             ],
           ),
         ] else if (_ldSectionIndex == 1)
           const _TrainingNeedAnalysisSection()
+        else if (_ldSectionIndex == 2)
+          const _ActionBrainstormingSection()
         else
-          const _ActionBrainstormingSection(),
+          const _LdTrainingReportsSection(),
       ],
     );
   }
@@ -2322,6 +2870,34 @@ class _TrainingNeedAnalysisSectionState
     }
   }
 
+  void _openSavedRecordsBrowser() {
+    showRspLdSavedRecordsBrowser(
+      context,
+      sheetTitle: 'Saved Training Need Analysis reports',
+      emptyMessage: 'No reports yet.',
+      loading: _loading,
+      items: _entries.map((e) {
+        final cy = e.cyYear ?? '—';
+        final dept = e.department ?? '—';
+        return SavedRecordListItem(
+          title: 'CY $cy — $dept',
+          subtitle: '${e.rows.length} table row(s)',
+          detailDialogTitle: 'Training Need Analysis — CY $cy',
+          previewContentWidth: 1100,
+          previewBuilder: () => _TrainingNeedAnalysisFormEditor(
+            readOnly: true,
+            entry: e,
+            onSave: (_) {},
+            onCancel: () {},
+            onPrint: (_) async {},
+            onDownloadPdf: (_) async {},
+          ),
+          onPrint: () => _printTna(e),
+        );
+      }).toList(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -2364,6 +2940,14 @@ class _TrainingNeedAnalysisSectionState
               onPressed: _loading ? null : _load,
               icon: const Icon(Icons.refresh_rounded, size: 20),
               label: const Text('Refresh'),
+              style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
+            ),
+            const SizedBox(width: 4),
+            TextButton.icon(
+              onPressed: _loading ? null : _openSavedRecordsBrowser,
+              icon: const Icon(Icons.folder_open_outlined, size: 20),
+              label: const Text('View records'),
+              style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
             ),
           ],
         ),
@@ -2394,10 +2978,465 @@ class _TrainingNeedAnalysisSectionState
   }
 }
 
+/// L&D: Training Daily Reports monitoring content (embedded in L&D page, not a separate screen).
+class _LdTrainingReportsSection extends StatefulWidget {
+  const _LdTrainingReportsSection();
+
+  @override
+  State<_LdTrainingReportsSection> createState() =>
+      _LdTrainingReportsSectionState();
+}
+
+class _LdTrainingReportsSectionState extends State<_LdTrainingReportsSection> {
+  final _searchController = TextEditingController();
+  bool _loading = false;
+  List<TrainingDailyReport> _reports = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final list = await TrainingDailyReportRepo.instance.listAllReports(
+        search: _searchController.text.trim().isEmpty
+            ? null
+            : _searchController.text.trim(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _reports = list;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  void _openSavedRecordsBrowser() {
+    showRspLdSavedRecordsBrowser(
+      context,
+      sheetTitle: 'Training daily reports (list)',
+      emptyMessage:
+          'No reports for the current search. Clear search and refresh, or wait for employees to submit.',
+      loading: _loading,
+      items: _reports
+          .map(
+            (r) => SavedRecordListItem(
+              title: '${r.employeeName ?? "Employee"} — ${r.title}',
+              subtitle: '${r.submittedAt.toLocal()} · ${r.status}',
+              detailDialogTitle: 'Training daily report — ${r.title}',
+              previewContentWidth: 560,
+              previewBuilder: () => TrainingDailyReportReadOnlyView(report: r),
+              onPrint: () => FormPdf.printTrainingDailyReport(r),
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  Future<void> _markSeen(TrainingDailyReport report) async {
+    try {
+      final updated = await TrainingDailyReportRepo.instance.markAsSeen(
+        report.id,
+      );
+      if (!mounted) return;
+      setState(() {
+        final idx = _reports.indexWhere((r) => r.id == report.id);
+        if (idx != -1) _reports[idx] = updated;
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Marked report as seen.')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to mark as seen: $e')));
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Training Daily Reports',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: 24,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.3,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Monitor daily reports from employees under training, review attachments, and mark them as seen.',
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 14,
+            height: 1.4,
+          ),
+        ),
+        const SizedBox(height: 24),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: 'Search',
+                  prefixIcon: Icon(
+                    Icons.search_rounded,
+                    color: AppTheme.textSecondary.withOpacity(0.8),
+                    size: 22,
+                  ),
+                  filled: true,
+                  fillColor: AppTheme.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(
+                      color: Colors.black.withOpacity(0.08),
+                    ),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(
+                      color: Colors.black.withOpacity(0.08),
+                    ),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
+                ),
+                onSubmitted: (_) => _load(),
+              ),
+            ),
+            const SizedBox(width: 12),
+            IconButton.filled(
+              tooltip: 'Refresh',
+              onPressed: _load,
+              style: IconButton.styleFrom(
+                backgroundColor: Colors.grey.shade100,
+                foregroundColor: AppTheme.textPrimary,
+              ),
+              icon: const Icon(Icons.refresh_rounded, size: 22),
+            ),
+            const SizedBox(width: 4),
+            TextButton.icon(
+              onPressed: _loading ? null : _openSavedRecordsBrowser,
+              icon: const Icon(Icons.folder_open_outlined, size: 20),
+              label: const Text('View records'),
+              style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
+            ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        if (_loading)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 32),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (_reports.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 32),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.assignment_outlined,
+                    size: 48,
+                    color: AppTheme.textSecondary.withOpacity(0.5),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'No training daily reports found.',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          )
+        else
+          ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _reports.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            itemBuilder: (context, index) {
+              final r = _reports[index];
+              return _LdReportCard(
+                report: r,
+                onViewFile: r.attachmentUrl != null
+                    ? () => _showAttachmentPreview(context, r.attachmentUrl!)
+                    : null,
+                onMarkSeen: () => _markSeen(r),
+              );
+            },
+          ),
+      ],
+    );
+  }
+
+  void _showAttachmentPreview(BuildContext context, String url) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return Dialog(
+          insetPadding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 900, maxHeight: 700),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Attachment preview',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Close',
+                        onPressed: () => Navigator.of(ctx).pop(),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: InteractiveViewer(
+                        minScale: 0.5,
+                        maxScale: 4,
+                        child: Image.network(
+                          url,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, __, ___) => Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Text(
+                                  'Preview for this file type is not supported.',
+                                  style: TextStyle(fontSize: 13),
+                                ),
+                                const SizedBox(height: 8),
+                                TextButton.icon(
+                                  onPressed: () async {
+                                    final uri = Uri.parse(url);
+                                    await launchUrl(
+                                      uri,
+                                      mode: LaunchMode.externalApplication,
+                                    );
+                                  },
+                                  icon: const Icon(
+                                    Icons.open_in_new_rounded,
+                                    size: 18,
+                                  ),
+                                  label: const Text('Open in new tab'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _LdReportCard extends StatelessWidget {
+  const _LdReportCard({
+    required this.report,
+    this.onViewFile,
+    required this.onMarkSeen,
+  });
+
+  final TrainingDailyReport report;
+  final VoidCallback? onViewFile;
+  final VoidCallback onMarkSeen;
+
+  @override
+  Widget build(BuildContext context) {
+    final r = report;
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      r.employeeName ?? 'Unknown employee',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      r.title,
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              _LdStatusChip(status: r.status),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            r.description ?? 'No description provided.',
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 13,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Submitted ${r.submittedAt.toLocal()}',
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              if (onViewFile != null)
+                TextButton.icon(
+                  onPressed: onViewFile,
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppTheme.primaryNavy,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                  ),
+                  icon: const Icon(Icons.visibility_outlined, size: 18),
+                  label: const Text('View file'),
+                ),
+              const Spacer(),
+              TextButton(
+                onPressed: onMarkSeen,
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.primaryNavy,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                ),
+                child: const Text('Mark as seen'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LdStatusChip extends StatelessWidget {
+  const _LdStatusChip({required this.status});
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    Color color;
+    switch (status.toLowerCase()) {
+      case 'seen':
+        color = const Color(0xFF0EA5E9);
+        break;
+      case 'reviewed':
+        color = Colors.indigo;
+        break;
+      case 'approved':
+        color = Colors.green;
+        break;
+      case 'needs_revision':
+      case 'needs-revision':
+        color = Colors.orange;
+        break;
+      default:
+        color = Colors.grey;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: color.withOpacity(0.14),
+      ),
+      child: Text(
+        status[0].toUpperCase() + status.substring(1),
+        style: TextStyle(
+          color: color,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
 class _TrainingNeedAnalysisFormEditor extends StatefulWidget {
   const _TrainingNeedAnalysisFormEditor({
     super.key,
     required this.entry,
+    this.readOnly = false,
     required this.onSave,
     required this.onCancel,
     required this.onPrint,
@@ -2405,6 +3444,7 @@ class _TrainingNeedAnalysisFormEditor extends StatefulWidget {
   });
 
   final TrainingNeedAnalysisEntry entry;
+  final bool readOnly;
   final void Function(TrainingNeedAnalysisEntry) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(TrainingNeedAnalysisEntry) onPrint;
@@ -2473,9 +3513,13 @@ class _TrainingNeedAnalysisFormEditorState
     super.dispose();
   }
 
-  void _addRow() =>
-      setState(() => _rows.add(_rowControllers('', '', '', '', '', '')));
+  void _addRow() {
+    if (widget.readOnly) return;
+    setState(() => _rows.add(_rowControllers('', '', '', '', '', '')));
+  }
+
   void _removeRow(int i) {
+    if (widget.readOnly) return;
     if (_rows.length <= 1) return;
     setState(() {
       for (final c in _rows[i].values) {
@@ -2523,10 +3567,14 @@ class _TrainingNeedAnalysisFormEditorState
     );
   }
 
-  void _save() => widget.onSave(_buildCurrentEntry());
+  void _save() {
+    if (widget.readOnly) return;
+    widget.onSave(_buildCurrentEntry());
+  }
 
   @override
   Widget build(BuildContext context) {
+    final ro = widget.readOnly;
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -2548,13 +3596,19 @@ class _TrainingNeedAnalysisFormEditorState
               ),
             ),
             const SizedBox(height: 12),
-            TextFormField(
-              controller: _cyYear,
-              decoration: rspUnderlinedField('FOR CY (e.g. 2025):'),
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _cyYear,
+                readOnly: ro,
+                decoration: rspUnderlinedField('FOR CY (e.g. 2025):'),
+              ),
             ),
-            TextFormField(
-              controller: _department,
-              decoration: rspUnderlinedField('DEPARTMENT:'),
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _department,
+                readOnly: ro,
+                decoration: rspUnderlinedField('DEPARTMENT:'),
+              ),
             ),
             const SizedBox(height: 20),
             Row(
@@ -2570,12 +3624,14 @@ class _TrainingNeedAnalysisFormEditorState
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                TextButton.icon(
-                  onPressed: _addRow,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Add row'),
-                ),
+                if (!ro) ...[
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    onPressed: _addRow,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add row'),
+                  ),
+                ],
               ],
             ),
             SingleChildScrollView(
@@ -2599,10 +3655,8 @@ class _TrainingNeedAnalysisFormEditorState
                           width: 140,
                           child: TextFormField(
                             controller: r['name_position'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -2611,10 +3665,8 @@ class _TrainingNeedAnalysisFormEditorState
                           width: 120,
                           child: TextFormField(
                             controller: r['goal'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -2623,10 +3675,8 @@ class _TrainingNeedAnalysisFormEditorState
                           width: 120,
                           child: TextFormField(
                             controller: r['behavior'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -2635,10 +3685,8 @@ class _TrainingNeedAnalysisFormEditorState
                           width: 120,
                           child: TextFormField(
                             controller: r['skills_knowledge'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -2647,10 +3695,8 @@ class _TrainingNeedAnalysisFormEditorState
                           width: 120,
                           child: TextFormField(
                             controller: r['need_for_training'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -2659,23 +3705,23 @@ class _TrainingNeedAnalysisFormEditorState
                           width: 140,
                           child: TextFormField(
                             controller: r['training_recommendations'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
                       DataCell(
-                        IconButton(
-                          icon: const Icon(
-                            Icons.remove_circle_outline,
-                            size: 20,
-                          ),
-                          onPressed: _rows.length > 1
-                              ? () => _removeRow(i)
-                              : null,
-                        ),
+                        ro
+                            ? const SizedBox(width: 40)
+                            : IconButton(
+                                icon: const Icon(
+                                  Icons.remove_circle_outline,
+                                  size: 20,
+                                ),
+                                onPressed: _rows.length > 1
+                                    ? () => _removeRow(i)
+                                    : null,
+                              ),
                       ),
                     ],
                   );
@@ -2685,27 +3731,40 @@ class _TrainingNeedAnalysisFormEditorState
             const SizedBox(height: 24),
             const RspFormFooter(),
             const SizedBox(height: 24),
-            Row(
-              children: [
-                FilledButton(onPressed: _save, child: const Text('Save')),
-                const SizedBox(width: 12),
-                TextButton(
-                  onPressed: widget.onCancel,
-                  child: const Text('Cancel'),
+            if (!ro) ...[
+              Row(
+                children: [
+                  FilledButton(onPressed: _save, child: const Text('Save')),
+                  const SizedBox(width: 12),
+                  TextButton(
+                    onPressed: widget.onCancel,
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  IconButton(
+                    onPressed: () => widget.onPrint(_buildCurrentEntry()),
+                    icon: const Icon(Icons.print_rounded),
+                    tooltip: 'Print',
+                  ),
+                  IconButton(
+                    onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
+                    icon: const Icon(Icons.picture_as_pdf_rounded),
+                    tooltip: 'Download PDF',
+                  ),
+                ],
+              ),
+            ] else ...[
+              if (widget.entry.createdAt != null)
+                Text(
+                  'Created: ${widget.entry.createdAt!.toLocal()}',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
-                const SizedBox(width: 12),
-                IconButton(
-                  onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                  icon: const Icon(Icons.print_rounded),
-                  tooltip: 'Print',
+              if (widget.entry.updatedAt != null)
+                Text(
+                  'Last updated: ${widget.entry.updatedAt!.toLocal()}',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
-                IconButton(
-                  onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
-                  icon: const Icon(Icons.picture_as_pdf_rounded),
-                  tooltip: 'Download PDF',
-                ),
-              ],
-            ),
+            ],
           ],
         ),
       ),
@@ -2749,6 +3808,22 @@ class _TrainingNeedAnalysisList extends StatelessWidget {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    TextButton(
+                      onPressed: () => showReadOnlySavedEntryDialog(
+                        context,
+                        title: 'Saved training need analysis',
+                        previewBuilder: () => _TrainingNeedAnalysisFormEditor(
+                          readOnly: true,
+                          entry: e,
+                          onSave: (_) {},
+                          onCancel: () {},
+                          onPrint: (_) async {},
+                          onDownloadPdf: (_) async {},
+                        ),
+                        contentWidth: 1100,
+                      ),
+                      child: const Text('View'),
+                    ),
                     TextButton(
                       onPressed: () => onEdit(e),
                       child: const Text('Edit'),
@@ -2931,6 +4006,33 @@ class _ActionBrainstormingSectionState
     }
   }
 
+  void _openSavedRecordsBrowser() {
+    showRspLdSavedRecordsBrowser(
+      context,
+      sheetTitle: 'Saved Action Brainstorming worksheets',
+      emptyMessage: 'No worksheets yet.',
+      loading: _loading,
+      items: _entries.map((e) {
+        final dept = e.department?.trim().isNotEmpty == true ? e.department! : '(No department)';
+        return SavedRecordListItem(
+          title: dept,
+          subtitle: '${e.date ?? "—"} · ${e.rows.length} row(s)',
+          detailDialogTitle: 'Action Brainstorming — $dept',
+          previewContentWidth: 1280,
+          previewBuilder: () => _ActionBrainstormingFormEditor(
+            readOnly: true,
+            entry: e,
+            onSave: (_) {},
+            onCancel: () {},
+            onPrint: (_) async {},
+            onDownloadPdf: (_) async {},
+          ),
+          onPrint: () => _printAb(e),
+        );
+      }).toList(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -2973,6 +4075,14 @@ class _ActionBrainstormingSectionState
               onPressed: _loading ? null : _load,
               icon: const Icon(Icons.refresh_rounded, size: 20),
               label: const Text('Refresh'),
+              style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
+            ),
+            const SizedBox(width: 4),
+            TextButton.icon(
+              onPressed: _loading ? null : _openSavedRecordsBrowser,
+              icon: const Icon(Icons.folder_open_outlined, size: 20),
+              label: const Text('View records'),
+              style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
             ),
           ],
         ),
@@ -3007,6 +4117,7 @@ class _ActionBrainstormingFormEditor extends StatefulWidget {
   const _ActionBrainstormingFormEditor({
     super.key,
     required this.entry,
+    this.readOnly = false,
     required this.onSave,
     required this.onCancel,
     required this.onPrint,
@@ -3014,6 +4125,7 @@ class _ActionBrainstormingFormEditor extends StatefulWidget {
   });
 
   final ActionBrainstormingEntry entry;
+  final bool readOnly;
   final void Function(ActionBrainstormingEntry) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(ActionBrainstormingEntry) onPrint;
@@ -3096,9 +4208,13 @@ class _ActionBrainstormingFormEditorState
     super.dispose();
   }
 
-  void _addRow() =>
-      setState(() => _rows.add(_rowCtrl('', '', '', '', '', '', '')));
+  void _addRow() {
+    if (widget.readOnly) return;
+    setState(() => _rows.add(_rowCtrl('', '', '', '', '', '', '')));
+  }
+
   void _removeRow(int i) {
+    if (widget.readOnly) return;
     if (_rows.length <= 1) return;
     setState(() {
       for (final c in _rows[i].values) {
@@ -3154,10 +4270,14 @@ class _ActionBrainstormingFormEditorState
     );
   }
 
-  void _save() => widget.onSave(_buildCurrentEntry());
+  void _save() {
+    if (widget.readOnly) return;
+    widget.onSave(_buildCurrentEntry());
+  }
 
   @override
   Widget build(BuildContext context) {
+    final ro = widget.readOnly;
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -3172,20 +4292,27 @@ class _ActionBrainstormingFormEditorState
             const RspFormHeader(
               formTitle: 'ACTION BRAINSTORMING AND COACHING WORKSHEET',
             ),
-            TextFormField(
-              controller: _department,
-              decoration: rspUnderlinedField('DEPARTMENT:'),
+            const SizedBox(height: 16),
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _department,
+                readOnly: ro,
+                decoration: rspUnderlinedField('DEPARTMENT:'),
+              ),
             ),
-            TextFormField(
-              controller: _date,
-              decoration: rspUnderlinedField('DATE:'),
+            RspSpacedOutlineField(
+              child: TextFormField(
+                controller: _date,
+                readOnly: ro,
+                decoration: rspUnderlinedField('DATE:'),
+              ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 20),
             Text(
               'Instruction: Use the worksheet to brainstorm/coach staff of the new ideas to move the department closer to department goal.',
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 22),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -3199,12 +4326,14 @@ class _ActionBrainstormingFormEditorState
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                TextButton.icon(
-                  onPressed: _addRow,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Add row'),
-                ),
+                if (!ro) ...[
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    onPressed: _addRow,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add row'),
+                  ),
+                ],
               ],
             ),
             SingleChildScrollView(
@@ -3231,10 +4360,8 @@ class _ActionBrainstormingFormEditorState
                           width: 100,
                           child: TextFormField(
                             controller: r['name'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3243,10 +4370,8 @@ class _ActionBrainstormingFormEditorState
                           width: 100,
                           child: TextFormField(
                             controller: r['stop_doing'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3255,10 +4380,8 @@ class _ActionBrainstormingFormEditorState
                           width: 100,
                           child: TextFormField(
                             controller: r['do_less_of'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3267,10 +4390,8 @@ class _ActionBrainstormingFormEditorState
                           width: 100,
                           child: TextFormField(
                             controller: r['keep_doing'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3279,10 +4400,8 @@ class _ActionBrainstormingFormEditorState
                           width: 100,
                           child: TextFormField(
                             controller: r['do_more_of'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3291,10 +4410,8 @@ class _ActionBrainstormingFormEditorState
                           width: 100,
                           child: TextFormField(
                             controller: r['start_doing'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
@@ -3303,23 +4420,23 @@ class _ActionBrainstormingFormEditorState
                           width: 100,
                           child: TextFormField(
                             controller: r['goal'],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: UnderlineInputBorder(),
-                            ),
+                            readOnly: ro,
+                            decoration: rspTableCellField(),
                           ),
                         ),
                       ),
                       DataCell(
-                        IconButton(
-                          icon: const Icon(
-                            Icons.remove_circle_outline,
-                            size: 20,
-                          ),
-                          onPressed: _rows.length > 1
-                              ? () => _removeRow(i)
-                              : null,
-                        ),
+                        ro
+                            ? const SizedBox(width: 40)
+                            : IconButton(
+                                icon: const Icon(
+                                  Icons.remove_circle_outline,
+                                  size: 20,
+                                ),
+                                onPressed: _rows.length > 1
+                                    ? () => _removeRow(i)
+                                    : null,
+                              ),
                       ),
                     ],
                   );
@@ -3341,9 +4458,12 @@ class _ActionBrainstormingFormEditorState
                           fontSize: 13,
                         ),
                       ),
-                      TextFormField(
-                        controller: _certifiedBy,
-                        decoration: rspUnderlinedField(''),
+                      RspSpacedOutlineField(
+                        child: TextFormField(
+                          controller: _certifiedBy,
+                          readOnly: ro,
+                          decoration: rspUnderlinedField(''),
+                        ),
                       ),
                       Text(
                         'Department Head',
@@ -3367,9 +4487,12 @@ class _ActionBrainstormingFormEditorState
                           fontSize: 13,
                         ),
                       ),
-                      TextFormField(
-                        controller: _certificationDate,
-                        decoration: rspUnderlinedField(''),
+                      RspSpacedOutlineField(
+                        child: TextFormField(
+                          controller: _certificationDate,
+                          readOnly: ro,
+                          decoration: rspUnderlinedField(''),
+                        ),
                       ),
                     ],
                   ),
@@ -3379,27 +4502,40 @@ class _ActionBrainstormingFormEditorState
             const SizedBox(height: 24),
             const RspFormFooter(),
             const SizedBox(height: 24),
-            Row(
-              children: [
-                FilledButton(onPressed: _save, child: const Text('Save')),
-                const SizedBox(width: 12),
-                TextButton(
-                  onPressed: widget.onCancel,
-                  child: const Text('Cancel'),
+            if (!ro) ...[
+              Row(
+                children: [
+                  FilledButton(onPressed: _save, child: const Text('Save')),
+                  const SizedBox(width: 12),
+                  TextButton(
+                    onPressed: widget.onCancel,
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  IconButton(
+                    onPressed: () => widget.onPrint(_buildCurrentEntry()),
+                    icon: const Icon(Icons.print_rounded),
+                    tooltip: 'Print',
+                  ),
+                  IconButton(
+                    onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
+                    icon: const Icon(Icons.picture_as_pdf_rounded),
+                    tooltip: 'Download PDF',
+                  ),
+                ],
+              ),
+            ] else ...[
+              if (widget.entry.createdAt != null)
+                Text(
+                  'Created: ${widget.entry.createdAt!.toLocal()}',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
-                const SizedBox(width: 12),
-                IconButton(
-                  onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                  icon: const Icon(Icons.print_rounded),
-                  tooltip: 'Print',
+              if (widget.entry.updatedAt != null)
+                Text(
+                  'Last updated: ${widget.entry.updatedAt!.toLocal()}',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
-                IconButton(
-                  onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
-                  icon: const Icon(Icons.picture_as_pdf_rounded),
-                  tooltip: 'Download PDF',
-                ),
-              ],
-            ),
+            ],
           ],
         ),
       ),
@@ -3443,6 +4579,22 @@ class _ActionBrainstormingList extends StatelessWidget {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    TextButton(
+                      onPressed: () => showReadOnlySavedEntryDialog(
+                        context,
+                        title: 'Saved action brainstorming worksheet',
+                        previewBuilder: () => _ActionBrainstormingFormEditor(
+                          readOnly: true,
+                          entry: e,
+                          onSave: (_) {},
+                          onCancel: () {},
+                          onPrint: (_) async {},
+                          onDownloadPdf: (_) async {},
+                        ),
+                        contentWidth: 1280,
+                      ),
+                      child: const Text('View'),
+                    ),
                     TextButton(
                       onPressed: () => onEdit(e),
                       child: const Text('Edit'),
@@ -3498,9 +4650,17 @@ class _ActionBrainstormingList extends StatelessWidget {
 }
 
 class _ManageContent extends StatelessWidget {
-  const _ManageContent({required this.subIndex});
+  const _ManageContent({
+    required this.subIndex,
+    this.onOpenAssignmentForEmployee,
+    this.prefillAssignmentEmployeeId,
+    this.onPrefillAssignmentConsumed,
+  });
 
   final int subIndex;
+  final void Function(String employeeId)? onOpenAssignmentForEmployee;
+  final String? prefillAssignmentEmployeeId;
+  final VoidCallback? onPrefillAssignmentConsumed;
 
   static const _titles = [
     'Employees',
@@ -3510,16 +4670,20 @@ class _ManageContent extends StatelessWidget {
     'Shift',
     'Holiday',
     'Attendance Policy',
-    'Attendance Adjustment',
   ];
 
   @override
   Widget build(BuildContext context) {
     if (subIndex == 0) {
-      return const ManageEmployee();
+      return ManageEmployee(
+        onOpenAssignmentForEmployee: onOpenAssignmentForEmployee,
+      );
     }
     if (subIndex == 1) {
-      return const ManageAssignment();
+      return ManageAssignment(
+        initialEmployeeId: prefillAssignmentEmployeeId,
+        onInitialEmployeeConsumed: onPrefillAssignmentConsumed,
+      );
     }
     if (subIndex == 2) {
       return const ManageDepartment();
@@ -3535,9 +4699,6 @@ class _ManageContent extends StatelessWidget {
     }
     if (subIndex == 7) {
       return const ManageAttendancePolicy();
-    }
-    if (subIndex == 8) {
-      return const ManageAttendanceAdjustment();
     }
     final title = subIndex >= 0 && subIndex < _titles.length
         ? _titles[subIndex]
@@ -3559,83 +4720,6 @@ class _ManageContent extends StatelessWidget {
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
         ),
       ],
-    );
-  }
-}
-
-class _PlaceholderContent extends StatelessWidget {
-  const _PlaceholderContent({required this.title});
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    final isNarrow = MediaQuery.of(context).size.width < 500;
-    return Center(
-      child: Container(
-        padding: EdgeInsets.symmetric(
-          horizontal: isNarrow ? 24 : 48,
-          vertical: isNarrow ? 32 : 48,
-        ),
-        margin: EdgeInsets.all(isNarrow ? 16 : 24),
-        decoration: BoxDecoration(
-          color: AppTheme.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.06),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
-            ),
-          ],
-          border: Border.all(color: Colors.black.withOpacity(0.06)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: EdgeInsets.all(isNarrow ? 20 : 24),
-              decoration: BoxDecoration(
-                color: AppTheme.primaryNavy.withOpacity(0.08),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.construction_rounded,
-                size: isNarrow ? 44 : 56,
-                color: AppTheme.primaryNavy.withOpacity(0.7),
-              ),
-            ),
-            SizedBox(height: isNarrow ? 20 : 24),
-            Text(
-              title,
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: isNarrow ? 18 : 22,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Coming soon',
-              style: TextStyle(
-                color: AppTheme.primaryNavy,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'This section will be available in a future update.',
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: isNarrow ? 13 : 14,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

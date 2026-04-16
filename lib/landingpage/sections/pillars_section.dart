@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../recruitment/screens/track_application_page.dart';
+import '../../recruitment/screens/application_flow_page.dart';
 import '../constants/app_theme.dart';
 import '../widgets/section_container.dart';
 
@@ -257,7 +257,7 @@ class _PillarCardState extends State<_PillarCard> {
 
   void _handleTrackStatus(BuildContext context) {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (context) => const TrackApplicationPage()),
+      MaterialPageRoute(builder: (context) => const ApplicationFlowPage()),
     );
   }
 

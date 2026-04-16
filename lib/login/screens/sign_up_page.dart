@@ -1,5 +1,6 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../api/client.dart';
 import '../constants/login_theme.dart';
 import '../models/login_role.dart';
 
@@ -85,25 +86,32 @@ class _SignUpPageState extends State<SignUpPage> {
 
     setState(() => _isLoading = true);
     try {
-      await Supabase.instance.client.auth.signUp(
-        email: email,
-        password: password,
+      await ApiClient.instance.post<Map<String, dynamic>>(
+        '/auth/register',
         data: {
-          'full_name': name,
+          'email': email,
+          'password': password,
+          'fullName': name,
           'role': _role == LoginRole.admin ? 'admin' : 'employee',
         },
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Account created. Please check your email to confirm, or sign in.'),
+            content: Text(
+              'Account created. You can sign in with your email and password.',
+            ),
             backgroundColor: LoginTheme.bluePrimary,
           ),
         );
         Navigator.of(context).pop();
       }
-    } on AuthException catch (e) {
-      if (mounted) _showSnackBar(e.message);
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      final msg = data is Map
+          ? (data['error']?.toString() ?? e.message ?? 'Sign up failed')
+          : (e.message ?? 'Sign up failed');
+      if (mounted) _showSnackBar(msg);
     } catch (e) {
       if (mounted) _showSnackBar('Sign up failed: $e');
     } finally {

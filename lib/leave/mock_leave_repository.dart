@@ -1,5 +1,6 @@
 import 'leave_repository.dart';
 import 'models/leave_balance.dart';
+import 'models/leave_balance_ledger.dart';
 import 'models/leave_request.dart';
 import 'models/leave_type.dart';
 
@@ -48,9 +49,7 @@ class MockLeaveRepository implements LeaveRepository {
   @override
   Future<LeaveRequest> updateRequest(LeaveRequest request) async {
     final old = _getRequestByIdInternal(request.id);
-    final saved = request.copyWith(
-      updatedAt: DateTime.now(),
-    );
+    final saved = request.copyWith(updatedAt: DateTime.now());
     _upsertRequest(saved);
     _ensureDefaultBalances(saved.userId);
     _reconcilePendingEffect(old: old, updated: saved);
@@ -66,14 +65,19 @@ class MockLeaveRepository implements LeaveRepository {
   Future<List<LeaveRequest>> listMyRequests(
     String userId, {
     LeaveRequestStatus? status,
+    int? limit,
   }) async {
-    return _sortedRequests(
+    var results = _sortedRequests(
       _requests.where((r) {
         if (r.userId != userId) return false;
         if (status != null && r.status != status) return false;
         return true;
       }).toList(),
     );
+    if (limit != null && limit > 0 && results.length > limit) {
+      results = results.take(limit).toList();
+    }
+    return results;
   }
 
   @override
@@ -87,7 +91,8 @@ class MockLeaveRepository implements LeaveRepository {
         return false;
       }
       if (query.startDateFrom != null &&
-          (r.startDate == null || r.startDate!.isBefore(query.startDateFrom!))) {
+          (r.startDate == null ||
+              r.startDate!.isBefore(query.startDateFrom!))) {
         return false;
       }
       if (query.startDateTo != null &&
@@ -106,7 +111,9 @@ class MockLeaveRepository implements LeaveRepository {
     }).toList();
 
     results = _sortedRequests(results);
-    if (query.limit != null && query.limit! > 0 && results.length > query.limit!) {
+    if (query.limit != null &&
+        query.limit! > 0 &&
+        results.length > query.limit!) {
       results = results.take(query.limit!).toList();
     }
     return results;
@@ -115,9 +122,7 @@ class MockLeaveRepository implements LeaveRepository {
   @override
   Future<List<LeaveRequest>> listPendingRequests() async {
     return _sortedRequests(
-      _requests
-          .where((r) => r.status == LeaveRequestStatus.pending)
-          .toList(),
+      _requests.where((r) => r.status == LeaveRequestStatus.pending).toList(),
     );
   }
 
@@ -125,8 +130,9 @@ class MockLeaveRepository implements LeaveRepository {
   Future<List<LeaveBalance>> getBalancesForUser(String userId) async {
     _ensureDefaultBalances(userId);
     final list = _balancesByUser[userId] ?? const <LeaveBalance>[];
-    return List<LeaveBalance>.from(list)
-      ..sort((a, b) => a.leaveType.displayName.compareTo(b.leaveType.displayName));
+    return List<LeaveBalance>.from(list)..sort(
+      (a, b) => a.leaveType.displayName.compareTo(b.leaveType.displayName),
+    );
   }
 
   @override
@@ -136,8 +142,9 @@ class MockLeaveRepository implements LeaveRepository {
   ) async {
     _ensureDefaultBalances(userId);
     try {
-      return (_balancesByUser[userId] ?? const <LeaveBalance>[])
-          .firstWhere((b) => b.leaveType == leaveType);
+      return (_balancesByUser[userId] ?? const <LeaveBalance>[]).firstWhere(
+        (b) => b.leaveType == leaveType,
+      );
     } catch (_) {
       return null;
     }
@@ -168,10 +175,14 @@ class MockLeaveRepository implements LeaveRepository {
       status: LeaveRequestStatus.approved,
       reviewerId: input.reviewerId,
       reviewerName: input.reviewerName,
+      reviewerRole: input.reviewerRole,
+      reviewerTitle: input.reviewerTitle,
       hrRemarks: input.hrRemarks,
       recommendationRemarks: input.recommendationRemarks,
       approvedDaysWithPay:
-          input.approvedDaysWithPay ?? old.approvedDaysWithPay ?? old.workingDaysApplied,
+          input.approvedDaysWithPay ??
+          old.approvedDaysWithPay ??
+          old.workingDaysApplied,
       approvedDaysWithoutPay:
           input.approvedDaysWithoutPay ?? old.approvedDaysWithoutPay,
       approvedOtherDetails:
@@ -190,6 +201,30 @@ class MockLeaveRepository implements LeaveRepository {
     return approved;
   }
 
+  /// #15: Revoke an approved leave (mock: restores used_days).
+  @override
+  Future<LeaveRequest> revokeApproval(LeaveReviewDecisionInput input) async {
+    final old = _requireRequest(input.requestId);
+    final revoked = old.copyWith(
+      status: LeaveRequestStatus.returned,
+      reviewerId: input.reviewerId,
+      reviewerName: input.reviewerName,
+      reviewerRole: input.reviewerRole,
+      reviewerTitle: input.reviewerTitle,
+      hrRemarks: input.hrRemarks ?? 'Approval revoked.',
+      disapprovalReason: input.reason,
+      reviewedAt: input.reviewedAt ?? DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+    _upsertRequest(revoked);
+    // Restore used_days in mock balance.
+    final daysWithPay = old.approvedDaysWithPay ?? old.workingDaysApplied ?? 0;
+    if (daysWithPay > 0) {
+      _adjustUsedDays(revoked.userId, revoked.leaveType, -daysWithPay);
+    }
+    return revoked;
+  }
+
   @override
   Future<LeaveRequest> returnRequest(LeaveReviewDecisionInput input) async {
     final old = _requireRequest(input.requestId);
@@ -197,6 +232,8 @@ class MockLeaveRepository implements LeaveRepository {
       status: LeaveRequestStatus.returned,
       reviewerId: input.reviewerId,
       reviewerName: input.reviewerName,
+      reviewerRole: input.reviewerRole,
+      reviewerTitle: input.reviewerTitle,
       hrRemarks: input.hrRemarks,
       disapprovalReason: input.reason,
       reviewedAt: input.reviewedAt ?? DateTime.now(),
@@ -214,6 +251,8 @@ class MockLeaveRepository implements LeaveRepository {
       status: LeaveRequestStatus.rejected,
       reviewerId: input.reviewerId,
       reviewerName: input.reviewerName,
+      reviewerRole: input.reviewerRole,
+      reviewerTitle: input.reviewerTitle,
       hrRemarks: input.hrRemarks,
       disapprovalReason: input.reason,
       reviewedAt: input.reviewedAt ?? DateTime.now(),
@@ -253,7 +292,8 @@ class MockLeaveRepository implements LeaveRepository {
     final old = _requireRequest(requestId);
     final updated = old.copyWith(
       attachmentName: fileName,
-      attachmentPath: 'mock://${LeaveRequest.storageBucket}/$requestId/$fileName',
+      attachmentPath:
+          'mock://${LeaveRequest.storageBucket}/$requestId/$fileName',
       updatedAt: DateTime.now(),
     );
     _upsertRequest(updated);
@@ -270,6 +310,73 @@ class MockLeaveRepository implements LeaveRepository {
     );
     _upsertRequest(updated);
     return updated;
+  }
+
+  @override
+  Future<List<int>?> getAttachmentBytes(String requestId) async => null;
+
+  // ---- Department Head stubs (mock) ----
+
+  @override
+  Future<Map<String, dynamic>> checkIsDepartmentHead() async => {
+    'isDeptHead': false,
+    'departmentId': null,
+    'departmentName': null,
+  };
+
+  @override
+  Future<List<LeaveRequest>> listDepartmentHeadRequests() async =>
+      const <LeaveRequest>[];
+
+  @override
+  Future<LeaveRequest> departmentHeadApprove(
+    LeaveReviewDecisionInput input,
+  ) async => _requireRequest(
+    input.requestId,
+  ).copyWith(status: LeaveRequestStatus.pendingHr);
+
+  @override
+  Future<LeaveRequest> departmentHeadReject(
+    LeaveReviewDecisionInput input,
+  ) async => _requireRequest(
+    input.requestId,
+  ).copyWith(status: LeaveRequestStatus.rejectedByDepartmentHead);
+
+  @override
+  Future<LeaveRequest> departmentHeadReturn(
+    LeaveReviewDecisionInput input,
+  ) async => _requireRequest(
+    input.requestId,
+  ).copyWith(status: LeaveRequestStatus.returned);
+
+  @override
+  Future<ForcedLeaveDeductionResult> applyForcedLeaveDeduction(
+    ForcedLeaveDeductionInput input,
+  ) async {
+    final vacation = await getBalanceForUserByType(
+      input.userId,
+      LeaveType.vacationLeave,
+    );
+    final available = vacation?.availableDays ?? 0;
+    if (!input.allowNegativeBalance && input.daysToDeduct > available) {
+      throw Exception(
+        'Insufficient vacation leave balance. Available ${available.toStringAsFixed(2)}, requested ${input.daysToDeduct.toStringAsFixed(2)}.',
+      );
+    }
+    _adjustUsedDays(input.userId, LeaveType.vacationLeave, input.daysToDeduct);
+    final updatedVacation = await getBalanceForUserByType(
+      input.userId,
+      LeaveType.vacationLeave,
+    );
+    return ForcedLeaveDeductionResult(
+      userId: input.userId,
+      leaveType: LeaveType.vacationLeave,
+      deductedDays: input.daysToDeduct,
+      remainingDays: updatedVacation?.remainingDays ?? 0,
+      year: input.year,
+      remarks: input.remarks,
+      appliedAt: DateTime.now(),
+    );
   }
 
   String _nextRequestId() {
@@ -322,8 +429,6 @@ class MockLeaveRepository implements LeaveRepository {
               userId: userId,
               leaveType: type,
               earnedDays: switch (type) {
-                LeaveType.vacationLeave => 15,
-                LeaveType.sickLeave => 15,
                 LeaveType.specialPrivilegeLeave => 3,
                 _ => 0,
               },
@@ -331,7 +436,10 @@ class MockLeaveRepository implements LeaveRepository {
               pendingDays: 0,
               adjustedDays: 0,
               asOfDate: now,
-              lastAccrualDate: now,
+              lastAccrualDate: switch (type) {
+                LeaveType.specialPrivilegeLeave => now,
+                _ => null,
+              },
               createdAt: now,
               updatedAt: now,
             ),
@@ -344,10 +452,10 @@ class MockLeaveRepository implements LeaveRepository {
     required LeaveRequest? old,
     required LeaveRequest updated,
   }) {
-    final oldPending = old?.status == LeaveRequestStatus.pending
+    final oldPending = (old?.status.isPending ?? false)
         ? (old?.workingDaysApplied ?? 0)
         : 0.0;
-    final newPending = updated.status == LeaveRequestStatus.pending
+    final newPending = updated.status.isPending
         ? (updated.workingDaysApplied ?? 0)
         : 0.0;
 
@@ -387,6 +495,16 @@ class MockLeaveRepository implements LeaveRepository {
     list[index] = current.copyWith(
       usedDays: next < 0 ? 0 : next,
       updatedAt: DateTime.now(),
+    );
+  }
+
+  @override
+  Future<LeaveLedgerResult> getLeaveLedger(LeaveLedgerQuery query) async {
+    return LeaveLedgerResult(
+      total: 0,
+      limit: query.limit,
+      offset: query.offset,
+      rows: const [],
     );
   }
 }

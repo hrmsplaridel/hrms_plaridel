@@ -1,4 +1,4 @@
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'rsp_ld_saved_entries_api.dart';
 
 /// One Background Investigation (BI) form entry: applicant + respondent + 9 competency ratings.
 class BiFormEntry {
@@ -121,39 +121,27 @@ class BiFormRepo {
   BiFormRepo._();
   static final BiFormRepo instance = BiFormRepo._();
 
-  SupabaseClient get _client => Supabase.instance.client;
-
   Future<List<BiFormEntry>> list() async {
-    final res = await _client
-        .from(BiFormEntry.tableName)
-        .select()
-        .order('created_at', ascending: false);
-    return (res as List).map((e) => BiFormEntry.fromJson(Map<String, dynamic>.from(e as Map))).toList();
+    final rows = await RspLdSavedEntriesApi.listRows(BiFormEntry.tableName);
+    return rows.map(BiFormEntry.fromJson).toList();
   }
 
   Future<BiFormEntry?> get(String id) async {
-    final res = await _client
-        .from(BiFormEntry.tableName)
-        .select()
-        .eq('id', id)
-        .maybeSingle();
-    return res == null ? null : BiFormEntry.fromJson(Map<String, dynamic>.from(res));
+    final row = await RspLdSavedEntriesApi.getRow(BiFormEntry.tableName, id);
+    return row == null ? null : BiFormEntry.fromJson(row);
   }
 
   Future<void> insert(BiFormEntry entry) async {
     final payload = Map<String, dynamic>.from(entry.toJson())..remove('id');
-    await _client.from(BiFormEntry.tableName).insert(payload);
+    await RspLdSavedEntriesApi.insertRow(BiFormEntry.tableName, payload);
   }
 
   Future<void> update(BiFormEntry entry) async {
     if (entry.id == null) return;
-    await _client
-        .from(BiFormEntry.tableName)
-        .update(entry.toJson())
-        .eq('id', entry.id!);
+    await RspLdSavedEntriesApi.updateRow(BiFormEntry.tableName, entry.id!, entry.toJson());
   }
 
   Future<void> delete(String id) async {
-    await _client.from(BiFormEntry.tableName).delete().eq('id', id);
+    await RspLdSavedEntriesApi.deleteRow(BiFormEntry.tableName, id);
   }
 }

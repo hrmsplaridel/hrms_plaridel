@@ -13,10 +13,12 @@ class LoginTheme {
   static const Color brandingGradientEnd = Color(0xFFE85D04);
 
   // Form
-  static const Color formBackground = Color(0xFFFFFFFF);
+  // Burnt orange background for auth forms.
+  static const Color formBackground = Color(0xFFD35400);
   static const Color borderLight = Color(0xFFE0E0E0);
-  static const Color textDark = Color(0xFF212121);
-  static const Color textSecondary = Color(0xFF757575);
+  // High-contrast text colors on burnt orange background.
+  static const Color textDark = Color(0xFFFFFFFF);
+  static const Color textSecondary = Color(0xFFFFE0CC);
 
   // Orange accents
   static const Color orange = Color(0xFFE85D04);

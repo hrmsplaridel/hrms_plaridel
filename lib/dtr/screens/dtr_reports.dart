@@ -2,12 +2,16 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:pdf/pdf.dart';
+import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
+import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../data/time_record.dart';
 import '../dtr_export.dart';
 import '../dtr_provider.dart';
 import '../dtr_share.dart';
+import '../widgets/attendance_display.dart';
 
 enum _DtrExportFormat { pdf, word, excel }
 
@@ -40,7 +44,19 @@ class _DtrReportsState extends State<DtrReports> {
   int _selectedMonth = DateTime.now().month;
   int _selectedYear = DateTime.now().year;
   String? _selectedEmployeeId;
+  String? _selectedDepartmentId;
   List<TimeRecord> _employeeRecords = [];
+  bool _showMinutesFormat = true;
+
+  /// Shift working days (ISO 1=Mon..7=Sun) for selected employee in report month. Null = use Mon–Fri.
+  List<int>? _shiftWorkingDays;
+
+  /// Official hours string from assigned shift, e.g. "8:00AM-12:00PM 01:00PM-5:00PM".
+  String? _shiftOfficialHours;
+
+  /// Active assignment window (calendar dates) for the selected employee; drives export + summary.
+  DateTime? _assignmentEffectiveFrom;
+  DateTime? _assignmentEffectiveTo;
 
   @override
   void initState() {
@@ -56,13 +72,22 @@ class _DtrReportsState extends State<DtrReports> {
 
   Future<void> _load() async {
     final dtr = context.read<DtrProvider>();
-    await dtr.loadEmployees();
+    await Future.wait([
+      dtr.loadEmployees(departmentId: _selectedDepartmentId),
+      dtr.loadDepartments(),
+    ]);
+    if (!mounted) return;
     if (dtr.employees.isNotEmpty) {
       if (_selectedEmployeeId == null ||
           !dtr.employees.any((e) => e.id == _selectedEmployeeId)) {
         setState(() => _selectedEmployeeId = dtr.employees.first.id);
       }
       _loadEmployeeRecords();
+    } else {
+      setState(() {
+        _selectedEmployeeId = null;
+        _employeeRecords = [];
+      });
     }
   }
 
@@ -71,12 +96,172 @@ class _DtrReportsState extends State<DtrReports> {
     final start = DateTime(_selectedYear, _selectedMonth, 1);
     final end = DateTime(_selectedYear, _selectedMonth + 1, 0);
     final dtr = context.read<DtrProvider>();
-    await dtr.loadTimeRecordsForAdmin(
-      startDate: start,
-      endDate: end,
-      userId: _selectedEmployeeId,
+    await Future.wait([
+      dtr.loadTimeRecordsForAdmin(
+        startDate: start,
+        endDate: end,
+        userId: _selectedEmployeeId,
+        limit: 100,
+      ),
+      _loadShiftWorkingDays(),
+    ]);
+    if (!mounted) return;
+    setState(() => _employeeRecords = List.from(dtr.timeRecords));
+  }
+
+  static String _formatOfficialHours(String start, String end) {
+    String toAmPm(String t) {
+      final parts = t.trim().split(RegExp(r'[:.\s]'));
+      if (parts.isEmpty) return t;
+      final h = int.tryParse(parts[0]) ?? 0;
+      final m = parts.length > 1 ? (int.tryParse(parts[1]) ?? 0) : 0;
+      final isPm = h >= 12;
+      final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+      return '${h12.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}${isPm ? 'PM' : 'AM'}';
+    }
+
+    return '${toAmPm(start)}-${toAmPm(end)}';
+  }
+
+  /// Fetch assignment for selected employee and set _shiftWorkingDays for report month.
+  Future<void> _loadShiftWorkingDays() async {
+    final employeeId = _selectedEmployeeId;
+    if (employeeId == null) return;
+    final monthStart = DateTime(_selectedYear, _selectedMonth, 1);
+    final monthEnd = DateTime(_selectedYear, _selectedMonth + 1, 0);
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/assignments',
+        queryParameters: {'employee_id': employeeId, 'status': 'Active'},
+      );
+      final list = res.data ?? [];
+      for (final a in list) {
+        final m = a as Map<String, dynamic>;
+        final from = m['effective_from'] != null
+            ? DateTime.tryParse(m['effective_from'].toString())
+            : null;
+        final to =
+            m['effective_to'] != null &&
+                m['effective_to'].toString().trim().isNotEmpty
+            ? DateTime.tryParse(m['effective_to'].toString())
+            : null;
+        if (from == null) continue;
+        if (from.isAfter(monthEnd)) continue;
+        if (to != null && to.isBefore(monthStart)) continue;
+        final wd = m['working_days'];
+        List<int>? days;
+        if (wd is List) {
+          days = wd
+              .map((x) => x is int ? x : int.tryParse(x.toString()))
+              .whereType<int>()
+              .where((x) => x >= 1 && x <= 7)
+              .toList();
+        }
+        String? officialHours;
+        final st = m['start_time'];
+        final et = m['end_time'];
+        if (st != null && et != null) {
+          officialHours = _formatOfficialHours(st.toString(), et.toString());
+        }
+        if (mounted) {
+          setState(() {
+            _shiftWorkingDays = (days != null && days.isNotEmpty) ? days : null;
+            _shiftOfficialHours = officialHours;
+            _assignmentEffectiveFrom = DateTime(
+              from.year,
+              from.month,
+              from.day,
+            );
+            _assignmentEffectiveTo = to != null
+                ? DateTime(to.year, to.month, to.day)
+                : null;
+          });
+          return;
+        }
+      }
+      if (mounted)
+        setState(() {
+          _shiftWorkingDays = null;
+          _shiftOfficialHours = null;
+          _assignmentEffectiveFrom = null;
+          _assignmentEffectiveTo = null;
+        });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _shiftWorkingDays = null;
+          _assignmentEffectiveFrom = null;
+          _assignmentEffectiveTo = null;
+        });
+      }
+    }
+  }
+
+  /// Shift weekday and within assignment effective dates when loaded.
+  bool _isScheduledWorkDay(DateTime dt) {
+    final shiftWd = _shiftWorkingDays != null && _shiftWorkingDays!.isNotEmpty
+        ? _shiftWorkingDays!.toSet()
+        : {1, 2, 3, 4, 5};
+    if (!shiftWd.contains(dt.weekday)) return false;
+    if (_assignmentEffectiveFrom != null) {
+      if (dt.isBefore(_assignmentEffectiveFrom!)) return false;
+    }
+    if (_assignmentEffectiveTo != null) {
+      if (dt.isAfter(_assignmentEffectiveTo!)) return false;
+    }
+    return true;
+  }
+
+  /// Holiday rows from the API are omitted when they are not meaningful for tardiness:
+  /// no assignment overlapping the month, or the date is not a scheduled work day for this employee.
+  Map<DateTime, TimeRecord> _filterRecordsForTardinessReport(
+    Map<DateTime, TimeRecord> raw,
+  ) {
+    final hasAssignment = _assignmentEffectiveFrom != null;
+    final out = <DateTime, TimeRecord>{};
+    for (final e in raw.entries) {
+      final dt = e.key;
+      final r = e.value;
+      final isHoliday = r.status == 'holiday' || (r.holidayId != null);
+      if (isHoliday) {
+        if (!hasAssignment) continue;
+        if (!_isScheduledWorkDay(dt)) continue;
+      }
+      out[dt] = r;
+    }
+    return out;
+  }
+
+  /// Last date in the selected month included in tardiness/absent/late stats. Days after "today"
+  /// are not treated as absent (no attendance record exists yet).
+  DateTime _tardinessStatsInclusiveEnd() {
+    final monthStart = DateTime(_selectedYear, _selectedMonth, 1);
+    final lastDay = DateTime(_selectedYear, _selectedMonth + 1, 0).day;
+    final monthEnd = DateTime(_selectedYear, _selectedMonth, lastDay);
+    final t = DateTime(
+      DateTime.now().year,
+      DateTime.now().month,
+      DateTime.now().day,
     );
-    setState(() => _employeeRecords = dtr.timeRecords);
+    if (monthEnd.isBefore(t)) {
+      return monthEnd;
+    }
+    if (t.isBefore(monthStart)) {
+      return monthStart.subtract(const Duration(days: 1));
+    }
+    return t.isAfter(monthEnd) ? monthEnd : t;
+  }
+
+  /// Scheduled work days in the month on or before [inclusiveEnd].
+  int _countScheduledWorkDaysThrough(DateTime inclusiveEnd) {
+    final lastDay = DateTime(_selectedYear, _selectedMonth + 1, 0).day;
+    var n = 0;
+    for (var d = 1; d <= lastDay; d++) {
+      final dt = DateTime(_selectedYear, _selectedMonth, d);
+      if (dt.isAfter(inclusiveEnd)) continue;
+      if (_isScheduledWorkDay(dt)) n++;
+    }
+    return n;
   }
 
   void _reset() {
@@ -84,18 +269,50 @@ class _DtrReportsState extends State<DtrReports> {
       _searchController.clear();
       _selectedMonth = DateTime.now().month;
       _selectedYear = DateTime.now().year;
+      _selectedDepartmentId = null;
     });
-    _loadEmployeeRecords();
+    _load();
   }
 
   static String _formatTime(DateTime? dt) {
     if (dt == null) return '—';
     final local = dt.toLocal();
-    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}:${local.second.toString().padLeft(2, '0')}';
+    final h = local.hour;
+    final m = local.minute;
+    final ampm = h >= 12 ? 'PM' : 'AM';
+    final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+    return '$h12:${m.toString().padLeft(2, '0')} $ampm';
   }
 
+  static String _cellDisplayForSegment({
+    required TimeRecord record,
+    required DateTime? timeValue,
+    required String segment,
+  }) {
+    if (timeValue != null) return _formatTime(timeValue);
+    final segs = record.locatorSlipSegments ?? const <String>[];
+    if (segs.any((s) => s.toUpperCase() == segment)) return 'On Field';
+    return '—';
+  }
+
+  static const List<String> _shortWeekdays = [
+    'Mon',
+    'Tue',
+    'Wed',
+    'Thu',
+    'Fri',
+    'Sat',
+    'Sun',
+  ];
+
   static String _formatDate(DateTime d) {
-    return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+    final weekday = _shortWeekdays[d.weekday - 1];
+    return '${d.day} $weekday';
+  }
+
+  static String _formatMinutes(int? mins) {
+    if (mins == null || mins <= 0) return '—';
+    return '$mins min';
   }
 
   static String _getRemarks(TimeRecord r) {
@@ -106,9 +323,9 @@ class _DtrReportsState extends State<DtrReports> {
         case 'absent':
           return 'Absent';
         case 'on_leave':
-          return 'On Leave';
+          return r.leaveTypeName ?? r.attendanceRemark ?? 'On Leave';
         case 'holiday':
-          return 'Holiday';
+          return r.holidayName ?? 'Holiday';
         default:
           return 'On Time';
       }
@@ -148,6 +365,10 @@ class _DtrReportsState extends State<DtrReports> {
             month: _selectedMonth,
             end: end,
             recordsByDate: recordsByDate,
+            officialHours: _shiftOfficialHours,
+            workingDays: _shiftWorkingDays,
+            assignmentEffectiveFrom: _assignmentEffectiveFrom,
+            assignmentEffectiveTo: _assignmentEffectiveTo,
           );
           if (!context.mounted) return;
           await shareOrDownloadPdf(bytes, '$baseName.pdf');
@@ -159,6 +380,10 @@ class _DtrReportsState extends State<DtrReports> {
             month: _selectedMonth,
             end: end,
             recordsByDate: recordsByDate,
+            officialHours: _shiftOfficialHours,
+            workingDays: _shiftWorkingDays,
+            assignmentEffectiveFrom: _assignmentEffectiveFrom,
+            assignmentEffectiveTo: _assignmentEffectiveTo,
           );
           if (!context.mounted) return;
           await shareOrDownloadFile(
@@ -168,12 +393,16 @@ class _DtrReportsState extends State<DtrReports> {
           );
           break;
         case _DtrExportFormat.word:
-          final html = DtrExport.generateWordHtml(
+          final html = await DtrExport.generateWordHtml(
             employeeName: selectedName,
             year: _selectedYear,
             month: _selectedMonth,
             end: end,
             recordsByDate: recordsByDate,
+            officialHours: _shiftOfficialHours,
+            workingDays: _shiftWorkingDays,
+            assignmentEffectiveFrom: _assignmentEffectiveFrom,
+            assignmentEffectiveTo: _assignmentEffectiveTo,
           );
           final bytes = Uint8List.fromList(utf8.encode(html));
           if (!context.mounted) return;
@@ -200,16 +429,80 @@ class _DtrReportsState extends State<DtrReports> {
     }
   }
 
-  static int _countWorkingDays(int year, int month) {
-    int count = 0;
-    final end = DateTime(year, month + 1, 0);
-    for (var d = 1; d <= end.day; d++) {
-      final dt = DateTime(year, month, d);
-      if (dt.weekday >= DateTime.monday && dt.weekday <= DateTime.friday) {
-        count++;
+  /// Print DTR report: open system print dialog when supported; otherwise share PDF.
+  Future<void> _printDtrReport(
+    BuildContext context, {
+    required String selectedName,
+    required DateTime end,
+    required Map<DateTime, TimeRecord> recordsByDate,
+    String? department,
+    String? position,
+  }) async {
+    final baseName =
+        'DTR_${selectedName.replaceAll(' ', '_')}_${_months[_selectedMonth - 1]}_$_selectedYear';
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Preparing print...')));
+    try {
+      final bytes = await DtrExport.generatePdf(
+        employeeName: selectedName,
+        year: _selectedYear,
+        month: _selectedMonth,
+        end: end,
+        recordsByDate: recordsByDate,
+        department: department,
+        position: position,
+        officialHours: _shiftOfficialHours,
+        workingDays: _shiftWorkingDays,
+        assignmentEffectiveFrom: _assignmentEffectiveFrom,
+        assignmentEffectiveTo: _assignmentEffectiveTo,
+      );
+      if (!context.mounted) return;
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => bytes,
+        name: baseName,
+      );
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('DTR sent to print')));
+    } catch (e) {
+      if (!context.mounted) return;
+      try {
+        final bytes = await DtrExport.generatePdf(
+          employeeName: selectedName,
+          year: _selectedYear,
+          month: _selectedMonth,
+          end: end,
+          recordsByDate: recordsByDate,
+          reportTitle: 'Daily Time Record Report',
+          department: department,
+          position: position,
+          officialHours: _shiftOfficialHours,
+          workingDays: _shiftWorkingDays,
+          assignmentEffectiveFrom: _assignmentEffectiveFrom,
+          assignmentEffectiveTo: _assignmentEffectiveTo,
+        );
+        await shareOrDownloadPdf(bytes, '$baseName.pdf');
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Print dialog not available. PDF shared — open it to print.',
+            ),
+          ),
+        );
+      } catch (e2) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Print failed: $e2'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     }
-    return count;
   }
 
   @override
@@ -243,27 +536,57 @@ class _DtrReportsState extends State<DtrReports> {
       );
       recordsByDate[key] = r;
     }
+    final reportRecordsByDate = _filterRecordsForTardinessReport(recordsByDate);
+    // Dates to show: same as tardiness-relevant records (excludes irrelevant holiday-only rows).
+    final sortedDates = reportRecordsByDate.keys.toList()
+      ..sort((a, b) => a.compareTo(b)); // ordered by date ascending
 
-    final workingDays = _countWorkingDays(_selectedYear, _selectedMonth);
+    // Compute summary from real API records, using shift + assignment window when available.
+    // Only count days up to today (elapsed) — future days in the month are not "absent" yet.
+    final statsEnd = _tardinessStatsInclusiveEnd();
+    final totalWeekdays = _countScheduledWorkDaysThrough(statsEnd);
     var lateCount = 0;
     var absentCount = 0;
+    var holidaysCount = 0;
     for (var d = 1; d <= end.day; d++) {
       final dt = DateTime(_selectedYear, _selectedMonth, d);
-      if (dt.weekday >= DateTime.monday && dt.weekday <= DateTime.friday) {
-        final rec = recordsByDate[dt];
-        if (rec == null || rec.timeIn == null) {
-          absentCount++;
-        } else {
-          final local = rec.timeIn!.toLocal();
-          final officeStart = DateTime(dt.year, dt.month, dt.day, 8, 0);
-          if (local.isAfter(officeStart)) lateCount++;
+      if (!_isScheduledWorkDay(dt)) continue;
+      if (dt.isAfter(statsEnd)) continue;
+      final rec = reportRecordsByDate[dt];
+      if (rec?.status == 'holiday' || (rec?.holidayId != null)) {
+        holidaysCount++;
+      } else if (rec?.status == 'on_leave') {
+        // On leave: not absent for tardiness
+      } else if (rec == null || (rec.timeIn == null && rec.breakIn == null)) {
+        absentCount++;
+      } else {
+        if (rec.status == 'late' || (rec.lateMinutes ?? 0) > 0) {
+          lateCount++;
         }
       }
     }
-    final tardyCount = lateCount + absentCount;
+    // Show summary whenever this month has any report rows — not only days with punches.
+    // (Absent / undertime-only days have no timeIn/breakIn but must still roll up to totals.)
+    final hasRecords = reportRecordsByDate.isNotEmpty;
+    final workingDays = hasRecords ? totalWeekdays - holidaysCount : 0;
+    final displayLateCount = hasRecords ? lateCount : 0;
+    final displayAbsentCount = hasRecords ? absentCount : 0;
+    final tardyCount = hasRecords ? (lateCount + absentCount) : 0;
     final tardinessPct = workingDays > 0
         ? ((tardyCount / workingDays) * 100).round()
         : 0;
+
+    // Total late and undertime minutes (elapsed days only, same window as counts)
+    var totalLateMinutes = 0;
+    var totalUndertimeMinutes = 0;
+    for (final e in reportRecordsByDate.entries) {
+      if (e.key.isAfter(statsEnd)) continue;
+      final rec = e.value;
+      totalLateMinutes += rec.lateMinutes ?? 0;
+      totalUndertimeMinutes += rec.undertimeMinutes ?? 0;
+    }
+    final displayTotalLateMinutes = hasRecords ? totalLateMinutes : 0;
+    final displayTotalUndertimeMinutes = hasRecords ? totalUndertimeMinutes : 0;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -299,26 +622,34 @@ class _DtrReportsState extends State<DtrReports> {
                     ? _buildMobileLayout(
                         employees: employees,
                         end: end,
-                        recordsByDate: recordsByDate,
+                        recordsByDate: reportRecordsByDate,
+                        sortedDates: sortedDates,
                         selectedName: selectedName,
                         workingDays: workingDays,
-                        lateCount: lateCount,
-                        absentCount: absentCount,
+                        lateCount: displayLateCount,
+                        absentCount: displayAbsentCount,
                         tardyCount: tardyCount,
                         tardinessPct: tardinessPct,
+                        totalLateMinutes: displayTotalLateMinutes,
+                        totalUndertimeMinutes: displayTotalUndertimeMinutes,
+                        hasRecords: hasRecords,
                         dtr: dtr,
                       )
                     : isCompact
                     ? _buildCompactLayout(
                         employees: employees,
                         end: end,
-                        recordsByDate: recordsByDate,
+                        recordsByDate: reportRecordsByDate,
+                        sortedDates: sortedDates,
                         selectedName: selectedName,
                         workingDays: workingDays,
-                        lateCount: lateCount,
-                        absentCount: absentCount,
+                        lateCount: displayLateCount,
+                        absentCount: displayAbsentCount,
                         tardyCount: tardyCount,
                         tardinessPct: tardinessPct,
+                        totalLateMinutes: displayTotalLateMinutes,
+                        totalUndertimeMinutes: displayTotalUndertimeMinutes,
+                        hasRecords: hasRecords,
                         dtr: dtr,
                       )
                     : SizedBox(
@@ -340,7 +671,8 @@ class _DtrReportsState extends State<DtrReports> {
                                       Expanded(
                                         child: _buildDtrTable(
                                           end: end,
-                                          recordsByDate: recordsByDate,
+                                          recordsByDate: reportRecordsByDate,
+                                          sortedDates: sortedDates,
                                           dtr: dtr,
                                           availableWidth: tableAvailableWidth,
                                         ),
@@ -349,11 +681,16 @@ class _DtrReportsState extends State<DtrReports> {
                                       _buildSummaryCard(
                                         selectedName: selectedName,
                                         workingDays: workingDays,
-                                        lateCount: lateCount,
-                                        absentCount: absentCount,
+                                        lateCount: displayLateCount,
+                                        absentCount: displayAbsentCount,
                                         tardyCount: tardyCount,
                                         tardinessPct: tardinessPct,
-                                        recordsByDate: recordsByDate,
+                                        totalLateMinutes:
+                                            displayTotalLateMinutes,
+                                        totalUndertimeMinutes:
+                                            displayTotalUndertimeMinutes,
+                                        hasRecords: hasRecords,
+                                        recordsByDate: reportRecordsByDate,
                                         end: end,
                                       ),
                                     ],
@@ -400,6 +737,24 @@ class _DtrReportsState extends State<DtrReports> {
           ),
         ),
         if (!isMobile) ...[
+          DropdownButton<String?>(
+            value: _selectedDepartmentId,
+            hint: const Text('All departments'),
+            items: [
+              const DropdownMenuItem<String?>(
+                value: null,
+                child: Text('All departments'),
+              ),
+              ...context.read<DtrProvider>().departments.map(
+                (d) =>
+                    DropdownMenuItem<String?>(value: d.id, child: Text(d.name)),
+              ),
+            ],
+            onChanged: (v) {
+              setState(() => _selectedDepartmentId = v);
+              _load();
+            },
+          ),
           DropdownButton<int>(
             value: _selectedMonth,
             items: List.generate(12, (i) => i + 1)
@@ -424,6 +779,42 @@ class _DtrReportsState extends State<DtrReports> {
             },
           ),
         ] else ...[
+          SizedBox(
+            width: 140,
+            child: DropdownButtonFormField<String?>(
+              initialValue: _selectedDepartmentId,
+              decoration: InputDecoration(
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                filled: true,
+                fillColor: AppTheme.white,
+              ),
+              hint: const Text('All departments'),
+              items: [
+                const DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text('All departments'),
+                ),
+                ...context.read<DtrProvider>().departments.map(
+                  (d) => DropdownMenuItem<String?>(
+                    value: d.id,
+                    child: Text(d.name, overflow: TextOverflow.ellipsis),
+                  ),
+                ),
+              ],
+              onChanged: (v) {
+                setState(() => _selectedDepartmentId = v);
+                _load();
+              },
+            ),
+          ),
+          const SizedBox(width: 8),
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -506,12 +897,16 @@ class _DtrReportsState extends State<DtrReports> {
     required List<dynamic> employees,
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
+    required List<DateTime> sortedDates,
     required String selectedName,
     required int workingDays,
     required int lateCount,
     required int absentCount,
     required int tardyCount,
     required int tardinessPct,
+    required int totalLateMinutes,
+    required int totalUndertimeMinutes,
+    required bool hasRecords,
     required DtrProvider dtr,
   }) {
     return Column(
@@ -552,6 +947,7 @@ class _DtrReportsState extends State<DtrReports> {
           child: _buildDtrTable(
             end: end,
             recordsByDate: recordsByDate,
+            sortedDates: sortedDates,
             dtr: dtr,
             compactColumns: true,
           ),
@@ -564,6 +960,9 @@ class _DtrReportsState extends State<DtrReports> {
           absentCount: absentCount,
           tardyCount: tardyCount,
           tardinessPct: tardinessPct,
+          totalLateMinutes: totalLateMinutes,
+          totalUndertimeMinutes: totalUndertimeMinutes,
+          hasRecords: hasRecords,
           fullWidth: true,
           isResponsive: true,
           recordsByDate: recordsByDate,
@@ -678,13 +1077,18 @@ class _DtrReportsState extends State<DtrReports> {
   Widget _buildDtrTable({
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
+    required List<DateTime> sortedDates,
     required DtrProvider dtr,
     bool compactColumns = false,
     double? availableWidth,
   }) {
     final colDate = compactColumns ? 80.0 : 90.0;
     final colTime = compactColumns ? 58.0 : 70.0;
-    final minTableWidth = compactColumns ? (colDate + colTime * 4 + 70) : 550.0;
+    final colLate = compactColumns ? 48.0 : 58.0;
+    final colUndertime = compactColumns ? 55.0 : 65.0;
+    final minTableWidth = compactColumns
+        ? (colDate + colTime * 4 + colLate + colUndertime + 70)
+        : 550.0 + colLate + colUndertime;
     final tableWidth = availableWidth != null
         ? availableWidth.clamp(minTableWidth, double.infinity)
         : minTableWidth;
@@ -770,6 +1174,28 @@ class _DtrReportsState extends State<DtrReports> {
                         ),
                       ),
                     ),
+                    SizedBox(
+                      width: colLate,
+                      child: Text(
+                        'Late',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: compactColumns ? 11 : 12,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: colUndertime,
+                      child: Text(
+                        'Undertime',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: compactColumns ? 11 : 12,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ),
                     Expanded(
                       child: Text(
                         'Remarks',
@@ -786,15 +1212,24 @@ class _DtrReportsState extends State<DtrReports> {
               Expanded(
                 child: dtr.loading
                     ? const Center(child: CircularProgressIndicator())
+                    : sortedDates.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Text(
+                            'No DTR records for this period',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ),
+                      )
                     : ListView.builder(
-                        itemCount: end.day,
+                        itemCount: sortedDates.length,
                         itemBuilder: (context, i) {
-                          final d = end.day - i;
-                          final dt = DateTime(_selectedYear, _selectedMonth, d);
-                          final rec = recordsByDate[dt];
-                          final isWeekend =
-                              dt.weekday == DateTime.saturday ||
-                              dt.weekday == DateTime.sunday;
+                          final dt = sortedDates[i];
+                          final rec = recordsByDate[dt]!;
                           return Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 12,
@@ -820,9 +1255,11 @@ class _DtrReportsState extends State<DtrReports> {
                                 SizedBox(
                                   width: colTime,
                                   child: Text(
-                                    rec?.timeIn != null
-                                        ? _formatTime(rec!.timeIn)
-                                        : '—',
+                                    _cellDisplayForSegment(
+                                      record: rec,
+                                      timeValue: rec.timeIn,
+                                      segment: 'AM IN',
+                                    ),
                                     style: TextStyle(
                                       fontSize: 12,
                                       color: AppTheme.textPrimary,
@@ -832,46 +1269,91 @@ class _DtrReportsState extends State<DtrReports> {
                                 SizedBox(
                                   width: colTime,
                                   child: Text(
-                                    '—',
+                                    _cellDisplayForSegment(
+                                      record: rec,
+                                      timeValue: rec.breakOut,
+                                      segment: 'AM OUT',
+                                    ),
                                     style: TextStyle(
                                       fontSize: compactColumns ? 11 : 12,
-                                      color: AppTheme.textSecondary,
+                                      color: AppTheme.textPrimary,
                                     ),
                                   ),
                                 ),
                                 SizedBox(
                                   width: colTime,
                                   child: Text(
-                                    '—',
+                                    _cellDisplayForSegment(
+                                      record: rec,
+                                      timeValue: rec.breakIn,
+                                      segment: 'PM IN',
+                                    ),
                                     style: TextStyle(
                                       fontSize: compactColumns ? 11 : 12,
-                                      color: AppTheme.textSecondary,
+                                      color: AppTheme.textPrimary,
                                     ),
                                   ),
                                 ),
                                 SizedBox(
                                   width: colTime,
                                   child: Text(
-                                    rec?.timeOut != null
-                                        ? _formatTime(rec!.timeOut)
-                                        : '—',
+                                    _cellDisplayForSegment(
+                                      record: rec,
+                                      timeValue: rec.timeOut,
+                                      segment: 'PM OUT',
+                                    ),
                                     style: TextStyle(
                                       fontSize: 12,
                                       color: AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(
+                                  width: colLate,
+                                  child: Text(
+                                    _formatMinutes(rec.lateMinutes),
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: (rec.lateMinutes ?? 0) > 0
+                                          ? Colors.red.shade700
+                                          : AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(
+                                  width: colUndertime,
+                                  child: Text(
+                                    _formatMinutes(rec.undertimeMinutes),
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: (rec.undertimeMinutes ?? 0) > 0
+                                          ? Colors.orange.shade700
+                                          : AppTheme.textPrimary,
                                     ),
                                   ),
                                 ),
                                 Expanded(
-                                  child: Text(
-                                    rec != null
-                                        ? _getRemarks(rec)
-                                        : (isWeekend ? '—' : 'Absent'),
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: rec?.status == 'late'
-                                          ? Colors.red.shade700
-                                          : AppTheme.textPrimary,
-                                    ),
+                                  child: Builder(
+                                    builder: (context) {
+                                      final remark =
+                                          rec.attendanceRemark != null &&
+                                              rec.attendanceRemark!.isNotEmpty
+                                          ? rec.attendanceRemark!
+                                          : _getRemarks(rec);
+                                      final isHoliday =
+                                          rec.status == 'holiday' ||
+                                          rec.holidayId != null;
+                                      return Text(
+                                        remark,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: colorForRemarkText(
+                                            remark,
+                                            isHoliday: isHoliday,
+                                          ),
+                                        ),
+                                      );
+                                    },
                                   ),
                                 ),
                               ],
@@ -887,6 +1369,15 @@ class _DtrReportsState extends State<DtrReports> {
     );
   }
 
+  String _formatMinutesOrHours(int minutes) {
+    if (minutes <= 0) return _showMinutesFormat ? '0 min' : '0 hrs';
+    if (_showMinutesFormat) return '$minutes min';
+    final hours = minutes / 60;
+    return hours == hours.roundToDouble()
+        ? '${hours.toInt()} hrs'
+        : '${hours.toStringAsFixed(2)} hrs';
+  }
+
   Widget _buildSummaryCard({
     required String selectedName,
     required int workingDays,
@@ -894,6 +1385,9 @@ class _DtrReportsState extends State<DtrReports> {
     required int absentCount,
     required int tardyCount,
     required int tardinessPct,
+    required int totalLateMinutes,
+    required int totalUndertimeMinutes,
+    bool hasRecords = true,
     bool fullWidth = false,
     bool isResponsive = false,
     required Map<DateTime, TimeRecord> recordsByDate,
@@ -940,7 +1434,50 @@ class _DtrReportsState extends State<DtrReports> {
               style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 12),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Text(
+                      'Show time as:',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Center(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: SegmentedButton<bool>(
+                          segments: const [
+                            ButtonSegment(value: true, label: Text('Min')),
+                            ButtonSegment(value: false, label: Text('Hrs')),
+                          ],
+                          selected: {_showMinutesFormat},
+                          onSelectionChanged: (selected) {
+                            setState(() => _showMinutesFormat = selected.first);
+                          },
+                          style: ButtonStyle(
+                            visualDensity: VisualDensity.compact,
+                            padding: WidgetStateProperty.all(
+                              const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 16),
             isResponsive
                 ? Wrap(
                     spacing: 12,
@@ -957,11 +1494,20 @@ class _DtrReportsState extends State<DtrReports> {
                         width: 140,
                         child: _SummaryStat(
                           label: 'Late',
-                          value: '$lateCount',
+                          value: _formatMinutesOrHours(totalLateMinutes),
                           hasBorder: true,
-                          borderColor: lateCount > 0
+                          borderColor: totalLateMinutes > 0
                               ? Colors.red
                               : const Color(0xFF4CAF50),
+                        ),
+                      ),
+                      SizedBox(
+                        width: 140,
+                        child: _SummaryStat(
+                          label: 'Undertime',
+                          value: _formatMinutesOrHours(totalUndertimeMinutes),
+                          hasBorder: totalUndertimeMinutes > 0,
+                          borderColor: Colors.orange,
                         ),
                       ),
                       SizedBox(
@@ -994,11 +1540,18 @@ class _DtrReportsState extends State<DtrReports> {
                       const SizedBox(height: 12),
                       _SummaryStat(
                         label: 'Late',
-                        value: '$lateCount',
+                        value: _formatMinutesOrHours(totalLateMinutes),
                         hasBorder: true,
-                        borderColor: lateCount > 0
+                        borderColor: totalLateMinutes > 0
                             ? Colors.red
                             : const Color(0xFF4CAF50),
+                      ),
+                      const SizedBox(height: 12),
+                      _SummaryStat(
+                        label: 'Undertime',
+                        value: _formatMinutesOrHours(totalUndertimeMinutes),
+                        hasBorder: totalUndertimeMinutes > 0,
+                        borderColor: Colors.orange,
                       ),
                       const SizedBox(height: 12),
                       _SummaryStat(
@@ -1027,6 +1580,24 @@ class _DtrReportsState extends State<DtrReports> {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () => _printDtrReport(
+                  context,
+                  selectedName: selectedName,
+                  end: end,
+                  recordsByDate: recordsByDate,
+                ),
+                icon: const Icon(Icons.print_rounded, size: 18),
+                label: const Text('PRINT'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.primaryNavy,
+                  foregroundColor: AppTheme.white,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
             const Text(
               'Generate DTR',
               style: TextStyle(
@@ -1132,12 +1703,16 @@ class _DtrReportsState extends State<DtrReports> {
     required List<EmployeeOption> employees,
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
+    required List<DateTime> sortedDates,
     required String selectedName,
     required int workingDays,
     required int lateCount,
     required int absentCount,
     required int tardyCount,
     required int tardinessPct,
+    required int totalLateMinutes,
+    required int totalUndertimeMinutes,
+    required bool hasRecords,
     required DtrProvider dtr,
   }) {
     return LayoutBuilder(
@@ -1155,6 +1730,7 @@ class _DtrReportsState extends State<DtrReports> {
               child: _buildDtrTable(
                 end: end,
                 recordsByDate: recordsByDate,
+                sortedDates: sortedDates,
                 dtr: dtr,
                 availableWidth: availableWidth,
               ),
@@ -1167,6 +1743,9 @@ class _DtrReportsState extends State<DtrReports> {
               absentCount: absentCount,
               tardyCount: tardyCount,
               tardinessPct: tardinessPct,
+              totalLateMinutes: totalLateMinutes,
+              totalUndertimeMinutes: totalUndertimeMinutes,
+              hasRecords: hasRecords,
               fullWidth: true,
               isResponsive: true,
               recordsByDate: recordsByDate,

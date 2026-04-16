@@ -1,7 +1,23 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
 import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
+
+/// Backend JSON often uses `{ "error": "..." }`; avoid showing raw [DioException] in UI.
+String _userFacingApiError(Object e) {
+  if (e is DioException) {
+    final data = e.response?.data;
+    if (data is Map && data['error'] != null) {
+      return data['error'].toString();
+    }
+    if (e.message != null && e.message!.isNotEmpty) {
+      return e.message!;
+    }
+    return 'Request failed';
+  }
+  return e.toString();
+}
 
 /// Employee summary for assignment list.
 class _EmployeeSummary {
@@ -33,6 +49,8 @@ class _AssignmentRecord {
     required this.endTime,
     required this.effectiveFrom,
     this.effectiveTo,
+    this.policyId,
+    this.policyName,
     required this.isActive,
     this.remarks,
   });
@@ -47,13 +65,23 @@ class _AssignmentRecord {
   final TimeOfDay endTime;
   final DateTime effectiveFrom;
   final DateTime? effectiveTo;
+  final String? policyId;
+  final String? policyName;
   final bool isActive;
   final String? remarks;
 }
 
 /// Assignment management screen: employee list + assignment CRUD.
 class ManageAssignment extends StatefulWidget {
-  const ManageAssignment({super.key});
+  const ManageAssignment({
+    super.key,
+    this.initialEmployeeId,
+    this.onInitialEmployeeConsumed,
+  });
+
+  /// Pre-select after first employee load (e.g. deep-link from Employees).
+  final String? initialEmployeeId;
+  final VoidCallback? onInitialEmployeeConsumed;
 
   @override
   State<ManageAssignment> createState() => _ManageAssignmentState();
@@ -73,19 +101,27 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   List<Map<String, dynamic>> _departments = [];
   List<Map<String, dynamic>> _positions = [];
   List<Map<String, dynamic>> _shifts = [];
+  List<Map<String, dynamic>> _attendancePolicies = [];
   bool _loadingLookups = false;
 
   String? _selectedDeptId;
   String? _selectedPositionId;
   String? _selectedShiftId;
+  String? _selectedPolicyId;
   DateTime? _effectiveFrom;
   DateTime? _effectiveTo;
   final _remarksController = TextEditingController();
   _AssignmentRecord? _selectedAssignment;
 
+  bool _initialPrefillApplied = false;
+
   @override
   void initState() {
     super.initState();
+    final pre = widget.initialEmployeeId?.trim();
+    if (pre != null && pre.isNotEmpty) {
+      _employeeStatusFilter = 'All';
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadEmployees();
       _loadLookups();
@@ -128,6 +164,26 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       _employees = [];
     }
     if (mounted) setState(() => _loadingEmployees = false);
+    if (!_initialPrefillApplied && widget.initialEmployeeId != null) {
+      _initialPrefillApplied = true;
+      await _applyInitialEmployeePrefill();
+    }
+  }
+
+  Future<void> _applyInitialEmployeePrefill() async {
+    final id = widget.initialEmployeeId?.trim();
+    if (id == null || id.isEmpty) {
+      widget.onInitialEmployeeConsumed?.call();
+      return;
+    }
+    if (!_employees.any((e) => e.id == id)) {
+      widget.onInitialEmployeeConsumed?.call();
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _selectedEmployeeId = id);
+    await _loadAssignments();
+    widget.onInitialEmployeeConsumed?.call();
   }
 
   Future<void> _loadLookups() async {
@@ -145,6 +201,10 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         '/api/shifts',
         queryParameters: {'status': 'Active'},
       );
+      final policyRes = await ApiClient.instance.get<List<dynamic>>(
+        '/api/attendance-policies',
+        queryParameters: {'status': 'Active'},
+      );
 
       _departments = (deptRes.data ?? []).map((e) {
         final m = e as Map<String, dynamic>;
@@ -158,11 +218,18 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         final m = e as Map<String, dynamic>;
         return {'id': m['id'], 'name': m['name'] as String? ?? ''};
       }).toList();
+      _attendancePolicies = (policyRes.data ?? []).map((e) {
+        final m = e as Map<String, dynamic>;
+        final name =
+            (m['policy_name'] as String?) ?? (m['name'] as String?) ?? '';
+        return {'id': m['id'], 'name': name};
+      }).toList();
     } catch (e) {
       debugPrint('Load lookups failed: $e');
       _departments = [];
       _positions = [];
       _shifts = [];
+      _attendancePolicies = [];
     }
     if (mounted) setState(() => _loadingLookups = false);
   }
@@ -175,6 +242,18 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     }
     setState(() => _loadingAssignments = true);
     try {
+      final policyRes = await ApiClient.instance.get<List<dynamic>>(
+        '/api/policy-assignments',
+        queryParameters: {
+          'employee_id': _selectedEmployeeId!,
+          'status': 'Active',
+        },
+      );
+      final policyRows = (policyRes.data ?? [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/assignments',
         queryParameters: {
@@ -189,6 +268,11 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         final et = m['end_time'] ?? m['override_end_time'];
         final fromDate = m['effective_from'] ?? m['date_assigned'];
         final toDate = m['effective_to'];
+        final resolvedPolicy = _resolvePolicyForAssignmentRange(
+          policyRows,
+          fromDate?.toString(),
+          toDate?.toString(),
+        );
         return _AssignmentRecord(
           id: m['id'] as String,
           departmentId: m['department_id'] as String?,
@@ -205,6 +289,8 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           effectiveTo: toDate != null && toDate.toString().isNotEmpty
               ? DateTime.tryParse(toDate.toString())
               : null,
+          policyId: resolvedPolicy?['attendance_policy_id']?.toString(),
+          policyName: resolvedPolicy?['policy_name']?.toString(),
           isActive: m['is_active'] as bool? ?? true,
           remarks: m['remarks'] as String?,
         );
@@ -219,6 +305,34 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         _selectedAssignment = null;
       });
     }
+  }
+
+  Map<String, dynamic>? _resolvePolicyForAssignmentRange(
+    List<Map<String, dynamic>> policies,
+    String? assignmentFromRaw,
+    String? assignmentToRaw,
+  ) {
+    if (assignmentFromRaw == null) return null;
+    final assignmentFrom = DateTime.tryParse(assignmentFromRaw.toString());
+    if (assignmentFrom == null) return null;
+    final assignmentTo =
+        assignmentToRaw != null && assignmentToRaw.toString().trim().isNotEmpty
+        ? DateTime.tryParse(assignmentToRaw.toString())
+        : null;
+
+    for (final p in policies) {
+      final pFrom = DateTime.tryParse((p['effective_from'] ?? '').toString());
+      if (pFrom == null) continue;
+      final pToRaw = p['effective_to'];
+      final pTo = pToRaw != null && pToRaw.toString().trim().isNotEmpty
+          ? DateTime.tryParse(pToRaw.toString())
+          : null;
+      final overlap =
+          !pFrom.isAfter(assignmentTo ?? DateTime(9999, 12, 31)) &&
+          !(pTo ?? DateTime(9999, 12, 31)).isBefore(assignmentFrom);
+      if (overlap) return p;
+    }
+    return null;
   }
 
   TimeOfDay? _parseTime(dynamic v) {
@@ -238,12 +352,21 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   String _timeStr(TimeOfDay t) =>
       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
+  /// Calendar-day comparison (ignores time) so picker values stay valid across timezones.
+  bool _isEffectiveRangeValid(DateTime from, DateTime? to) {
+    if (to == null) return true;
+    final a = DateTime(from.year, from.month, from.day);
+    final b = DateTime(to.year, to.month, to.day);
+    return !b.isBefore(a);
+  }
+
   void _selectAssignment(_AssignmentRecord a) {
     setState(() {
       _selectedAssignment = a;
       _selectedDeptId = a.departmentId;
       _selectedPositionId = a.positionId;
       _selectedShiftId = a.shiftId;
+      _selectedPolicyId = a.policyId;
       _effectiveFrom = a.effectiveFrom;
       _effectiveTo = a.effectiveTo;
       _remarksController.text = a.remarks ?? '';
@@ -256,6 +379,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       _selectedDeptId = null;
       _selectedPositionId = null;
       _selectedShiftId = null;
+      _selectedPolicyId = null;
       _effectiveFrom = null;
       _effectiveTo = null;
       _remarksController.clear();
@@ -280,6 +404,14 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       );
       return;
     }
+    if (!_isEffectiveRangeValid(_effectiveFrom!, _effectiveTo)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Effective to must be on or after effective from.'),
+        ),
+      );
+      return;
+    }
     try {
       final data = <String, dynamic>{
         'employee_id': _selectedEmployeeId,
@@ -290,8 +422,12 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         if (_effectiveTo != null)
           'effective_to': _effectiveTo!.toIso8601String().split('T')[0],
         'is_active': true,
+        'remarks': _remarksController.text.trim().isEmpty
+            ? null
+            : _remarksController.text.trim(),
       };
       await ApiClient.instance.post('/api/assignments', data: data);
+      await _upsertEmployeePolicyAssignment();
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -303,7 +439,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to add: $e')));
+        ).showSnackBar(SnackBar(content: Text(_userFacingApiError(e))));
       }
     }
   }
@@ -332,6 +468,14 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       );
       return;
     }
+    if (!_isEffectiveRangeValid(_effectiveFrom!, _effectiveTo)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Effective to must be on or after effective from.'),
+        ),
+      );
+      return;
+    }
     try {
       final data = <String, dynamic>{
         'department_id': _selectedDeptId,
@@ -346,6 +490,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
             : _remarksController.text.trim(),
       };
       await ApiClient.instance.put('/api/assignments/${a.id}', data: data);
+      await _upsertEmployeePolicyAssignment();
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -357,9 +502,25 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
+        ).showSnackBar(SnackBar(content: Text(_userFacingApiError(e))));
       }
     }
+  }
+
+  Future<void> _upsertEmployeePolicyAssignment() async {
+    if (_selectedEmployeeId == null || _effectiveFrom == null) return;
+    await ApiClient.instance.post(
+      '/api/policy-assignments/employee-upsert',
+      data: {
+        'employee_id': _selectedEmployeeId,
+        'attendance_policy_id': _selectedPolicyId,
+        'effective_from': _effectiveFrom!.toIso8601String().split('T')[0],
+        'effective_to': _effectiveTo != null
+            ? _effectiveTo!.toIso8601String().split('T')[0]
+            : null,
+        'is_active': true,
+      },
+    );
   }
 
   Future<void> _deactivateAssignment() async {
@@ -407,7 +568,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to deactivate: $e')));
+        ).showSnackBar(SnackBar(content: Text(_userFacingApiError(e))));
       }
     }
   }
@@ -774,6 +935,10 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                   child: Text('Shift', style: _tableHeaderStyle),
                 ),
                 Expanded(
+                  flex: 2,
+                  child: Text('Policy', style: _tableHeaderStyle),
+                ),
+                Expanded(
                   flex: 1,
                   child: Text('Time', style: _tableHeaderStyle),
                 ),
@@ -821,6 +986,16 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                         Expanded(
                           flex: 1,
                           child: Text(a.shiftName, style: _tableCellStyle),
+                        ),
+                        Expanded(
+                          flex: 2,
+                          child: Text(
+                            (a.policyName != null &&
+                                    a.policyName!.trim().isNotEmpty)
+                                ? a.policyName!
+                                : 'Default policy',
+                            style: _tableCellStyle,
+                          ),
                         ),
                         Expanded(
                           flex: 1,
@@ -872,12 +1047,13 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         children: [
           LayoutBuilder(
             builder: (context, constraints) {
-              final useRow = constraints.maxWidth >= 520;
+              final useRow = constraints.maxWidth >= 600;
               if (useRow) {
                 return Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
+                      flex: 1,
                       child: _buildFormDropdown(
                         'Department',
                         _selectedDeptId,
@@ -885,8 +1061,9 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                         (v) => setState(() => _selectedDeptId = v),
                       ),
                     ),
-                    const SizedBox(width: 16),
+                    const SizedBox(width: 12),
                     Expanded(
+                      flex: 1,
                       child: _buildFormDropdown(
                         'Position',
                         _selectedPositionId,
@@ -894,13 +1071,24 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                         (v) => setState(() => _selectedPositionId = v),
                       ),
                     ),
-                    const SizedBox(width: 16),
+                    const SizedBox(width: 12),
                     Expanded(
+                      flex: 1,
                       child: _buildFormDropdown(
                         'Shift',
                         _selectedShiftId,
                         _shifts,
                         (v) => setState(() => _selectedShiftId = v),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 1,
+                      child: _buildFormDropdown(
+                        'Attendance Policy (opt)',
+                        _selectedPolicyId,
+                        _attendancePolicies,
+                        (v) => setState(() => _selectedPolicyId = v),
                       ),
                     ),
                   ],
@@ -927,6 +1115,12 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                     _selectedShiftId,
                     _shifts,
                     (v) => setState(() => _selectedShiftId = v),
+                  ),
+                  _buildFormDropdown(
+                    'Attendance Policy (opt)',
+                    _selectedPolicyId,
+                    _attendancePolicies,
+                    (v) => setState(() => _selectedPolicyId = v),
                   ),
                 ],
               );
@@ -1087,15 +1281,19 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         ),
         const SizedBox(height: 6),
         DropdownButtonFormField<String>(
-          initialValue: value,
+          value: value,
           decoration: _inputDecoration('Select'),
           hint: const Text('Select'),
+          isExpanded: true,
           items: [
             const DropdownMenuItem(value: null, child: Text('Select')),
             ...items.map(
               (e) => DropdownMenuItem(
                 value: e['id'] as String?,
-                child: Text(e['name'] as String? ?? ''),
+                child: Text(
+                  e['name'] as String? ?? '',
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ),
           ],

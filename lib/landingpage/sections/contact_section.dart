@@ -15,6 +15,9 @@ class ContactSection extends StatelessWidget {
 
     return SectionContainer(
       backgroundColor: AppTheme.offWhite,
+      borderRadius: 20,
+      withShadow: true,
+      margin: const EdgeInsets.symmetric(vertical: 18),
       child: Stack(
         clipBehavior: Clip.none,
         children: [
@@ -25,20 +28,31 @@ class ContactSection extends StatelessWidget {
                 'Contact Us',
                 style: TextStyle(
                   color: AppTheme.primaryNavy,
-                  fontSize: AppTheme.sectionTitleSize,
-                  fontWeight: FontWeight.w700,
+                  fontSize: AppTheme.sectionTitleSize + 2,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.3,
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 6),
+              Container(
+                width: 48,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryNavy.withOpacity(0.8),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 14),
               Text(
                 'Get in touch with the Human Resource Management and Development Office',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: AppTheme.textSecondary,
                   fontSize: AppTheme.bodySize,
+                  height: 1.5,
                 ),
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 36),
               isWide
                   ? Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -134,7 +148,14 @@ class _ContactItem extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, color: AppTheme.primaryNavy, size: 24),
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: AppTheme.primaryNavy.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(icon, color: AppTheme.primaryNavy, size: 22),
+        ),
         const SizedBox(width: 16),
         Expanded(
           child: Column(
@@ -145,6 +166,7 @@ class _ContactItem extends StatelessWidget {
                 style: TextStyle(
                   color: AppTheme.textSecondary,
                   fontSize: AppTheme.smallSize,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
               const SizedBox(height: 4),
@@ -154,6 +176,7 @@ class _ContactItem extends StatelessWidget {
                   color: AppTheme.textPrimary,
                   fontSize: AppTheme.bodySize,
                   fontWeight: FontWeight.w500,
+                  height: 1.4,
                 ),
               ),
             ],
@@ -174,14 +197,14 @@ class _OfficeMap extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppTheme.lightGray),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE8EAED)),
         color: AppTheme.white,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.06),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
           ),
         ],
       ),

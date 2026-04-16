@@ -1,13 +1,61 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
 
 const SALT_ROUNDS = 10;
-const JWT_EXPIRY = process.env.JWT_EXPIRY || '7d';
+// Support JWT_EXPIRATION or legacy JWT_EXPIRY from .env
+const JWT_EXPIRATION = process.env.JWT_EXPIRATION || process.env.JWT_EXPIRY || '15m';
+const JWT_REFRESH_EXPIRATION = process.env.JWT_REFRESH_EXPIRATION || '30d';
+
+function hashRefreshToken(token) {
+  return crypto.createHash('sha256').update(String(token)).digest('hex');
+}
+
+/**
+ * Issue access + refresh JWTs and persist refresh token hash.
+ */
+async function issueTokensForUser(user, req) {
+  const accessPayload = {
+    id: user.id,
+    email: user.email,
+    role: user.role,
+    typ: 'access',
+  };
+  const accessToken = jwt.sign(accessPayload, process.env.JWT_SECRET, {
+    expiresIn: JWT_EXPIRATION,
+  });
+
+  if (!process.env.JWT_REFRESH_SECRET) {
+    throw new Error('JWT_REFRESH_SECRET is not configured');
+  }
+
+  const refreshToken = jwt.sign(
+    { id: user.id, typ: 'refresh' },
+    process.env.JWT_REFRESH_SECRET,
+    { expiresIn: JWT_REFRESH_EXPIRATION }
+  );
+
+  const decodedRefresh = jwt.decode(refreshToken);
+  const expiresAt = new Date(decodedRefresh.exp * 1000);
+  const tokenHash = hashRefreshToken(refreshToken);
+
+  const ua = req.get('user-agent');
+  const rawIp = req.ip || req.socket?.remoteAddress;
+  const ipForDb = rawIp && String(rawIp).trim() !== '' ? String(rawIp) : null;
+
+  await pool.query(
+    `INSERT INTO auth_refresh_tokens (user_id, token_hash, expires_at, device_info, ip_address)
+     VALUES ($1, $2, $3, $4, $5::inet)`,
+    [user.id, tokenHash, expiresAt, ua || null, ipForDb]
+  );
+
+  return { accessToken, refreshToken };
+}
 
 /**
  * POST /auth/register
@@ -33,14 +81,23 @@ router.post('/register', async (req, res) => {
     );
     const user = result.rows[0];
 
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: JWT_EXPIRY }
-    );
+    try {
+      // VL/SL: earned credits come from monthly accrual only (1.25/mo each); no static seed.
+      await pool.query(
+        `INSERT INTO leave_balances (user_id, leave_type, earned_days, used_days, pending_days, adjusted_days)
+         VALUES ($1::uuid, 'vacationLeave', 0, 0, 0, 0), ($1::uuid, 'sickLeave', 0, 0, 0, 0)
+         ON CONFLICT (user_id, leave_type) DO NOTHING`,
+        [user.id]
+      );
+    } catch (lbErr) {
+      console.warn('[auth/register] Could not create default leave balances:', lbErr.message);
+    }
+
+    const { accessToken, refreshToken } = await issueTokensForUser(user, req);
 
     res.status(201).json({
-      token,
+      token: accessToken,
+      refreshToken,
       user: {
         id: user.id,
         email: user.email,
@@ -89,14 +146,11 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: JWT_EXPIRY }
-    );
+    const { accessToken, refreshToken } = await issueTokensForUser(user, req);
 
     res.json({
-      token,
+      token: accessToken,
+      refreshToken,
       user: {
         id: user.id,
         email: user.email,
@@ -113,8 +167,95 @@ router.post('/login', async (req, res) => {
 });
 
 /**
+ * POST /auth/refresh
+ * Body: { refreshToken: string }
+ * Returns new { token, refreshToken } (rotates refresh token).
+ */
+router.post('/refresh', async (req, res) => {
+  const raw = req.body?.refreshToken;
+  if (!raw || typeof raw !== 'string') {
+    return res.status(400).json({ error: 'refreshToken is required' });
+  }
+  if (!process.env.JWT_REFRESH_SECRET) {
+    return res.status(503).json({ error: 'Refresh tokens not configured' });
+  }
+
+  try {
+    const decoded = jwt.verify(raw, process.env.JWT_REFRESH_SECRET);
+    if (decoded.typ !== 'refresh') {
+      return res.status(401).json({ error: 'Invalid refresh token' });
+    }
+
+    const tokenHash = hashRefreshToken(raw);
+    const rowResult = await pool.query(
+      `SELECT id, user_id, expires_at, revoked_at
+       FROM auth_refresh_tokens
+       WHERE token_hash = $1`,
+      [tokenHash]
+    );
+    const rec = rowResult.rows[0];
+    if (!rec || rec.revoked_at) {
+      return res.status(401).json({ error: 'Invalid or revoked refresh token' });
+    }
+    if (new Date(rec.expires_at) < new Date()) {
+      return res.status(401).json({ error: 'Refresh token expired' });
+    }
+
+    const userResult = await pool.query(
+      `SELECT id, email, role, full_name, avatar_path, is_active
+       FROM users WHERE id = $1`,
+      [decoded.id]
+    );
+    const user = userResult.rows[0];
+    if (!user || !user.is_active) {
+      return res.status(403).json({ error: 'Account is deactivated' });
+    }
+
+    await pool.query(
+      `UPDATE auth_refresh_tokens SET revoked_at = now() WHERE id = $1`,
+      [rec.id]
+    );
+
+    const { accessToken, refreshToken } = await issueTokensForUser(user, req);
+
+    return res.json({
+      token: accessToken,
+      refreshToken,
+    });
+  } catch (e) {
+    if (e.name === 'JsonWebTokenError' || e.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: 'Invalid or expired refresh token' });
+    }
+    console.error('[auth/refresh]', e);
+    return res.status(500).json({ error: 'Token refresh failed' });
+  }
+});
+
+/**
+ * POST /auth/logout
+ * Body: { refreshToken: string }
+ * Revokes the refresh token row (optional client cleanup).
+ */
+router.post('/logout', async (req, res) => {
+  const raw = req.body?.refreshToken;
+  if (!raw || typeof raw !== 'string') {
+    return res.status(400).json({ error: 'refreshToken is required' });
+  }
+
+  const tokenHash = hashRefreshToken(raw);
+  await pool.query(
+    `UPDATE auth_refresh_tokens
+     SET revoked_at = now()
+     WHERE token_hash = $1 AND revoked_at IS NULL`,
+    [tokenHash]
+  );
+
+  return res.json({ ok: true });
+});
+
+/**
  * GET /auth/me
- * Requires Authorization: Bearer <token>
+ * Requires Authorization: Bearer <access token>
  */
 router.get('/me', authMiddleware, async (req, res) => {
   try {

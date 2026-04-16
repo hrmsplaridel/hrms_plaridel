@@ -1,8 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import '../landingpage/constants/app_theme.dart';
-import '../providers/auth_provider.dart';
-import 'docutracker_provider.dart';
 import 'docutracker_routes.dart';
 import 'screens/docutracker_admin_screen.dart';
 import 'screens/docutracker_documents_screen.dart';
@@ -10,11 +7,7 @@ import 'screens/docutracker_documents_screen.dart';
 /// Main DocuTracker module entry.
 /// Sections: Documents, Admin (for privilege management).
 class DocuTrackerMain extends StatefulWidget {
-  const DocuTrackerMain({
-    super.key,
-    this.section,
-    this.isAdmin = false,
-  });
+  const DocuTrackerMain({super.key, this.section, this.isAdmin = false});
 
   /// Active section when driven by sidebar; null uses internal tabs.
   final DocuTrackerSection? section;
@@ -53,10 +46,7 @@ class _DocuTrackerMainState extends State<DocuTrackerMain> {
               : 'Document routing and workflow tracking. Choose a feature below.',
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
         ),
-        if (!useSidebarNav) ...[
-          const SizedBox(height: 24),
-          _buildSectionNav(),
-        ],
+        if (!useSidebarNav) ...[const SizedBox(height: 24), _buildSectionNav()],
         const SizedBox(height: 24),
         _buildContent(),
       ],
@@ -117,7 +107,8 @@ class _DocuTrackerMainState extends State<DocuTrackerMain> {
     );
   }
 
-  static IconData _iconForSection(DocuTrackerSection section) => switch (section) {
+  static IconData _iconForSection(DocuTrackerSection section) =>
+      switch (section) {
         DocuTrackerSection.dashboard => Icons.dashboard_rounded,
         DocuTrackerSection.documents => Icons.description_rounded,
         DocuTrackerSection.admin => Icons.admin_panel_settings_rounded,
@@ -128,12 +119,12 @@ class _DocuTrackerMainState extends State<DocuTrackerMain> {
       constraints: const BoxConstraints(minHeight: 200),
       child: switch (_activeSection) {
         DocuTrackerSection.documents => DocuTrackerDocumentsScreen(
-            isAdmin: widget.isAdmin,
-          ),
+          isAdmin: widget.isAdmin,
+        ),
         DocuTrackerSection.admin => const DocuTrackerAdminScreen(),
         DocuTrackerSection.dashboard => DocuTrackerDocumentsScreen(
-            isAdmin: widget.isAdmin,
-          ),
+          isAdmin: widget.isAdmin,
+        ),
       },
     );
   }

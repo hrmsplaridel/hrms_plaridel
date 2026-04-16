@@ -1,4 +1,5 @@
 import 'models/leave_balance.dart';
+import 'models/leave_balance_ledger.dart';
 import 'models/leave_request.dart';
 import 'models/leave_type.dart';
 
@@ -23,6 +24,22 @@ class LeaveRequestQuery {
   final DateTime? createdFrom;
   final DateTime? createdTo;
   final int? limit;
+
+  /// Convert to URL query-param map for the API layer.
+  Map<String, dynamic> toQueryParams() => {
+    if (status != null) 'status': status!.value,
+    if (leaveType != null) 'leave_type': leaveType!.value,
+    if (userId != null && userId!.isNotEmpty) 'user_id': userId,
+    if (limit != null) 'limit': limit,
+    if (startDateFrom != null)
+      'start_date_from': _toDateStr(startDateFrom!),
+    if (startDateTo != null) 'start_date_to': _toDateStr(startDateTo!),
+    if (createdFrom != null) 'created_from': createdFrom!.toIso8601String(),
+    if (createdTo != null) 'created_to': createdTo!.toIso8601String(),
+  };
+
+  static String _toDateStr(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 }
 
 /// Approval payload used by HR/admin actions.
@@ -31,6 +48,8 @@ class LeaveApprovalInput {
     required this.requestId,
     required this.reviewerId,
     this.reviewerName,
+    this.reviewerRole,
+    this.reviewerTitle,
     this.hrRemarks,
     this.recommendationRemarks,
     this.approvedDaysWithPay,
@@ -42,6 +61,8 @@ class LeaveApprovalInput {
   final String requestId;
   final String reviewerId;
   final String? reviewerName;
+  final String? reviewerRole;
+  final String? reviewerTitle;
   final String? hrRemarks;
   final String? recommendationRemarks;
   final double? approvedDaysWithPay;
@@ -56,6 +77,8 @@ class LeaveReviewDecisionInput {
     required this.requestId,
     required this.reviewerId,
     this.reviewerName,
+    this.reviewerRole,
+    this.reviewerTitle,
     this.hrRemarks,
     this.reason,
     this.reviewedAt,
@@ -64,9 +87,49 @@ class LeaveReviewDecisionInput {
   final String requestId;
   final String reviewerId;
   final String? reviewerName;
+  final String? reviewerRole;
+  final String? reviewerTitle;
   final String? hrRemarks;
   final String? reason;
   final DateTime? reviewedAt;
+}
+
+/// Admin payload for year-end forced leave deduction.
+class ForcedLeaveDeductionInput {
+  const ForcedLeaveDeductionInput({
+    required this.userId,
+    required this.daysToDeduct,
+    this.year,
+    this.remarks,
+    this.allowNegativeBalance = false,
+  });
+
+  final String userId;
+  final double daysToDeduct;
+  final int? year;
+  final String? remarks;
+  final bool allowNegativeBalance;
+}
+
+/// Result returned after a forced leave deduction is applied.
+class ForcedLeaveDeductionResult {
+  const ForcedLeaveDeductionResult({
+    required this.userId,
+    required this.leaveType,
+    required this.deductedDays,
+    required this.remainingDays,
+    this.year,
+    this.remarks,
+    this.appliedAt,
+  });
+
+  final String userId;
+  final LeaveType leaveType;
+  final double deductedDays;
+  final double remainingDays;
+  final int? year;
+  final String? remarks;
+  final DateTime? appliedAt;
 }
 
 /// Backend-neutral contract for leave data access.
@@ -94,6 +157,7 @@ abstract class LeaveRepository {
   Future<List<LeaveRequest>> listMyRequests(
     String userId, {
     LeaveRequestStatus? status,
+    int? limit,
   });
 
   /// General request listing for admin tables/reports.
@@ -119,6 +183,10 @@ abstract class LeaveRepository {
   /// Approve a request and apply any balance changes required by policy.
   Future<LeaveRequest> approveRequest(LeaveApprovalInput input);
 
+  /// Revoke a previously approved leave request (Admin only).
+  /// Restores the used_days balance and cleans up DTR on_leave rows.
+  Future<LeaveRequest> revokeApproval(LeaveReviewDecisionInput input);
+
   /// Send a request back to the employee for correction.
   Future<LeaveRequest> returnRequest(LeaveReviewDecisionInput input);
 
@@ -143,4 +211,32 @@ abstract class LeaveRepository {
 
   /// Optional hook for removing a supporting attachment.
   Future<LeaveRequest> removeAttachment(String requestId);
+
+  /// Fetch attachment bytes for viewing/downloading. Returns null if none or not supported.
+  Future<List<int>?> getAttachmentBytes(String requestId) => Future.value(null);
+
+  // ---- Department Head workflow ----
+
+  /// Check if the current authenticated user is a department head.
+  Future<Map<String, dynamic>> checkIsDepartmentHead();
+
+  /// List leave requests pending department head approval for the user's department.
+  Future<List<LeaveRequest>> listDepartmentHeadRequests();
+
+  /// Department head approves a request (moves to pending_hr).
+  Future<LeaveRequest> departmentHeadApprove(LeaveReviewDecisionInput input);
+
+  /// Department head rejects a request.
+  Future<LeaveRequest> departmentHeadReject(LeaveReviewDecisionInput input);
+
+  /// Department head returns a request to the employee.
+  Future<LeaveRequest> departmentHeadReturn(LeaveReviewDecisionInput input);
+
+  /// Admin/HR applies year-end forced leave as a vacation balance deduction.
+  Future<ForcedLeaveDeductionResult> applyForcedLeaveDeduction(
+    ForcedLeaveDeductionInput input,
+  );
+
+  /// Balance movement audit (GET /api/leave/ledger). Employees: omit [query.userId].
+  Future<LeaveLedgerResult> getLeaveLedger(LeaveLedgerQuery query);
 }

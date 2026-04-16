@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'dart:ui';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/auth_provider.dart';
@@ -34,24 +35,80 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    final isWide = MediaQuery.of(context).size.width > 800;
+    final screenW = MediaQuery.sizeOf(context).width;
+    final isWide = screenW > 800;
+    // Keep branding within the viewport on narrow phones (fixed 420 caused overflow).
+    final brandingWidth = isWide ? 460.0 : (screenW - 32).clamp(260.0, 420.0);
 
     return Scaffold(
-      body: Row(
+      body: Stack(
         children: [
-          if (isWide) Expanded(flex: 4, child: _BrandingSection()),
-          Expanded(
-            flex: isWide ? 6 : 1,
-            child: _LoginFormSection(
-              emailController: _emailController,
-              passwordController: _passwordController,
-              passwordFocusNode: _passwordFocusNode,
-              rememberMe: _rememberMe,
-              isLoading: _isLoading,
-              onRememberMeChanged: (v) =>
-                  setState(() => _rememberMe = v ?? false),
-              onLogin: _onLogin,
-              onForgotPassword: _onForgotPassword,
+          Positioned.fill(
+            child: Image.asset(
+              'assets/images/Building.jpg',
+              fit: BoxFit.cover,
+              width: double.infinity,
+              height: double.infinity,
+              errorBuilder: (_, __, ___) => Container(
+                width: double.infinity,
+                height: double.infinity,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      LoginTheme.brandingGradientStart,
+                      LoginTheme.brandingGradientEnd,
+                      LoginTheme.blueLight.withValues(alpha: 0.85),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          if (kIsWeb)
+            Positioned(
+              top: 12,
+              left: 12,
+              child: SafeArea(child: _LoginBackButton()),
+            ),
+          // Place branding above the form, and push the form down a bit
+          // so there is clear separation (no overlap).
+          Positioned.fill(
+            child: SafeArea(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Align(
+                    alignment: Alignment.topCenter,
+                    child: SizedBox(
+                      width: brandingWidth,
+                      child: _BrandingSection(),
+                    ),
+                  ),
+                  const SizedBox(height: 0),
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      child: Transform.translate(
+                        // More negative = moves the form upward.
+                        offset: const Offset(0, -27),
+                        child: _LoginFormSection(
+                          emailController: _emailController,
+                          passwordController: _passwordController,
+                          passwordFocusNode: _passwordFocusNode,
+                          rememberMe: _rememberMe,
+                          isLoading: _isLoading,
+                          onRememberMeChanged: (v) =>
+                              setState(() => _rememberMe = v ?? false),
+                          onLogin: _onLogin,
+                          onForgotPassword: _onForgotPassword,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -75,32 +132,33 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _isLoading = true);
     try {
       final auth = context.read<AuthProvider>();
-      final ok = await auth.login(email, password);
+      final errorMessage = await auth.login(email, password);
       if (!mounted) return;
-      if (ok) {
-        final auth = context.read<AuthProvider>();
+      if (errorMessage == null) {
         final role = auth.user?.role ?? 'employee';
-        final isAdmin = role == 'admin';
+        final isPrivileged = role == 'admin' || role == 'hr';
 
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(kLoginAsKey, isAdmin ? 'Admin' : 'Employee');
+        await prefs.setString(kLoginAsKey, isPrivileged ? 'Admin' : 'Employee');
 
+        if (!mounted) return;
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
-            builder: (context) =>
-                isAdmin ? const AdminDashboard() : const EmployeeDashboard(),
+            builder: (context) => isPrivileged
+                ? const AdminDashboard()
+                : const EmployeeDashboard(),
           ),
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Invalid email or password')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(errorMessage)));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Login failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Login failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -112,107 +170,123 @@ class _LoginPageState extends State<LoginPage> {
   }
 }
 
+class _LoginBackButton extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.25),
+        shape: BoxShape.circle,
+      ),
+      child: IconButton(
+        padding: const EdgeInsets.all(10),
+        onPressed: () => Navigator.of(context).pop(),
+        icon: const Icon(Icons.arrow_back, size: 30),
+        color: Colors.white,
+      ),
+    );
+  }
+}
+
 /// Left panel: blue gradient, HR logo/title, tagline, illustration.
 class _BrandingSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            LoginTheme.brandingGradientStart,
-            LoginTheme.brandingGradientEnd,
-          ],
-        ),
-      ),
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 32),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      width: 56,
-                      height: 56,
-                      color: Colors.white.withOpacity(0.2),
-                      child: Image.asset(
-                        'assets/images/Plaridel Logo.jpg',
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const Icon(
-                          Icons.shield_outlined,
-                          color: Colors.white,
-                          size: 32,
-                        ),
-                      ),
-                    ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 24),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final availableWidth = constraints.maxWidth;
+          final isCompact = availableWidth < 340;
+          final titleSize = isCompact
+              ? 22.0
+              : (availableWidth < 400 ? 26.0 : 34.0);
+          final subtitleSize = isCompact
+              ? 11.5
+              : (availableWidth < 400 ? 13.0 : 16.0);
+          final logoSize = isCompact ? 76.0 : 92.0;
+
+          Widget buildLogo() {
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                width: logoSize,
+                height: logoSize,
+                color: Colors.white.withOpacity(0.2),
+                child: Image.asset(
+                  'assets/images/Plaridel Logo.jpg',
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const Icon(
+                    Icons.shield_outlined,
+                    color: Colors.white,
+                    size: 32,
                   ),
-                  const SizedBox(width: 16),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Municipality of Plaridel',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.3,
-                          height: 1.2,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'HUMAN RESOURCE MANAGEMENT SYSTEM',
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.95),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 0.8,
-                          height: 1.2,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 32),
-              Text(
-                'Modernizing Human Resource Services',
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.95),
-                  fontSize: 18,
-                  fontWeight: FontWeight.w500,
-                  height: 1.3,
                 ),
               ),
-              const Spacer(),
-              Center(
-                child: Column(
+            );
+          }
+
+          Widget buildTitleBlock({required TextAlign align}) {
+            return Column(
+              crossAxisAlignment: align == TextAlign.center
+                  ? CrossAxisAlignment.center
+                  : CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Municipality of Plaridel',
+                  textAlign: align,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: titleSize,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.3,
+                    height: 1.15,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'HUMAN RESOURCE MANAGEMENT SYSTEM',
+                  textAlign: align,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.95),
+                    fontSize: subtitleSize,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: isCompact ? 0.3 : 0.7,
+                    height: 1.2,
+                  ),
+                  maxLines: isCompact ? 3 : 2,
+                  overflow: TextOverflow.ellipsis,
+                  softWrap: true,
+                ),
+              ],
+            );
+          }
+
+          return Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const SizedBox(height: 56),
+              if (isCompact) ...[
+                buildLogo(),
+                const SizedBox(height: 14),
+                buildTitleBlock(align: TextAlign.center),
+              ] else
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Icon(
-                      Icons.groups_rounded,
-                      size: 100,
-                      color: Colors.white.withOpacity(0.5),
-                    ),
-                    const SizedBox(height: 16),
-                    Icon(
-                      Icons.business_center_rounded,
-                      size: 64,
-                      color: Colors.white.withOpacity(0.4),
-                    ),
+                    buildLogo(),
+                    const SizedBox(width: 12),
+                    Expanded(child: buildTitleBlock(align: TextAlign.left)),
                   ],
                 ),
-              ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 0),
+              // Removed tagline as requested.
             ],
-          ),
-        ),
+          );
+        },
       ),
     );
   }
@@ -243,165 +317,168 @@ class _LoginFormSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: LoginTheme.formBackground,
-      child: SafeArea(
-        child: Stack(
-          children: [
-            Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 40),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 420),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const SizedBox(height: 24),
-                      Text(
-                        'Welcome Back!',
-                        style: TextStyle(
-                          color: LoginTheme.textDark,
-                          fontSize: 28,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Please login to your account',
-                        style: TextStyle(
-                          color: LoginTheme.textSecondary,
-                          fontSize: 15,
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      _LoginTextField(
-                        controller: emailController,
-                        hint: 'Email or Employee ID',
-                        icon: Icons.mail_outline,
-                        nextFocusNode: passwordFocusNode,
-                      ),
-                      const SizedBox(height: 16),
-                      _PasswordTextField(
-                        controller: passwordController,
-                        focusNode: passwordFocusNode,
-                        onSubmitted: onLogin,
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          SizedBox(
-                            height: 24,
-                            width: 24,
-                            child: Checkbox(
-                              value: rememberMe,
-                              onChanged: onRememberMeChanged,
-                              activeColor: LoginTheme.bluePrimary,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Remember Me',
-                            style: TextStyle(
-                              color: LoginTheme.textDark,
-                              fontSize: 14,
-                            ),
-                          ),
-                          const Spacer(),
-                          TextButton(
-                            onPressed: onForgotPassword,
-                            style: TextButton.styleFrom(
-                              foregroundColor: LoginTheme.bluePrimary,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                              ),
-                            ),
-                            child: const Text('Forgot Password?'),
+      color: Colors.transparent,
+      child: Stack(
+        children: [
+          Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 20),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 460),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(24),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF000000).withValues(alpha: 0.12),
+                            blurRadius: 18,
+                            offset: const Offset(0, 8),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 28),
-                      _LoginToHrmsButton(
-                        onPressed: isLoading ? null : onLogin,
-                        isLoading: isLoading,
-                      ),
-                      const SizedBox(height: 48),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                      padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(
-                            '© 2026 HRMS',
-                            style: TextStyle(
-                              color: LoginTheme.textSecondary,
-                              fontSize: 12,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            '|',
-                            style: TextStyle(
-                              color: LoginTheme.textSecondary,
-                              fontSize: 12,
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: () {},
-                            style: TextButton.styleFrom(
-                              foregroundColor: LoginTheme.bluePrimary,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
+                          const SizedBox(height: 8),
+                          const Center(
+                            child: Text(
+                              'Welcome Back!',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 28,
+                                fontWeight: FontWeight.w700,
                               ),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            child: const Text(
-                              'Privacy Policy',
-                              style: TextStyle(fontSize: 12),
                             ),
                           ),
-                          Text(
-                            '|',
-                            style: TextStyle(
-                              color: LoginTheme.textSecondary,
-                              fontSize: 12,
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: () {},
-                            style: TextButton.styleFrom(
-                              foregroundColor: LoginTheme.bluePrimary,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
+                          const SizedBox(height: 10),
+                          Center(
+                            child: Text(
+                              'Please login to your account',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.9),
+                                fontSize: 14,
                               ),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             ),
-                            child: const Text(
-                              'Terms of Use',
-                              style: TextStyle(fontSize: 12),
-                            ),
+                          ),
+                          const SizedBox(height: 28),
+                          _LoginTextField(
+                            controller: emailController,
+                            label: 'Email',
+                            hintText: 'Enter your email',
+                            icon: Icons.mail_outline,
+                            nextFocusNode: passwordFocusNode,
+                          ),
+                          const SizedBox(height: 20),
+                          _PasswordTextField(
+                            controller: passwordController,
+                            focusNode: passwordFocusNode,
+                            onSubmitted: onLogin,
+                          ),
+                          const SizedBox(height: 20),
+                          Row(
+                            children: [
+                              SizedBox(
+                                height: 24,
+                                width: 24,
+                                child: Checkbox(
+                                  value: rememberMe,
+                                  onChanged: onRememberMeChanged,
+                                  activeColor: Colors.white,
+                                  checkColor: const Color(0xFFD65A00),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              const Text(
+                                'Remember Me',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              const Spacer(),
+                              TextButton(
+                                onPressed: onForgotPassword,
+                                style: TextButton.styleFrom(
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                  ),
+                                ),
+                                child: const Text('Forgot Password?'),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 22),
+                          _LoginToHrmsButton(
+                            onPressed: isLoading ? null : onLogin,
+                            isLoading: isLoading,
+                          ),
+                          const SizedBox(height: 22),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                '© 2026 HRMS',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white.withValues(alpha: 0.7),
+                                  fontSize: 12,
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                '|',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white.withValues(alpha: 0.7),
+                                  fontSize: 12,
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                'Privacy Policy',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white.withValues(alpha: 0.7),
+                                  fontSize: 12,
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                '|',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white.withValues(alpha: 0.7),
+                                  fontSize: 12,
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                'Terms of Use',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white.withValues(alpha: 0.7),
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ),
             ),
-            if (kIsWeb)
-              Positioned(
-                top: 0,
-                left: 16,
-                child: IconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.arrow_back),
-                  color: LoginTheme.textDark,
-                ),
-              ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -410,47 +487,82 @@ class _LoginFormSection extends StatelessWidget {
 class _LoginTextField extends StatelessWidget {
   const _LoginTextField({
     required this.controller,
-    required this.hint,
+    required this.label,
+    required this.hintText,
     required this.icon,
     this.nextFocusNode,
   });
 
   final TextEditingController controller;
-  final String hint;
+  final String label;
+  final String hintText;
   final IconData icon;
   final FocusNode? nextFocusNode;
 
+  static const Color _accent = Color(0xFFD65A00);
+
   @override
   Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      textInputAction: TextInputAction.next,
-      onSubmitted: (_) => nextFocusNode?.requestFocus(),
-      decoration: InputDecoration(
-        hintText: hint,
-        prefixIcon: Icon(icon, color: LoginTheme.bluePrimary, size: 22),
-        filled: true,
-        fillColor: Colors.white,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: LoginTheme.borderLight),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: LoginTheme.borderLight),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(
-            color: LoginTheme.bluePrimary,
-            width: 1.5,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.95),
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.2,
           ),
         ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 14,
+        const SizedBox(height: 10),
+        TextField(
+          controller: controller,
+          keyboardType: TextInputType.emailAddress,
+          autocorrect: false,
+          textInputAction: TextInputAction.next,
+          onSubmitted: (_) => nextFocusNode?.requestFocus(),
+          textAlignVertical: TextAlignVertical.center,
+          style: const TextStyle(
+            color: Color(0xFF212529),
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+            height: 1.25,
+          ),
+          decoration: InputDecoration(
+            hintText: hintText,
+            hintStyle: TextStyle(
+              color: Colors.grey.shade500,
+              fontSize: 15,
+              fontWeight: FontWeight.w400,
+              height: 1.25,
+            ),
+            floatingLabelBehavior: FloatingLabelBehavior.never,
+            prefixIcon: Icon(icon, color: _accent, size: 22),
+            prefixIconConstraints: const BoxConstraints(
+              minWidth: 48,
+              minHeight: 48,
+              maxHeight: 52,
+            ),
+            filled: true,
+            fillColor: Colors.white,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(color: Colors.grey.shade300),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(color: Colors.grey.shade300),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: _accent, width: 2),
+            ),
+            contentPadding: const EdgeInsets.fromLTRB(0, 14, 16, 14),
+            isDense: true,
+          ),
         ),
-      ),
+      ],
     );
   }
 }
@@ -473,54 +585,93 @@ class _PasswordTextField extends StatefulWidget {
 class _PasswordTextFieldState extends State<_PasswordTextField> {
   bool _obscure = true;
 
+  static const Color _accent = Color(0xFFD65A00);
+
   @override
   Widget build(BuildContext context) {
-    return TextField(
-      controller: widget.controller,
-      focusNode: widget.focusNode,
-      obscureText: _obscure,
-      textInputAction: TextInputAction.done,
-      onSubmitted: (_) => widget.onSubmitted?.call(),
-      decoration: InputDecoration(
-        hintText: 'Password',
-        prefixIcon: Icon(
-          Icons.lock_outline,
-          color: LoginTheme.bluePrimary,
-          size: 22,
-        ),
-        suffixIcon: IconButton(
-          onPressed: () => setState(() => _obscure = !_obscure),
-          icon: Icon(
-            _obscure
-                ? Icons.visibility_off_outlined
-                : Icons.visibility_outlined,
-            color: LoginTheme.bluePrimary,
-            size: 22,
-          ),
-          tooltip: _obscure ? 'Show password' : 'Hide password',
-        ),
-        filled: true,
-        fillColor: Colors.white,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: LoginTheme.borderLight),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: LoginTheme.borderLight),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(
-            color: LoginTheme.bluePrimary,
-            width: 1.5,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Password',
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.95),
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.2,
           ),
         ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 14,
+        const SizedBox(height: 10),
+        TextField(
+          controller: widget.controller,
+          focusNode: widget.focusNode,
+          obscureText: _obscure,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => widget.onSubmitted?.call(),
+          textAlignVertical: TextAlignVertical.center,
+          style: const TextStyle(
+            color: Color(0xFF212529),
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+            height: 1.25,
+          ),
+          decoration: InputDecoration(
+            hintText: 'Enter your password',
+            hintStyle: TextStyle(
+              color: Colors.grey.shade500,
+              fontSize: 15,
+              fontWeight: FontWeight.w400,
+              height: 1.25,
+            ),
+            floatingLabelBehavior: FloatingLabelBehavior.never,
+            prefixIcon: const Icon(
+              Icons.lock_outline,
+              color: _accent,
+              size: 22,
+            ),
+            prefixIconConstraints: const BoxConstraints(
+              minWidth: 48,
+              minHeight: 48,
+              maxHeight: 52,
+            ),
+            suffixIcon: IconButton(
+              onPressed: () => setState(() => _obscure = !_obscure),
+              icon: Icon(
+                _obscure
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+                color: _accent,
+                size: 22,
+              ),
+              tooltip: _obscure ? 'Show password' : 'Hide password',
+              style: IconButton.styleFrom(
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+            suffixIconConstraints: const BoxConstraints(
+              minWidth: 48,
+              minHeight: 48,
+              maxHeight: 52,
+            ),
+            filled: true,
+            fillColor: Colors.white,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(color: Colors.grey.shade300),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(color: Colors.grey.shade300),
+            ),
+            focusedBorder: const OutlineInputBorder(
+              borderRadius: BorderRadius.all(Radius.circular(14)),
+              borderSide: BorderSide(color: _accent, width: 2),
+            ),
+            contentPadding: const EdgeInsets.fromLTRB(0, 14, 4, 14),
+            isDense: true,
+          ),
         ),
-      ),
+      ],
     );
   }
 }
@@ -539,19 +690,12 @@ class _LoginToHrmsButton extends StatelessWidget {
       child: DecoratedBox(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
-          gradient: LinearGradient(
-            colors: onPressed != null && !isLoading
-                ? [LoginTheme.blueLight, LoginTheme.blueDark]
-                : [
-                    LoginTheme.blueLight.withOpacity(0.7),
-                    LoginTheme.blueDark.withOpacity(0.7),
-                  ],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
+          color: onPressed != null && !isLoading
+              ? Colors.white
+              : Colors.white70,
           boxShadow: [
             BoxShadow(
-              color: LoginTheme.bluePrimary.withOpacity(0.35),
+              color: LoginTheme.bluePrimary.withValues(alpha: 0.35),
               blurRadius: 8,
               offset: const Offset(0, 4),
             ),
@@ -569,13 +713,15 @@ class _LoginToHrmsButton extends StatelessWidget {
                       height: 24,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          Color(0xFFD65A00),
+                        ),
                       ),
                     )
-                  : const Text(
+                  : Text(
                       'Login to HRMS',
                       style: TextStyle(
-                        color: Colors.white,
+                        color: const Color(0xFFD65A00),
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
                       ),

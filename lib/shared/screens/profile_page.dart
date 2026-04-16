@@ -22,11 +22,12 @@ class ProfilePage extends StatelessWidget {
     final padding = isWeb ? 32.0 : 16.0;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF0F2F5),
+      backgroundColor: const Color(0xFFF5F6FA),
       appBar: AppBar(
-        backgroundColor: AppTheme.white,
+        backgroundColor: Colors.white,
         elevation: 0,
-        scrolledUnderElevation: 1,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
           onPressed: () => Navigator.of(context).pop(),
@@ -36,8 +37,9 @@ class ProfilePage extends StatelessWidget {
           'My Profile',
           style: TextStyle(
             color: AppTheme.textPrimary,
-            fontSize: isWeb ? 20 : 18,
-            fontWeight: FontWeight.w700,
+            fontSize: isWeb ? 22 : 20,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.3,
           ),
         ),
       ),
@@ -327,36 +329,47 @@ class _ProfileContentState extends State<ProfileContent> {
                 child: Stack(
                   alignment: Alignment.bottomRight,
                   children: [
-                    _avatarUrl != null
-                        ? ClipOval(
-                            child: Image.network(
-                              _avatarUrl!,
-                              width: avatarRadius * 2,
-                              height: avatarRadius * 2,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => CircleAvatar(
-                                radius: avatarRadius,
-                                backgroundColor: AppTheme.primaryNavy
-                                    .withOpacity(0.1),
-                                child: Icon(
-                                  Icons.person_rounded,
-                                  size: avatarSize,
-                                  color: AppTheme.primaryNavy.withOpacity(0.5),
+                    Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.08),
+                            blurRadius: 16,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: _avatarUrl != null
+                          ? ClipOval(
+                              child: Image.network(
+                                _avatarUrl!,
+                                width: avatarRadius * 2,
+                                height: avatarRadius * 2,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => CircleAvatar(
+                                  radius: avatarRadius,
+                                  backgroundColor: AppTheme.primaryNavy
+                                      .withOpacity(0.1),
+                                  child: Icon(
+                                    Icons.person_rounded,
+                                    size: avatarSize,
+                                    color: AppTheme.primaryNavy.withOpacity(0.5),
+                                  ),
                                 ),
                               ),
+                            )
+                          : CircleAvatar(
+                              radius: avatarRadius,
+                              backgroundColor:
+                                  AppTheme.primaryNavy.withOpacity(0.1),
+                              child: Icon(
+                                Icons.person_rounded,
+                                size: avatarSize,
+                                color: AppTheme.primaryNavy.withOpacity(0.5),
+                              ),
                             ),
-                          )
-                        : CircleAvatar(
-                            radius: avatarRadius,
-                            backgroundColor: AppTheme.primaryNavy.withOpacity(
-                              0.1,
-                            ),
-                            child: Icon(
-                              Icons.person_rounded,
-                              size: avatarSize,
-                              color: AppTheme.primaryNavy.withOpacity(0.5),
-                            ),
-                          ),
+                    ),
                     if (_imageLoading)
                       Positioned(
                         right: 0,
@@ -374,6 +387,13 @@ class _ProfileContentState extends State<ProfileContent> {
                           color: AppTheme.primaryNavy,
                           shape: BoxShape.circle,
                           border: Border.all(color: Colors.white, width: 2),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.2),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
                         ),
                         child: Icon(
                           Icons.camera_alt_rounded,
@@ -390,7 +410,7 @@ class _ProfileContentState extends State<ProfileContent> {
                 style: TextStyle(
                   fontSize: isWeb ? 13 : 12,
                   color: AppTheme.primaryNavy,
-                  fontWeight: FontWeight.w500,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ],
@@ -402,11 +422,25 @@ class _ProfileContentState extends State<ProfileContent> {
           decoration: InputDecoration(
             labelText: 'Full name',
             hintText: 'Enter your full name',
-            border: const OutlineInputBorder(),
-            prefixIcon: const Icon(Icons.badge_outlined),
-            contentPadding: isWeb
-                ? null
-                : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            filled: true,
+            fillColor: const Color(0xFFF8F9FA),
+            prefixIcon: const Icon(Icons.badge_outlined, color: AppTheme.primaryNavy),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Color(0xFFE8EAED)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(
+                color: AppTheme.primaryNavy,
+                width: 2,
+              ),
+            ),
+            contentPadding: EdgeInsets.symmetric(
+              horizontal: isWeb ? 18 : 16,
+              vertical: isWeb ? 16 : 14,
+            ),
           ),
           textCapitalization: TextCapitalization.words,
         ),
@@ -416,11 +450,25 @@ class _ProfileContentState extends State<ProfileContent> {
           decoration: InputDecoration(
             labelText: 'Phone (optional)',
             hintText: 'e.g. 09XX XXX XXXX',
-            border: const OutlineInputBorder(),
-            prefixIcon: const Icon(Icons.phone_outlined),
-            contentPadding: isWeb
-                ? null
-                : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            filled: true,
+            fillColor: const Color(0xFFF8F9FA),
+            prefixIcon: const Icon(Icons.phone_outlined, color: AppTheme.primaryNavy),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Color(0xFFE8EAED)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(
+                color: AppTheme.primaryNavy,
+                width: 2,
+              ),
+            ),
+            contentPadding: EdgeInsets.symmetric(
+              horizontal: isWeb ? 18 : 16,
+              vertical: isWeb ? 16 : 14,
+            ),
           ),
           keyboardType: TextInputType.phone,
         ),
@@ -430,17 +478,22 @@ class _ProfileContentState extends State<ProfileContent> {
           readOnly: true,
           decoration: InputDecoration(
             labelText: 'Email',
-            border: const OutlineInputBorder(),
-            prefixIcon: const Icon(Icons.email_outlined),
             filled: true,
-            fillColor: AppTheme.lightGray.withOpacity(0.5),
+            fillColor: const Color(0xFFF8F9FA),
+            prefixIcon: const Icon(Icons.email_outlined, color: AppTheme.primaryNavy),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Color(0xFFE8EAED)),
+            ),
             helperText: isWeb
                 ? 'Used for login. Change via your account provider if needed.'
                 : null,
             helperStyle: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
-            contentPadding: isWeb
-                ? null
-                : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            contentPadding: EdgeInsets.symmetric(
+              horizontal: isWeb ? 18 : 16,
+              vertical: isWeb ? 16 : 14,
+            ),
           ),
         ),
         if (_message != null) ...[
@@ -468,7 +521,16 @@ class _ProfileContentState extends State<ProfileContent> {
             label: Text(_loading ? 'Saving...' : 'Save profile'),
             style: FilledButton.styleFrom(
               backgroundColor: AppTheme.primaryNavy,
-              padding: EdgeInsets.symmetric(vertical: isWeb ? 14 : 16),
+              foregroundColor: Colors.white,
+              padding: EdgeInsets.symmetric(
+                vertical: isWeb ? 14 : 16,
+                horizontal: 24,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              elevation: 1,
+              shadowColor: Colors.black.withOpacity(0.2),
             ),
           ),
         ),
@@ -494,20 +556,35 @@ class _ProfileContentState extends State<ProfileContent> {
           obscureText: _obscureCurrent,
           decoration: InputDecoration(
             labelText: 'Current password',
-            border: const OutlineInputBorder(),
-            prefixIcon: const Icon(Icons.lock_outline_rounded),
+            filled: true,
+            fillColor: const Color(0xFFF8F9FA),
+            prefixIcon: const Icon(Icons.lock_outline_rounded, color: AppTheme.primaryNavy),
             suffixIcon: IconButton(
               icon: Icon(
                 _obscureCurrent
                     ? Icons.visibility_off_rounded
                     : Icons.visibility_rounded,
+                color: AppTheme.textSecondary,
               ),
               onPressed: () =>
                   setState(() => _obscureCurrent = !_obscureCurrent),
             ),
-            contentPadding: isWeb
-                ? null
-                : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Color(0xFFE8EAED)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(
+                color: AppTheme.primaryNavy,
+                width: 2,
+              ),
+            ),
+            contentPadding: EdgeInsets.symmetric(
+              horizontal: isWeb ? 18 : 16,
+              vertical: isWeb ? 16 : 14,
+            ),
           ),
         ),
         SizedBox(height: isWeb ? 16 : 12),
@@ -518,19 +595,34 @@ class _ProfileContentState extends State<ProfileContent> {
           decoration: InputDecoration(
             labelText: 'New password',
             hintText: 'At least 6 characters',
-            border: const OutlineInputBorder(),
-            prefixIcon: const Icon(Icons.lock_rounded),
+            filled: true,
+            fillColor: const Color(0xFFF8F9FA),
+            prefixIcon: const Icon(Icons.lock_rounded, color: AppTheme.primaryNavy),
             suffixIcon: IconButton(
               icon: Icon(
                 _obscureNew
                     ? Icons.visibility_off_rounded
                     : Icons.visibility_rounded,
+                color: AppTheme.textSecondary,
               ),
               onPressed: () => setState(() => _obscureNew = !_obscureNew),
             ),
-            contentPadding: isWeb
-                ? null
-                : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Color(0xFFE8EAED)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(
+                color: AppTheme.primaryNavy,
+                width: 2,
+              ),
+            ),
+            contentPadding: EdgeInsets.symmetric(
+              horizontal: isWeb ? 18 : 16,
+              vertical: isWeb ? 16 : 14,
+            ),
           ),
         ),
         if (newPass.isNotEmpty) ...[
@@ -558,20 +650,35 @@ class _ProfileContentState extends State<ProfileContent> {
           obscureText: _obscureConfirm,
           decoration: InputDecoration(
             labelText: 'Confirm new password',
-            border: const OutlineInputBorder(),
-            prefixIcon: const Icon(Icons.lock_rounded),
+            filled: true,
+            fillColor: const Color(0xFFF8F9FA),
+            prefixIcon: const Icon(Icons.lock_rounded, color: AppTheme.primaryNavy),
             suffixIcon: IconButton(
               icon: Icon(
                 _obscureConfirm
                     ? Icons.visibility_off_rounded
                     : Icons.visibility_rounded,
+                color: AppTheme.textSecondary,
               ),
               onPressed: () =>
                   setState(() => _obscureConfirm = !_obscureConfirm),
             ),
-            contentPadding: isWeb
-                ? null
-                : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Color(0xFFE8EAED)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(
+                color: AppTheme.primaryNavy,
+                width: 2,
+              ),
+            ),
+            contentPadding: EdgeInsets.symmetric(
+              horizontal: isWeb ? 18 : 16,
+              vertical: isWeb ? 16 : 14,
+            ),
           ),
         ),
         if (_passwordMessage != null) ...[
@@ -597,6 +704,7 @@ class _ProfileContentState extends State<ProfileContent> {
                 : 'Forgot password?',
           ),
           style: TextButton.styleFrom(
+            foregroundColor: AppTheme.primaryNavy,
             padding: EdgeInsets.symmetric(vertical: isWeb ? 8 : 12),
           ),
         ),
@@ -618,7 +726,16 @@ class _ProfileContentState extends State<ProfileContent> {
             label: Text(_passwordLoading ? 'Updating...' : 'Change password'),
             style: FilledButton.styleFrom(
               backgroundColor: AppTheme.primaryNavy,
-              padding: EdgeInsets.symmetric(vertical: isWeb ? 14 : 16),
+              foregroundColor: Colors.white,
+              padding: EdgeInsets.symmetric(
+                vertical: isWeb ? 14 : 16,
+                horizontal: 24,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              elevation: 1,
+              shadowColor: Colors.black.withOpacity(0.2),
             ),
           ),
         ),
@@ -676,30 +793,38 @@ class _ProfileSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final titleSize = isCompact ? 12.0 : 13.0;
-    final radius = isCompact ? 12.0 : 16.0;
+    final radius = isCompact ? 16.0 : 24.0;
+    final titleSize = isCompact ? 14.0 : 16.0;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: EdgeInsets.only(left: 4, bottom: isCompact ? 8 : 12),
+          padding: EdgeInsets.only(left: 4, bottom: isCompact ? 10 : 14),
           child: Row(
             children: [
               if (icon != null) ...[
-                Icon(
-                  icon,
-                  size: isCompact ? 16 : 18,
-                  color: AppTheme.primaryNavy,
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryNavy.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    icon,
+                    size: isCompact ? 18 : 20,
+                    color: AppTheme.primaryNavy,
+                  ),
                 ),
-                SizedBox(width: isCompact ? 6 : 8),
+                SizedBox(width: isCompact ? 10 : 12),
               ],
               Text(
                 title,
                 style: TextStyle(
-                  color: AppTheme.textSecondary,
+                  color: AppTheme.textPrimary,
                   fontSize: titleSize,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.2,
                 ),
               ),
             ],
@@ -711,12 +836,12 @@ class _ProfileSection extends StatelessWidget {
           decoration: BoxDecoration(
             color: AppTheme.white,
             borderRadius: BorderRadius.circular(radius),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            border: Border.all(color: Colors.black.withOpacity(0.04)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(isCompact ? 0.03 : 0.04),
-                blurRadius: isCompact ? 8 : 12,
-                offset: const Offset(0, 2),
+                color: Colors.black.withOpacity(0.06),
+                blurRadius: 24,
+                offset: const Offset(0, 8),
               ),
             ],
           ),

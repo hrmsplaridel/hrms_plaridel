@@ -18,6 +18,22 @@ function parseTime(val) {
   return s.match(/^\d{1,2}:\d{2}/) ? (s.length <= 5 ? s + ':00' : s.substring(0, 8)) : null;
 }
 
+/** Normalize a DATE / timestamp column from pg for comparison with parseDate() output (YYYY-MM-DD). */
+function dateFromRow(val) {
+  if (val == null) return null;
+  if (typeof val === 'string') {
+    const s = val.split('T')[0];
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+  }
+  if (val instanceof Date) return val.toISOString().slice(0, 10);
+  return parseDate(val);
+}
+
+/** ef, et are YYYY-MM-DD; et null means open-ended. */
+function effectiveToBeforeFrom(ef, et) {
+  return ef != null && et != null && et < ef;
+}
+
 // GET /api/assignments?employee_id=uuid - list assignments for employee (Schema v2: effective_from/to, override times)
 router.get('/', protect, async (req, res) => {
   try {
@@ -36,7 +52,8 @@ router.get('/', protect, async (req, res) => {
       `SELECT a.id, a.employee_id, a.department_id, a.position_id, a.shift_id,
               a.override_start_time, a.override_end_time, a.effective_from, a.effective_to, a.is_active, a.remarks,
               d.name AS department_name, p.name AS position_name, s.name AS shift_name,
-              s.start_time AS shift_start_time, s.end_time AS shift_end_time
+              s.start_time AS shift_start_time, s.end_time AS shift_end_time,
+              s.working_days AS shift_working_days
        FROM assignments a
        LEFT JOIN departments d ON a.department_id = d.id
        LEFT JOIN positions p ON a.position_id = p.id
@@ -46,23 +63,30 @@ router.get('/', protect, async (req, res) => {
       [employeeId]
     );
 
-    res.json(result.rows.map((r) => ({
-      id: r.id,
-      employee_id: r.employee_id,
-      department_id: r.department_id,
-      position_id: r.position_id,
-      shift_id: r.shift_id,
-      effective_from: r.effective_from,
-      effective_to: r.effective_to,
-      is_active: r.is_active ?? true,
-      remarks: r.remarks,
-      department_name: r.department_name,
-      position_name: r.position_name,
-      shift_name: r.shift_name,
-      start_time: r.override_start_time || r.shift_start_time,
-      end_time: r.override_end_time || r.shift_end_time,
-      date_assigned: r.effective_from,
-    })));
+    res.json(result.rows.map((r) => {
+      const wd = r.shift_working_days;
+      const workingDays = Array.isArray(wd)
+        ? wd.map((x) => (typeof x === 'number' ? x : parseInt(x, 10))).filter((x) => Number.isFinite(x))
+        : (wd != null ? [1, 2, 3, 4, 5] : null);
+      return {
+        id: r.id,
+        employee_id: r.employee_id,
+        department_id: r.department_id,
+        position_id: r.position_id,
+        shift_id: r.shift_id,
+        effective_from: r.effective_from,
+        effective_to: r.effective_to,
+        is_active: r.is_active ?? true,
+        remarks: r.remarks,
+        department_name: r.department_name,
+        position_name: r.position_name,
+        shift_name: r.shift_name,
+        start_time: r.override_start_time || r.shift_start_time,
+        end_time: r.override_end_time || r.shift_end_time,
+        date_assigned: r.effective_from,
+        working_days: workingDays?.length ? workingDays : [1, 2, 3, 4, 5],
+      };
+    }));
   } catch (err) {
     console.error('[assignments GET]', err);
     res.status(500).json({ error: 'Failed to fetch assignments' });
@@ -80,6 +104,9 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     if (!ef) return res.status(400).json({ error: 'Invalid effective_from' });
     const et = effective_to != null && effective_to !== '' ? parseDate(effective_to) : null;
     if (effective_to != null && effective_to !== '' && !et) return res.status(400).json({ error: 'Invalid effective_to' });
+    if (effectiveToBeforeFrom(ef, et)) {
+      return res.status(400).json({ error: 'effective_to must be on or after effective_from' });
+    }
 
     await pool.query('BEGIN');
     try {
@@ -135,16 +162,51 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     if (remarks !== undefined) { updates.push(`remarks = $${i++}`); values.push(remarks?.trim() || null); }
 
     if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
-    updates.push('updated_at = now()');
-    values.push(id);
 
-    const result = await pool.query(
-      `UPDATE assignments SET ${updates.join(', ')} WHERE id = $${i}
-       RETURNING id, employee_id, department_id, position_id, shift_id, effective_from, effective_to, is_active, remarks`,
-      values
+    const existing = await pool.query(
+      'SELECT id, employee_id, effective_from, effective_to, is_active FROM assignments WHERE id = $1',
+      [id]
     );
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Assignment not found' });
-    res.json(result.rows[0]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Assignment not found' });
+    const row = existing.rows[0];
+
+    const mergedEffectiveFrom =
+      effective_from !== undefined ? parseDate(effective_from) : dateFromRow(row.effective_from);
+    const mergedEffectiveTo =
+      effective_to !== undefined
+        ? (effective_to === null || effective_to === '' ? null : parseDate(effective_to))
+        : dateFromRow(row.effective_to);
+    const mergedIsActive =
+      is_active !== undefined ? !!is_active : (row.is_active == null || row.is_active === true);
+
+    if (effectiveToBeforeFrom(mergedEffectiveFrom, mergedEffectiveTo)) {
+      return res.status(400).json({ error: 'effective_to must be on or after effective_from' });
+    }
+
+    await pool.query('BEGIN');
+    try {
+      if (mergedIsActive && mergedEffectiveFrom) {
+        await pool.query(
+          `UPDATE assignments SET is_active = false, effective_to = $1::date, updated_at = now()
+           WHERE employee_id = $2 AND id <> $3::uuid AND is_active = true
+             AND (effective_to IS NULL OR effective_to >= $1::date)`,
+          [mergedEffectiveFrom, row.employee_id, id]
+        );
+      }
+
+      updates.push('updated_at = now()');
+      values.push(id);
+      const result = await pool.query(
+        `UPDATE assignments SET ${updates.join(', ')} WHERE id = $${i}
+         RETURNING id, employee_id, department_id, position_id, shift_id, effective_from, effective_to, is_active, remarks`,
+        values
+      );
+      await pool.query('COMMIT');
+      res.json(result.rows[0]);
+    } catch (e) {
+      await pool.query('ROLLBACK');
+      throw e;
+    }
   } catch (err) {
     console.error('[assignments PUT]', err);
     res.status(500).json({ error: 'Failed to update assignment' });
