@@ -644,8 +644,29 @@ class _RequestsPanelState extends State<_RequestsPanel> {
                   'No leave requests yet. Start by filing your first leave request.',
             )
           : filteredRequests.isEmpty
-          ? const _CenteredState(
-              message: 'No leave requests match the current filters.',
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _LeaveRequestsFiltersBar(
+                  selectedStatus: _selectedStatus,
+                  fromDate: _fromDate,
+                  toDate: _toDate,
+                  searchQuery: _searchQuery,
+                  visibleCount: filteredRequests.length,
+                  totalCount: widget.requests.length,
+                  onSearchChanged: (value) =>
+                      setState(() => _searchQuery = value),
+                  onStatusChanged: (status) =>
+                      setState(() => _selectedStatus = status),
+                  onPickFromDate: () => _pickFilterDate(isFrom: true),
+                  onPickToDate: () => _pickFilterDate(isFrom: false),
+                  onClearFilters: _clearFilters,
+                ),
+                const SizedBox(height: 12),
+                const _CenteredState(
+                  message: 'No leave requests match the current filters.',
+                ),
+              ],
             )
           : !useScrollableList
           ? Column(

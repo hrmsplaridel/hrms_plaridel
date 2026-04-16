@@ -15,7 +15,7 @@ class LeaveGeneralInstructionsPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return _GuidanceContainer(
       color: const Color(0xFFFFF8ED),
-      borderColor: const Color(0xFFFBBC04).withOpacity(0.45),
+      borderColor: const Color(0xFFFBBC04).withValues(alpha: 0.45),
       icon: Icons.info_outline_rounded,
       iconColor: const Color(0xFFB45309),
       child: Column(
