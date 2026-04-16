@@ -1,5 +1,6 @@
 import 'leave_repository.dart';
 import 'models/leave_balance.dart';
+import 'models/leave_balance_ledger.dart';
 import 'models/leave_request.dart';
 import 'models/leave_type.dart';
 
@@ -314,6 +315,70 @@ class MockLeaveRepository implements LeaveRepository {
   @override
   Future<List<int>?> getAttachmentBytes(String requestId) async => null;
 
+  // ---- Department Head stubs (mock) ----
+
+  @override
+  Future<Map<String, dynamic>> checkIsDepartmentHead() async => {
+    'isDeptHead': false,
+    'departmentId': null,
+    'departmentName': null,
+  };
+
+  @override
+  Future<List<LeaveRequest>> listDepartmentHeadRequests() async =>
+      const <LeaveRequest>[];
+
+  @override
+  Future<LeaveRequest> departmentHeadApprove(
+    LeaveReviewDecisionInput input,
+  ) async => _requireRequest(
+    input.requestId,
+  ).copyWith(status: LeaveRequestStatus.pendingHr);
+
+  @override
+  Future<LeaveRequest> departmentHeadReject(
+    LeaveReviewDecisionInput input,
+  ) async => _requireRequest(
+    input.requestId,
+  ).copyWith(status: LeaveRequestStatus.rejectedByDepartmentHead);
+
+  @override
+  Future<LeaveRequest> departmentHeadReturn(
+    LeaveReviewDecisionInput input,
+  ) async => _requireRequest(
+    input.requestId,
+  ).copyWith(status: LeaveRequestStatus.returned);
+
+  @override
+  Future<ForcedLeaveDeductionResult> applyForcedLeaveDeduction(
+    ForcedLeaveDeductionInput input,
+  ) async {
+    final vacation = await getBalanceForUserByType(
+      input.userId,
+      LeaveType.vacationLeave,
+    );
+    final available = vacation?.availableDays ?? 0;
+    if (!input.allowNegativeBalance && input.daysToDeduct > available) {
+      throw Exception(
+        'Insufficient vacation leave balance. Available ${available.toStringAsFixed(2)}, requested ${input.daysToDeduct.toStringAsFixed(2)}.',
+      );
+    }
+    _adjustUsedDays(input.userId, LeaveType.vacationLeave, input.daysToDeduct);
+    final updatedVacation = await getBalanceForUserByType(
+      input.userId,
+      LeaveType.vacationLeave,
+    );
+    return ForcedLeaveDeductionResult(
+      userId: input.userId,
+      leaveType: LeaveType.vacationLeave,
+      deductedDays: input.daysToDeduct,
+      remainingDays: updatedVacation?.remainingDays ?? 0,
+      year: input.year,
+      remarks: input.remarks,
+      appliedAt: DateTime.now(),
+    );
+  }
+
   String _nextRequestId() {
     _requestCounter += 1;
     return 'leave_${DateTime.now().millisecondsSinceEpoch}_$_requestCounter';
@@ -364,8 +429,6 @@ class MockLeaveRepository implements LeaveRepository {
               userId: userId,
               leaveType: type,
               earnedDays: switch (type) {
-                LeaveType.vacationLeave => 15,
-                LeaveType.sickLeave => 15,
                 LeaveType.specialPrivilegeLeave => 3,
                 _ => 0,
               },
@@ -373,7 +436,10 @@ class MockLeaveRepository implements LeaveRepository {
               pendingDays: 0,
               adjustedDays: 0,
               asOfDate: now,
-              lastAccrualDate: now,
+              lastAccrualDate: switch (type) {
+                LeaveType.specialPrivilegeLeave => now,
+                _ => null,
+              },
               createdAt: now,
               updatedAt: now,
             ),
@@ -386,10 +452,10 @@ class MockLeaveRepository implements LeaveRepository {
     required LeaveRequest? old,
     required LeaveRequest updated,
   }) {
-    final oldPending = old?.status == LeaveRequestStatus.pending
+    final oldPending = (old?.status.isPending ?? false)
         ? (old?.workingDaysApplied ?? 0)
         : 0.0;
-    final newPending = updated.status == LeaveRequestStatus.pending
+    final newPending = updated.status.isPending
         ? (updated.workingDaysApplied ?? 0)
         : 0.0;
 
@@ -429,6 +495,16 @@ class MockLeaveRepository implements LeaveRepository {
     list[index] = current.copyWith(
       usedDays: next < 0 ? 0 : next,
       updatedAt: DateTime.now(),
+    );
+  }
+
+  @override
+  Future<LeaveLedgerResult> getLeaveLedger(LeaveLedgerQuery query) async {
+    return LeaveLedgerResult(
+      total: 0,
+      limit: query.limit,
+      offset: query.offset,
+      rows: const [],
     );
   }
 }

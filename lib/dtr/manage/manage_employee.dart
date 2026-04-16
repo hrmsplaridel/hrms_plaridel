@@ -1,9 +1,12 @@
-import 'dart:typed_data';
+import 'dart:async';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:shimmer/shimmer.dart';
 
 import '../../api/client.dart';
 import '../../api/config.dart';
@@ -11,6 +14,8 @@ import '../../data/recruitment_application.dart';
 import '../../providers/recruitment_hire_prefill.dart';
 import '../../widgets/structured_address_fields.dart';
 import '../dtr_provider.dart';
+import '../repositories/biometric_import_repository.dart';
+import '../dtr_share.dart';
 import '../../landingpage/constants/app_theme.dart';
 
 /// Employee profile for Manage screen (full data from profiles).
@@ -34,6 +39,8 @@ class _EmployeeProfile {
     this.dateHired,
     this.employmentStatus,
     this.biometricUserId,
+    this.departmentName,
+    this.positionName,
   });
   final String id;
   final String fullName;
@@ -55,13 +62,38 @@ class _EmployeeProfile {
   final DateTime? dateHired;
   final String? employmentStatus;
   final String? biometricUserId;
+  final String? departmentName;
+  final String? positionName;
 
   String get roleDisplay => role == 'admin' ? 'Admin' : 'Employee';
+
+  /// Current assignment from API (department · position), or em dash if none.
+  String get assignmentDisplay {
+    final d = departmentName?.trim();
+    final p = positionName?.trim();
+    final hasD = d != null && d.isNotEmpty;
+    final hasP = p != null && p.isNotEmpty;
+    if (!hasD && !hasP) return '—';
+    if (d != null && d.isNotEmpty && p != null && p.isNotEmpty) {
+      return '$d · $p';
+    }
+    if (d != null && d.isNotEmpty) return d;
+    if (p != null && p.isNotEmpty) return p;
+    return '—';
+  }
+
+  String get displayEmployeeNo {
+    if (employeeNumber == null) return '—';
+    return 'EMP-${employeeNumber!.toString().padLeft(3, '0')}';
+  }
 }
 
 /// Create Account form. Use inline in Dashboard. Single place for adding employees.
 class AddEmployeeForm extends StatefulWidget {
-  const AddEmployeeForm({super.key});
+  const AddEmployeeForm({super.key, this.onAccountCreated});
+
+  /// When set (e.g. opened from a dialog), invoked after a successful create instead of only a snackbar.
+  final VoidCallback? onAccountCreated;
 
   @override
   State<AddEmployeeForm> createState() => _AddEmployeeFormState();
@@ -79,11 +111,15 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   final _streetController = TextEditingController();
   GlobalKey<StructuredAddressFormState> _addressFormKey =
       GlobalKey<StructuredAddressFormState>();
+  final _salaryGradeController = TextEditingController();
 
   String? _privilege;
   String? _suffix;
   String? _sex;
   DateTime? _dateOfBirth;
+  String? _employmentType;
+  String _employmentStatus = 'active';
+  DateTime? _dateHired;
   bool _obscurePassword = true;
   bool _obscureRepeatPassword = true;
   Uint8List? _selectedImageBytes;
@@ -144,6 +180,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     _lastNameController.dispose();
     _contactController.dispose();
     _streetController.dispose();
+    _salaryGradeController.dispose();
     super.dispose();
   }
 
@@ -236,17 +273,21 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     _lastNameController.clear();
     _contactController.clear();
     _streetController.clear();
+    _salaryGradeController.clear();
     setState(() {
       _addressFormKey = GlobalKey<StructuredAddressFormState>();
       _privilege = null;
       _suffix = null;
       _sex = null;
       _dateOfBirth = null;
+      _employmentType = null;
+      _employmentStatus = 'active';
+      _dateHired = null;
       _selectedImageBytes = null;
     });
   }
 
-  Future<void> _saveEmployee(BuildContext context) async {
+  Future<void> _saveEmployee() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
     final email = _emailController.text.trim();
@@ -280,21 +321,26 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         if (_contactController.text.trim().isNotEmpty)
           'contact_number': _contactController.text.trim(),
         if (encodedAddress.isNotEmpty) 'address': encodedAddress,
+        if (_employmentType != null) 'employment_type': _employmentType,
+        if (_salaryGradeController.text.trim().isNotEmpty)
+          'salary_grade': _salaryGradeController.text.trim(),
+        'date_hired': _dateHired!.toIso8601String().split('T')[0],
+        'employment_status': _employmentStatus,
       };
 
       final res = await ApiClient.instance.post<Map<String, dynamic>>(
         '/api/employees',
         data: body,
       );
+      if (!mounted) return;
       final data = res.data;
       if (data == null || data['id'] == null) {
-        _showSnackBar(context, 'Account creation failed');
+        _showSnackBar('Account creation failed');
         return;
       }
 
       final userId = data['id'] as String;
 
-      var recruitmentLinkedOk = false;
       final hire = context.read<RecruitmentHirePrefill>();
       if (hire.hasPendingLink && hire.applicationId != null) {
         try {
@@ -304,11 +350,9 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           );
           hire.clear();
           _lastAppliedPrefillStamp = null;
-          recruitmentLinkedOk = true;
         } catch (e) {
           if (mounted) {
             _showSnackBar(
-              context,
               'Account created, but linking to recruitment failed: $e',
             );
           }
@@ -332,34 +376,33 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         context.read<DtrProvider>().loadEmployees();
       } catch (_) {}
       _clearForm();
-      if (recruitmentLinkedOk) {
-        _showSnackBar(
-          context,
-          'Account created and linked to recruitment. Applicant is registered; they can sign in with email and password.',
-        );
+      if (widget.onAccountCreated != null) {
+        widget.onAccountCreated!();
       } else {
         _showSnackBar(
-          context,
           'Account created successfully. They can sign in with their email and password.',
         );
       }
     } on DioException catch (e) {
+      if (!mounted) return;
       if (e.response?.statusCode == 409) {
-        if (mounted) _showSnackBar(context, 'Email already registered');
+        _showSnackBar('Email already registered');
       } else {
         final msg = e.response?.data is Map
             ? (e.response!.data as Map)['error']?.toString()
             : e.message ?? 'Failed';
-        if (mounted) _showSnackBar(context, msg ?? 'Failed');
+        _showSnackBar(msg ?? 'Failed');
       }
     } catch (e) {
-      if (mounted) _showSnackBar(context, 'Failed: $e');
+      if (!mounted) return;
+      _showSnackBar('Failed: $e');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
-  void _showSnackBar(BuildContext context, String msg) {
+  void _showSnackBar(String msg) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
@@ -367,6 +410,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   Widget build(BuildContext context) {
     final w = MediaQuery.of(context).size.width;
     final isNarrow = w < 700;
+    final sectionGap = isNarrow ? 18.0 : 24.0;
 
     return Form(
       key: _formKey,
@@ -416,48 +460,48 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
               color: AppTheme.white,
               borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
             ),
-            child: isNarrow
-                ? Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
-                    child: Column(
+            child: Padding(
+              padding: EdgeInsets.all(isNarrow ? 16 : 24),
+              child: isNarrow
+                  ? Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        _buildAccountSection(narrow: true),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 20),
-                          child: Divider(
-                            height: 1,
-                            color: Colors.black.withOpacity(0.08),
-                          ),
+                        _buildSectionCard(
+                          child: _buildAccountSection(narrow: true),
                         ),
-                        _buildPersonalSection(),
+                        SizedBox(height: sectionGap),
+                        _buildSectionCard(child: _buildPersonalSection()),
+                        SizedBox(height: sectionGap),
+                        _buildEmploymentSection(),
                       ],
-                    ),
-                  )
-                : IntrinsicHeight(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                    )
+                  : Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(24, 24, 20, 24),
-                            child: _buildAccountSection(narrow: false),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              _buildSectionCard(
+                                child: _buildAccountSection(narrow: false),
+                              ),
+                              SizedBox(height: sectionGap),
+                              _buildEmploymentSection(),
+                            ],
                           ),
                         ),
-                        VerticalDivider(
-                          width: 1,
-                          thickness: 1,
-                          color: Colors.black.withOpacity(0.08),
-                        ),
+                        SizedBox(width: sectionGap),
                         Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(20, 24, 24, 24),
-                            child: _buildPersonalSection(),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              _buildSectionCard(child: _buildPersonalSection()),
+                            ],
                           ),
                         ),
                       ],
                     ),
-                  ),
+            ),
           ),
           Container(
             padding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
@@ -474,7 +518,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 FilledButton(
-                  onPressed: _saving ? null : () => _saveEmployee(context),
+                  onPressed: _saving ? null : _saveEmployee,
                   style: FilledButton.styleFrom(
                     backgroundColor: AppTheme.primaryNavy,
                     foregroundColor: Colors.white,
@@ -617,7 +661,6 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           onChanged: (v) => setState(() => _privilege = v),
           validator: (v) => v == null ? 'Required' : null,
         ),
-        if (!narrow) const Spacer(),
         SizedBox(height: narrow ? 14 : 16),
         Container(
           padding: const EdgeInsets.all(12),
@@ -649,6 +692,18 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildSectionCard({required Widget child}) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.black.withOpacity(0.06)),
+      ),
+      child: child,
     );
   }
 
@@ -780,85 +835,922 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       ],
     );
   }
+
+  Widget _buildEmploymentSection() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.black.withOpacity(0.06)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Employment',
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 16),
+          DropdownButtonFormField<String>(
+            value: _employmentType,
+            decoration: _fieldDecoration('Employment Type'),
+            hint: const Text('Employment Type'),
+            items: [
+              'regular',
+              'contractual',
+              'job_order',
+              'casual',
+            ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+            onChanged: (v) => setState(() => _employmentType = v),
+          ),
+          const SizedBox(height: 16),
+          TextFormField(
+            controller: _salaryGradeController,
+            decoration: _fieldDecoration('Salary Grade'),
+            keyboardType: TextInputType.text,
+          ),
+          const SizedBox(height: 16),
+          FormField<DateTime>(
+            key: ValueKey(_dateHired?.toIso8601String() ?? 'hire_null'),
+            validator: (_) =>
+                _dateHired == null ? 'Date hired is required' : null,
+            builder: (state) {
+              return InkWell(
+                onTap: () async {
+                  final d = await showDatePicker(
+                    context: context,
+                    initialDate: _dateHired ?? DateTime.now(),
+                    firstDate: DateTime(1900),
+                    lastDate: DateTime.now().add(
+                      const Duration(days: 365 * 10),
+                    ),
+                  );
+                  if (d != null) {
+                    setState(() => _dateHired = d);
+                    state.didChange(d);
+                  }
+                },
+                borderRadius: BorderRadius.circular(8),
+                child: InputDecorator(
+                  decoration: _fieldDecoration('').copyWith(
+                    errorText: state.errorText,
+                    suffixIcon: Icon(
+                      Icons.calendar_today_rounded,
+                      size: 20,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                  child: Text(
+                    _dateHired != null
+                        ? '${_dateHired!.year}-${_dateHired!.month.toString().padLeft(2, '0')}-${_dateHired!.day.toString().padLeft(2, '0')}'
+                        : 'Date Hired (tap to select) *',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: _dateHired != null
+                          ? AppTheme.textPrimary
+                          : AppTheme.textSecondary,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 16),
+          DropdownButtonFormField<String>(
+            value: _employmentStatus,
+            decoration: _fieldDecoration('Employment Status'),
+            items: [
+              'active',
+              'inactive',
+              'resigned',
+              'retired',
+              'terminated',
+            ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+            onChanged: (v) => setState(() => _employmentStatus = v ?? 'active'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Prefer JSON `error` from API responses (Dio), then Dio message.
+String _apiErrorMessageFromDio(Object e, {required String fallback}) {
+  if (e is DioException) {
+    final data = e.response?.data;
+    if (data is Map && data['error'] != null) {
+      return data['error'].toString();
+    }
+    if (e.message != null && e.message!.isNotEmpty) return e.message!;
+  }
+  return fallback;
+}
+
+String _messageForEmployeesLoadError(Object e) {
+  if (e is DioException) {
+    return _apiErrorMessageFromDio(
+      e,
+      fallback:
+          'Could not load employees. Check your connection and try again.',
+    );
+  }
+  return 'Could not load employees.';
+}
+
+String _titleCaseUnderscores(String raw) {
+  return raw
+      .split('_')
+      .map(
+        (w) => w.isEmpty
+            ? w
+            : '${w[0].toUpperCase()}${w.substring(1).toLowerCase()}',
+      )
+      .join(' ');
+}
+
+_EmployeeProfile _employeeProfileFromJson(Map<String, dynamic> m) {
+  final dob = m['date_of_birth'];
+  final empNum = m['employee_number'];
+  final dateHiredRaw = m['date_hired'];
+  return _EmployeeProfile(
+    id: m['id'] as String,
+    fullName: m['full_name'] as String? ?? 'Unknown',
+    role: m['role'] as String? ?? 'employee',
+    employeeNumber: empNum is int
+        ? empNum
+        : (empNum != null ? int.tryParse(empNum.toString()) : null),
+    email: m['email'] as String?,
+    isActive: m['is_active'] as bool? ?? true,
+    avatarPath: m['avatar_path'] as String?,
+    middleName: m['middle_name'] as String?,
+    suffix: m['suffix'] as String?,
+    sex: m['sex'] as String?,
+    dateOfBirth: dob != null ? DateTime.tryParse(dob.toString()) : null,
+    contactNumber: m['contact_number'] as String?,
+    address: m['address'] as String?,
+    employmentType: m['employment_type'] as String?,
+    salaryGrade: m['salary_grade'] as String?,
+    dateHired: dateHiredRaw != null
+        ? DateTime.tryParse(dateHiredRaw.toString())
+        : null,
+    employmentStatus: m['employment_status'] as String?,
+    biometricUserId: m['biometric_user_id'] as String?,
+    departmentName: m['current_department_name'] as String?,
+    positionName: m['current_position_name'] as String?,
+  );
+}
+
+String _csvEscapeForExport(String? val) {
+  if (val == null || val.isEmpty) return '';
+  if (val.contains(',') ||
+      val.contains('"') ||
+      val.contains('\n') ||
+      val.contains('\r')) {
+    return '"${val.replaceAll('"', '""')}"';
+  }
+  return val;
 }
 
 /// Employees management screen: list with filters and detail panel.
 /// Matches reference: search, Privilege/Status filters, ID/Name/Privilege columns,
 /// right panel with avatar, Add/Edit/Deactivate buttons.
 class ManageEmployee extends StatefulWidget {
-  const ManageEmployee({super.key});
+  const ManageEmployee({super.key, this.onOpenAssignmentForEmployee});
+
+  /// When set (e.g. from admin DTR hub), detail panel can jump to Assignment with this employee.
+  final void Function(String employeeId)? onOpenAssignmentForEmployee;
 
   @override
   State<ManageEmployee> createState() => _ManageEmployeeState();
 }
 
 class _ManageEmployeeState extends State<ManageEmployee> {
+  static const _kSearchDebounceMs = 350;
+  static const _kPageSizes = [10, 25, 50, 100];
+
   final _searchController = TextEditingController();
+  Timer? _searchDebounceTimer;
+
+  /// Search text applied to the API (after debounce).
+  String _searchQuery = '';
+
   String _privilegeFilter = 'All';
   String _statusFilter = 'Active';
+  String? _departmentFilterId;
+
+  /// When set, list only employees whose biometric ID exists on this ZKTeco (admin API).
+  String? _biometricDeviceFilterId;
+  List<dynamic> _biometricDevicesForFilter = [];
   String? _selectedEmployeeId;
   List<_EmployeeProfile> _employees = [];
+  List<DepartmentOption> _departmentOptions = [];
   bool _loading = false;
+  String? _loadError;
+
+  int _pageIndex = 0;
+  int _pageSize = 25;
+  int _totalCount = 0;
+
+  /// API `sort` param (whitelist on server).
+  String _sortField = 'full_name';
+  bool _sortAscending = true;
+  bool _exportingCsv = false;
+
+  final Set<String> _selectedBulkIds = {};
+  final List<FocusNode> _rowFocusNodes = [];
+  bool _bulkWorking = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadEmployees());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadDepartmentOptions();
+      _loadBiometricDevicesForFilter();
+      _loadEmployees();
+    });
   }
 
-  Future<void> _loadEmployees() async {
-    setState(() => _loading = true);
+  Future<void> _loadDepartmentOptions() async {
     try {
-      final status = _statusFilter;
-      final roleFilter = _privilegeFilter;
       final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/departments',
+      );
+      final data = res.data ?? [];
+      final list =
+          data
+              .map((e) {
+                final m = e as Map;
+                final id = m['id']?.toString();
+                final name = m['name']?.toString() ?? '—';
+                return id != null ? DepartmentOption(id: id, name: name) : null;
+              })
+              .whereType<DepartmentOption>()
+              .toList()
+            ..sort(
+              (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+            );
+      if (mounted) {
+        setState(() {
+          _departmentOptions = list;
+          final fid = _departmentFilterId;
+          if (fid != null && !list.any((d) => d.id == fid)) {
+            _departmentFilterId = null;
+          }
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _departmentOptions = []);
+    }
+  }
+
+  Future<void> _loadBiometricDevicesForFilter() async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/biometric-devices',
+        queryParameters: const {'status': 'Active'},
+      );
+      if (!mounted) return;
+      final list = res.data ?? [];
+      setState(() {
+        _biometricDevicesForFilter = list;
+        final fid = _biometricDeviceFilterId;
+        if (fid != null &&
+            !list.any((d) => (d as Map)['id']?.toString() == fid)) {
+          _biometricDeviceFilterId = null;
+        }
+      });
+    } catch (_) {
+      if (mounted) setState(() => _biometricDevicesForFilter = []);
+    }
+  }
+
+  /// Query params shared by the paged list and CSV export (filters, search, sort).
+  Map<String, dynamic> _employeeListQueryBase() {
+    final q = <String, dynamic>{
+      'status': _statusFilter,
+      'role': _privilegeFilter,
+      'sort': _sortField,
+      'order': _sortAscending ? 'asc' : 'desc',
+    };
+    if (_departmentFilterId != null && _departmentFilterId!.isNotEmpty) {
+      q['department_id'] = _departmentFilterId;
+    }
+    final bioDev = _biometricDeviceFilterId?.trim();
+    if (bioDev != null && bioDev.isNotEmpty) {
+      q['biometric_device_id'] = bioDev;
+    }
+    final sq = _searchQuery.trim();
+    if (sq.isNotEmpty) {
+      q['q'] = sq;
+    }
+    return q;
+  }
+
+  Future<void> _loadEmployees({bool clampPage = true}) async {
+    if (!mounted) return;
+    setState(() {
+      _loading = true;
+      _loadError = null;
+    });
+    try {
+      final query = <String, dynamic>{
+        ..._employeeListQueryBase(),
+        'limit': _pageSize,
+        'offset': _pageIndex * _pageSize,
+      };
+
+      final bioDev = _biometricDeviceFilterId?.trim();
+      final res = await ApiClient.instance.get<dynamic>(
         '/api/employees',
-        queryParameters: {'status': status, 'role': roleFilter},
+        queryParameters: query,
+        options: bioDev != null && bioDev.isNotEmpty
+            ? Options(receiveTimeout: const Duration(seconds: 120))
+            : null,
       );
       final data = res.data;
-      if (data == null) {
-        _employees = [];
+      List<_EmployeeProfile> next;
+      int total;
+      if (data is Map) {
+        final list = data['employees'] as List<dynamic>? ?? [];
+        total = (data['total'] as num?)?.toInt() ?? 0;
+        next = list
+            .map(
+              (e) =>
+                  _employeeProfileFromJson(Map<String, dynamic>.from(e as Map)),
+            )
+            .toList();
+      } else if (data is List) {
+        next = data
+            .map(
+              (e) =>
+                  _employeeProfileFromJson(Map<String, dynamic>.from(e as Map)),
+            )
+            .toList();
+        total = next.length;
       } else {
-        _employees = data.map((e) {
-          final m = e as Map<String, dynamic>;
-          final dob = m['date_of_birth'];
-          final empNum = m['employee_number'];
-          final dateHiredRaw = m['date_hired'];
-          return _EmployeeProfile(
-            id: m['id'] as String,
-            fullName: m['full_name'] as String? ?? 'Unknown',
-            role: m['role'] as String? ?? 'employee',
-            employeeNumber: empNum is int
-                ? empNum
-                : (empNum != null ? int.tryParse(empNum.toString()) : null),
-            email: m['email'] as String?,
-            isActive: m['is_active'] as bool? ?? true,
-            avatarPath: m['avatar_path'] as String?,
-            middleName: m['middle_name'] as String?,
-            suffix: m['suffix'] as String?,
-            sex: m['sex'] as String?,
-            dateOfBirth: dob != null ? DateTime.tryParse(dob.toString()) : null,
-            contactNumber: m['contact_number'] as String?,
-            address: m['address'] as String?,
-            employmentType: m['employment_type'] as String?,
-            salaryGrade: m['salary_grade'] as String?,
-            dateHired: dateHiredRaw != null
-                ? DateTime.tryParse(dateHiredRaw.toString())
-                : null,
-            employmentStatus: m['employment_status'] as String?,
-            biometricUserId: m['biometric_user_id'] as String?,
-          );
-        }).toList();
+        next = [];
+        total = 0;
       }
+
+      var pageIdx = _pageIndex;
+      if (clampPage && total > 0 && _pageSize > 0) {
+        final maxPage = (total - 1) ~/ _pageSize;
+        if (pageIdx > maxPage) {
+          pageIdx = maxPage;
+        }
+      }
+
+      if (clampPage && pageIdx != _pageIndex) {
+        if (!mounted) return;
+        setState(() {
+          _pageIndex = pageIdx;
+          _loading = false;
+        });
+        await _loadEmployees(clampPage: false);
+        return;
+      }
+
+      if (!mounted) return;
+      _syncRowFocusNodes(next.length);
+      setState(() {
+        _employees = next;
+        _totalCount = total;
+        _loading = false;
+        _loadError = null;
+        final id = _selectedEmployeeId;
+        if (id != null && !_employees.any((e) => e.id == id)) {
+          _selectedEmployeeId = null;
+        }
+        _selectedBulkIds.removeWhere(
+          (id) => !_employees.any((e) => e.id == id),
+        );
+      });
     } catch (e) {
       debugPrint('Load employees failed: $e');
-      _employees = [];
+      if (!mounted) return;
+      _syncRowFocusNodes(0);
+      setState(() {
+        _employees = [];
+        _totalCount = 0;
+        _loadError = _messageForEmployeesLoadError(e);
+        _loading = false;
+        _selectedEmployeeId = null;
+      });
     }
-    if (mounted) setState(() => _loading = false);
+  }
+
+  void _onSearchChanged(String _) {
+    _searchDebounceTimer?.cancel();
+    _searchDebounceTimer = Timer(
+      const Duration(milliseconds: _kSearchDebounceMs),
+      () {
+        if (!mounted) return;
+        final next = _searchController.text.trim();
+        if (next == _searchQuery) return;
+        setState(() {
+          _searchQuery = next;
+          _pageIndex = 0;
+        });
+        _loadEmployees();
+      },
+    );
+  }
+
+  void _goToPage(int index) {
+    if (index < 0) return;
+    final maxPage = _totalCount > 0 ? (_totalCount - 1) ~/ _pageSize : 0;
+    if (index > maxPage) return;
+    setState(() => _pageIndex = index);
+    _loadEmployees();
+  }
+
+  void _setPageSize(int size) {
+    if (!_kPageSizes.contains(size)) return;
+    setState(() {
+      _pageSize = size;
+      _pageIndex = 0;
+    });
+    _loadEmployees();
+  }
+
+  void _setSort(String sortKey) {
+    setState(() {
+      if (_sortField == sortKey) {
+        _sortAscending = !_sortAscending;
+      } else {
+        _sortField = sortKey;
+        _sortAscending = true;
+      }
+      _pageIndex = 0;
+    });
+    _loadEmployees();
+  }
+
+  Future<void> _exportCsv() async {
+    if (!mounted || _exportingCsv) return;
+    setState(() => _exportingCsv = true);
+    try {
+      final bioDev = _biometricDeviceFilterId?.trim();
+      final res = await ApiClient.instance.dio.get<List<int>>(
+        '/api/employees/export/csv',
+        queryParameters: _employeeListQueryBase(),
+        options: Options(
+          responseType: ResponseType.bytes,
+          receiveTimeout: Duration(
+            seconds: bioDev != null && bioDev.isNotEmpty ? 120 : 90,
+          ),
+          headers: const {'Accept': 'text/csv'},
+        ),
+      );
+      final raw = res.data;
+      if (raw == null || raw.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Export returned no data.')),
+          );
+        }
+        return;
+      }
+      final bytes = Uint8List.fromList(raw);
+      final day = DateTime.now().toIso8601String().split('T').first;
+      await shareOrDownloadFile(bytes, 'employees_export_$day.csv', 'text/csv');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Employee export downloaded.')),
+        );
+      }
+    } on DioException catch (e) {
+      if (!mounted) return;
+      if (e.response?.statusCode == 413) {
+        final body = e.response?.data;
+        var msg =
+            'Too many rows for one export. Narrow filters or search and try again.';
+        if (body is Map && body['error'] != null) {
+          msg = body['error'].toString();
+        }
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(msg)));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_messageForEmployeesLoadError(e))),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _exportingCsv = false);
+    }
+  }
+
+  Future<void> _exportCsvPageOnly() async {
+    if (!mounted) return;
+    if (_employees.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No rows on this page to export.')),
+      );
+      return;
+    }
+    const header = [
+      'Employee No',
+      'Full Name',
+      'Email',
+      'Department',
+      'Position',
+      'Privilege',
+      'Account Active',
+      'Employment Status',
+      'Biometric ID',
+    ];
+    final lines = <String>[header.map(_csvEscapeForExport).join(',')];
+    for (final e in _employees) {
+      final empNo = e.employeeNumber != null
+          ? 'EMP-${e.employeeNumber!.toString().padLeft(3, '0')}'
+          : '';
+      final priv = e.role == 'admin' ? 'Admin' : 'Employee';
+      final acct = e.isActive ? 'Active' : 'Inactive';
+      lines.add(
+        [
+          _csvEscapeForExport(empNo),
+          _csvEscapeForExport(e.fullName),
+          _csvEscapeForExport(e.email ?? ''),
+          _csvEscapeForExport(e.departmentName ?? ''),
+          _csvEscapeForExport(e.positionName ?? ''),
+          _csvEscapeForExport(priv),
+          _csvEscapeForExport(acct),
+          _csvEscapeForExport(e.employmentStatus ?? ''),
+          _csvEscapeForExport(e.biometricUserId ?? ''),
+        ].join(','),
+      );
+    }
+    final csv = '\uFEFF${lines.join('\n')}';
+    final bytes = Uint8List.fromList(utf8.encode(csv));
+    final day = DateTime.now().toIso8601String().split('T').first;
+    try {
+      await shareOrDownloadFile(
+        bytes,
+        'employees_page${_pageIndex + 1}_$day.csv',
+        'text/csv',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('This page export downloaded.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
+      }
+    }
+  }
+
+  void _syncRowFocusNodes(int count) {
+    while (_rowFocusNodes.length < count) {
+      _rowFocusNodes.add(
+        FocusNode(debugLabel: 'employee_row_${_rowFocusNodes.length}'),
+      );
+    }
+    while (_rowFocusNodes.length > count) {
+      _rowFocusNodes.removeLast().dispose();
+    }
+  }
+
+  bool? _headerSelectAllValue() {
+    if (_employees.isEmpty) return false;
+    final onPage = _employees.map((e) => e.id).toSet();
+    var n = 0;
+    for (final id in onPage) {
+      if (_selectedBulkIds.contains(id)) n++;
+    }
+    if (n == 0) return false;
+    if (n == onPage.length) return true;
+    return null;
+  }
+
+  void _onHeaderSelectAllChanged(bool? v) {
+    setState(() {
+      if (v == true) {
+        for (final e in _employees) {
+          _selectedBulkIds.add(e.id);
+        }
+      } else {
+        for (final e in _employees) {
+          _selectedBulkIds.remove(e.id);
+        }
+      }
+    });
+  }
+
+  KeyEventResult _handleEmployeeRowKey(KeyEvent event, int index) {
+    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.space) {
+      final id = _employees[index].id;
+      setState(() {
+        if (_selectedBulkIds.contains(id)) {
+          _selectedBulkIds.remove(id);
+        } else {
+          _selectedBulkIds.add(id);
+        }
+      });
+      return KeyEventResult.handled;
+    }
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      if (index < _employees.length - 1) {
+        _rowFocusNodes[index + 1].requestFocus();
+        setState(() => _selectedEmployeeId = _employees[index + 1].id);
+      }
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      if (index > 0) {
+        _rowFocusNodes[index - 1].requestFocus();
+        setState(() => _selectedEmployeeId = _employees[index - 1].id);
+      }
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  Future<void> _confirmBulkDeactivate() async {
+    final targets = _employees
+        .where((e) => _selectedBulkIds.contains(e.id) && e.isActive)
+        .toList();
+    if (targets.isEmpty) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Deactivate ${targets.length} employees?'),
+        content: Text(
+          targets.length <= 3
+              ? targets.map((e) => e.fullName).join(', ')
+              : 'This will deactivate ${targets.length} selected accounts. They will no longer be able to sign in.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Deactivate'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final dtr = context.read<DtrProvider>();
+    setState(() => _bulkWorking = true);
+    try {
+      await ApiClient.instance.post(
+        '/api/employees/bulk-status',
+        data: {
+          'employee_ids': targets.map((e) => e.id).toList(),
+          'is_active': false,
+        },
+      );
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('${targets.length} employees deactivated.')),
+      );
+      setState(() {
+        _bulkWorking = false;
+        _selectedBulkIds.clear();
+      });
+      await _loadEmployees();
+      if (mounted) dtr.loadEmployees();
+    } catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('Bulk deactivate failed: $e')),
+        );
+        setState(() => _bulkWorking = false);
+      }
+    }
+  }
+
+  Future<void> _confirmBulkActivate() async {
+    final targets = _employees
+        .where((e) => _selectedBulkIds.contains(e.id) && !e.isActive)
+        .toList();
+    if (targets.isEmpty) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Activate ${targets.length} employees?'),
+        content: Text(
+          targets.length <= 3
+              ? targets.map((e) => e.fullName).join(', ')
+              : 'This will reactivate ${targets.length} selected accounts. They will be able to sign in again.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF4CAF50),
+            ),
+            child: const Text('Activate'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final dtr = context.read<DtrProvider>();
+    setState(() => _bulkWorking = true);
+    try {
+      await ApiClient.instance.post(
+        '/api/employees/bulk-status',
+        data: {
+          'employee_ids': targets.map((e) => e.id).toList(),
+          'is_active': true,
+        },
+      );
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('${targets.length} employees activated.')),
+      );
+      setState(() {
+        _bulkWorking = false;
+        _selectedBulkIds.clear();
+      });
+      await _loadEmployees();
+      if (mounted) dtr.loadEmployees();
+    } catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('Bulk activate failed: $e')),
+        );
+        setState(() => _bulkWorking = false);
+      }
+    }
+  }
+
+  Widget _buildBulkSelectionBar() {
+    final n = _selectedBulkIds.length;
+    final canDeactivate = _employees.any(
+      (e) => _selectedBulkIds.contains(e.id) && e.isActive,
+    );
+    final canActivate = _employees.any(
+      (e) => _selectedBulkIds.contains(e.id) && !e.isActive,
+    );
+    return Material(
+      color: AppTheme.primaryNavy.withOpacity(0.07),
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Wrap(
+          spacing: 10,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(
+              '$n selected',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+            TextButton(
+              onPressed: _bulkWorking
+                  ? null
+                  : () => setState(() => _selectedBulkIds.clear()),
+              child: const Text('Clear'),
+            ),
+            FilledButton.icon(
+              onPressed: _bulkWorking || !canDeactivate
+                  ? null
+                  : _confirmBulkDeactivate,
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFE53935),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+              ),
+              icon: const Icon(Icons.person_off_rounded, size: 18),
+              label: const Text('Deactivate'),
+            ),
+            FilledButton.icon(
+              onPressed: _bulkWorking || !canActivate
+                  ? null
+                  : _confirmBulkActivate,
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF4CAF50),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+              ),
+              icon: const Icon(Icons.person_add_rounded, size: 18),
+              label: const Text('Activate'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showAddEmployeeDialog() {
+    final messenger = ScaffoldMessenger.of(context);
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return Dialog(
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 24,
+          ),
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 920,
+              maxHeight: MediaQuery.of(context).size.height * 0.92,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 8, 8),
+                  child: Row(
+                    children: [
+                      Text(
+                        'Add employee',
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded),
+                        tooltip: 'Close',
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: AddEmployeeForm(
+                      onAccountCreated: () {
+                        Navigator.of(dialogContext).pop();
+                        setState(() => _pageIndex = 0);
+                        _loadEmployees();
+                        messenger.showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Account created. The list has been refreshed.',
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   @override
   void dispose() {
+    _searchDebounceTimer?.cancel();
+    for (final n in _rowFocusNodes) {
+      n.dispose();
+    }
+    _rowFocusNodes.clear();
     _searchController.dispose();
     super.dispose();
   }
@@ -907,13 +1799,614 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     );
   }
 
+  Widget _buildEmployeesToolbar() {
+    // Single horizontal strip: sharing one row with action buttons squeezed the Wrap
+    // and forced each filter onto its own line. Scroll when the strip is wider than the panel.
+    final filterStrip = SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 2),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            SizedBox(width: 220, child: _buildSearchField()),
+            const SizedBox(width: 12),
+            _buildDropdown(_privilegeFilter, ['All', 'Admin', 'Employee'], (v) {
+              setState(() {
+                _privilegeFilter = v ?? 'All';
+                _pageIndex = 0;
+              });
+              _loadEmployees();
+            }),
+            const SizedBox(width: 12),
+            _buildDropdown(_statusFilter, ['Active', 'Inactive', 'All'], (v) {
+              setState(() {
+                _statusFilter = v ?? 'Active';
+                _pageIndex = 0;
+              });
+              _loadEmployees();
+            }),
+            const SizedBox(width: 12),
+            _buildDepartmentFilterDropdown(),
+            const SizedBox(width: 12),
+            _buildBiometricDeviceFilterDropdown(),
+          ],
+        ),
+      ),
+    );
+    final actions = Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      alignment: WrapAlignment.center,
+      children: [
+        OutlinedButton.icon(
+          onPressed: () => _showImportDialog(context),
+          icon: Icon(
+            Icons.download_rounded,
+            size: 18,
+            color: AppTheme.primaryNavy,
+          ),
+          label: Text(
+            'Import from Device',
+            style: TextStyle(color: AppTheme.primaryNavy),
+          ),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppTheme.primaryNavy,
+            side: BorderSide(color: AppTheme.primaryNavy.withOpacity(0.45)),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        ),
+        OutlinedButton.icon(
+          onPressed: () => _showBiometricRosterDialog(context),
+          icon: Icon(
+            Icons.badge_outlined,
+            size: 18,
+            color: AppTheme.primaryNavy,
+          ),
+          label: Text(
+            'Biometric roster',
+            style: TextStyle(color: AppTheme.primaryNavy),
+          ),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppTheme.primaryNavy,
+            side: BorderSide(color: AppTheme.primaryNavy.withOpacity(0.45)),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        ),
+        MenuAnchor(
+          alignmentOffset: const Offset(0, 8),
+          builder: (context, controller, _) {
+            return OutlinedButton.icon(
+              onPressed: _exportingCsv
+                  ? null
+                  : () {
+                      if (controller.isOpen) {
+                        controller.close();
+                      } else {
+                        controller.open();
+                      }
+                    },
+              icon: _exportingCsv
+                  ? ExcludeSemantics(
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppTheme.primaryNavy,
+                        ),
+                      ),
+                    )
+                  : Icon(
+                      Icons.file_download_outlined,
+                      size: 18,
+                      color: AppTheme.primaryNavy,
+                    ),
+              label: Text(
+                'Export CSV',
+                style: TextStyle(color: AppTheme.primaryNavy),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+                side: BorderSide(color: AppTheme.primaryNavy.withOpacity(0.45)),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            );
+          },
+          menuChildren: [
+            MenuItemButton(
+              onPressed: _exportingCsv ? null : () => _exportCsv(),
+              child: const Text('All matching rows (max 10,000)'),
+            ),
+            MenuItemButton(
+              onPressed: _exportingCsv ? null : () => _exportCsvPageOnly(),
+              child: const Text('This page only'),
+            ),
+          ],
+        ),
+        FilledButton.icon(
+          onPressed: _showAddEmployeeDialog,
+          icon: const Icon(Icons.person_add_rounded, size: 18),
+          label: const Text('Add employee'),
+          style: FilledButton.styleFrom(
+            backgroundColor: AppTheme.primaryNavy,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        ),
+      ],
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        filterStrip,
+        const SizedBox(height: 12),
+        Center(child: actions),
+      ],
+    );
+  }
+
+  Widget _buildDepartmentFilterDropdown() {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 160, maxWidth: 220),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppTheme.lightGray.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.transparent),
+      ),
+      child: DropdownButton<String?>(
+        value: _departmentFilterId,
+        hint: Text(
+          'All departments',
+          style: TextStyle(
+            color: AppTheme.textSecondary.withOpacity(0.85),
+            fontSize: 14,
+          ),
+        ),
+        underline: const SizedBox.shrink(),
+        isDense: true,
+        isExpanded: true,
+        items: [
+          const DropdownMenuItem<String?>(
+            value: null,
+            child: Text('All departments'),
+          ),
+          ..._departmentOptions.map(
+            (d) => DropdownMenuItem<String?>(
+              value: d.id,
+              child: Text(d.name, overflow: TextOverflow.ellipsis, maxLines: 1),
+            ),
+          ),
+        ],
+        onChanged: (v) {
+          setState(() {
+            _departmentFilterId = v;
+            _pageIndex = 0;
+          });
+          _loadEmployees();
+        },
+      ),
+    );
+  }
+
+  Widget _buildBiometricDeviceFilterDropdown() {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 160, maxWidth: 240),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppTheme.lightGray.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.transparent),
+      ),
+      child: DropdownButton<String?>(
+        value: _biometricDeviceFilterId,
+        hint: Text(
+          'All devices',
+          style: TextStyle(
+            color: AppTheme.textSecondary.withOpacity(0.85),
+            fontSize: 14,
+          ),
+        ),
+        underline: const SizedBox.shrink(),
+        isDense: true,
+        isExpanded: true,
+        items: [
+          const DropdownMenuItem<String?>(
+            value: null,
+            child: Text('All devices'),
+          ),
+          ..._biometricDevicesForFilter.map((d) {
+            final m = Map<String, dynamic>.from(d as Map);
+            final id = m['id']?.toString() ?? '';
+            final name = m['name']?.toString() ?? id;
+            final loc = m['location']?.toString();
+            final line = (loc != null && loc.isNotEmpty)
+                ? '$name · $loc'
+                : name;
+            return DropdownMenuItem<String?>(
+              value: id,
+              child: Text(line, overflow: TextOverflow.ellipsis, maxLines: 1),
+            );
+          }),
+        ],
+        onChanged: (v) {
+          setState(() {
+            _biometricDeviceFilterId = v;
+            _pageIndex = 0;
+          });
+          _loadEmployees();
+        },
+      ),
+    );
+  }
+
+  Widget _buildLoadErrorBanner() {
+    final err = _loadError;
+    if (err == null) return const SizedBox.shrink();
+    return Material(
+      color: const Color(0xFFFFEBEE),
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              Icons.error_outline_rounded,
+              color: Colors.red.shade700,
+              size: 22,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                err,
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 13,
+                  height: 1.35,
+                ),
+              ),
+            ),
+            TextButton(onPressed: _loadEmployees, child: const Text('Retry')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusCellContent(_EmployeeProfile e) {
+    final hrRaw = e.employmentStatus?.trim();
+    final showHr =
+        hrRaw != null && hrRaw.isNotEmpty && hrRaw.toLowerCase() != 'active';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          e.isActive ? 'Active' : 'Inactive',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: e.isActive
+                ? const Color(0xFF2E7D32)
+                : const Color(0xFFC62828),
+          ),
+        ),
+        if (showHr)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              _titleCaseUnderscores(hrRaw),
+              style: TextStyle(
+                fontSize: 10,
+                color: AppTheme.textSecondary.withOpacity(0.9),
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+      ],
+    );
+  }
+
   Widget _buildLeftPanel() {
-    final search = _searchController.text.toLowerCase();
-    final filtered = search.isEmpty
-        ? _employees
-        : _employees
-              .where((e) => e.fullName.toLowerCase().contains(search))
-              .toList();
+    String emptyMessage() {
+      if (_totalCount == 0) {
+        return _searchQuery.trim().isNotEmpty
+            ? 'No results for your search.'
+            : 'No employees match these filters yet.';
+      }
+      if (_employees.isEmpty) {
+        return 'No rows on this page.';
+      }
+      return '';
+    }
+
+    const kTableMinWidth = 768.0;
+    const columnWidths = <int, TableColumnWidth>{
+      0: FixedColumnWidth(44),
+      1: FixedColumnWidth(88),
+      2: FlexColumnWidth(1.35),
+      3: FlexColumnWidth(1.15),
+      4: FixedColumnWidth(104),
+      5: FixedColumnWidth(92),
+    };
+
+    Widget tableCore() {
+      final headerRow = TableRow(
+        decoration: BoxDecoration(
+          color: AppTheme.lightGray.withOpacity(0.4),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        children: [
+          TableCell(
+            verticalAlignment: TableCellVerticalAlignment.middle,
+            child: Semantics(
+              label: 'Select all employees on this page',
+              child: Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: Checkbox(
+                  tristate: true,
+                  value: _headerSelectAllValue(),
+                  onChanged: (_employees.isEmpty || _loading)
+                      ? null
+                      : _onHeaderSelectAllChanged,
+                ),
+              ),
+            ),
+          ),
+          _sortableHeaderCell('No.', 'employee_number'),
+          _sortableHeaderCell('Name', 'full_name'),
+          _sortableHeaderCell('Assignment', 'department'),
+          _sortableHeaderCell('Status', 'is_active'),
+          _sortableHeaderCell('Privilege', 'role'),
+        ],
+      );
+
+      if (_loading) {
+        return Table(
+          columnWidths: columnWidths,
+          children: [headerRow, ..._employeeTableSkeletonRows()],
+        );
+      }
+
+      if (_employees.isEmpty) {
+        final msg = emptyMessage();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Table(columnWidths: columnWidths, children: [headerRow]),
+            Container(
+              width: double.infinity,
+              constraints: const BoxConstraints(minHeight: 120),
+              alignment: Alignment.center,
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+              decoration: BoxDecoration(
+                border: Border(
+                  top: BorderSide(color: AppTheme.lightGray.withOpacity(0.6)),
+                ),
+              ),
+              child: Semantics(
+                label: msg,
+                child: Text(
+                  msg,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppTheme.textSecondary.withOpacity(0.88),
+                    fontSize: 14,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      }
+
+      return Table(
+        columnWidths: columnWidths,
+        children: [
+          headerRow,
+          ..._employees.asMap().entries.map((entry) {
+            final i = entry.key;
+            final e = entry.value;
+            final isSelected = _selectedEmployeeId == e.id;
+            return TableRow(
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? AppTheme.primaryNavy.withOpacity(0.08)
+                    : null,
+              ),
+              children: [
+                TableCell(
+                  verticalAlignment: TableCellVerticalAlignment.middle,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: Checkbox(
+                      value: _selectedBulkIds.contains(e.id),
+                      onChanged: (v) {
+                        setState(() {
+                          if (v == true) {
+                            _selectedBulkIds.add(e.id);
+                          } else {
+                            _selectedBulkIds.remove(e.id);
+                          }
+                          _selectedEmployeeId = e.id;
+                        });
+                        if (i >= 0 && i < _rowFocusNodes.length) {
+                          _rowFocusNodes[i].requestFocus();
+                        }
+                      },
+                    ),
+                  ),
+                ),
+                TableCell(
+                  verticalAlignment: TableCellVerticalAlignment.middle,
+                  child: _employeeRowInkWell(
+                    e: e,
+                    isSelected: isSelected,
+                    primarySemanticForRow: false,
+                    rowIndex: i,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      child: Text(
+                        e.displayEmployeeNo,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.textSecondary,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                    ),
+                  ),
+                ),
+                TableCell(
+                  verticalAlignment: TableCellVerticalAlignment.middle,
+                  child: Focus(
+                    focusNode: _rowFocusNodes[i],
+                    onKeyEvent: (node, event) =>
+                        _handleEmployeeRowKey(event, i),
+                    child: _employeeRowInkWell(
+                      e: e,
+                      isSelected: isSelected,
+                      primarySemanticForRow: true,
+                      rowIndex: i,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                e.fullName,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: AppTheme.textPrimary,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                              ),
+                            ),
+                            if (!e.isActive)
+                              Container(
+                                margin: const EdgeInsets.only(left: 6),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.red.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  e.biometricUserId != null
+                                      ? 'Imported (Inactive)'
+                                      : 'Inactive',
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.red,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                TableCell(
+                  verticalAlignment: TableCellVerticalAlignment.middle,
+                  child: _employeeRowInkWell(
+                    e: e,
+                    isSelected: isSelected,
+                    primarySemanticForRow: false,
+                    rowIndex: i,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      child: Text(
+                        e.assignmentDisplay,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.textSecondary,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                ),
+                TableCell(
+                  verticalAlignment: TableCellVerticalAlignment.middle,
+                  child: _employeeRowInkWell(
+                    e: e,
+                    isSelected: isSelected,
+                    primarySemanticForRow: false,
+                    rowIndex: i,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      child: _buildStatusCellContent(e),
+                    ),
+                  ),
+                ),
+                TableCell(
+                  verticalAlignment: TableCellVerticalAlignment.middle,
+                  child: _employeeRowInkWell(
+                    e: e,
+                    isSelected: isSelected,
+                    primarySemanticForRow: false,
+                    rowIndex: i,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      child: Text(
+                        e.roleDisplay,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.textSecondary,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }),
+        ],
+      );
+    }
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -932,242 +2425,243 @@ class _ManageEmployeeState extends State<ManageEmployee> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
+          _buildEmployeesToolbar(),
+          const SizedBox(height: 16),
+          if (_selectedBulkIds.isNotEmpty) ...[
+            _buildBulkSelectionBar(),
+            const SizedBox(height: 12),
+          ],
+          if (_loadError != null) ...[
+            _buildLoadErrorBanner(),
+            const SizedBox(height: 16),
+          ],
+          if (_loadError == null) ...[
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final useHScroll = constraints.maxWidth < kTableMinWidth;
+                if (!useHScroll) return tableCore();
+                return SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: SizedBox(width: kTableMinWidth, child: tableCore()),
+                );
+              },
+            ),
+            _buildPaginationBar(),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPaginationBar() {
+    if (_loading && _employees.isEmpty) return const SizedBox.shrink();
+    final total = _totalCount;
+    final maxPage = total <= 0 ? 0 : (total - 1) ~/ _pageSize;
+    final start = total == 0 ? 0 : _pageIndex * _pageSize + 1;
+    final end = total == 0
+        ? 0
+        : (_pageIndex * _pageSize + _employees.length).clamp(0, total);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 10,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text(
+            total == 0 ? 'No results' : 'Showing $start–$end of $total',
+            style: TextStyle(
+              fontSize: 13,
+              color: AppTheme.textSecondary.withOpacity(0.9),
+            ),
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              SizedBox(width: 200, child: _buildSearchField()),
-              _buildDropdown(
-                'Privilege',
-                _privilegeFilter,
-                ['All', 'Admin', 'Employee'],
-                (v) {
-                  setState(() => _privilegeFilter = v ?? 'All');
-                  _loadEmployees();
-                },
-              ),
-              _buildDropdown(
-                'Status',
-                _statusFilter,
-                ['Active', 'Inactive', 'All'],
-                (v) {
-                  setState(() => _statusFilter = v ?? 'Active');
-                  _loadEmployees();
-                },
-              ),
-              const Spacer(),
-              FilledButton.icon(
-                onPressed: () => _showImportDialog(context),
-                icon: const Icon(Icons.download_rounded, size: 18),
-                label: const Text('Import from Device'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.primaryNavy,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
+              Text(
+                'Rows',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: AppTheme.textSecondary.withOpacity(0.85),
                 ),
+              ),
+              const SizedBox(width: 8),
+              DropdownButton<int>(
+                value: _pageSize,
+                underline: const SizedBox.shrink(),
+                isDense: true,
+                items: _kPageSizes
+                    .map(
+                      (s) =>
+                          DropdownMenuItem(value: s, child: Text('$s / page')),
+                    )
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) _setPageSize(v);
+                },
               ),
             ],
           ),
-          const SizedBox(height: 20),
-          Table(
-            columnWidths: const {
-              0: FixedColumnWidth(88),
-              1: FlexColumnWidth(),
-              2: FixedColumnWidth(100),
-            },
-            children: [
-              TableRow(
-                decoration: BoxDecoration(
-                  color: AppTheme.lightGray.withOpacity(0.4),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                children: [
-                  _tableCell('No.', bold: true),
-                  _tableCell('Name', bold: true),
-                  _tableCell('Privilege', bold: true),
-                ],
-              ),
-              ...(_loading
-                  ? [
-                      TableRow(
-                        children: [
-                          TableCell(
-                            verticalAlignment:
-                                TableCellVerticalAlignment.middle,
-                            child: Container(
-                              constraints: const BoxConstraints(minHeight: 120),
-                              alignment: Alignment.center,
-                              child: const CircularProgressIndicator(),
-                            ),
-                          ),
-                          const TableCell(child: SizedBox.shrink()),
-                          const TableCell(child: SizedBox.shrink()),
-                        ],
-                      ),
-                    ]
-                  : filtered.isEmpty
-                  ? [
-                      TableRow(
-                        children: [
-                          TableCell(
-                            verticalAlignment:
-                                TableCellVerticalAlignment.middle,
-                            child: Container(
-                              constraints: const BoxConstraints(minHeight: 120),
-                              alignment: Alignment.center,
-                              child: Text(
-                                'No employees yet',
-                                style: TextStyle(
-                                  color: AppTheme.textSecondary.withOpacity(
-                                    0.8,
-                                  ),
-                                  fontSize: 14,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const TableCell(child: SizedBox.shrink()),
-                          const TableCell(child: SizedBox.shrink()),
-                        ],
-                      ),
-                    ]
-                  : filtered.map((e) {
-                      final isSelected = _selectedEmployeeId == e.id;
-                      return TableRow(
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? AppTheme.primaryNavy.withOpacity(0.08)
-                              : null,
-                        ),
-                        children: [
-                          TableCell(
-                            verticalAlignment:
-                                TableCellVerticalAlignment.middle,
-                            child: InkWell(
-                              onTap: () =>
-                                  setState(() => _selectedEmployeeId = e.id),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 10,
-                                ),
-                                child: Text(
-                                  e.employeeNumber != null
-                                      ? 'EMP-${e.employeeNumber!.toString().padLeft(3, '0')}'
-                                      : '—',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: AppTheme.textSecondary,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                  maxLines: 1,
-                                ),
-                              ),
-                            ),
-                          ),
-                          TableCell(
-                            verticalAlignment:
-                                TableCellVerticalAlignment.middle,
-                            child: InkWell(
-                              onTap: () =>
-                                  setState(() => _selectedEmployeeId = e.id),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 10,
-                                ),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        e.fullName,
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          color: AppTheme.textPrimary,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
-                                        maxLines: 1,
-                                      ),
-                                    ),
-                                    if (!e.isActive)
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 6,
-                                          vertical: 2,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: Colors.red.withOpacity(0.1),
-                                          borderRadius: BorderRadius.circular(
-                                            4,
-                                          ),
-                                        ),
-                                        child: Text(
-                                          e.biometricUserId != null
-                                              ? 'Imported (Inactive)'
-                                              : 'Inactive',
-                                          style: const TextStyle(
-                                            fontSize: 10,
-                                            color: Colors.red,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                          TableCell(
-                            verticalAlignment:
-                                TableCellVerticalAlignment.middle,
-                            child: InkWell(
-                              onTap: () =>
-                                  setState(() => _selectedEmployeeId = e.id),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 10,
-                                ),
-                                child: Text(
-                                  e.roleDisplay,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: AppTheme.textSecondary,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                  maxLines: 1,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      );
-                    }).toList()),
-            ],
+          IconButton(
+            tooltip: 'Previous page',
+            icon: const Icon(Icons.chevron_left_rounded),
+            onPressed: _pageIndex > 0 ? () => _goToPage(_pageIndex - 1) : null,
+          ),
+          Text(
+            'Page ${_pageIndex + 1} / ${maxPage + 1}',
+            style: TextStyle(
+              fontSize: 13,
+              color: AppTheme.textPrimary,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          IconButton(
+            tooltip: 'Next page',
+            icon: const Icon(Icons.chevron_right_rounded),
+            onPressed: _pageIndex < maxPage
+                ? () => _goToPage(_pageIndex + 1)
+                : null,
           ),
         ],
       ),
     );
   }
 
-  Widget _tableCell(String text, {bool bold = false}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontWeight: bold ? FontWeight.w700 : FontWeight.normal,
-          fontSize: 13,
-          color: AppTheme.textPrimary,
+  Widget _employeeRowInkWell({
+    required _EmployeeProfile e,
+    required bool isSelected,
+    required bool primarySemanticForRow,
+    required Widget child,
+    int? rowIndex,
+  }) {
+    final ink = InkWell(
+      onTap: () {
+        if (rowIndex != null &&
+            rowIndex >= 0 &&
+            rowIndex < _rowFocusNodes.length) {
+          _rowFocusNodes[rowIndex].requestFocus();
+        }
+        setState(() => _selectedEmployeeId = e.id);
+      },
+      focusColor: AppTheme.primaryNavy.withOpacity(0.08),
+      canRequestFocus: false,
+      child: child,
+    );
+    if (primarySemanticForRow) {
+      return Semantics(
+        button: true,
+        selected: isSelected,
+        label:
+            '${e.fullName}, employee number ${e.displayEmployeeNo}, '
+            '${e.assignmentDisplay}, '
+            '${e.isActive ? "active account" : "inactive account"}, '
+            '${e.roleDisplay}. Activate to select. '
+            'Arrow up and down to move between rows. Space toggles bulk selection.',
+        child: ink,
+      );
+    }
+    return ExcludeSemantics(child: ink);
+  }
+
+  List<TableRow> _employeeTableSkeletonRows() {
+    Widget skelBox(double width) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Shimmer.fromColors(
+            baseColor: AppTheme.lightGray.withOpacity(0.55),
+            highlightColor: AppTheme.white,
+            period: const Duration(milliseconds: 1200),
+            child: SizedBox(
+              width: width,
+              height: 12,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: AppTheme.lightGray.withOpacity(0.85),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
+          ),
         ),
-        overflow: TextOverflow.ellipsis,
-        maxLines: 1,
+      );
+    }
+
+    return List<TableRow>.generate(
+      6,
+      (_) => TableRow(
+        children: [
+          TableCell(
+            verticalAlignment: TableCellVerticalAlignment.middle,
+            child: skelBox(22),
+          ),
+          TableCell(
+            verticalAlignment: TableCellVerticalAlignment.middle,
+            child: skelBox(52),
+          ),
+          TableCell(
+            verticalAlignment: TableCellVerticalAlignment.middle,
+            child: skelBox(160),
+          ),
+          TableCell(
+            verticalAlignment: TableCellVerticalAlignment.middle,
+            child: skelBox(120),
+          ),
+          TableCell(
+            verticalAlignment: TableCellVerticalAlignment.middle,
+            child: skelBox(64),
+          ),
+          TableCell(
+            verticalAlignment: TableCellVerticalAlignment.middle,
+            child: skelBox(72),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sortableHeaderCell(String label, String sortKey) {
+    final active = _sortField == sortKey;
+    final orderHint = active
+        ? (_sortAscending ? ', ascending' : ', descending')
+        : '';
+    return Semantics(
+      button: true,
+      label: 'Sort by $label$orderHint',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => _setSort(sortKey),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      color: AppTheme.textPrimary,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  ),
+                ),
+                if (active)
+                  Icon(
+                    _sortAscending
+                        ? Icons.arrow_upward_rounded
+                        : Icons.arrow_downward_rounded,
+                    size: 16,
+                    color: AppTheme.primaryNavy,
+                  ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -1175,9 +2669,9 @@ class _ManageEmployeeState extends State<ManageEmployee> {
   Widget _buildSearchField() {
     return TextField(
       controller: _searchController,
-      onChanged: (_) => setState(() {}),
+      onChanged: _onSearchChanged,
       decoration: InputDecoration(
-        hintText: 'Search',
+        hintText: 'Search name, ID, or email',
         hintStyle: TextStyle(
           color: AppTheme.textSecondary.withOpacity(0.8),
           fontSize: 14,
@@ -1203,12 +2697,12 @@ class _ManageEmployeeState extends State<ManageEmployee> {
   }
 
   Widget _buildDropdown(
-    String label,
     String value,
     List<String> options,
     ValueChanged<String?> onChanged,
   ) {
     return Container(
+      constraints: const BoxConstraints(minWidth: 128, maxWidth: 200),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
         color: AppTheme.lightGray.withOpacity(0.5),
@@ -1219,6 +2713,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
         value: value,
         underline: const SizedBox.shrink(),
         isDense: true,
+        isExpanded: true,
         items: options
             .map((o) => DropdownMenuItem(value: o, child: Text(o)))
             .toList(),
@@ -1236,6 +2731,8 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     }
     final sel = selected;
     final hasSelection = sel != null;
+    final emailTrim = sel?.email?.trim();
+    final bioTrim = sel?.biometricUserId?.trim();
 
     return Container(
       padding: const EdgeInsets.all(24),
@@ -1295,12 +2792,121 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             ),
             textAlign: TextAlign.center,
           ),
+          if (emailTrim != null && emailTrim.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              emailTrim,
+              style: TextStyle(
+                color: AppTheme.textSecondary.withOpacity(0.9),
+                fontSize: 12,
+              ),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+          if (hasSelection && sel.assignmentDisplay != '—') ...[
+            const SizedBox(height: 10),
+            Text(
+              sel.assignmentDisplay,
+              style: TextStyle(
+                color: AppTheme.textSecondary.withOpacity(0.85),
+                fontSize: 12,
+                height: 1.3,
+              ),
+              textAlign: TextAlign.center,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+          if (bioTrim != null && bioTrim.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Semantics(
+              container: true,
+              label:
+                  'Linked to time clock device. Biometric user identifier $bioTrim',
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.2),
+                  ),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Text(
+                      'Linked to device',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.9),
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.fingerprint_rounded,
+                          size: 14,
+                          color: AppTheme.primaryNavy.withOpacity(0.85),
+                        ),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            bioTrim,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: AppTheme.textPrimary.withOpacity(0.85),
+                              fontWeight: FontWeight.w500,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          if (hasSelection && widget.onOpenAssignmentForEmployee != null) ...[
+            const SizedBox(height: 12),
+            TextButton.icon(
+              onPressed: () => widget.onOpenAssignmentForEmployee!(sel.id),
+              icon: Icon(
+                Icons.assignment_turned_in_outlined,
+                size: 18,
+                color: AppTheme.primaryNavy,
+              ),
+              label: Text(
+                'View assignment & shift',
+                style: TextStyle(
+                  color: AppTheme.primaryNavy,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
+            ),
+          ],
           const SizedBox(height: 32),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
               onPressed: hasSelection
-                  ? () => _showEditEmployeeDialog(context, sel)
+                  ? () => _showEditEmployeeDialog(sel)
                   : null,
               icon: Icon(
                 Icons.edit_rounded,
@@ -1331,9 +2937,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
               onPressed: hasSelection
                   ? () {
                       final p = sel;
-                      p.isActive
-                          ? _confirmDeactivate(context, p)
-                          : _confirmActivate(context, p);
+                      p.isActive ? _confirmDeactivate(p) : _confirmActivate(p);
                     }
                   : null,
               icon: Icon(
@@ -1367,7 +2971,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     );
   }
 
-  void _confirmActivate(BuildContext context, _EmployeeProfile profile) async {
+  Future<void> _confirmActivate(_EmployeeProfile profile) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1396,54 +3000,53 @@ class _ManageEmployeeState extends State<ManageEmployee> {
         '/api/employees/${profile.id}',
         data: {'is_active': true},
       );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${profile.fullName} has been activated.')),
-        );
-        setState(() => _selectedEmployeeId = null);
-        _loadEmployees();
-        context.read<DtrProvider>().loadEmployees();
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${profile.fullName} has been activated.')),
+      );
+      await _loadEmployees();
+      if (!mounted) return;
+      context.read<DtrProvider>().loadEmployees();
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to activate: $e')));
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to activate: $e')));
     }
   }
 
-  void _showEditEmployeeDialog(
-    BuildContext context,
-    _EmployeeProfile profile,
-  ) async {
+  Future<void> _showEditEmployeeDialog(_EmployeeProfile profile) async {
     final updated = await showDialog<bool>(
       context: context,
-      builder: (context) => _EditEmployeeDialog(profile: profile),
+      builder: (dialogCtx) => _EditEmployeeDialog(profile: profile),
     );
-    if (updated == true && mounted) {
-      _loadEmployees();
-      context.read<DtrProvider>().loadEmployees();
-    }
+    if (updated != true || !mounted) return;
+    await _loadEmployees();
+    if (!mounted) return;
+    context.read<DtrProvider>().loadEmployees();
   }
 
   void _showImportDialog(BuildContext context) async {
     await showDialog<void>(
       context: context,
-      builder: (context) => _BiometricImportDialog(
-        _employees,
+      builder: (dialogContext) => _BiometricImportDialog(
         onImportSuccess: () {
+          setState(() => _pageIndex = 0);
           _loadEmployees();
-          context.read<DtrProvider>().loadEmployees();
+          dialogContext.read<DtrProvider>().loadEmployees();
         },
       ),
     );
   }
 
-  void _confirmDeactivate(
-    BuildContext context,
-    _EmployeeProfile profile,
-  ) async {
+  void _showBiometricRosterDialog(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => const _BiometricRosterDialog(),
+    );
+  }
+
+  Future<void> _confirmDeactivate(_EmployeeProfile profile) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1467,20 +3070,18 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     if (ok != true || !mounted) return;
     try {
       await ApiClient.instance.delete('/api/employees/${profile.id}');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${profile.fullName} has been deactivated.')),
-        );
-        setState(() => _selectedEmployeeId = null);
-        _loadEmployees();
-        context.read<DtrProvider>().loadEmployees();
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${profile.fullName} has been deactivated.')),
+      );
+      await _loadEmployees();
+      if (!mounted) return;
+      context.read<DtrProvider>().loadEmployees();
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to deactivate: $e')));
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to deactivate: $e')));
     }
   }
 }
@@ -1551,6 +3152,11 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
   Uint8List? _selectedImageBytes;
   bool _saving = false;
 
+  List<dynamic> _bioDevices = [];
+  String? _selectedPushDeviceId;
+  bool _loadingBioDevices = true;
+  bool _pushingToDevice = false;
+
   @override
   void initState() {
     super.initState();
@@ -1574,6 +3180,82 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
     _dateHired = _profile.dateHired;
     _employmentStatus = _profile.employmentStatus ?? 'active';
     _biometricIdController.text = _profile.biometricUserId ?? '';
+    _loadBioDevicesForPush();
+  }
+
+  Future<void> _loadBioDevicesForPush() async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/biometric-devices',
+      );
+      if (!mounted) return;
+      final list = res.data ?? [];
+      setState(() {
+        _bioDevices = list;
+        _selectedPushDeviceId = list.isNotEmpty
+            ? list.first['id']?.toString()
+            : null;
+        _loadingBioDevices = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingBioDevices = false);
+    }
+  }
+
+  Future<void> _pushEmployeeToDevice() async {
+    final deviceId = _selectedPushDeviceId;
+    if (deviceId == null) return;
+    final bio = _biometricIdController.text.trim();
+    if (bio.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Set a Biometric User ID first (employee number on the clock).',
+          ),
+        ),
+      );
+      return;
+    }
+    setState(() => _pushingToDevice = true);
+    try {
+      await ApiClient.instance.post<Map<String, dynamic>>(
+        '/api/biometric-devices/$deviceId/push-user',
+        data: <String, dynamic>{'employee_id': _profile.id},
+        options: Options(
+          receiveTimeout: const Duration(seconds: 90),
+          sendTimeout: const Duration(seconds: 30),
+        ),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'User sent to device. Enroll fingerprint or face on the clock if required.',
+          ),
+        ),
+      );
+    } on DioException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _apiErrorMessageFromDio(
+                e,
+                fallback: 'Push to device failed. Check network and device IP.',
+              ),
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Push to device failed: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _pushingToDevice = false);
+    }
   }
 
   @override
@@ -1587,6 +3269,10 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
     _biometricIdController.dispose();
     super.dispose();
   }
+
+  /// Once saved, the ID must match the device (ZKTeco user ID is fixed on the clock).
+  bool get _biometricUserIdLocked =>
+      (_profile.biometricUserId?.trim().isNotEmpty ?? false);
 
   InputDecoration _inputDecoration(String hint) => InputDecoration(
     hintText: hint,
@@ -1626,7 +3312,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
     }
   }
 
-  Future<void> _saveEmployee(BuildContext context) async {
+  Future<void> _saveEmployee() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
     final firstName = _firstNameController.text.trim();
@@ -1662,7 +3348,8 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
         if (_dateHired != null)
           'date_hired': _dateHired!.toIso8601String().split('T')[0],
         if (_employmentStatus != null) 'employment_status': _employmentStatus,
-        if (_biometricIdController.text.trim().isNotEmpty)
+        if (!_biometricUserIdLocked &&
+            _biometricIdController.text.trim().isNotEmpty)
           'biometric_user_id': _biometricIdController.text.trim(),
       };
 
@@ -1678,6 +3365,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
         }
       }
 
+      if (!mounted) return;
       await ApiClient.instance.put('/api/employees/${_profile.id}', data: body);
 
       if (!mounted) return;
@@ -1687,13 +3375,12 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Employee updated successfully.')),
       );
-      if (mounted) Navigator.of(context).pop(true);
+      Navigator.of(context).pop(true);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -1776,7 +3463,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
                   ),
                   const SizedBox(width: 12),
                   FilledButton(
-                    onPressed: _saving ? null : () => _saveEmployee(context),
+                    onPressed: _saving ? null : _saveEmployee,
                     style: FilledButton.styleFrom(
                       backgroundColor: const Color(0xFF4CAF50),
                       foregroundColor: Colors.white,
@@ -1907,10 +3594,82 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
             validator: (v) => v == null ? 'Required' : null,
           ),
           const SizedBox(height: 16),
-          TextFormField(
-            controller: _biometricIdController,
-            decoration: _inputDecoration('Biometric User ID (optional)'),
-          ),
+          if (_biometricUserIdLocked)
+            InputDecorator(
+              decoration: _inputDecoration('Biometric User ID').copyWith(
+                helperText:
+                    'Locked: must match the time clock. IDs cannot be edited here after they are set.',
+                helperMaxLines: 2,
+              ),
+              child: Text(
+                _profile.biometricUserId ?? '',
+                style: const TextStyle(fontSize: 14),
+              ),
+            )
+          else
+            TextFormField(
+              controller: _biometricIdController,
+              decoration: _inputDecoration('Biometric User ID (optional)').copyWith(
+                helperText:
+                    'Set once to match the user ID on the ZKTeco; then it becomes locked.',
+                helperMaxLines: 2,
+              ),
+            ),
+          const SizedBox(height: 12),
+          if (_loadingBioDevices)
+            const Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: LinearProgressIndicator(minHeight: 2),
+            )
+          else if (_bioDevices.isEmpty)
+            Text(
+              'No biometric devices registered. Add one under DTR / devices to push users to the clock.',
+              style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+            )
+          else
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  value: _selectedPushDeviceId,
+                  decoration: _inputDecoration('Push to device'),
+                  items: _bioDevices
+                      .where((d) => d['id'] != null && '${d['id']}'.isNotEmpty)
+                      .map(
+                        (d) => DropdownMenuItem<String>(
+                          value: d['id'].toString(),
+                          child: Text(
+                            '${d['name'] ?? 'Device'}${d['ip_address'] != null ? ' (${d['ip_address']})' : ''}',
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) => setState(() => _selectedPushDeviceId = v),
+                ),
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: _pushingToDevice ? null : _pushEmployeeToDevice,
+                  icon: _pushingToDevice
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.upload_rounded, size: 18),
+                  label: Text(
+                    _pushingToDevice ? 'Pushing…' : 'Push to Biometric Device',
+                  ),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF2E7D32),
+                    foregroundColor: Colors.white,
+                    alignment: Alignment.center,
+                  ),
+                ),
+              ],
+            ),
         ],
       ),
     );
@@ -2094,6 +3853,15 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
               ),
             ),
           ),
+          const SizedBox(height: 6),
+          Text(
+            'Changing date hired may affect leave accrual and first-month proration.',
+            style: TextStyle(
+              fontSize: 12,
+              height: 1.35,
+              color: AppTheme.textSecondary.withOpacity(0.9),
+            ),
+          ),
           const SizedBox(height: 16),
           DropdownButtonFormField<String>(
             value: _employmentStatus,
@@ -2114,12 +3882,9 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
 }
 
 class _BiometricImportDialog extends StatefulWidget {
-  final List<_EmployeeProfile> existingEmployees;
+  const _BiometricImportDialog({required this.onImportSuccess});
+
   final VoidCallback onImportSuccess;
-  const _BiometricImportDialog(
-    this.existingEmployees, {
-    required this.onImportSuccess,
-  });
 
   @override
   State<_BiometricImportDialog> createState() => _BiometricImportDialogState();
@@ -2132,6 +3897,9 @@ class _BiometricImportDialogState extends State<_BiometricImportDialog> {
 
   bool _loadingUsers = false;
   List<dynamic> _fetchedUsers = [];
+
+  /// Biometric user IDs already linked in HRMS (from API; not the paged table).
+  Set<String> _duplicateBioIds = {};
 
   @override
   void initState() {
@@ -2164,6 +3932,7 @@ class _BiometricImportDialogState extends State<_BiometricImportDialog> {
     setState(() {
       _loadingUsers = true;
       _fetchedUsers = [];
+      _duplicateBioIds = {};
     });
     try {
       final res = await ApiClient.instance.get(
@@ -2174,6 +3943,7 @@ class _BiometricImportDialogState extends State<_BiometricImportDialog> {
           _fetchedUsers = res.data ?? [];
           _loadingUsers = false;
         });
+        await _refreshDuplicateBioIds();
       }
     } catch (e) {
       if (mounted) {
@@ -2185,6 +3955,34 @@ class _BiometricImportDialogState extends State<_BiometricImportDialog> {
     }
   }
 
+  Future<void> _refreshDuplicateBioIds() async {
+    final ids = _fetchedUsers
+        .map((u) => u['biometric_user_id']?.toString().trim())
+        .whereType<String>()
+        .where((s) => s.isNotEmpty)
+        .toList();
+    if (!mounted) return;
+    if (ids.isEmpty) {
+      setState(() => _duplicateBioIds = {});
+      return;
+    }
+    const chunk = 40;
+    final found = <String>{};
+    try {
+      const repo = BiometricImportRepository();
+      for (var i = 0; i < ids.length; i += chunk) {
+        final end = i + chunk > ids.length ? ids.length : i + chunk;
+        final slice = ids.sublist(i, end);
+        final matches = await repo.findEmployeesByBiometricIds(slice);
+        found.addAll(matches.map((e) => e.biometricUserId));
+      }
+    } catch (_) {
+      if (mounted) setState(() => _duplicateBioIds = {});
+      return;
+    }
+    if (mounted) setState(() => _duplicateBioIds = found);
+  }
+
   void _openUserImportModal(Map<String, dynamic> user, bool isDuplicate) async {
     if (isDuplicate) return;
     final success = await showDialog<bool>(
@@ -2192,19 +3990,11 @@ class _BiometricImportDialogState extends State<_BiometricImportDialog> {
       builder: (_) => _SingleUserImportModal(user, _selectedDeviceId!),
     );
     if (success == true) {
-      widget.onImportSuccess(); // Refresh employees tree behind
-      // Add a dummy employee profile logic locally so this dialog sees them as "Duplicate" now
-      setState(() {
-        widget.existingEmployees.add(
-          _EmployeeProfile(
-            id: 'temp',
-            fullName: user['full_name'] ?? 'Imported User',
-            role: 'employee',
-            biometricUserId: user['biometric_user_id']?.toString(),
-            isActive: false,
-          ),
-        );
-      });
+      widget.onImportSuccess();
+      final bid = user['biometric_user_id']?.toString().trim();
+      if (bid != null && bid.isNotEmpty && mounted) {
+        setState(() => _duplicateBioIds = {..._duplicateBioIds, bid});
+      }
     }
   }
 
@@ -2274,9 +4064,7 @@ class _BiometricImportDialogState extends State<_BiometricImportDialog> {
                           final bioId = u['biometric_user_id']?.toString();
                           if (bioId == null) return const SizedBox.shrink();
 
-                          final isDuplicate = widget.existingEmployees.any(
-                            (e) => e.biometricUserId == bioId,
-                          );
+                          final isDuplicate = _duplicateBioIds.contains(bioId);
                           final name = u['full_name']?.toString() ?? 'Unknown';
 
                           return ListTile(
@@ -2537,6 +4325,432 @@ class _SingleUserImportModalState extends State<_SingleUserImportModal> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Dialog: all employees with biometric user ID visibility (paged, search, filters).
+class _BiometricRosterDialog extends StatefulWidget {
+  const _BiometricRosterDialog();
+
+  @override
+  State<_BiometricRosterDialog> createState() => _BiometricRosterDialogState();
+}
+
+class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
+  static const int _pageSize = 50;
+
+  int _pageIndex = 0;
+  String _filter = 'all';
+  String? _selectedDeviceId;
+  List<dynamic> _devices = [];
+  bool _loadingDevices = true;
+  final TextEditingController _searchController = TextEditingController();
+  final ScrollController _tableHorizontalScrollController = ScrollController();
+  Timer? _searchDebounce;
+  bool _loading = true;
+  String? _error;
+  List<_EmployeeProfile> _rows = [];
+  int _total = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDevices();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _searchController.dispose();
+    _tableHorizontalScrollController.dispose();
+    super.dispose();
+  }
+
+  int get _totalPages {
+    if (_total <= 0) return 1;
+    return ((_total - 1) ~/ _pageSize) + 1;
+  }
+
+  Future<void> _loadDevices() async {
+    setState(() => _loadingDevices = true);
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/biometric-devices',
+        queryParameters: const {'status': 'Active'},
+      );
+      if (!mounted) return;
+      setState(() {
+        _devices = res.data ?? [];
+        _loadingDevices = false;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _devices = [];
+          _loadingDevices = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final query = <String, dynamic>{
+        'status': 'All',
+        'role': 'All',
+        'sort': 'full_name',
+        'order': 'asc',
+        'limit': _pageSize,
+        'offset': _pageIndex * _pageSize,
+      };
+      if (_filter != 'all') {
+        query['biometric_filter'] = _filter;
+      }
+      final dev = _selectedDeviceId?.trim();
+      if (dev != null && dev.isNotEmpty) {
+        query['biometric_device_id'] = dev;
+      }
+      final sq = _searchController.text.trim();
+      if (sq.isNotEmpty) {
+        query['q'] = sq;
+      }
+
+      final res = await ApiClient.instance.get<dynamic>(
+        '/api/employees',
+        queryParameters: query,
+        options: dev != null && dev.isNotEmpty
+            ? Options(receiveTimeout: const Duration(seconds: 120))
+            : null,
+      );
+      if (!mounted) return;
+      final data = res.data;
+      List<_EmployeeProfile> next = [];
+      var total = 0;
+      if (data is Map) {
+        final list = data['employees'] as List<dynamic>? ?? [];
+        total = (data['total'] as num?)?.toInt() ?? 0;
+        next = list
+            .map(
+              (e) =>
+                  _employeeProfileFromJson(Map<String, dynamic>.from(e as Map)),
+            )
+            .toList();
+      }
+      setState(() {
+        _rows = next;
+        _total = total;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+        _rows = [];
+        _total = 0;
+      });
+    }
+  }
+
+  void _onSearchChanged(String _) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+      _pageIndex = 0;
+      _load();
+    });
+  }
+
+  void _setFilter(String value) {
+    if (_filter == value) return;
+    setState(() {
+      _filter = value;
+      _pageIndex = 0;
+    });
+    _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 640,
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 8, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Biometric roster',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close),
+                    tooltip: 'Close',
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Text(
+                _selectedDeviceId == null || _selectedDeviceId!.trim().isEmpty
+                    ? 'Biometric user IDs stored in HRMS. Use this list to pick a free ID before enrolling someone on the ZKTeco.'
+                    : 'Only employees whose Biometric User ID exists on the selected device. The server reads the device user list (may take a few seconds the first time).',
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.35,
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Device',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String?>(
+                    isExpanded: true,
+                    value: _selectedDeviceId,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                    ),
+                    hint: const Text('All devices (HRMS only)'),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('All devices (HRMS only)'),
+                      ),
+                      ..._devices.map((d) {
+                        final map = Map<String, dynamic>.from(d as Map);
+                        final id = map['id']?.toString() ?? '';
+                        final name = map['name']?.toString() ?? id;
+                        final loc = map['location']?.toString();
+                        final label = (loc != null && loc.isNotEmpty)
+                            ? '$name · $loc'
+                            : name;
+                        return DropdownMenuItem<String?>(
+                          value: id,
+                          child: Text(label, overflow: TextOverflow.ellipsis),
+                        );
+                      }),
+                    ],
+                    onChanged: _loadingDevices
+                        ? null
+                        : (v) {
+                            setState(() {
+                              _selectedDeviceId = v;
+                              _pageIndex = 0;
+                            });
+                            _load();
+                          },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  ChoiceChip(
+                    label: const Text('All'),
+                    selected: _filter == 'all',
+                    onSelected: (sel) {
+                      if (sel) _setFilter('all');
+                    },
+                  ),
+                  ChoiceChip(
+                    label: const Text('Has ID'),
+                    selected: _filter == 'set',
+                    onSelected: (sel) {
+                      if (sel) _setFilter('set');
+                    },
+                  ),
+                  ChoiceChip(
+                    label: const Text('Missing ID'),
+                    selected: _filter == 'missing',
+                    onSelected: (sel) {
+                      if (sel) _setFilter('missing');
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: 'Search name, email, employee no., biometric ID…',
+                  isDense: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                ),
+                onChanged: _onSearchChanged,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _error != null
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Text(
+                          _error!,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.red.shade800),
+                        ),
+                      ),
+                    )
+                  : _rows.isEmpty
+                  ? Center(
+                      child: Text(
+                        'No employees match.',
+                        style: TextStyle(color: AppTheme.textSecondary),
+                      ),
+                    )
+                  : Scrollbar(
+                      controller: _tableHorizontalScrollController,
+                      thumbVisibility: true,
+                      child: SingleChildScrollView(
+                        controller: _tableHorizontalScrollController,
+                        scrollDirection: Axis.horizontal,
+                        child: SingleChildScrollView(
+                          child: DataTable(
+                            columnSpacing: 20,
+                            headingRowHeight: 40,
+                            dataRowMinHeight: 40,
+                            columns: const [
+                              DataColumn(label: Text('No.')),
+                              DataColumn(label: Text('Name')),
+                              DataColumn(label: Text('Biometric ID')),
+                              DataColumn(label: Text('Active')),
+                            ],
+                            rows: _rows.map((e) {
+                              final bio = e.biometricUserId?.trim() ?? '';
+                              return DataRow(
+                                cells: [
+                                  DataCell(Text(e.displayEmployeeNo)),
+                                  DataCell(
+                                    SizedBox(
+                                      width: 220,
+                                      child: Text(
+                                        e.fullName,
+                                        overflow: TextOverflow.ellipsis,
+                                        maxLines: 2,
+                                      ),
+                                    ),
+                                  ),
+                                  DataCell(
+                                    Text(
+                                      bio.isNotEmpty ? bio : '—',
+                                      style: TextStyle(
+                                        fontFeatures: const [
+                                          FontFeature.tabularFigures(),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  DataCell(Text(e.isActive ? 'Yes' : 'No')),
+                                ],
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                      ),
+                    ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Flexible(
+                    child: Text(
+                      _total == 0
+                          ? '0 employees'
+                          : 'Page ${_pageIndex + 1} of $_totalPages · $_total total',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextButton(
+                        onPressed: _pageIndex <= 0 || _loading
+                            ? null
+                            : () {
+                                setState(() => _pageIndex--);
+                                _load();
+                              },
+                        child: const Text('Previous'),
+                      ),
+                      TextButton(
+                        onPressed: _pageIndex >= _totalPages - 1 || _loading
+                            ? null
+                            : () {
+                                setState(() => _pageIndex++);
+                                _load();
+                              },
+                        child: const Text('Next'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

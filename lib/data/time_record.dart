@@ -29,6 +29,8 @@ class TimeRecord {
     this.attendanceRemark,
     this.leaveTypeName,
     this.source,
+    this.locatorSlipId,
+    this.locatorSlipSegments,
   });
 
   final String? id;
@@ -78,6 +80,10 @@ class TimeRecord {
 
   /// Attendance source: 'manual' (clock-in button), 'system' (biometric), 'adjusted' (admin correction).
   final String? source;
+
+  /// Approved locator-slip metadata (when present in DTR payload).
+  final String? locatorSlipId;
+  final List<String>? locatorSlipSegments;
 
   static const String tableName = 'time_records';
 
@@ -132,6 +138,12 @@ class TimeRecord {
       attendanceRemark: json['attendance_remark']?.toString(),
       leaveTypeName: json['leave_type_name']?.toString(),
       source: json['source']?.toString(),
+      locatorSlipId: json['locator_slip_id']?.toString(),
+      locatorSlipSegments: (json['locator_slip_segments'] is List)
+          ? (json['locator_slip_segments'] as List)
+                .map((e) => e.toString())
+                .toList()
+          : null,
     );
   }
 
@@ -206,6 +218,8 @@ class TimeRecord {
     String? attendanceRemark,
     String? leaveTypeName,
     String? source,
+    String? locatorSlipId,
+    List<String>? locatorSlipSegments,
   }) {
     return TimeRecord(
       id: id ?? this.id,
@@ -230,8 +244,25 @@ class TimeRecord {
       attendanceRemark: attendanceRemark ?? this.attendanceRemark,
       leaveTypeName: leaveTypeName ?? this.leaveTypeName,
       source: source ?? this.source,
+      locatorSlipId: locatorSlipId ?? this.locatorSlipId,
+      locatorSlipSegments: locatorSlipSegments ?? this.locatorSlipSegments,
     );
   }
+}
+
+/// Aggregated counts for the admin DTR dashboard (from GET /api/dtr-daily-summary/summary).
+class DtrSummaryCounts {
+  const DtrSummaryCounts({
+    required this.presentToday,
+    required this.lateToday,
+    required this.onLeaveToday,
+    required this.pendingApproval,
+  });
+
+  final int presentToday;
+  final int lateToday;
+  final int onLeaveToday;
+  final int pendingApproval;
 }
 
 /// Repository for DTR time records. Uses backend API (dtr_daily_summary); Supabase logic commented out.
@@ -240,12 +271,17 @@ class TimeRecordRepo {
   static final TimeRecordRepo instance = TimeRecordRepo._();
 
   /// List time records for admin (all users). Uses GET /api/dtr-daily-summary.
+  ///
+  /// With [startDate] and [endDate], omit [limit] to load the full merged list (all employees for
+  /// that range). Pass [limit] (+ optional [offset]) to page the *merged* result (server sets
+  /// `X-Total-Count` when [limit] is sent).
   Future<List<TimeRecord>> listForAdmin({
     DateTime? startDate,
     DateTime? endDate,
     String? userId,
     String? departmentId,
     int? limit,
+    int? offset,
   }) async {
     try {
       final params = <String, dynamic>{};
@@ -257,6 +293,7 @@ class TimeRecordRepo {
       if (departmentId != null && departmentId.isNotEmpty)
         params['department_id'] = departmentId;
       if (limit != null) params['limit'] = limit;
+      if (offset != null) params['offset'] = offset;
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/dtr-daily-summary',
         queryParameters: params,
@@ -371,30 +408,35 @@ class TimeRecordRepo {
     await ApiClient.instance.delete('/api/dtr-daily-summary/$id');
   }
 
-  /// Count present today. Uses GET /api/dtr-daily-summary/summary.
-  Future<int> countPresentToday() async {
+  /// Admin dashboard counts in one round-trip (DTR + leave).
+  /// Uses GET /api/dtr-daily-summary/summary.
+  Future<DtrSummaryCounts> fetchSummaryCounts() async {
     try {
       final res = await ApiClient.instance.get<Map<String, dynamic>>(
         '/api/dtr-daily-summary/summary',
       );
       final data = res.data;
-      return (data?['present_today'] as int?) ?? 0;
+      return DtrSummaryCounts(
+        presentToday: _jsonInt(data, 'present_today'),
+        lateToday: _jsonInt(data, 'late_today'),
+        onLeaveToday: _jsonInt(data, 'on_leave_today'),
+        pendingApproval: _jsonInt(data, 'pending_approval'),
+      );
     } on DioException catch (_) {
-      return 0;
+      return const DtrSummaryCounts(
+        presentToday: 0,
+        lateToday: 0,
+        onLeaveToday: 0,
+        pendingApproval: 0,
+      );
     }
   }
 
-  /// Count late today. Uses GET /api/dtr-daily-summary/summary.
-  Future<int> countLateToday() async {
-    try {
-      final res = await ApiClient.instance.get<Map<String, dynamic>>(
-        '/api/dtr-daily-summary/summary',
-      );
-      final data = res.data;
-      return (data?['late_today'] as int?) ?? 0;
-    } on DioException catch (_) {
-      return 0;
-    }
+  static int _jsonInt(Map<String, dynamic>? data, String key) {
+    final v = data?[key];
+    if (v is int) return v;
+    if (v is num) return v.round();
+    return 0;
   }
 
   /// List recent time records for admin dashboard.

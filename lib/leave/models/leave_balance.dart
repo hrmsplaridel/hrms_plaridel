@@ -52,10 +52,12 @@ class LeaveBalance {
 
   static const String tableName = 'leave_balances';
 
-  /// Remaining usable credits after approved usage and adjustments.
+  /// Pool after approved usage and HR adjustments: `earned - used + adjusted`.
+  /// Matches backend `ledgerRemainingFromBalancesRow` / approval headroom for final approve.
   double get remainingDays => earnedDays - usedDays + adjustedDays;
 
-  /// Optional stricter view that also considers pending requests.
+  /// Days still free to **reserve** with new requests: [remainingDays] minus [pendingDays].
+  /// Matches backend `assertEnoughAvailableForPendingReservation` and forced-deduct `available` checks.
   double get availableDays => remainingDays - pendingDays;
 
   bool get hasInsufficientBalance => availableDays < 0;

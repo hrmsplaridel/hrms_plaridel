@@ -51,7 +51,18 @@ ALTER TABLE leave_requests DROP CONSTRAINT IF EXISTS chk_leave_requests_status;
 
 ALTER TABLE leave_requests
   ADD CONSTRAINT chk_leave_requests_status
-  CHECK (status IN ('draft','pending','returned','approved','rejected','cancelled'));
+  CHECK (status IN (
+    'draft',
+    'pending',
+    'pending_department_head',
+    'pending_hr',
+    'rejected_by_department_head',
+    'rejected_by_hr',
+    'returned',
+    'approved',
+    'rejected',
+    'cancelled'
+  ));
 
 -- 5) Ensure date integrity constraints exist (keep originals if present)
 ALTER TABLE leave_requests DROP CONSTRAINT IF EXISTS chk_leave_dates;

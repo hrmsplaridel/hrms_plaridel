@@ -2,6 +2,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../leave_provider.dart';
@@ -153,23 +154,15 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       if (entered > computed) {
         _showMessage(
           'Working days ($entered) cannot exceed the computed '
-          'Mon–Fri days for the selected range ($computed).'
+          'Mon–Fri days for the selected range ($computed).',
         );
         return;
       }
     }
 
-    // FIX #6: Block submit if leave type requires an attachment and none exists.
-    if (_leaveType.requiresAttachment && !_hasAttachment()) {
-      // For sick leave, the attachment is only strictly required when > 5 days
-      // (matching the backend leaveTypeRules.js rule).
-      final isSickLeaveMandatory = _leaveType == LeaveType.sickLeave
-          ? ((_computeWorkingDays() ?? 0) > 5)
-          : true;
-      if (isSickLeaveMandatory) {
-        _showAttachmentRequiredDialog();
-        return;
-      }
+    if (_shouldShowAttachmentSection() && !_hasAttachment()) {
+      _showMessage('Attachment is required for this leave type.');
+      return;
     }
 
     await _submit(isDraft: false);
@@ -195,29 +188,95 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     return (current?.attachmentName ?? '').trim().isNotEmpty;
   }
 
-  void _showAttachmentRequiredDialog() {
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.warning_amber_rounded, color: Colors.orange[700]),
-            const SizedBox(width: 8),
-            const Text('Attachment Required'),
-          ],
-        ),
-        content: Text(
-          'This leave type (${_leaveType.displayName}) requires a supporting '
-          'document (e.g. medical certificate, birth certificate).\n\n'
-          'Please save as draft first, upload the required document, then submit.',
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
+  bool _hasLeaveRequestId() {
+    final id = (_savedRequest ?? widget.initialRequest)?.id;
+    return id != null && id.trim().isNotEmpty;
+  }
+
+  /// Visible only when an attachment is mandatory: sick leave ≥5 working days,
+  /// or any non–sick type with [LeaveType.requiresAttachment].
+  bool _shouldShowAttachmentSection() {
+    if (_leaveType == LeaveType.sickLeave) {
+      return (_computeWorkingDays() ?? 0) >= 5;
+    }
+    return _leaveType.requiresAttachment;
+  }
+
+  /// Fills CSC header fields (name, office, position, salary, date filed) from
+  /// auth + active assignment + employee profile when the request does not
+  /// already have them (e.g. first save).
+  Future<
+    ({
+      String employeeName,
+      String? officeDepartment,
+      String? positionTitle,
+      double? salary,
+      DateTime dateFiled,
+    })
+  >
+  _loadEmployeeHeaderSnapshot({
+    required String userId,
+    required AuthProvider auth,
+  }) async {
+    final authName = auth.user?.fullName?.trim();
+    final display = auth.displayName.trim();
+    var employeeName = (authName != null && authName.isNotEmpty)
+        ? authName
+        : display;
+
+    String? officeDepartment;
+    String? positionTitle;
+    double? salary;
+
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/assignments?employee_id=$userId&status=Active',
+      );
+      final data = res.data;
+      if (data != null && data.isNotEmpty) {
+        final first = data.first as Map<String, dynamic>;
+        officeDepartment = (first['department_name'] as String?)?.trim();
+        positionTitle = (first['position_name'] as String?)?.trim();
+      }
+    } catch (_) {
+      // Best-effort; fields stay from auth or empty.
+    }
+
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/employees/$userId',
+      );
+      final data = res.data;
+      if (data != null) {
+        final full = data['full_name']?.toString().trim();
+        if (full != null && full.isNotEmpty) {
+          employeeName = full;
+        }
+        final sg = data['salary_grade']?.toString().trim();
+        if (sg != null && sg.isNotEmpty) {
+          final parsed = double.tryParse(sg);
+          if (parsed != null) {
+            salary = parsed;
+          }
+        }
+      }
+    } catch (_) {
+      // Salary / name refinement optional.
+    }
+
+    final initial = widget.initialRequest;
+    final existingFiled = _savedRequest?.dateFiled ?? initial?.dateFiled;
+    final today = DateTime.now();
+    final dateFiled = existingFiled != null
+        ? DateTime(existingFiled.year, existingFiled.month, existingFiled.day)
+        : DateTime(today.year, today.month, today.day);
+
+    return (
+      employeeName: employeeName,
+      officeDepartment: officeDepartment,
+      positionTitle: positionTitle,
+      salary: salary,
+      dateFiled: dateFiled,
     );
   }
 
@@ -225,15 +284,36 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     setState(() => _busy = true);
     try {
       final initial = widget.initialRequest;
-      final userId = context.read<AuthProvider>().user!.id;
+      final auth = context.read<AuthProvider>();
+      final userId = auth.user!.id;
 
       // FIX #4: prefer the ID from _savedRequest (set on first save) so that
       // subsequent "Save Draft" clicks do a PUT (update) rather than another POST.
       final existingId = _savedRequest?.id ?? initial?.id;
 
+      final header = await _loadEmployeeHeaderSnapshot(
+        userId: userId,
+        auth: auth,
+      );
+      final prior = _savedRequest ?? initial;
+      String? coalesceStr(String? saved, String? incoming) {
+        final a = (saved ?? '').trim();
+        if (a.isNotEmpty) return a;
+        final b = (incoming ?? '').trim();
+        return b.isEmpty ? null : b;
+      }
+
       final req = LeaveRequest(
         id: existingId,
         userId: userId,
+        employeeName: coalesceStr(prior?.employeeName, header.employeeName),
+        officeDepartment: coalesceStr(
+          prior?.officeDepartment,
+          header.officeDepartment,
+        ),
+        positionTitle: coalesceStr(prior?.positionTitle, header.positionTitle),
+        salary: prior?.salary ?? header.salary,
+        dateFiled: header.dateFiled,
         leaveType: _leaveType,
         customLeaveTypeText: _leaveType == LeaveType.others
             ? _customLeaveTypeController.text.trim()
@@ -275,13 +355,24 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
             ? await widget.onSaveDraft!(req)
             : false;
         if (!mounted) return;
-        if (success) Navigator.of(context).pop(true);
+        if (success) {
+          final provider = context.read<LeaveProvider>();
+          final saved = provider.selectedRequest;
+          if (saved != null &&
+              saved.id != null &&
+              saved.id!.trim().isNotEmpty) {
+            setState(() => _savedRequest = saved);
+          }
+          _showMessage('Draft saved.');
+        }
       } else {
         final action = widget.onSubmitRequest;
         if (action != null) {
           final success = await action(req);
           if (!mounted) return;
-          if (success) Navigator.of(context).pop(true);
+          if (success) {
+            Navigator.of(context).pop(kLeaveFormResultSubmitted);
+          }
         }
       }
     } catch (e) {
@@ -343,6 +434,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                           const SizedBox(height: 16),
                           DropdownButtonFormField<LeaveType>(
                             value: _leaveType,
+                            isExpanded: true,
                             decoration: _inputDecoration('Select Leave Type'),
                             items: LeaveType.values
                                 .where(
@@ -432,34 +524,38 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                                 keyboardType: TextInputType.numberWithOptions(
                                   decimal: true,
                                 ),
-                                decoration: _inputDecoration(
-                                  'Number of Working Days Applied For',
-                                ).copyWith(
-                                  suffixIcon:  computed != null
-                                      ? Tooltip(
-                                          message:
-                                              'Auto-computed: $computed Mon–Fri day(s)',
-                                          child: IconButton(
-                                            icon: const Icon(
-                                              Icons.auto_fix_high,
-                                              size: 18,
-                                            ),
-                                            onPressed: () => setState(
-                                              () => _workingDaysController.text =
-                                                  computed.toString(),
-                                            ),
-                                          ),
-                                        )
-                                      : null,
-                                  helperText: computed != null
-                                      ? 'Mon–Fri days for selected range: $computed'
-                                      : 'Select dates to auto-compute',
-                                ),
+                                decoration:
+                                    _inputDecoration(
+                                      'Number of Working Days Applied For',
+                                    ).copyWith(
+                                      suffixIcon: computed != null
+                                          ? Tooltip(
+                                              message:
+                                                  'Auto-computed: $computed Mon–Fri day(s)',
+                                              child: IconButton(
+                                                icon: const Icon(
+                                                  Icons.auto_fix_high,
+                                                  size: 18,
+                                                ),
+                                                onPressed: () => setState(
+                                                  () =>
+                                                      _workingDaysController
+                                                          .text = computed
+                                                          .toString(),
+                                                ),
+                                              ),
+                                            )
+                                          : null,
+                                      helperText: computed != null
+                                          ? 'Mon–Fri days for selected range: $computed'
+                                          : 'Select dates to auto-compute',
+                                    ),
                                 validator: (val) {
                                   if (val == null || val.trim().isEmpty)
                                     return 'Required';
                                   final entered = double.tryParse(val.trim());
-                                  if (entered == null) return 'Must be a number';
+                                  if (entered == null)
+                                    return 'Must be a number';
                                   if (entered <= 0)
                                     return 'Must be greater than 0';
                                   // FIX #7: Hard-block if entered > computed.
@@ -512,8 +608,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                               ),
                             ],
                           ),
-                          const Divider(height: 32),
-                          _buildAttachmentSection(),
+                          if (_shouldShowAttachmentSection()) ...[
+                            const Divider(height: 32),
+                            _buildAttachmentSection(),
+                          ],
                         ],
                       ),
                     ),
@@ -750,7 +848,6 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
   Widget _buildAttachmentSection() {
     final current = _savedRequest ?? widget.initialRequest;
-    final requestId = current?.id;
     final hasAttachment = (current?.attachmentName ?? '').trim().isNotEmpty;
 
     return Column(
@@ -759,113 +856,119 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         Row(
           children: [
             Text('Attachments', style: TextStyle(fontWeight: FontWeight.w500)),
-            if (_leaveType.requiresAttachment) ...[
-              const SizedBox(width: 8),
-              // FIX #6: Show mandatory badge for attachment-required types.
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.orange[100],
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: Colors.orange.shade300),
-                ),
-                child: Text(
-                  _leaveType == LeaveType.sickLeave
-                      ? 'Required if > 5 days'
-                      : 'Required',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.orange[800],
-                  ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.orange[100],
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: Colors.orange.shade300),
+              ),
+              child: Text(
+                'Required',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.orange[800],
                 ),
               ),
-            ],
+            ),
           ],
         ),
         const SizedBox(height: 4),
         Text(
-          _leaveType.requiresAttachment
-              ? 'A supporting document is required for this leave type (e.g. medical certificate, birth certificate). PDF, JPG, PNG (max 10MB).'
-              : 'Supporting attachment: optional. PDF, JPG, PNG (max 10MB).',
+          _leaveType == LeaveType.sickLeave
+              ? 'Medical certificate is required for sick leave exceeding 5 days. '
+                    'PDF, JPG, PNG (max 10MB).'
+              : 'A supporting document is required for ${_leaveType.displayName} '
+                    '(e.g. medical certificate, birth certificate). '
+                    'PDF, JPG, PNG (max 10MB).',
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
         ),
-        const SizedBox(height: 12),
-        if (requestId == null || requestId.isEmpty)
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppTheme.lightGray,
-              borderRadius: BorderRadius.circular(8),
+        if (!_hasLeaveRequestId()) ...[
+          const SizedBox(height: 8),
+          Text(
+            'If you upload before saving manually, a draft is created automatically.',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 12,
+              fontStyle: FontStyle.italic,
             ),
-            child: const Row(
-              children: [
-                Icon(Icons.info_outline, size: 20),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Save draft first to upload an attachment.',
-                    style: TextStyle(fontSize: 13),
-                  ),
-                ),
-              ],
-            ),
-          )
-        else ...[
-          if (hasAttachment)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Row(
-                children: [
-                  Icon(Icons.attach_file, color: AppTheme.primaryNavy),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      current!.attachmentName!,
-                      style: const TextStyle(fontWeight: FontWeight.w500),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          Row(
-            children: [
-              OutlinedButton.icon(
-                onPressed: (_busy || _attachmentUploading)
-                    ? null
-                    : _pickAndUploadAttachment,
-                icon: _attachmentUploading
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.upload_file, size: 18),
-                label: Text(hasAttachment ? 'Replace File' : 'Upload File'),
-              ),
-              if (hasAttachment) ...[
-                const SizedBox(width: 12),
-                TextButton(
-                  onPressed: (_busy || _attachmentUploading)
-                      ? null
-                      : _removeAttachment,
-                  style: TextButton.styleFrom(foregroundColor: Colors.red),
-                  child: const Text('Remove'),
-                ),
-              ],
-            ],
           ),
         ],
+        const SizedBox(height: 12),
+        if (hasAttachment)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Row(
+              children: [
+                Icon(Icons.attach_file, color: AppTheme.primaryNavy),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    current!.attachmentName!,
+                    style: const TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        Row(
+          children: [
+            OutlinedButton.icon(
+              onPressed: (_busy || _attachmentUploading)
+                  ? null
+                  : _pickAndUploadAttachment,
+              icon: _attachmentUploading
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.upload_file, size: 18),
+              label: Text(hasAttachment ? 'Replace File' : 'Upload File'),
+            ),
+            if (hasAttachment) ...[
+              const SizedBox(width: 12),
+              TextButton(
+                onPressed: (_busy || _attachmentUploading)
+                    ? null
+                    : _removeAttachment,
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                child: const Text('Remove'),
+              ),
+            ],
+          ],
+        ),
       ],
     );
   }
 
   Future<void> _pickAndUploadAttachment() async {
-    final current = _savedRequest ?? widget.initialRequest;
-    final requestId = current?.id;
+    if (!_shouldShowAttachmentSection()) return;
+
+    var current = _savedRequest ?? widget.initialRequest;
+    var requestId = current?.id;
+
     if (requestId == null || requestId.isEmpty) {
-      _showMessage('Save draft first to add an attachment.');
-      return;
+      if (!_formKey.currentState!.validate()) return;
+      if (_startDate == null || _endDate == null) {
+        _showMessage('Please select start and end dates before uploading.');
+        return;
+      }
+      await _submit(isDraft: true);
+      if (!mounted) return;
+      current = _savedRequest ?? widget.initialRequest;
+      requestId = current?.id;
+      if (requestId == null || requestId.isEmpty) {
+        final err = context.read<LeaveProvider>().error;
+        _showMessage(
+          (err != null && err.trim().isNotEmpty)
+              ? err
+              : 'Could not create a draft for your attachment. Try again.',
+        );
+        return;
+      }
     }
 
     final result = await FilePicker.platform.pickFiles(
@@ -911,6 +1014,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   }
 
   Future<void> _removeAttachment() async {
+    if (!_shouldShowAttachmentSection()) return;
+
     final current = _savedRequest ?? widget.initialRequest;
     final requestId = current?.id;
     if (requestId == null || requestId.isEmpty) return;
@@ -957,4 +1062,25 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       _showMessage('Remove failed: $e');
     }
   }
+}
+
+/// Pop value from [LeaveRequestFormScreen] after a successful draft save or submit.
+const String kLeaveFormResultDraftSaved = 'leave_draft_saved';
+const String kLeaveFormResultSubmitted = 'leave_submitted';
+
+void showLeaveFormSuccessSnackBar(BuildContext context, String result) {
+  final text = result == kLeaveFormResultDraftSaved
+      ? 'Draft saved successfully.'
+      : result == kLeaveFormResultSubmitted
+      ? 'Leave request submitted successfully.'
+      : null;
+  if (text == null) return;
+  ScaffoldMessenger.of(context).clearSnackBars();
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(text),
+      behavior: SnackBarBehavior.floating,
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+    ),
+  );
 }
