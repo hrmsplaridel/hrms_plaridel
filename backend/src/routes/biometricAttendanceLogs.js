@@ -2,7 +2,11 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
-const { processBiometricLogsToSummary } = require('../services/biometricProcessing');
+const {
+  processBiometricLogsToSummary,
+  evaluateBiometricDayGate,
+  getManilaDateStr,
+} = require('../services/biometricProcessing');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -51,6 +55,7 @@ router.get('/devices', pushAuth, async (req, res) => {
  * Body: { punches: [{ biometric_user_id, logged_at }], device_id?, source_name? }
  * - Looks up user_id from users WHERE biometric_user_id = ?
  * - Skips punches for unmatched biometric_user_id (logged)
+ * - Skips punches when not allowed for that Manila calendar day: no shift, whole-day holiday, or blocking approved leave
  * - Uses ON CONFLICT to skip duplicates
  * - Processes to dtr_daily_summary after insert
  */
@@ -64,6 +69,10 @@ router.post('/push', pushAuth, async (req, res) => {
         error: 'No punches to push',
         inserted: 0,
         skipped_unmatched: 0,
+        skipped_no_schedule: 0,
+        skipped_holiday: 0,
+        skipped_leave: 0,
+        skipped_invalid_timestamp: 0,
         duplicates_skipped: 0,
       });
     }
@@ -82,7 +91,12 @@ router.post('/push', pushAuth, async (req, res) => {
     let inserted = 0;
     let duplicatesSkipped = 0;
     let skippedUnmatched = 0;
+    let skippedNoSchedule = 0;
+    let skippedHoliday = 0;
+    let skippedLeave = 0;
+    let skippedInvalidTimestamp = 0;
     const userIds = new Set();
+    const biometricGateCache = new Map();
 
     for (const p of punches) {
       const biometricUserId = String(p.biometric_user_id || '').trim();
@@ -98,6 +112,24 @@ router.post('/push', pushAuth, async (req, res) => {
       const userId = biometricToUserId.get(biometricUserId);
       if (!userId) {
         skippedUnmatched++;
+        continue;
+      }
+
+      const manilaDate = getManilaDateStr(loggedAt);
+      if (!manilaDate) {
+        skippedInvalidTimestamp++;
+        continue;
+      }
+      const gateKey = `${userId}|${manilaDate}`;
+      let gate = biometricGateCache.get(gateKey);
+      if (gate === undefined) {
+        gate = await evaluateBiometricDayGate(userId, manilaDate);
+        biometricGateCache.set(gateKey, gate);
+      }
+      if (!gate.allowed) {
+        if (gate.reason === 'no_schedule') skippedNoSchedule++;
+        else if (gate.reason === 'holiday') skippedHoliday++;
+        else if (gate.reason === 'leave') skippedLeave++;
         continue;
       }
 
@@ -144,6 +176,10 @@ router.post('/push', pushAuth, async (req, res) => {
     res.json({
       inserted,
       skipped_unmatched: skippedUnmatched,
+      skipped_no_schedule: skippedNoSchedule,
+      skipped_holiday: skippedHoliday,
+      skipped_leave: skippedLeave,
+      skipped_invalid_timestamp: skippedInvalidTimestamp,
       duplicates_skipped: duplicatesSkipped,
       summaries_inserted: summariesInserted,
       summaries_updated: summariesUpdated,
@@ -161,6 +197,7 @@ router.post('/push', pushAuth, async (req, res) => {
  * Import matched biometric logs into biometric_attendance_logs, then process into dtr_daily_summary.
  * Body: { rows: [{ user_id, biometric_user_id, logged_at, raw_line, verify_code?, punch_code?, work_code? }], source_file_name }
  * Uses ON CONFLICT (biometric_user_id, logged_at) DO NOTHING to skip duplicates.
+ * Skips rows when not allowed for that Manila calendar day: no shift, whole-day holiday, or blocking approved leave.
  * Admin only.
  */
 router.post('/import', protect, requireAdmin, async (req, res) => {
@@ -171,6 +208,10 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
         error: 'No rows to import',
         inserted: 0,
         duplicates_skipped: 0,
+        skipped_no_schedule: 0,
+        skipped_holiday: 0,
+        skipped_leave: 0,
+        skipped_invalid_timestamp: 0,
         summaries_inserted: 0,
         summaries_updated: 0,
       });
@@ -178,9 +219,14 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
 
     let inserted = 0;
     let duplicatesSkipped = 0;
+    let skippedNoSchedule = 0;
+    let skippedHoliday = 0;
+    let skippedLeave = 0;
+    let skippedInvalidTimestamp = 0;
     const userIds = new Set();
     let dateMin = null;
     let dateMax = null;
+    const biometricGateCache = new Map();
 
     for (const row of rows) {
       const userId = row.user_id;
@@ -189,6 +235,24 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
       const rawLine = row.raw_line;
 
       if (!userId || !biometricUserId || !loggedAt || !rawLine) {
+        continue;
+      }
+
+      const manilaDate = getManilaDateStr(loggedAt);
+      if (!manilaDate) {
+        skippedInvalidTimestamp++;
+        continue;
+      }
+      const gateKey = `${userId}|${manilaDate}`;
+      let gate = biometricGateCache.get(gateKey);
+      if (gate === undefined) {
+        gate = await evaluateBiometricDayGate(userId, manilaDate);
+        biometricGateCache.set(gateKey, gate);
+      }
+      if (!gate.allowed) {
+        if (gate.reason === 'no_schedule') skippedNoSchedule++;
+        else if (gate.reason === 'holiday') skippedHoliday++;
+        else if (gate.reason === 'leave') skippedLeave++;
         continue;
       }
 
@@ -250,6 +314,10 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
     res.json({
       inserted,
       duplicates_skipped: duplicatesSkipped,
+      skipped_no_schedule: skippedNoSchedule,
+      skipped_holiday: skippedHoliday,
+      skipped_leave: skippedLeave,
+      skipped_invalid_timestamp: skippedInvalidTimestamp,
       summaries_inserted: summariesInserted,
       summaries_updated: summariesUpdated,
     });

@@ -32,7 +32,6 @@ class _ImportBiometricAttendanceLogsDialogState
   static const _matchingRepo = BiometricImportRepository();
 
   String? _selectedFileName;
-  int? _selectedFileSizeBytes;
   String? _validationError;
   String? _parseError;
   BiometricImportPreview? _preview;
@@ -70,7 +69,6 @@ class _ImportBiometricAttendanceLogsDialogState
   void _resetSelection() {
     setState(() {
       _selectedFileName = null;
-      _selectedFileSizeBytes = null;
       _validationError = null;
       _parseError = null;
       _preview = null;
@@ -138,7 +136,6 @@ class _ImportBiometricAttendanceLogsDialogState
 
     setState(() {
       _selectedFileName = name;
-      _selectedFileSizeBytes = platformFile.size;
       _validationError = null;
       _parseError = null;
       _preview = null;

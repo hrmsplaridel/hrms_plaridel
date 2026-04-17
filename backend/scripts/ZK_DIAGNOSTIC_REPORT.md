@@ -85,7 +85,7 @@ Device: 192.168.254.201:4370
 --- All steps completed successfully ---
 ```
 
-**If successful:** Use `zkteco-sync-py.py` as the sync service instead of `zkteco-sync.js`.
+**If successful:** Use `zkteco-sync-py.py` as the production sync service.
 
 ---
 

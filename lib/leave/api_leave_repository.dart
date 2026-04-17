@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import '../api/client.dart';
 import 'leave_repository.dart';
 import 'models/leave_balance.dart';
+import 'models/leave_balance_ledger.dart';
 import 'models/leave_request.dart';
 import 'models/leave_type.dart';
 
@@ -97,7 +98,7 @@ class ApiLeaveRepository implements LeaveRepository {
   Future<List<LeaveRequest>> listMyRequests(
     String userId, {
     LeaveRequestStatus? status,
-    int? limit,  // #13: pagination
+    int? limit, // #13: pagination
   }) async {
     // userId is inferred from JWT on backend; we keep signature for compatibility.
     final res = await ApiClient.instance.get<List<dynamic>>(
@@ -126,7 +127,9 @@ class ApiLeaveRepository implements LeaveRepository {
 
   @override
   Future<List<LeaveRequest>> listPendingRequests() async {
-    final res = await ApiClient.instance.get<List<dynamic>>('/api/leave/pending');
+    final res = await ApiClient.instance.get<List<dynamic>>(
+      '/api/leave/pending',
+    );
     final data = res.data ?? const [];
     return data.map((e) => LeaveRequest.fromJson(_asMap(e))).toList();
   }
@@ -155,8 +158,39 @@ class ApiLeaveRepository implements LeaveRepository {
 
   @override
   Future<LeaveBalance> upsertBalance(LeaveBalance balance) async {
-    throw Exception('Balance upsert not implemented yet.');
+    if (balance.userId.isEmpty) {
+      throw Exception('Missing user id');
+    }
+    try {
+      final payload = <String, dynamic>{
+        'leave_type': balance.leaveType.value,
+        'earned_days': balance.earnedDays,
+        'used_days': balance.usedDays,
+        'pending_days': balance.pendingDays,
+        'adjusted_days': balance.adjustedDays,
+      };
+      final asOf = balance.asOfDate;
+      if (asOf != null) {
+        payload['as_of_date'] = _leaveDateOnly(asOf);
+      }
+      final lastAcc = balance.lastAccrualDate;
+      if (lastAcc != null) {
+        payload['last_accrual_date'] = _leaveDateOnly(lastAcc);
+      }
+      final res = await ApiClient.instance.put<Map<String, dynamic>>(
+        '/api/leave/balances/${balance.userId}',
+        data: payload,
+      );
+      final data = res.data;
+      if (data == null) throw Exception('No data returned');
+      return LeaveBalance.fromJson(data);
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
   }
+
+  static String _leaveDateOnly(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
   @override
   Future<LeaveRequest> approveRequest(LeaveApprovalInput input) async {
@@ -165,6 +199,10 @@ class ApiLeaveRepository implements LeaveRepository {
         '/api/leave/${input.requestId}/approve',
         data: {
           'reviewer_remarks': input.hrRemarks,
+          'recommendation_remarks': input.recommendationRemarks,
+          'approved_days_with_pay': input.approvedDaysWithPay,
+          'approved_days_without_pay': input.approvedDaysWithoutPay,
+          'approved_other_details': input.approvedOtherDetails,
         },
       );
       final data = res.data;
@@ -181,9 +219,7 @@ class ApiLeaveRepository implements LeaveRepository {
     try {
       final res = await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/leave/${input.requestId}/revoke',
-        data: {
-          'reviewer_remarks': input.reason ?? input.hrRemarks,
-        },
+        data: {'reviewer_remarks': input.reason ?? input.hrRemarks},
       );
       final data = res.data;
       if (data == null) throw Exception('No data returned');
@@ -197,9 +233,7 @@ class ApiLeaveRepository implements LeaveRepository {
   Future<LeaveRequest> returnRequest(LeaveReviewDecisionInput input) async {
     final res = await ApiClient.instance.patch<Map<String, dynamic>>(
       '/api/leave/${input.requestId}/return',
-      data: {
-        'reviewer_remarks': input.reason ?? input.hrRemarks,
-      },
+      data: {'reviewer_remarks': input.reason ?? input.hrRemarks},
     );
     final data = res.data;
     if (data == null) throw Exception('No data returned');
@@ -212,6 +246,7 @@ class ApiLeaveRepository implements LeaveRepository {
       '/api/leave/${input.requestId}/reject',
       data: {
         'reviewer_remarks': input.reason ?? input.hrRemarks,
+        'disapproval_reason': input.reason ?? input.hrRemarks,
       },
     );
     final data = res.data;
@@ -228,9 +263,7 @@ class ApiLeaveRepository implements LeaveRepository {
     try {
       final res = await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/leave/$requestId/cancel',
-        data: {
-          if (reason != null) 'reason': reason,
-        },
+        data: {if (reason != null) 'reason': reason},
       );
       final data = res.data;
       if (data == null) throw Exception('No data returned');
@@ -288,5 +321,138 @@ class ApiLeaveRepository implements LeaveRepository {
       rethrow;
     }
   }
-}
 
+  // ---- Department Head workflow ----
+
+  @override
+  Future<Map<String, dynamic>> checkIsDepartmentHead() async {
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/leave/department-head/check',
+      );
+      return res.data ?? {'isDeptHead': false};
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
+  Future<List<LeaveRequest>> listDepartmentHeadRequests() async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/leave/department-head',
+      );
+      return (res.data ?? [])
+          .map((j) => LeaveRequest.fromJson(j as Map<String, dynamic>))
+          .toList();
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
+  Future<LeaveRequest> departmentHeadApprove(
+    LeaveReviewDecisionInput input,
+  ) async {
+    try {
+      final res = await ApiClient.instance.patch<Map<String, dynamic>>(
+        '/api/leave/${input.requestId}/department-head-approve',
+        data: {'reviewer_remarks': input.hrRemarks ?? input.reason ?? ''},
+      );
+      final data = res.data;
+      if (data == null) throw Exception('No data returned');
+      return LeaveRequest.fromJson(data);
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
+  Future<LeaveRequest> departmentHeadReject(
+    LeaveReviewDecisionInput input,
+  ) async {
+    try {
+      final res = await ApiClient.instance.patch<Map<String, dynamic>>(
+        '/api/leave/${input.requestId}/department-head-reject',
+        data: {
+          'reviewer_remarks': input.hrRemarks ?? '',
+          'reason': input.reason ?? '',
+        },
+      );
+      final data = res.data;
+      if (data == null) throw Exception('No data returned');
+      return LeaveRequest.fromJson(data);
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
+  Future<LeaveRequest> departmentHeadReturn(
+    LeaveReviewDecisionInput input,
+  ) async {
+    try {
+      final res = await ApiClient.instance.patch<Map<String, dynamic>>(
+        '/api/leave/${input.requestId}/department-head-return',
+        data: {
+          'reviewer_remarks': input.hrRemarks ?? '',
+          'reason': input.reason ?? '',
+        },
+      );
+      final data = res.data;
+      if (data == null) throw Exception('No data returned');
+      return LeaveRequest.fromJson(data);
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
+  Future<ForcedLeaveDeductionResult> applyForcedLeaveDeduction(
+    ForcedLeaveDeductionInput input,
+  ) async {
+    try {
+      final res = await ApiClient.instance.post<Map<String, dynamic>>(
+        '/api/leave/admin/forced-leave-deduction',
+        data: {
+          'user_id': input.userId,
+          'days_to_deduct': input.daysToDeduct,
+          if (input.year != null) 'year': input.year,
+          'remarks': input.remarks,
+          'allow_negative_balance': input.allowNegativeBalance,
+        },
+      );
+      final data = res.data;
+      if (data == null) throw Exception('No data returned');
+      final leaveType = leaveTypeFromString(data['leave_type']?.toString());
+      return ForcedLeaveDeductionResult(
+        userId: (data['user_id'] ?? '').toString(),
+        leaveType: leaveType,
+        deductedDays: (data['deducted_days'] as num?)?.toDouble() ?? 0,
+        remainingDays: (data['remaining_days'] as num?)?.toDouble() ?? 0,
+        year: data['year'] as int?,
+        remarks: data['remarks']?.toString(),
+        appliedAt: data['applied_at'] != null
+            ? DateTime.tryParse(data['applied_at'].toString())
+            : null,
+      );
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
+  Future<LeaveLedgerResult> getLeaveLedger(LeaveLedgerQuery query) async {
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/leave/ledger',
+        queryParameters: query.toQueryParams(),
+      );
+      final data = res.data;
+      if (data == null) throw Exception('No data returned');
+      return LeaveLedgerResult.fromJson(data);
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+}

@@ -15,6 +15,7 @@ import 'docutracker/docutracker_provider.dart';
 import 'leave/leave_provider.dart';
 import 'leave/api_leave_repository.dart';
 import 'data/mis_occ_barangays_loader.dart';
+import 'notifications/notification_provider.dart';
 import 'admin/screens/admin_dashboard.dart';
 import 'employee/screens/employee_dashboard.dart';
 
@@ -31,9 +32,9 @@ final RouteObserver<ModalRoute<void>> routeObserver =
 /// Otherwise: web → LandingPage, mobile → LoginPage.
 Widget _initialHome(AuthProvider auth, String storedLoginAs) {
   if (auth.user != null) {
-    final role = auth.user!.role ?? 'em ployee';
-    final isAdmin = role == 'admin';
-    return isAdmin ? const AdminDashboard() : const EmployeeDashboard();
+    final role = auth.user!.role ?? 'employee';
+    final isPrivileged = role == 'admin' || role == 'hr';
+    return isPrivileged ? const AdminDashboard() : const EmployeeDashboard();
   }
 
   if (kIsWeb) {
@@ -81,8 +82,14 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider<AuthProvider>.value(value: auth),
         ChangeNotifierProvider(create: (_) => DtrProvider()),
         ChangeNotifierProvider(create: (_) => DocuTrackerProvider()),
+        ChangeNotifierProvider(create: (_) => NotificationProvider()),
         ChangeNotifierProvider(
-          create: (_) => LeaveProvider(repository: ApiLeaveRepository()),
+          create: (context) => LeaveProvider(
+            repository: ApiLeaveRepository(),
+            onMutation: () {
+              context.read<NotificationProvider>().refreshUnreadCount();
+            },
+          ),
         ),
         ChangeNotifierProvider(create: (_) => RecruitmentHirePrefill()),
       ],

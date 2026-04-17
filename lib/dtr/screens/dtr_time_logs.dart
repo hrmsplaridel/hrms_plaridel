@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../data/time_record.dart';
 import '../../providers/auth_provider.dart';
-import '../dtr_provider.dart';
+import '../dtr_provider.dart' show DtrProvider, EmployeeOption;
 import '../widgets/attendance_source_badge.dart';
 import '../widgets/import_biometric_attendance_logs_dialog.dart';
 
@@ -154,9 +154,9 @@ class DtrTimeLogs extends StatefulWidget {
   State<DtrTimeLogs> createState() => _DtrTimeLogsState();
 }
 
-class _DtrTimeLogsState extends State<DtrTimeLogs> {
+class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
   final _searchController = TextEditingController();
-  Timer? _refreshTimer;
+  StreamSubscription? _wsSub;
   int _selectedMonth = DateTime.now().month;
   int _selectedYear = DateTime.now().year;
 
@@ -171,6 +171,37 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
   int get _lastDayOfSelectedMonth {
     final end = DateTime(_selectedYear, _selectedMonth + 1, 0);
     return end.day;
+  }
+
+  /// Latest day the user can pick for the selected month/year. Past months: full month.
+  /// Current month/year: cannot pick future days (no time logs yet). Future months: full month (usually empty).
+  int get _maxSelectableCalendarDay {
+    final now = DateTime.now();
+    final last = _lastDayOfSelectedMonth;
+    if (_selectedYear < now.year ||
+        (_selectedYear == now.year && _selectedMonth < now.month)) {
+      return last;
+    }
+    if (_selectedYear > now.year ||
+        (_selectedYear == now.year && _selectedMonth > now.month)) {
+      return last;
+    }
+    final today = now.day;
+    return today < last ? today : last;
+  }
+
+  /// Keeps [_selectedDay] within the month and not beyond today when viewing current month/year.
+  void _clampSelectedDayIfNeeded() {
+    if (_selectedDay == null) return;
+    final last = _lastDayOfSelectedMonth;
+    final maxD = _maxSelectableCalendarDay;
+    if (_selectedDay! > last) {
+      _selectedDay = null;
+      return;
+    }
+    if (_selectedDay! > maxD) {
+      _selectedDay = maxD;
+    }
   }
 
   /// Intended filter range based on current month/year/day selection.
@@ -209,32 +240,52 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final now = DateTime.now();
     _selectedDay = now.day;
-    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
-    // Auto-refresh every 30s so new time-in/time-out shows without manual refresh
-    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (mounted) _applyFilters(silent: true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _load();
+      if (mounted) {
+        _wsSub = context.read<DtrProvider>().onDtrUpdate.listen((_) {
+          if (mounted) _applyFilters(silent: true);
+        });
+      }
     });
   }
 
   @override
   void dispose() {
-    _refreshTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _wsSub?.cancel();
     _searchController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      _applyFilters(silent: true);
+    }
   }
 
   Future<void> _load() async {
     if (!mounted) return;
     final dtr = context.read<DtrProvider>();
-    await Future.wait([dtr.loadEmployees(), dtr.loadDepartments()]);
+    await Future.wait([
+      dtr.loadEmployees(departmentId: _selectedDepartmentId),
+      dtr.loadDepartments(),
+    ]);
     if (!mounted) return;
     await _applyFilters();
   }
 
   Future<void> _applyFilters({bool silent = false}) async {
     if (!mounted) return;
+    final dayBefore = _selectedDay;
+    _clampSelectedDayIfNeeded();
+    if (dayBefore != _selectedDay && mounted) {
+      setState(() {});
+    }
     final dtr = context.read<DtrProvider>();
     final lastDay = _lastDayOfSelectedMonth;
     final int day =
@@ -275,6 +326,54 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
     return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
   }
 
+  static const List<String> _shortWeekdays = [
+    'Mon',
+    'Tue',
+    'Wed',
+    'Thu',
+    'Fri',
+    'Sat',
+    'Sun',
+  ];
+
+  static String _formatDateWithWeekday(DateTime d) {
+    final w = _shortWeekdays[d.weekday - 1];
+    return '${_formatDate(d)} · $w';
+  }
+
+  static String _formatTimeOfDay12h(TimeOfDay t) {
+    final h = t.hour;
+    final m = t.minute;
+    final ampm = h >= 12 ? 'PM' : 'AM';
+    final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+    return '$h12:${m.toString().padLeft(2, '0')} $ampm';
+  }
+
+  static String _cellDisplayForSegment({
+    required TimeRecord record,
+    required DateTime? timeValue,
+    required String segment,
+  }) {
+    if (timeValue != null) return _formatTime(timeValue);
+    final segs = record.locatorSlipSegments ?? const <String>[];
+    if (segs.any((s) => s.toUpperCase() == segment)) {
+      return 'On Field';
+    }
+    return '—';
+  }
+
+  /// Prefer [preferredUserId] if still in list; otherwise first employee.
+  static String? _pickUserIdForEmployeeList(
+    List<EmployeeOption> emps,
+    String? preferredUserId,
+  ) {
+    if (emps.isEmpty) return null;
+    if (preferredUserId != null && emps.any((e) => e.id == preferredUserId)) {
+      return preferredUserId;
+    }
+    return emps.first.id;
+  }
+
   /// Fallback attendance remark when backend does not send attendanceRemark (e.g. hardcoded preview).
   /// Backend sends shift-aware attendance_remark; this is a simple fallback.
   static String getAttendanceRemark(TimeRecord r) {
@@ -311,8 +410,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
     if (r.status == 'holiday' ||
         r.holidayId != null ||
         r.status == 'on_leave' ||
-        r.leaveRequestId != null)
+        r.leaveRequestId != null) {
       return '—';
+    }
     final m = r.lateMinutes ?? 0;
     return m == 0 ? '0 min' : '$m min';
   }
@@ -322,8 +422,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
     if (r.status == 'holiday' ||
         r.holidayId != null ||
         r.status == 'on_leave' ||
-        r.leaveRequestId != null)
+        r.leaveRequestId != null) {
       return '—';
+    }
+
     final m = r.undertimeMinutes ?? 0;
     return m == 0 ? '0 min' : '$m min';
   }
@@ -541,6 +643,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                                   _selectedDay! > _lastDayOfSelectedMonth) {
                                 _selectedDay = null;
                               }
+                              _clampSelectedDayIfNeeded();
                             });
                           }
                           _applyFilters();
@@ -568,6 +671,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                                   _selectedDay! > _lastDayOfSelectedMonth) {
                                 _selectedDay = null;
                               }
+                              _clampSelectedDayIfNeeded();
                             });
                           }
                           _applyFilters();
@@ -582,7 +686,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                             child: Text('All days'),
                           ),
                           ...List.generate(
-                            _lastDayOfSelectedMonth,
+                            _maxSelectableCalendarDay,
                             (i) => i + 1,
                           ).map(
                             (d) => DropdownMenuItem<int?>(
@@ -611,8 +715,15 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                             ),
                           ),
                         ],
-                        onChanged: (v) {
-                          setState(() => _selectedDepartmentId = v);
+                        onChanged: (v) async {
+                          final dtr = context.read<DtrProvider>();
+                          setState(() {
+                            _selectedDepartmentId = v;
+                            _selectedUserId = null;
+                          });
+                          await dtr.loadEmployees(departmentId: v);
+                          if (!mounted) return;
+                          setState(() {});
                           _applyFilters();
                         },
                       ),
@@ -637,8 +748,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                         },
                       ),
                       OutlinedButton(
-                        onPressed: () {
+                        onPressed: () async {
                           final now = DateTime.now();
+                          final dtr = context.read<DtrProvider>();
                           setState(() {
                             _searchController.clear();
                             _selectedMonth = now.month;
@@ -647,6 +759,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                             _selectedUserId = null;
                             _selectedDepartmentId = null;
                           });
+                          await dtr.loadEmployees();
+                          if (!mounted) return;
                           _applyFilters();
                         },
                         style: OutlinedButton.styleFrom(
@@ -772,22 +886,12 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Add a manual entry or try a different date range.',
+                      'Use Add manual entry above, or try a different date range.',
                       style: TextStyle(
                         color: AppTheme.textSecondary,
                         fontSize: 14,
                       ),
                       textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 20),
-                    FilledButton.icon(
-                      onPressed: () => _showAddDialog(context, dtr),
-                      icon: const Icon(Icons.add_rounded, size: 18),
-                      label: const Text('Add manual entry'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.primaryNavy,
-                        foregroundColor: AppTheme.white,
-                      ),
                     ),
                   ],
                 ),
@@ -957,7 +1061,11 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                                         flex: 1,
                                         child: Center(
                                           child: Text(
-                                            _formatTime(timeIn),
+                                            _cellDisplayForSegment(
+                                              record: r,
+                                              timeValue: timeIn,
+                                              segment: 'AM IN',
+                                            ),
                                             style: TextStyle(
                                               fontSize: 13,
                                               color: AppTheme.textPrimary,
@@ -970,7 +1078,11 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                                         flex: 1,
                                         child: Center(
                                           child: Text(
-                                            _formatTime(breakOut),
+                                            _cellDisplayForSegment(
+                                              record: r,
+                                              timeValue: breakOut,
+                                              segment: 'AM OUT',
+                                            ),
                                             style: TextStyle(
                                               fontSize: 13,
                                               color: AppTheme.textPrimary,
@@ -983,7 +1095,11 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                                         flex: 1,
                                         child: Center(
                                           child: Text(
-                                            _formatTime(breakIn),
+                                            _cellDisplayForSegment(
+                                              record: r,
+                                              timeValue: breakIn,
+                                              segment: 'PM IN',
+                                            ),
                                             style: TextStyle(
                                               fontSize: 13,
                                               color: AppTheme.textPrimary,
@@ -996,7 +1112,11 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
                                         flex: 1,
                                         child: Center(
                                           child: Text(
-                                            _formatTime(timeOut),
+                                            _cellDisplayForSegment(
+                                              record: r,
+                                              timeValue: timeOut,
+                                              segment: 'PM OUT',
+                                            ),
                                             style: TextStyle(
                                               fontSize: 13,
                                               color: AppTheme.textPrimary,
@@ -1139,17 +1259,84 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
     );
   }
 
+  Widget _manualEntryPunchTile({
+    required String label,
+    required TimeOfDay? value,
+    required VoidCallback onTap,
+    required IconData icon,
+  }) {
+    return Material(
+      color: AppTheme.sectionAlt,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Icon(icon, size: 20, color: AppTheme.primaryNavy),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      value != null ? _formatTimeOfDay12h(value) : 'Tap to set',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: value != null
+                            ? AppTheme.textPrimary
+                            : AppTheme.textSecondary.withOpacity(0.75),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.schedule_rounded,
+                size: 20,
+                color: AppTheme.textSecondary.withOpacity(0.65),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _showAddDialog(BuildContext context, DtrProvider dtr) async {
-    final employees = dtr.employees;
-    if (employees.isEmpty) {
+    if (dtr.departments.isEmpty) {
+      await dtr.loadDepartments();
+      if (!context.mounted) return;
+    }
+
+    var addDeptId = _selectedDepartmentId;
+    await dtr.loadEmployees(departmentId: addDeptId);
+    if (!context.mounted) return;
+
+    if (dtr.employees.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('No employees found. Add profiles first.'),
+          content: Text(
+            'No employees for this department filter. Try All departments or add employee profiles.',
+          ),
         ),
       );
       return;
     }
-    String? userId = employees.first.id;
+
+    String? userId = _pickUserIdForEmployeeList(dtr.employees, _selectedUserId);
     // Use the currently selected day/month/year so manual entry goes to the right date
     final day = _selectedDay;
     final lastDay = _lastDayOfSelectedMonth;
@@ -1160,119 +1347,426 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
     TimeOfDay? breakOut;
     TimeOfDay? breakIn;
     TimeOfDay? timeOut;
+    var employeesLoading = false;
 
-    final updated = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setState) => AlertDialog(
-          title: const Text('Add time entry'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  initialValue: userId,
-                  decoration: const InputDecoration(labelText: 'Employee'),
-                  items: employees
-                      .map(
-                        (e) => DropdownMenuItem(
-                          value: e.id,
-                          child: Text(e.fullName),
+    bool? updated;
+    try {
+      updated = await showDialog<bool>(
+        context: context,
+        builder: (ctx) {
+          return StatefulBuilder(
+            builder: (ctx, setState) {
+              final hasAnyTime =
+                  timeIn != null ||
+                  breakOut != null ||
+                  breakIn != null ||
+                  timeOut != null;
+              final screenH = MediaQuery.sizeOf(ctx).height;
+              final empList = dtr.employees;
+              final String? employeeDropdownValue = empList.isEmpty
+                  ? null
+                  : (userId != null && empList.any((e) => e.id == userId))
+                  ? userId
+                  : empList.first.id;
+              final canSubmit =
+                  !employeesLoading &&
+                  employeeDropdownValue != null &&
+                  empList.isNotEmpty;
+              return Dialog(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                insetPadding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 24,
+                ),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: 440,
+                    maxHeight: screenH * 0.92,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primaryNavy.withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Icon(
+                                Icons.edit_calendar_rounded,
+                                color: AppTheme.primaryNavy,
+                                size: 24,
+                              ),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Add time entry',
+                                    style: TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'Department filters the list below (defaults to your Time Logs filter). One employee, one date; empty punches stay blank.',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      height: 1.35,
+                                      color: AppTheme.textSecondary.withOpacity(
+                                        0.95,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
-                      )
-                      .toList(),
-                  onChanged: (v) => setState(() => userId = v),
-                ),
-                const SizedBox(height: 16),
-                ListTile(
-                  title: const Text('Date'),
-                  subtitle: Text(_formatDate(recordDate)),
-                  onTap: () async {
-                    final d = await showDatePicker(
-                      context: ctx,
-                      initialDate: recordDate,
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime(2030),
-                    );
-                    if (d != null) setState(() => recordDate = d);
-                  },
-                ),
-                ListTile(
-                  title: const Text('AM In'),
-                  subtitle: Text(
-                    timeIn != null
-                        ? '${timeIn!.hour.toString().padLeft(2, '0')}:${timeIn!.minute.toString().padLeft(2, '0')}'
-                        : 'Select',
+                      ),
+                      Flexible(
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              DropdownButtonFormField<String?>(
+                                value: addDeptId,
+                                isExpanded: true,
+                                decoration: InputDecoration(
+                                  labelText: 'Department',
+                                  filled: true,
+                                  fillColor: AppTheme.offWhite,
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                      color: Colors.black.withOpacity(0.12),
+                                    ),
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                      color: Colors.black.withOpacity(0.12),
+                                    ),
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 14,
+                                  ),
+                                ),
+                                items: [
+                                  const DropdownMenuItem<String?>(
+                                    value: null,
+                                    child: Text('All departments'),
+                                  ),
+                                  ...dtr.departments.map(
+                                    (d) => DropdownMenuItem<String?>(
+                                      value: d.id,
+                                      child: Text(
+                                        d.name,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                                onChanged: employeesLoading
+                                    ? null
+                                    : (v) async {
+                                        addDeptId = v;
+                                        setState(() => employeesLoading = true);
+                                        await dtr.loadEmployees(
+                                          departmentId: v,
+                                        );
+                                        if (!ctx.mounted) return;
+                                        setState(() {
+                                          employeesLoading = false;
+                                          userId = _pickUserIdForEmployeeList(
+                                            dtr.employees,
+                                            userId,
+                                          );
+                                        });
+                                      },
+                              ),
+                              const SizedBox(height: 10),
+                              if (employeesLoading)
+                                const Padding(
+                                  padding: EdgeInsets.only(bottom: 8),
+                                  child: LinearProgressIndicator(minHeight: 3),
+                                ),
+                              if (!employeesLoading && empList.isEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 10),
+                                  child: Text(
+                                    'No employees in this department. Choose All departments or another office.',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: Colors.orange.shade800,
+                                    ),
+                                  ),
+                                ),
+                              DropdownButtonFormField<String>(
+                                value: employeeDropdownValue,
+                                isExpanded: true,
+                                decoration: InputDecoration(
+                                  labelText: 'Employee',
+                                  filled: true,
+                                  fillColor: AppTheme.offWhite,
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                      color: Colors.black.withOpacity(0.12),
+                                    ),
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                      color: Colors.black.withOpacity(0.12),
+                                    ),
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 14,
+                                  ),
+                                ),
+                                items: empList
+                                    .map(
+                                      (e) => DropdownMenuItem(
+                                        value: e.id,
+                                        child: Text(
+                                          e.fullName,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: employeesLoading || empList.isEmpty
+                                    ? null
+                                    : (v) {
+                                        if (v != null) {
+                                          setState(() => userId = v);
+                                        }
+                                      },
+                              ),
+                              const SizedBox(height: 14),
+                              Material(
+                                color: AppTheme.offWhite,
+                                borderRadius: BorderRadius.circular(12),
+                                child: InkWell(
+                                  onTap: () async {
+                                    final d = await showDatePicker(
+                                      context: ctx,
+                                      initialDate: recordDate,
+                                      firstDate: DateTime(2020),
+                                      lastDate: DateTime(2030),
+                                    );
+                                    if (d != null)
+                                      setState(() => recordDate = d);
+                                  },
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 14,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          Icons.calendar_today_rounded,
+                                          size: 20,
+                                          color: AppTheme.primaryNavy,
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              const Text(
+                                                'Date',
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: AppTheme.textSecondary,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                _formatDateWithWeekday(
+                                                  recordDate,
+                                                ),
+                                                style: const TextStyle(
+                                                  fontSize: 15,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: AppTheme.textPrimary,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        Icon(
+                                          Icons.chevron_right_rounded,
+                                          color: AppTheme.textSecondary
+                                              .withOpacity(0.7),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 18),
+                              Text(
+                                'Morning',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.4,
+                                  color: AppTheme.textSecondary.withOpacity(
+                                    0.9,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              _manualEntryPunchTile(
+                                label: 'AM In (time in)',
+                                value: timeIn,
+                                icon: Icons.wb_sunny_outlined,
+                                onTap: () async {
+                                  final t = await showTimePicker(
+                                    context: ctx,
+                                    initialTime: timeIn ?? TimeOfDay.now(),
+                                  );
+                                  if (t != null) setState(() => timeIn = t);
+                                },
+                              ),
+                              const SizedBox(height: 8),
+                              _manualEntryPunchTile(
+                                label: 'AM Out (break out)',
+                                value: breakOut,
+                                icon: Icons.restaurant_outlined,
+                                onTap: () async {
+                                  final t = await showTimePicker(
+                                    context: ctx,
+                                    initialTime: breakOut ?? TimeOfDay.now(),
+                                  );
+                                  if (t != null) setState(() => breakOut = t);
+                                },
+                              ),
+                              const SizedBox(height: 18),
+                              Text(
+                                'Afternoon',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.4,
+                                  color: AppTheme.textSecondary.withOpacity(
+                                    0.9,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              _manualEntryPunchTile(
+                                label: 'PM In (break in)',
+                                value: breakIn,
+                                icon: Icons.nightlight_outlined,
+                                onTap: () async {
+                                  final t = await showTimePicker(
+                                    context: ctx,
+                                    initialTime: breakIn ?? TimeOfDay.now(),
+                                  );
+                                  if (t != null) setState(() => breakIn = t);
+                                },
+                              ),
+                              const SizedBox(height: 8),
+                              _manualEntryPunchTile(
+                                label: 'PM Out (time out)',
+                                value: timeOut,
+                                icon: Icons.logout_rounded,
+                                onTap: () async {
+                                  final t = await showTimePicker(
+                                    context: ctx,
+                                    initialTime: timeOut ?? TimeOfDay.now(),
+                                  );
+                                  if (t != null) setState(() => timeOut = t);
+                                },
+                              ),
+                              if (hasAnyTime) ...[
+                                const SizedBox(height: 8),
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: TextButton(
+                                    onPressed: () => setState(() {
+                                      timeIn = null;
+                                      breakOut = null;
+                                      breakIn = null;
+                                      timeOut = null;
+                                    }),
+                                    child: const Text('Clear all times'),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                      const Divider(height: 1),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx, false),
+                              child: const Text('Cancel'),
+                            ),
+                            const SizedBox(width: 8),
+                            FilledButton(
+                              onPressed: !canSubmit
+                                  ? null
+                                  : () {
+                                      userId = employeeDropdownValue;
+                                      Navigator.pop(ctx, true);
+                                    },
+                              style: FilledButton.styleFrom(
+                                backgroundColor: AppTheme.primaryNavy,
+                                foregroundColor: AppTheme.white,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 20,
+                                  vertical: 12,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                              child: const Text('Add entry'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                  onTap: () async {
-                    final t = await showTimePicker(
-                      context: ctx,
-                      initialTime: timeIn ?? TimeOfDay.now(),
-                    );
-                    if (t != null) setState(() => timeIn = t);
-                  },
                 ),
-                ListTile(
-                  title: const Text('AM Out'),
-                  subtitle: Text(
-                    breakOut != null
-                        ? '${breakOut!.hour.toString().padLeft(2, '0')}:${breakOut!.minute.toString().padLeft(2, '0')}'
-                        : 'Select',
-                  ),
-                  onTap: () async {
-                    final t = await showTimePicker(
-                      context: ctx,
-                      initialTime: breakOut ?? TimeOfDay.now(),
-                    );
-                    if (t != null) setState(() => breakOut = t);
-                  },
-                ),
-                ListTile(
-                  title: const Text('PM In'),
-                  subtitle: Text(
-                    breakIn != null
-                        ? '${breakIn!.hour.toString().padLeft(2, '0')}:${breakIn!.minute.toString().padLeft(2, '0')}'
-                        : 'Select',
-                  ),
-                  onTap: () async {
-                    final t = await showTimePicker(
-                      context: ctx,
-                      initialTime: breakIn ?? TimeOfDay.now(),
-                    );
-                    if (t != null) setState(() => breakIn = t);
-                  },
-                ),
-                ListTile(
-                  title: const Text('PM Out'),
-                  subtitle: Text(
-                    timeOut != null
-                        ? '${timeOut!.hour.toString().padLeft(2, '0')}:${timeOut!.minute.toString().padLeft(2, '0')}'
-                        : 'Select',
-                  ),
-                  onTap: () async {
-                    final t = await showTimePicker(
-                      context: ctx,
-                      initialTime: timeOut ?? TimeOfDay.now(),
-                    );
-                    if (t != null) setState(() => timeOut = t);
-                  },
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Add'),
-            ),
-          ],
-        ),
-      ),
-    );
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      if (mounted) {
+        await dtr.loadEmployees(departmentId: _selectedDepartmentId);
+      }
+    }
 
     final uid = userId;
     if (updated == true && uid != null && uid.isNotEmpty) {
@@ -1481,7 +1975,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
       ),
     );
 
-    if (updated == true && r.id != null) {
+    if (updated == true) {
       final date = DateTime(recordDate.year, recordDate.month, recordDate.day);
       DateTime? tin;
       DateTime? bo;
@@ -1539,7 +2033,11 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
         timeOut: tout,
         totalHours: hours,
       );
-      await dtr.updateEntry(updatedRec);
+      if (r.id != null) {
+        await dtr.updateEntry(updatedRec);
+      } else {
+        await dtr.addManualEntry(updatedRec);
+      }
       if (context.mounted) {
         ScaffoldMessenger.of(
           context,
@@ -1574,12 +2072,26 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> {
       ),
     );
     if (ok == true && r.id != null) {
-      await dtr.deleteEntry(r.id!);
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Time entry deleted.')));
-      }
+      final deleted = await dtr.deleteEntry(r.id!);
+      if (!context.mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(deleted ? 'Time entry deleted' : 'Delete failed'),
+          content: Text(
+            deleted
+                ? 'The time log was deleted successfully.'
+                : (dtr.error ??
+                      'Unable to delete this time log. Please try again.'),
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
     }
   }
 }

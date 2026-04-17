@@ -1,6 +1,10 @@
 const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
+const {
+  expandNonRecurringToWindow,
+  expandRecurringToWindow,
+} = require('../services/holidayRangeUtils');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -17,12 +21,6 @@ function toDateStr(v) {
   }
   const s = String(v).split('T')[0];
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
-}
-
-/** Get MM-DD from DB date for recurring month/day comparison. */
-function toMmDd(v) {
-  const s = toDateStr(v);
-  return s ? s.slice(5) : null;
 }
 
 // GET /api/calendar-events?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&employee_id=uuid (optional)
@@ -45,49 +43,48 @@ router.get('/events', protect, async (req, res) => {
     const events = [];
     const holidayDatesSeen = new Set();
 
-    // Exact-date holidays in range
-    const exactResult = await pool.query(
-      `SELECT holiday_date, name, holiday_type FROM holidays WHERE holiday_date >= $1::date AND holiday_date <= $2::date AND (is_active IS NULL OR is_active = true) ORDER BY holiday_date`,
+    const nonRecur = await pool.query(
+      `SELECT date_from, date_to, name, holiday_type FROM holidays
+       WHERE recurring = false AND (is_active IS NULL OR is_active = true)
+         AND date_from <= $2::date AND date_to >= $1::date`,
       [startDate, endDate]
     );
-    for (const r of exactResult.rows) {
-      const dStr = toDateStr(r.holiday_date) || String(r.holiday_date).split('T')[0];
-      if (!dStr) continue;
-      holidayDatesSeen.add(dStr);
-      events.push({
-        date: dStr,
-        type: 'holiday',
-        label: r.name,
-        holiday_type: r.holiday_type,
-      });
-    }
-
-    // Recurring holidays: for each day in range, add if month+day matches a recurring holiday (and not already added)
-    const recurringResult = await pool.query(
-      `SELECT holiday_date, name, holiday_type FROM holidays WHERE recurring = true AND (is_active IS NULL OR is_active = true)`
-    );
-    const nextDayStr = (s) => {
-      const d = new Date(s + 'T12:00:00Z');
-      d.setUTCDate(d.getUTCDate() + 1);
-      return d.toISOString().slice(0, 10);
-    };
-    for (let dStr = startDate; dStr <= endDate; dStr = nextDayStr(dStr)) {
-      if (holidayDatesSeen.has(dStr)) continue;
-      const mmdd = dStr.slice(5);
-      for (const r of recurringResult.rows) {
-        const hMmdd = toMmDd(r.holiday_date);
-        if (hMmdd && hMmdd === mmdd) {
-          holidayDatesSeen.add(dStr);
-          events.push({
-            date: dStr,
-            type: 'holiday',
-            label: r.name,
-            holiday_type: r.holiday_type,
-          });
-          break;
-        }
+    for (const r of nonRecur.rows) {
+      const df = toDateStr(r.date_from);
+      const dt = toDateStr(r.date_to);
+      if (!df || !dt) continue;
+      for (const dStr of expandNonRecurringToWindow(df, dt, startDate, endDate)) {
+        if (holidayDatesSeen.has(dStr)) continue;
+        holidayDatesSeen.add(dStr);
+        events.push({
+          date: dStr,
+          type: 'holiday',
+          label: r.name,
+          holiday_type: r.holiday_type,
+        });
       }
     }
+
+    const recurringResult = await pool.query(
+      `SELECT date_from, date_to, name, holiday_type FROM holidays WHERE recurring = true AND (is_active IS NULL OR is_active = true)`
+    );
+    for (const r of recurringResult.rows) {
+      const df = toDateStr(r.date_from);
+      const dt = toDateStr(r.date_to);
+      if (!df || !dt) continue;
+      for (const dStr of expandRecurringToWindow(df, dt, startDate, endDate)) {
+        if (holidayDatesSeen.has(dStr)) continue;
+        holidayDatesSeen.add(dStr);
+        events.push({
+          date: dStr,
+          type: 'holiday',
+          label: r.name,
+          holiday_type: r.holiday_type,
+        });
+      }
+    }
+
+    events.sort((a, b) => a.date.localeCompare(b.date));
 
     // For the given employee: assignment-effective shift per day (Schema v2: effective_from / effective_to)
     if (employeeId) {

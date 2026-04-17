@@ -48,6 +48,9 @@ dependencies:
   webview_flutter: ^4.10.0
   webview_flutter_web: ^0.2.3
   web: ^1.1.1
+  shimmer: ^3.0.0
+  web_socket_channel: ^3.0.3
+  fl_chart: ^0.69.0
 
 dev_dependencies:
   flutter_test:

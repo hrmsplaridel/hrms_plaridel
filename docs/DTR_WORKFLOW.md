@@ -58,7 +58,7 @@ From `EmployeeDashboard` sidebar:
 
 In practice, **admin == HR** for the DTR and leave modules.
 
-### 3.1 DTR Hub (AdminDashboard → _DtrContent)
+### 3.1 DTR Hub (AdminDashboard → \_DtrContent)
 
 Feature cards available to admin in the DTR hub:
 
@@ -79,7 +79,7 @@ Routing:
 - `Time Logs` → `DtrMain(section: timeLogs)` → `DtrTimeLogs`
 - `Reports` → `DtrMain(section: reports)` → `DtrReports`
 - `Leave Management` → `LeaveMain(isAdmin: true)`
-- Other cards go through `_ManageContent` to various manage_* screens.
+- Other cards go through `_ManageContent` to various manage\_\* screens.
 
 ### 3.2 Capabilities
 
@@ -118,7 +118,7 @@ Routing:
 
 - **Manage shifts, holidays, and related data**
   - `Assignment` → `ManageAssignment` (assign employees to departments, positions, shifts with effective dates).
-  - `Department`, `Position`, `Shift` → manage reference data via their respective manage_* screens.
+  - `Department`, `Position`, `Shift` → manage reference data via their respective manage\_\* screens.
   - `Holiday Management` → `ManageHoliday` (configure holidays used by DTR and payroll).
   - `Attendance Policy` → `ManageAttendancePolicy` (grace period, late/absent/undertime rules, etc.).
   - `Employees` → `ManageEmployee` (employee profiles, roles: admin vs employee).
@@ -177,12 +177,12 @@ Result: the system currently supports **correction approvals**, but **not a mult
 
 Target workflow: **Employee → Supervisor → HR**
 
-| Step                    | Ideal Workflow                                              | Current Implementation                                                   |
-|-------------------------|------------------------------------------------------------|---------------------------------------------------------------------------|
-| Employee attendance     | Employee views logs and requests corrections/leave        | Employee views own logs; can file **leave**, but **no DTR correction UI** |
-| Supervisor review       | Supervisor reviews and approves employee corrections/leave | **Not implemented** as a distinct role or UI                              |
-| HR/Personnel review     | HR verifies final records, manages shifts/holidays         | Admin (HR) can edit logs, approve corrections, manage shifts/holidays     |
-| DTR approval status     | DTR may carry supervisor/HR verification indicators        | DTR PDF has no explicit approval states; uses current `time_records` only |
+| Step                | Ideal Workflow                                             | Current Implementation                                                    |
+| ------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Employee attendance | Employee views logs and requests corrections/leave         | Employee views own logs; can file **leave**, but **no DTR correction UI** |
+| Supervisor review   | Supervisor reviews and approves employee corrections/leave | **Not implemented** as a distinct role or UI                              |
+| HR/Personnel review | HR verifies final records, manages shifts/holidays         | Admin (HR) can edit logs, approve corrections, manage shifts/holidays     |
+| DTR approval status | DTR may carry supervisor/HR verification indicators        | DTR PDF has no explicit approval states; uses current `time_records` only |
 
 In short:
 
@@ -194,4 +194,3 @@ In short:
   - No explicit approval flags on DTR exports.
 
 This is important context for planning future enhancements toward a more formal, government‑style DTR workflow.
-

@@ -35,7 +35,10 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    final isWide = MediaQuery.of(context).size.width > 800;
+    final screenW = MediaQuery.sizeOf(context).width;
+    final isWide = screenW > 800;
+    // Keep branding within the viewport on narrow phones (fixed 420 caused overflow).
+    final brandingWidth = isWide ? 460.0 : (screenW - 32).clamp(260.0, 420.0);
 
     return Scaffold(
       body: Stack(
@@ -79,7 +82,7 @@ class _LoginPageState extends State<LoginPage> {
                   Align(
                     alignment: Alignment.topCenter,
                     child: SizedBox(
-                      width: isWide ? 460 : 420,
+                      width: brandingWidth,
                       child: _BrandingSection(),
                     ),
                   ),
@@ -133,16 +136,17 @@ class _LoginPageState extends State<LoginPage> {
       if (!mounted) return;
       if (errorMessage == null) {
         final role = auth.user?.role ?? 'employee';
-        final isAdmin = role == 'admin';
+        final isPrivileged = role == 'admin' || role == 'hr';
 
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(kLoginAsKey, isAdmin ? 'Admin' : 'Employee');
+        await prefs.setString(kLoginAsKey, isPrivileged ? 'Admin' : 'Employee');
 
         if (!mounted) return;
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
-            builder: (context) =>
-                isAdmin ? const AdminDashboard() : const EmployeeDashboard(),
+            builder: (context) => isPrivileged
+                ? const AdminDashboard()
+                : const EmployeeDashboard(),
           ),
         );
       } else {
@@ -190,63 +194,99 @@ class _BrandingSection extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          const SizedBox(height: 56),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  width: 92,
-                  height: 92,
-                  color: Colors.white.withValues(alpha: 0.2),
-                  child: Image.asset(
-                    'assets/images/Plaridel Logo.jpg',
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const Icon(
-                      Icons.shield_outlined,
-                      color: Colors.white,
-                      size: 32,
-                    ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final availableWidth = constraints.maxWidth;
+          final isCompact = availableWidth < 340;
+          final titleSize = isCompact
+              ? 22.0
+              : (availableWidth < 400 ? 26.0 : 34.0);
+          final subtitleSize = isCompact
+              ? 11.5
+              : (availableWidth < 400 ? 13.0 : 16.0);
+          final logoSize = isCompact ? 76.0 : 92.0;
+
+          Widget buildLogo() {
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                width: logoSize,
+                height: logoSize,
+                color: Colors.white.withOpacity(0.2),
+                child: Image.asset(
+                  'assets/images/Plaridel Logo.jpg',
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const Icon(
+                    Icons.shield_outlined,
+                    color: Colors.white,
+                    size: 32,
                   ),
                 ),
               ),
-              const SizedBox(width: 16),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Municipality of Plaridel',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 34,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.3,
-                      height: 1.2,
-                    ),
+            );
+          }
+
+          Widget buildTitleBlock({required TextAlign align}) {
+            return Column(
+              crossAxisAlignment: align == TextAlign.center
+                  ? CrossAxisAlignment.center
+                  : CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Municipality of Plaridel',
+                  textAlign: align,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: titleSize,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.3,
+                    height: 1.15,
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'HUMAN RESOURCE MANAGEMENT SYSTEM',
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.95),
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.8,
-                      height: 1.2,
-                    ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'HUMAN RESOURCE MANAGEMENT SYSTEM',
+                  textAlign: align,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.95),
+                    fontSize: subtitleSize,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: isCompact ? 0.3 : 0.7,
+                    height: 1.2,
                   ),
-                ],
-              ),
+                  maxLines: isCompact ? 3 : 2,
+                  overflow: TextOverflow.ellipsis,
+                  softWrap: true,
+                ),
+              ],
+            );
+          }
+
+          return Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const SizedBox(height: 56),
+              if (isCompact) ...[
+                buildLogo(),
+                const SizedBox(height: 14),
+                buildTitleBlock(align: TextAlign.center),
+              ] else
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    buildLogo(),
+                    const SizedBox(width: 12),
+                    Expanded(child: buildTitleBlock(align: TextAlign.left)),
+                  ],
+                ),
+              const SizedBox(height: 0),
+              // Removed tagline as requested.
             ],
-          ),
-          const SizedBox(height: 0),
-          // Removed tagline as requested.
-        ],
+          );
+        },
       ),
     );
   }

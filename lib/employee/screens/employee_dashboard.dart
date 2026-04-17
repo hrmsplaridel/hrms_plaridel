@@ -8,19 +8,46 @@ import '../../../landingpage/screens/landing_page.dart';
 import '../../../login/screens/login_page.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../dtr/dtr_provider.dart';
+import '../../../data/time_record.dart';
 import '../../../dtr/widgets/attendance_display.dart';
 import '../../../dtr/widgets/attendance_source_badge.dart';
 import '../../../docutracker/docutracker_main.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
 import '../../../leave/leave_provider.dart';
+import '../../../leave/widgets/my_leave_loading_skeleton.dart';
+import '../../../locator/screens/employee_locator_slip_screen.dart';
+import '../../../notifications/notification_provider.dart';
+import '../../../notifications/notification_tap_result.dart';
+import '../../../notifications/open_notifications_panel.dart';
 import '../../../leave/models/leave_type.dart';
 import '../../../widgets/user_avatar.dart';
 import '../../../ld/training_daily_report_employee_screen.dart';
+import '../widgets/attendance_overview/attendance_overview.dart';
+import '../widgets/employee_dashboard_skeletons.dart';
 import '../../shared/screens/profile_and_settings_page.dart';
 
-/// Employee dashboard: light HRMS sidebar (matches admin), main content with
-/// welcome, attendance, leave, training, DocuTracker, and announcements.
+/// Main scroll padding: comfortable insets on phones (narrower gutters still breathe).
+EdgeInsets _employeeMainScrollPadding(BuildContext context) {
+  final mq = MediaQuery.of(context);
+  final w = mq.size.width;
+  final horizontal = w > 900 ? 24.0 : (w > 600 ? 20.0 : 18.0);
+  final top = w < 600 ? 4.0 : 8.0;
+  final bottom = 28.0 + (w < 600 ? mq.padding.bottom * 0.5 : 0.0);
+  return EdgeInsets.fromLTRB(horizontal, top, horizontal, bottom);
+}
+
+double _employeeCardPadding(BuildContext context) {
+  return MediaQuery.sizeOf(context).width < 600 ? 16.0 : 20.0;
+}
+
+double _employeeSectionCardPadding(BuildContext context) {
+  return MediaQuery.sizeOf(context).width < 600 ? 16.0 : 24.0;
+}
+
+/// Employee dashboard reference: dark blue sidebar (HR branding), nav items,
+/// welcome + Clock In, Attendance, Leave Balance, Payslip cards, Announcements,
+/// Upcoming Leave, Attendance Overview.
 class EmployeeDashboard extends StatefulWidget {
   const EmployeeDashboard({super.key});
 
@@ -28,16 +55,97 @@ class EmployeeDashboard extends StatefulWidget {
   State<EmployeeDashboard> createState() => _EmployeeDashboardState();
 }
 
-class _EmployeeDashboardState extends State<EmployeeDashboard> {
+class _EmployeeDashboardState extends State<EmployeeDashboard>
+    with WidgetsBindingObserver {
   int _selectedNavIndex = 0;
+
+  /// One frame: open My Leave on the tab chosen from a notification tap.
+  LeaveSection? _leaveInitialSection;
+
+  /// Bumps when routing from a notification so [LeaveMain] remounts with [initialSection].
+  int _leaveNavKey = 0;
+
+  /// Polls unread count so badges update when other users trigger notifications (e.g. HR after dept head approval).
+  Timer? _notificationPollTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<NotificationProvider>().refreshUnreadCount();
+      _notificationPollTimer?.cancel();
+      _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+        if (!mounted) return;
+        context.read<NotificationProvider>().refreshUnreadCount();
+      });
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      context.read<NotificationProvider>().refreshUnreadCount();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _notificationPollTimer?.cancel();
+    super.dispose();
+  }
+
   static const _navItems = [
     'Dashboard',
     'My Attendance',
     'My Leave',
+    'Locator Slip',
     'Training Reports',
     'DocuTracker',
     'Announcements',
   ];
+
+  Future<void> _handleOpenNotifications() async {
+    final result = await openNotificationsPanel(context);
+    if (!mounted) return;
+    await context.read<NotificationProvider>().refreshUnreadCount();
+    if (!mounted) return;
+    _applyNotificationTapResult(result);
+  }
+
+  void _applyNotificationTapResult(NotificationTapResult? result) {
+    if (result == null || result.kind == NotificationTapKind.none) return;
+    switch (result.kind) {
+      case NotificationTapKind.employeeLeaveApprovals:
+      case NotificationTapKind.employeeLeaveRequests:
+        final section = result.employeeLeaveSection;
+        if (section == null) return;
+        setState(() {
+          _selectedNavIndex = 2;
+          _leaveInitialSection = section;
+          _leaveNavKey++;
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() => _leaveInitialSection = null);
+          }
+        });
+        break;
+      case NotificationTapKind.employeeMyAttendance:
+        setState(() => _selectedNavIndex = 1);
+        break;
+      case NotificationTapKind.employeeLocatorApprovals:
+      case NotificationTapKind.employeeLocatorRequests:
+        setState(() => _selectedNavIndex = 3);
+        break;
+      case NotificationTapKind.adminDtrLocatorManagement:
+      case NotificationTapKind.adminDtrLeaveManagement:
+      case NotificationTapKind.none:
+        break;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -57,7 +165,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     final avatarPath = auth.avatarPath;
     final width = MediaQuery.of(context).size.width;
     final isWide = width > 900;
-    final contentPadding = width > 900 ? 24.0 : (width > 600 ? 20.0 : 16.0);
 
     return Scaffold(
       backgroundColor: AppTheme.offWhite,
@@ -67,7 +174,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
               child: SafeArea(
                 child: _EmployeeSidebar(
                   displayName: displayName,
-                  email: email,
                   avatarPath: avatarPath,
                   selectedIndex: _selectedNavIndex,
                   onTap: (i) {
@@ -77,302 +183,370 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                 ),
               ),
             ),
-      body: Row(
-        children: [
-          if (isWide)
-            _EmployeeSidebar(
-              displayName: displayName,
-              email: email,
-              avatarPath: avatarPath,
-              selectedIndex: _selectedNavIndex,
-              onTap: (i) => setState(() => _selectedNavIndex = i),
-            ),
-          Expanded(
-            child: Column(
-              children: [
-                _EmployeeTopBar(
-                  displayName: displayName,
-                  email: email,
-                  avatarPath: avatarPath,
-                  showMenuButton: !isWide,
-                  onProfileTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const ProfileAndSettingsPage(),
-                      ),
-                    );
-                  },
-                ),
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: EdgeInsets.all(contentPadding),
-                    child: _selectedNavIndex == 0
-                        ? _EmployeeDashboardContent(
-                            displayName: displayName,
-                            onViewAttendance: () =>
-                                setState(() => _selectedNavIndex = 1),
-                          )
-                        : _selectedNavIndex == 1
-                        ? const _EmployeeAttendanceContent()
-                        : _selectedNavIndex == 2
-                            ? const LeaveMain(isAdmin: false)
-                            : _selectedNavIndex == 3
-                                ? const TrainingDailyReportEmployeeScreen()
-                                : _selectedNavIndex == 4
-                                    ? const DocuTrackerMain(isAdmin: false)
-                                    : _EmployeePlaceholderContent(
-                                        title: _navItems[_selectedNavIndex],
-                                      ),
+      body: SafeArea(
+        child: Row(
+          children: [
+            if (isWide)
+              _EmployeeSidebar(
+                displayName: displayName,
+                avatarPath: avatarPath,
+                selectedIndex: _selectedNavIndex,
+                onTap: (i) => setState(() => _selectedNavIndex = i),
+              ),
+            Expanded(
+              child: Column(
+                children: [
+                  _EmployeeTopBar(
+                    displayName: displayName,
+                    email: email,
+                    avatarPath: avatarPath,
+                    showMenuButton: !isWide,
+                    onOpenNotifications: _handleOpenNotifications,
+                    onProfileTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const ProfileAndSettingsPage(),
+                        ),
+                      );
+                    },
                   ),
-                ),
-              ],
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: _employeeMainScrollPadding(context),
+                      child: _selectedNavIndex == 0
+                          ? _EmployeeDashboardContent(
+                              displayName: displayName,
+                              onViewAttendance: () =>
+                                  setState(() => _selectedNavIndex = 1),
+                            )
+                          : _selectedNavIndex == 1
+                          ? const _EmployeeAttendanceContent()
+                          : _selectedNavIndex == 2
+                          ? _EmployeeLeaveMainEntry(
+                              key: ValueKey(_leaveNavKey),
+                              initialSection: _leaveInitialSection,
+                            )
+                          : _selectedNavIndex == 3
+                          ? const EmployeeLocatorSlipScreen()
+                          : _selectedNavIndex == 4
+                          ? const TrainingDailyReportEmployeeScreen()
+                          : _selectedNavIndex == 5
+                          ? const DocuTrackerMain(isAdmin: false)
+                          : _EmployeePlaceholderContent(
+                              title: _navItems[_selectedNavIndex],
+                            ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
-/// Light sidebar aligned with admin HRMS drawer: orange header, nav tiles, profile card, footer.
+/// Reusable employee attendance overview container.
+///
+/// Employee mode: welcome line + Clock In, Attendance, Leave summary cards,
+/// monthly overview, and upcoming leave.
+///
+/// Admin portal mode ([adminPortal]: true): Clock In only (no Attendance /
+/// Leave Balance cards), no upcoming leave, monthly overview, then the full
+/// **My Attendance** table on the same scroll — admin-only layout.
+class EmployeeAttendanceOverviewSection extends StatelessWidget {
+  const EmployeeAttendanceOverviewSection({
+    super.key,
+    required this.displayName,
+    this.onViewAttendance,
+    this.adminPortal = false,
+  });
+
+  final String displayName;
+  final VoidCallback? onViewAttendance;
+  final bool adminPortal;
+
+  @override
+  Widget build(BuildContext context) {
+    final w = MediaQuery.sizeOf(context).width;
+    final isNarrow = w < 600;
+    final isTiny = w < 360;
+    final welcomeSize = isTiny ? 18.0 : (isNarrow ? 20.0 : 26.0);
+    final subtitleSize = isNarrow ? 13.5 : 15.0;
+
+    final header = adminPortal
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'My Attendance',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: welcomeSize,
+                  fontWeight: FontWeight.w800,
+                  height: 1.25,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'View your time-in/out records.',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: subtitleSize,
+                  height: 1.35,
+                ),
+              ),
+            ],
+          )
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Welcome back, $displayName!',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: welcomeSize,
+                  fontWeight: FontWeight.w800,
+                  height: 1.25,
+                ),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                "Here's your latest information and updates.",
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: subtitleSize,
+                  height: 1.35,
+                ),
+              ),
+            ],
+          );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        header,
+        SizedBox(height: isNarrow ? 18 : 24),
+        EmployeeAttendanceOverviewCard(
+          onViewMore: adminPortal ? null : onViewAttendance,
+          summaryCards: adminPortal
+              ? const _EmployeeClockInOnlySummary()
+              : _EmployeeSummaryCards(
+                  isNarrow: isNarrow,
+                  onViewAttendance: onViewAttendance,
+                ),
+          upcomingLeave: adminPortal
+              ? null
+              : const _EmployeeUpcomingLeaveCard(embedded: true),
+        ),
+        if (adminPortal) ...[
+          const SizedBox(height: 24),
+          const EmployeeAttendanceDetailsSection(showPageHeader: false),
+        ],
+      ],
+    );
+  }
+}
+
+/// Clock In card only — used for admin My Attendance overview (no Attendance /
+/// Leave Balance strip).
+class _EmployeeClockInOnlySummary extends StatelessWidget {
+  const _EmployeeClockInOnlySummary();
+
+  @override
+  Widget build(BuildContext context) {
+    final w = MediaQuery.sizeOf(context).width;
+    final singleColumn = w < 500;
+    final clockIn = _ClockInCard();
+    if (singleColumn) return clockIn;
+    return Row(children: [Expanded(child: clockIn)]);
+  }
+}
+
+/// Reusable detailed "My Attendance" table/list.
+class EmployeeAttendanceDetailsSection extends StatelessWidget {
+  const EmployeeAttendanceDetailsSection({
+    super.key,
+    this.showPageHeader = true,
+  });
+
+  final bool showPageHeader;
+
+  @override
+  Widget build(BuildContext context) {
+    return _EmployeeAttendanceContent(showPageHeader: showPageHeader);
+  }
+}
+
+class _EmployeeLeaveMainEntry extends StatefulWidget {
+  const _EmployeeLeaveMainEntry({super.key, this.initialSection});
+
+  final LeaveSection? initialSection;
+
+  @override
+  State<_EmployeeLeaveMainEntry> createState() =>
+      _EmployeeLeaveMainEntryState();
+}
+
+class _EmployeeLeaveMainEntryState extends State<_EmployeeLeaveMainEntry> {
+  Future<bool>? _deptHeadFuture;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _deptHeadFuture ??= context.read<LeaveProvider>().checkIsDepartmentHead();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<bool>(
+      future: _deptHeadFuture,
+      builder: (context, snapshot) {
+        final isDeptHead = snapshot.data ?? false;
+        if (snapshot.connectionState != ConnectionState.done) {
+          final compact = MediaQuery.sizeOf(context).width < 820;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Leave Management',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'View leave balances, file requests, and track approvals.',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+              ),
+              const SizedBox(height: 24),
+              MyLeaveLoadingSkeleton(compact: compact),
+            ],
+          );
+        }
+        return LeaveMain(
+          isAdmin: false,
+          isDepartmentHead: isDeptHead,
+          initialSection: widget.initialSection,
+        );
+      },
+    );
+  }
+}
+
+/// Dark blue sidebar: HR branding, nav (Dashboard, My Attendance, My Leave, DocuTracker, Announcements), user block, footer.
 class _EmployeeSidebar extends StatelessWidget {
   const _EmployeeSidebar({
     required this.displayName,
-    required this.email,
     this.avatarPath,
     required this.selectedIndex,
     required this.onTap,
   });
 
   final String displayName;
-  final String email;
   final String? avatarPath;
   final int selectedIndex;
   final ValueChanged<int> onTap;
 
-  static const String _sidebarFont = 'NotoSans';
-
-  static Widget _sealAvatar({double size = 48}) {
-    final pad = size * 0.08;
-    return Container(
-      padding: EdgeInsets.all(pad),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: ClipOval(
-        child: Image.asset(
-          'assets/images/Plaridel Logo.jpg',
-          width: size - pad * 2,
-          height: size - pad * 2,
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => Container(
-            width: size - pad * 2,
-            height: size - pad * 2,
-            color: Colors.white,
-            child: Icon(
-              Icons.account_balance_rounded,
-              color: AppTheme.primaryNavy,
-              size: size * 0.42,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final year = DateTime.now().year;
     return Container(
-      width: 288,
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 28,
-            offset: const Offset(6, 0),
-          ),
-        ],
-      ),
+      width: 268,
+      decoration: const BoxDecoration(color: AppTheme.primaryNavy),
       child: Column(
         children: [
-          const SizedBox(height: 18),
-          Container(
-            margin: const EdgeInsets.symmetric(horizontal: 14),
-            padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  AppTheme.primaryNavyLight,
-                  AppTheme.primaryNavy,
-                  AppTheme.primaryNavyDark,
-                ],
-                stops: const [0.0, 0.45, 1.0],
-              ),
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: AppTheme.primaryNavy.withValues(alpha: 0.42),
-                  blurRadius: 20,
-                  spreadRadius: -2,
-                  offset: const Offset(0, 8),
-                ),
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.06),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                _sealAvatar(size: 54),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Municipality of Plaridel',
-                        style: TextStyle(
-                          fontFamily: _sidebarFont,
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w800,
-                          height: 1.2,
-                          letterSpacing: -0.2,
-                        ),
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        'HUMAN RESOURCE MANAGEMENT SYSTEM',
-                        style: TextStyle(
-                          fontFamily: _sidebarFont,
-                          color: Colors.white.withValues(alpha: 0.95),
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.85,
-                          height: 1.3,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 22),
-          Expanded(
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _EmployeeNavTile(
-                    icon: Icons.home_rounded,
-                    label: 'Dashboard',
-                    selected: selectedIndex == 0,
-                    onTap: () => onTap(0),
-                  ),
-                  _EmployeeNavTile(
-                    icon: Icons.event_available_rounded,
-                    label: 'My Attendance',
-                    selected: selectedIndex == 1,
-                    onTap: () => onTap(1),
-                  ),
-                  _EmployeeNavTile(
-                    icon: Icons.event_busy_rounded,
-                    label: 'My Leave',
-                    selected: selectedIndex == 2,
-                    onTap: () => onTap(2),
-                  ),
-                  _EmployeeNavTile(
-                    icon: Icons.assignment_rounded,
-                    label: 'Training Reports',
-                    selected: selectedIndex == 3,
-                    onTap: () => onTap(3),
-                  ),
-                  _EmployeeNavTile(
-                    icon: Icons.description_rounded,
-                    label: 'DocuTracker',
-                    selected: selectedIndex == 4,
-                    onTap: () => onTap(4),
-                  ),
-                  _EmployeeNavTile(
-                    icon: Icons.campaign_rounded,
-                    label: 'Announcements',
-                    selected: selectedIndex == 5,
-                    onTap: () => onTap(5),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          const SizedBox(height: 24),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Divider(
-              height: 1,
-              thickness: 1,
-              color: AppTheme.lightGray,
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
               decoration: BoxDecoration(
-                color: const Color(0xFFF1F3F5),
-                borderRadius: BorderRadius.circular(16),
+                color: AppTheme.primaryNavy,
+                borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: AppTheme.lightGray.withValues(alpha: 0.85),
+                  color: Colors.white.withOpacity(0.1),
+                  width: 1,
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.3),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
               child: Row(
                 children: [
-                  UserAvatar(
-                    avatarPath: avatarPath,
-                    radius: 21,
-                    backgroundColor: AppTheme.lightGray,
-                    placeholderIconColor: AppTheme.textSecondary,
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.white, width: 2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.2),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.asset(
+                        'assets/images/Plaridel Logo.jpg',
+                        width: 48,
+                        height: 48,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          width: 48,
+                          height: 48,
+                          color: AppTheme.primaryNavy,
+                          child: const Icon(
+                            Icons.shield_rounded,
+                            color: Colors.white,
+                            size: 28,
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 14),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          displayName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontFamily: _sidebarFont,
-                            color: AppTheme.textPrimary,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 14,
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Municipality of Plaridel',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              height: 1.2,
+                            ),
                           ),
                         ),
                         const SizedBox(height: 2),
-                        Text(
-                          email.isNotEmpty ? email : 'Employee',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontFamily: _sidebarFont,
-                            color: AppTheme.textSecondary.withValues(alpha: 0.88),
-                            fontSize: 12,
-                            height: 1.2,
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'HUMAN RESOURCE MANAGEMENT SYSTEM',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.95),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.4,
+                              height: 1.2,
+                            ),
                           ),
                         ),
                       ],
@@ -382,86 +556,152 @@ class _EmployeeSidebar extends StatelessWidget {
               ),
             ),
           ),
+          const SizedBox(height: 28),
+          _EmployeeNavTile(
+            icon: Icons.home_rounded,
+            label: 'Dashboard',
+            selected: selectedIndex == 0,
+            onTap: () => onTap(0),
+          ),
+          _EmployeeNavTile(
+            icon: Icons.event_available_rounded,
+            label: 'My Attendance',
+            selected: selectedIndex == 1,
+            onTap: () => onTap(1),
+          ),
+          _EmployeeNavTile(
+            icon: Icons.event_busy_rounded,
+            label: 'My Leave',
+            selected: selectedIndex == 2,
+            onTap: () => onTap(2),
+          ),
+          _EmployeeNavTile(
+            icon: Icons.pin_drop_outlined,
+            label: 'Locator Slip',
+            selected: selectedIndex == 3,
+            onTap: () => onTap(3),
+          ),
+          _EmployeeNavTile(
+            icon: Icons.assignment_rounded,
+            label: 'Training Reports',
+            selected: selectedIndex == 4,
+            onTap: () => onTap(4),
+          ),
+          _EmployeeNavTile(
+            icon: Icons.description_rounded,
+            label: 'DocuTracker',
+            selected: selectedIndex == 5,
+            onTap: () => onTap(5),
+          ),
+          _EmployeeNavTile(
+            icon: Icons.campaign_rounded,
+            label: 'Announcements',
+            selected: selectedIndex == 6,
+            onTap: () => onTap(6),
+          ),
+          const Spacer(),
+          const Divider(height: 1, color: Colors.white24),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
-            child: Wrap(
-              alignment: WrapAlignment.center,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 0,
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+            child: Row(
               children: [
-                Text(
-                  '\u00a9 $year HRMS',
-                  style: TextStyle(
-                    fontFamily: _sidebarFont,
-                    color: AppTheme.textSecondary,
-                    fontSize: 11,
-                    height: 1.2,
-                  ),
+                UserAvatar(
+                  avatarPath: avatarPath,
+                  radius: 24,
+                  backgroundColor: Colors.white.withOpacity(0.25),
+                  placeholderIconColor: Colors.white,
                 ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: Text(
-                    '\u00b7',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.textSecondary.withValues(alpha: 0.7),
-                    ),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () {},
-                  style: TextButton.styleFrom(
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 0),
-                  ),
-                  child: Text(
-                    'Privacy',
-                    style: TextStyle(
-                      fontFamily: _sidebarFont,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.primaryNavy,
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: Text(
-                    '\u00b7',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.textSecondary.withValues(alpha: 0.7),
-                    ),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () {},
-                  style: TextButton.styleFrom(
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 0),
-                  ),
-                  child: Text(
-                    'Terms',
-                    style: TextStyle(
-                      fontFamily: _sidebarFont,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.primaryNavy,
-                    ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        displayName,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                        ),
+                      ),
+                      Text(
+                        'Employee',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.85),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Column(
+              children: [
+                Text(
+                  '© 2026 HRMS',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.6),
+                    fontSize: 11,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    TextButton(
+                      onPressed: () {},
+                      style: TextButton.styleFrom(
+                        minimumSize: Size.zero,
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                      ),
+                      child: Text(
+                        'Privacy Policy',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.white.withOpacity(0.7),
+                        ),
+                      ),
+                    ),
+                    Text(
+                      ' | ',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.white.withOpacity(0.6),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () {},
+                      style: TextButton.styleFrom(
+                        minimumSize: Size.zero,
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                      ),
+                      child: Text(
+                        'Terms',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.white.withOpacity(0.7),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
         ],
       ),
     );
   }
 }
 
-class _EmployeeNavTile extends StatefulWidget {
+class _EmployeeNavTile extends StatelessWidget {
   const _EmployeeNavTile({
     required this.icon,
     required this.label,
@@ -475,95 +715,36 @@ class _EmployeeNavTile extends StatefulWidget {
   final VoidCallback onTap;
 
   @override
-  State<_EmployeeNavTile> createState() => _EmployeeNavTileState();
-}
-
-class _EmployeeNavTileState extends State<_EmployeeNavTile> {
-  bool _hover = false;
-
-  static const _activeFill = Color(0xFFFFF0E6);
-  static const _inactiveIcon = Color(0xFF495057);
-  static const _inactiveLabel = Color(0xFF343A40);
-
-  @override
   Widget build(BuildContext context) {
-    final iconColor = widget.selected
-        ? AppTheme.primaryNavy
-        : (_hover ? AppTheme.primaryNavy.withValues(alpha: 0.9) : _inactiveIcon);
-    final labelColor = widget.selected
-        ? AppTheme.primaryNavy
-        : (_hover ? AppTheme.textPrimary : _inactiveLabel);
-
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-        child: Material(
-          color: Colors.transparent,
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: widget.onTap,
-            borderRadius: BorderRadius.circular(16),
-            child: IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (widget.selected)
-                    Container(
-                      width: 5,
-                      decoration: const BoxDecoration(
-                        color: AppTheme.primaryNavy,
-                        borderRadius: BorderRadius.horizontal(
-                          left: Radius.circular(14),
-                        ),
-                      ),
-                    ),
-                  Expanded(
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      curve: Curves.easeOutCubic,
-                      decoration: BoxDecoration(
-                        color: widget.selected
-                            ? _activeFill
-                            : (_hover
-                                ? AppTheme.primaryNavy.withValues(alpha: 0.06)
-                                : Colors.transparent),
-                        borderRadius: widget.selected
-                            ? const BorderRadius.horizontal(
-                                right: Radius.circular(16),
-                              )
-                            : BorderRadius.circular(16),
-                      ),
-                      padding: EdgeInsets.fromLTRB(
-                        widget.selected ? 12 : 16,
-                        14,
-                        16,
-                        14,
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(widget.icon, size: 22, color: iconColor),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Text(
-                              widget.label,
-                              style: TextStyle(
-                                fontFamily: _EmployeeSidebar._sidebarFont,
-                                color: labelColor,
-                                fontWeight:
-                                    widget.selected ? FontWeight.w700 : FontWeight.w500,
-                                fontSize: 15,
-                                letterSpacing: -0.15,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+    final bgColor = selected
+        ? Colors.white.withOpacity(0.22)
+        : Colors.transparent;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: bgColor,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                Icon(icon, size: 22, color: Colors.white),
+                const SizedBox(width: 14),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w500,
+                    fontSize: 14,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ),
@@ -579,6 +760,7 @@ class _EmployeeTopBar extends StatelessWidget {
     required this.email,
     this.avatarPath,
     this.showMenuButton = false,
+    required this.onOpenNotifications,
     this.onProfileTap,
   });
 
@@ -586,6 +768,7 @@ class _EmployeeTopBar extends StatelessWidget {
   final String email;
   final String? avatarPath;
   final bool showMenuButton;
+  final Future<void> Function() onOpenNotifications;
   final VoidCallback? onProfileTap;
 
   @override
@@ -593,7 +776,10 @@ class _EmployeeTopBar extends StatelessWidget {
     final isCompact = MediaQuery.of(context).size.width < 600;
     return Container(
       height: isCompact ? 56 : 64,
-      padding: EdgeInsets.symmetric(horizontal: isCompact ? 12 : 24),
+      padding: EdgeInsets.symmetric(
+        horizontal: isCompact ? 16 : 24,
+        vertical: isCompact ? 6 : 8,
+      ),
       decoration: BoxDecoration(
         color: AppTheme.lightGray,
         border: Border(
@@ -647,40 +833,55 @@ class _EmployeeTopBar extends StatelessWidget {
                   ),
           ),
           if (isCompact) const Spacer(),
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              IconButton(
-                icon: Icon(
-                  Icons.notifications_outlined,
-                  color: AppTheme.textPrimary,
-                  size: isCompact ? 22 : 24,
-                ),
-                onPressed: () {},
-              ),
-              Positioned(
-                right: 10,
-                top: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 5,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE53935),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Text(
-                    '1',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
+          Consumer<NotificationProvider>(
+            builder: (context, np, _) {
+              final c = np.unreadCount;
+              return Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      Icons.notifications_outlined,
+                      color: AppTheme.textPrimary,
+                      size: isCompact ? 22 : 24,
                     ),
+                    tooltip: 'Notifications',
+                    onPressed: () {
+                      onOpenNotifications();
+                    },
                   ),
-                ),
-              ),
-            ],
+                  if (c > 0)
+                    Positioned(
+                      right: -2,
+                      top: -2,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 1,
+                        ),
+                        constraints: const BoxConstraints(
+                          minWidth: 18,
+                          minHeight: 18,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE53935),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.white, width: 1.2),
+                        ),
+                        child: Text(
+                          c > 99 ? '99+' : '$c',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
           const SizedBox(width: 8),
           _EmployeeUserMenu(
@@ -902,11 +1103,8 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
       final dtr = context.read<DtrProvider>();
       if (dtr.loading) return;
       dtr.loadTodayRecord();
-      final now = DateTime.now();
-      dtr.loadTimeRecordsForUser(
-        startDate: DateTime(now.year, now.month, 1),
-        endDate: DateTime(now.year, now.month + 1, 0),
-      );
+      // Month list is loaded by [EmployeeAttendanceOverviewCard] / My Attendance;
+      // avoid overwriting the provider with a fixed "current month" every tick.
     });
   }
 
@@ -918,7 +1116,12 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
 
   @override
   Widget build(BuildContext context) {
-    final isNarrow = MediaQuery.of(context).size.width < 600;
+    final w = MediaQuery.sizeOf(context).width;
+    final isNarrow = w < 600;
+    final isTiny = w < 360;
+    final welcomeSize = isTiny ? 18.0 : (isNarrow ? 20.0 : 26.0);
+    final subtitleSize = isNarrow ? 13.5 : 15.0;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -926,24 +1129,32 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
           'Welcome back, ${widget.displayName}!',
           style: TextStyle(
             color: AppTheme.textPrimary,
-            fontSize: isNarrow ? 22 : 26,
+            fontSize: welcomeSize,
             fontWeight: FontWeight.w800,
+            height: 1.25,
           ),
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
         ),
         const SizedBox(height: 6),
         Text(
           "Here's your latest information and updates.",
           style: TextStyle(
             color: AppTheme.textSecondary,
-            fontSize: isNarrow ? 14 : 15,
+            fontSize: subtitleSize,
+            height: 1.35,
           ),
         ),
-        const SizedBox(height: 24),
-        _EmployeeSummaryCards(
-          isNarrow: isNarrow,
-          onViewAttendance: widget.onViewAttendance,
+        SizedBox(height: isNarrow ? 18 : 24),
+        EmployeeAttendanceOverviewCard(
+          onViewMore: widget.onViewAttendance,
+          summaryCards: _EmployeeSummaryCards(
+            isNarrow: isNarrow,
+            onViewAttendance: widget.onViewAttendance,
+          ),
+          upcomingLeave: const _EmployeeUpcomingLeaveCard(embedded: true),
         ),
-        const SizedBox(height: 24),
+        SizedBox(height: isNarrow ? 20 : 24),
         Text(
           'DocuTracker',
           style: TextStyle(
@@ -955,7 +1166,7 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
         ),
         const SizedBox(height: 12),
         Container(
-          padding: const EdgeInsets.all(24),
+          padding: EdgeInsets.all(_employeeSectionCardPadding(context)),
           decoration: BoxDecoration(
             color: AppTheme.white,
             borderRadius: BorderRadius.circular(20),
@@ -980,10 +1191,6 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
         ),
         const SizedBox(height: 24),
         _EmployeeAnnouncementsCard(),
-        const SizedBox(height: 24),
-        _EmployeeUpcomingLeaveCard(),
-        const SizedBox(height: 24),
-        _EmployeeAttendanceOverviewCard(),
         const SizedBox(height: 32),
       ],
     );
@@ -996,27 +1203,26 @@ class _EmployeeSummaryCards extends StatelessWidget {
   final bool isNarrow;
   final VoidCallback? onViewAttendance;
 
+  /// Summary row: Clock In, Attendance, Leave balance. [_PayslipCard] omitted for now.
+
   @override
   Widget build(BuildContext context) {
     final w = MediaQuery.of(context).size.width;
     final singleColumn = w < 500;
     final twoRows = w < 800 && !singleColumn;
+    final cardGap = w < 600 ? 12.0 : 16.0;
 
     Widget clockIn = _ClockInCard();
     Widget attendance = _AttendanceCard(onViewAttendance: onViewAttendance);
     Widget leaveBalance = _LeaveBalanceCard();
-    Widget payslip = _PayslipCard();
-
     if (singleColumn) {
       return Column(
         children: [
           clockIn,
-          const SizedBox(height: 16),
+          SizedBox(height: cardGap),
           attendance,
-          const SizedBox(height: 16),
+          SizedBox(height: cardGap),
           leaveBalance,
-          const SizedBox(height: 16),
-          payslip,
         ],
       );
     }
@@ -1026,30 +1232,22 @@ class _EmployeeSummaryCards extends StatelessWidget {
           Row(
             children: [
               Expanded(child: clockIn),
-              const SizedBox(width: 16),
+              SizedBox(width: cardGap),
               Expanded(child: attendance),
             ],
           ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(child: leaveBalance),
-              const SizedBox(width: 16),
-              Expanded(child: payslip),
-            ],
-          ),
+          SizedBox(height: cardGap),
+          Row(children: [Expanded(child: leaveBalance)]),
         ],
       );
     }
     return Row(
       children: [
         Expanded(child: clockIn),
-        const SizedBox(width: 16),
+        SizedBox(width: cardGap),
         Expanded(child: attendance),
-        const SizedBox(width: 16),
+        SizedBox(width: cardGap),
         Expanded(child: leaveBalance),
-        const SizedBox(width: 16),
-        Expanded(child: payslip),
       ],
     );
   }
@@ -1139,8 +1337,11 @@ class _ClockInCard extends StatelessWidget {
         // Block ALL clock actions when outside shift window (before start or after end)
         final isShiftDisabled = onTap != null && dtr.isOutsideShiftWindow;
 
+        final narrow = MediaQuery.sizeOf(context).width < 600;
+        final detailFontSize = narrow ? 10.0 : 11.0;
+
         return Container(
-          padding: const EdgeInsets.all(20),
+          padding: EdgeInsets.all(_employeeCardPadding(context)),
           decoration: BoxDecoration(
             color: AppTheme.white,
             borderRadius: BorderRadius.circular(16),
@@ -1196,7 +1397,12 @@ class _ClockInCard extends StatelessWidget {
                   record.timeIn != null
                       ? 'AM In: ${_formatTime(record.timeIn)}  AM Out: ${_formatTime(record.breakOut)}  PM In: ${_formatTime(record.breakIn)}  PM Out: ${_formatTime(record.timeOut)}'
                       : 'AM: Absent  PM In: ${_formatTime(record.breakIn)}  PM Out: ${_formatTime(record.timeOut)}',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: detailFontSize,
+                    height: 1.35,
+                  ),
+                  softWrap: true,
                 ),
                 if (record.source != null && record.source!.isNotEmpty) ...[
                   const SizedBox(height: 6),
@@ -1332,7 +1538,7 @@ class _AttendanceCard extends StatelessWidget {
             '${now.year}-${now.month.toString().padLeft(2, '0')}';
 
         return Container(
-          padding: const EdgeInsets.all(20),
+          padding: EdgeInsets.all(_employeeCardPadding(context)),
           decoration: BoxDecoration(
             color: AppTheme.white,
             borderRadius: BorderRadius.circular(16),
@@ -1345,61 +1551,85 @@ class _AttendanceCard extends StatelessWidget {
               ),
             ],
           ),
-          child: Column(
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Attendance',
-                style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.baseline,
-                textBaseline: TextBaseline.alphabetic,
-                children: [
-                  Text(
-                    '$presentCount',
-                    style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: 28,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Present Days',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                monthLabel,
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-              ),
-              const SizedBox(height: 14),
-              TextButton(
-                onPressed: onViewAttendance,
-                style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.primaryNavy,
-                  padding: EdgeInsets.zero,
-                  minimumSize: Size.zero,
-                ),
-                child: const Row(
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('View details'),
-                    SizedBox(width: 4),
-                    Icon(Icons.arrow_forward_rounded, size: 16),
+                    Text(
+                      'Attendance',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      '$presentCount',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 28,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Present Days',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AttendanceOverviewColors.present.withValues(
+                          alpha: 0.08,
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        monthLabel,
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextButton(
+                      onPressed: onViewAttendance,
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppTheme.primaryNavy,
+                        padding: EdgeInsets.zero,
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('View details'),
+                          SizedBox(width: 4),
+                          Icon(Icons.arrow_forward_rounded, size: 16),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
+              ),
+              const SizedBox(width: 12),
+              const _SummaryCardIconAccent(
+                icon: Icons.event_available_rounded,
+                color: AttendanceOverviewColors.present,
               ),
             ],
           ),
@@ -1430,8 +1660,13 @@ class _LeaveBalanceCard extends StatelessWidget {
         final sickDays = sick.isNotEmpty ? sick.first.remainingDays : null;
 
         final hasData = leave.balances.isNotEmpty;
+        if (leave.loading && !hasData) {
+          return LeaveBalanceSummaryCardSkeleton(
+            padding: EdgeInsets.all(_employeeCardPadding(context)),
+          );
+        }
         return Container(
-          padding: const EdgeInsets.all(20),
+          padding: EdgeInsets.all(_employeeCardPadding(context)),
           decoration: BoxDecoration(
             color: AppTheme.white,
             borderRadius: BorderRadius.circular(16),
@@ -1444,60 +1679,71 @@ class _LeaveBalanceCard extends StatelessWidget {
               ),
             ],
           ),
-          child: Column(
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Leave Balance',
-                style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Leave Balance',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      hasData ? totalRemaining.toStringAsFixed(1) : '—',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 28,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Remaining Days',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: _LeaveBalanceMiniLine(
+                            icon: Icons.beach_access_rounded,
+                            label: 'Vacation',
+                            value: vacationDays != null
+                                ? vacationDays.toStringAsFixed(1)
+                                : '—',
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _LeaveBalanceMiniLine(
+                            icon: Icons.medical_services_outlined,
+                            label: 'Sick',
+                            value: sickDays != null
+                                ? sickDays.toStringAsFixed(1)
+                                : '—',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 12),
-              Text(
-                hasData ? totalRemaining.toStringAsFixed(1) : '—',
-                style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 28,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Remaining Days',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-              ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Icon(
-                    Icons.arrow_downward_rounded,
-                    size: 16,
-                    color: AppTheme.textSecondary,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Vacation ${vacationDays != null ? vacationDays.toStringAsFixed(1) : '—'}',
-                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  Icon(
-                    Icons.medical_services_outlined,
-                    size: 16,
-                    color: AppTheme.textSecondary,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Sick ${sickDays != null ? sickDays.toStringAsFixed(1) : '—'}',
-                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-                  ),
-                ],
+              const SizedBox(width: 12),
+              const _SummaryCardIconAccent(
+                icon: Icons.event_note_rounded,
+                color: AttendanceOverviewColors.onLeave,
               ),
             ],
           ),
@@ -1507,11 +1753,93 @@ class _LeaveBalanceCard extends StatelessWidget {
   }
 }
 
+/// Right-side visual anchor so summary cards use horizontal space evenly with the clock card.
+class _SummaryCardIconAccent extends StatelessWidget {
+  const _SummaryCardIconAccent({required this.icon, required this.color});
+
+  final IconData icon;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 48,
+      height: 48,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Icon(icon, color: color, size: 26),
+    );
+  }
+}
+
+class _LeaveBalanceMiniLine extends StatelessWidget {
+  const _LeaveBalanceMiniLine({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: AppTheme.textSecondary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  value,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// Re-enable in [_EmployeeSummaryCards] when payroll / payslip is ready.
+// ignore: unused_element
 class _PayslipCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(_employeeCardPadding(context)),
       decoration: BoxDecoration(
         color: AppTheme.white,
         borderRadius: BorderRadius.circular(16),
@@ -1579,300 +1907,229 @@ class _PayslipCard extends StatelessWidget {
 class _EmployeeAnnouncementsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
+    final pad = _employeeSectionCardPadding(context);
+    final innerPad = MediaQuery.sizeOf(context).width < 600 ? 12.0 : 16.0;
+
+    Widget titleRow() {
+      return Row(
+        children: [
+          Icon(Icons.campaign_rounded, color: AppTheme.primaryNavy, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Announcements',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontWeight: FontWeight.w700,
+                fontSize: 17,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, c) {
+        final stackHeader = c.maxWidth < 400;
+        return Container(
+          padding: EdgeInsets.all(pad),
+          decoration: BoxDecoration(
+            color: AppTheme.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.campaign_rounded,
-                      color: AppTheme.primaryNavy,
-                      size: 22,
+              if (stackHeader) ...[
+                titleRow(),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () {},
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppTheme.primaryNavy,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
                     ),
-                    const SizedBox(width: 10),
-                    Flexible(
-                      child: Text(
-                        'Announcements',
-                        style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 17,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                    child: const Text('View All >'),
+                  ),
+                ),
+              ] else
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: titleRow()),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () {},
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppTheme.primaryNavy,
+                      ),
+                      child: const Text('View All >'),
+                    ),
+                  ],
+                ),
+              SizedBox(height: stackHeader ? 12 : 16),
+              Container(
+                padding: EdgeInsets.all(innerPad),
+                decoration: BoxDecoration(
+                  color: AppTheme.offWhite,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.black.withOpacity(0.06)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'No announcements yet.',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 14,
+                        height: 1.4,
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              TextButton(
-                onPressed: () {},
-                style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.primaryNavy,
-                ),
-                child: const Text('View All >'),
-              ),
             ],
           ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppTheme.offWhite,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.black.withOpacity(0.06)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'No announcements yet.',
-                  style: TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 14,
-                    height: 1.4,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
 
 class _EmployeeUpcomingLeaveCard extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.event_rounded,
-                      color: AppTheme.primaryNavy,
-                      size: 22,
-                    ),
-                    const SizedBox(width: 10),
-                    Flexible(
-                      child: Text(
-                        'Upcoming Leave',
-                        style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 17,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              TextButton(
-                onPressed: () {},
-                style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.primaryNavy,
-                ),
-                child: const Text('View More >'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppTheme.offWhite,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.black.withOpacity(0.06)),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'No upcoming leave.',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 14,
-                    ),
-                  ),
-                ),
-                Icon(
-                  Icons.event_rounded,
-                  color: AppTheme.textSecondary.withOpacity(0.5),
-                  size: 40,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+  const _EmployeeUpcomingLeaveCard({this.embedded = false});
 
-class _EmployeeAttendanceOverviewCard extends StatelessWidget {
+  /// When true, omits outer card chrome (for use inside [EmployeeAttendanceOverviewCard]).
+  final bool embedded;
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
+    final pad = embedded ? 0.0 : _employeeSectionCardPadding(context);
+    final innerPad = MediaQuery.sizeOf(context).width < 600 ? 12.0 : 16.0;
+
+    Widget titleRow() {
+      return Row(
+        children: [
+          Icon(Icons.event_rounded, color: AppTheme.primaryNavy, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Upcoming Leave',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontWeight: FontWeight.w700,
+                fontSize: 17,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Text(
-                  'Attendance Overview',
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 17,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(width: 8),
-              TextButton(
-                onPressed: () {},
-                style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.primaryNavy,
-                ),
-                child: const Text('View More >'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Container(
-            height: 200,
-            decoration: BoxDecoration(
-              color: AppTheme.offWhite.withOpacity(0.5),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.black.withOpacity(0.06)),
-            ),
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.show_chart_rounded,
-                    size: 48,
-                    color: AppTheme.textSecondary.withOpacity(0.4),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Attendance chart (April 14 – April 29)',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 14,
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, c) {
+        final stackHeader = c.maxWidth < 400;
+        final content = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (stackHeader) ...[
+              titleRow(),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () {},
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppTheme.primaryNavy,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _ChartLegend(
-                        color: const Color(0xFFE85D04),
-                        label: 'Present',
+                  child: const Text('View More >'),
+                ),
+              ),
+            ] else
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: titleRow()),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: () {},
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppTheme.primaryNavy,
+                    ),
+                    child: const Text('View More >'),
+                  ),
+                ],
+              ),
+            SizedBox(height: stackHeader ? 12 : 16),
+            Container(
+              padding: EdgeInsets.all(innerPad),
+              decoration: BoxDecoration(
+                color: AppTheme.offWhite,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.black.withOpacity(0.06)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'No upcoming leave.',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 14,
                       ),
-                      const SizedBox(width: 20),
-                      _ChartLegend(
-                        color: const Color(0xFF81C784),
-                        label: 'Absent',
-                      ),
-                      const SizedBox(width: 20),
-                      _ChartLegend(
-                        color: const Color(0xFFFFB74D),
-                        label: 'Late',
-                      ),
-                    ],
+                    ),
+                  ),
+                  Icon(
+                    Icons.event_rounded,
+                    color: AppTheme.textSecondary.withOpacity(0.5),
+                    size: 40,
                   ),
                 ],
               ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+          ],
+        );
 
-class _ChartLegend extends StatelessWidget {
-  const _ChartLegend({required this.color, required this.label});
+        if (embedded) {
+          return content;
+        }
 
-  final Color color;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 12,
-          height: 12,
+        return Container(
+          padding: EdgeInsets.all(pad),
           decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(4),
+            color: AppTheme.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
-        ),
-        const SizedBox(width: 6),
-        Text(
-          label,
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-        ),
-      ],
+          child: content,
+        );
+      },
     );
   }
 }
@@ -1894,7 +2151,10 @@ const List<String> _attendanceMonths = [
 
 /// My Attendance: employee's own time records.
 class _EmployeeAttendanceContent extends StatefulWidget {
-  const _EmployeeAttendanceContent();
+  const _EmployeeAttendanceContent({this.showPageHeader = true});
+
+  /// When false, omits the title/subtitle (e.g. embedded under admin overview).
+  final bool showPageHeader;
 
   @override
   State<_EmployeeAttendanceContent> createState() =>
@@ -1912,6 +2172,39 @@ class _EmployeeAttendanceContentState
     return end.day;
   }
 
+  /// Latest day selectable in the current month/year (no future day picker values).
+  int get _maxSelectableCalendarDay {
+    final now = DateTime.now();
+    final last = _lastDayOfSelectedMonth;
+    if (_selectedYear < now.year ||
+        (_selectedYear == now.year && _selectedMonth < now.month)) {
+      return last;
+    }
+    if (_selectedYear > now.year ||
+        (_selectedYear == now.year && _selectedMonth > now.month)) {
+      return last;
+    }
+    return now.day < last ? now.day : last;
+  }
+
+  DateTime get _todayDateOnly {
+    final t = DateTime.now();
+    return DateTime(t.year, t.month, t.day);
+  }
+
+  void _clampSelectedDayIfNeeded() {
+    if (_selectedDay == null) return;
+    final last = _lastDayOfSelectedMonth;
+    final maxD = _maxSelectableCalendarDay;
+    if (_selectedDay! > last) {
+      _selectedDay = null;
+      return;
+    }
+    if (_selectedDay! > maxD) {
+      _selectedDay = maxD;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1919,6 +2212,7 @@ class _EmployeeAttendanceContentState
   }
 
   Future<void> _load() async {
+    _clampSelectedDayIfNeeded();
     final dtr = context.read<DtrProvider>();
     final lastDay = _lastDayOfSelectedMonth;
     final day =
@@ -1932,7 +2226,9 @@ class _EmployeeAttendanceContentState
       end = start;
     } else {
       start = DateTime(_selectedYear, _selectedMonth, 1);
-      end = DateTime(_selectedYear, _selectedMonth + 1, 0);
+      final monthEnd = DateTime(_selectedYear, _selectedMonth + 1, 0);
+      // For current month, don't fetch future days.
+      end = monthEnd.isAfter(_todayDateOnly) ? _todayDateOnly : monthEnd;
     }
     await dtr.loadTimeRecordsForUser(startDate: start, endDate: end);
   }
@@ -1945,6 +2241,21 @@ class _EmployeeAttendanceContentState
     final ampm = h >= 12 ? 'PM' : 'AM';
     final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
     return '$h12:${m.toString().padLeft(2, '0')} $ampm';
+  }
+
+  static String _formatTimeWithLocator(
+    TimeRecord r,
+    DateTime? dt,
+    String segment,
+  ) {
+    if (dt != null) return _formatTime(dt);
+    final segs = r.locatorSlipSegments ?? const <String>[];
+    if (segs.any((s) => s.toUpperCase() == segment)) return 'On Field';
+    if (segs.isEmpty &&
+        segment == 'AM IN' &&
+        (r.status == 'on_field' || r.locatorSlipId != null))
+      return 'On Field';
+    return '—';
   }
 
   static const List<String> _shortWeekdays = [
@@ -1965,24 +2276,39 @@ class _EmployeeAttendanceContentState
   @override
   Widget build(BuildContext context) {
     final dtr = context.watch<DtrProvider>();
+    final today = _todayDateOnly;
+    final visibleRecords = List.of(dtr.timeRecords)
+      ..removeWhere((r) {
+        final rd = DateTime(
+          r.recordDate.year,
+          r.recordDate.month,
+          r.recordDate.day,
+        );
+        return rd.isAfter(today);
+      })
+      ..sort(
+        (a, b) => a.recordDate.compareTo(b.recordDate),
+      ); // Day 1..N ascending
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'My Attendance',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
+        if (widget.showPageHeader) ...[
+          Text(
+            'My Attendance',
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+            ),
           ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'View your time-in/out records.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-        ),
-        const SizedBox(height: 24),
+          const SizedBox(height: 8),
+          Text(
+            'View your time-in/out records.',
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          ),
+          const SizedBox(height: 24),
+        ],
         LayoutBuilder(
           builder: (context, constraints) {
             final isNarrow = constraints.maxWidth < 520;
@@ -2036,6 +2362,7 @@ class _EmployeeAttendanceContentState
                               _selectedDay! > _lastDayOfSelectedMonth) {
                             _selectedDay = null;
                           }
+                          _clampSelectedDayIfNeeded();
                         });
                         _load();
                       }
@@ -2080,6 +2407,7 @@ class _EmployeeAttendanceContentState
                               _selectedDay! > _lastDayOfSelectedMonth) {
                             _selectedDay = null;
                           }
+                          _clampSelectedDayIfNeeded();
                         });
                         _load();
                       }
@@ -2115,7 +2443,7 @@ class _EmployeeAttendanceContentState
                         style: TextStyle(fontSize: 14),
                       ),
                       ...List.generate(
-                        _lastDayOfSelectedMonth,
+                        _maxSelectableCalendarDay,
                         (i) => Text(
                           'Day ${i + 1}',
                           overflow: TextOverflow.ellipsis,
@@ -2129,7 +2457,7 @@ class _EmployeeAttendanceContentState
                         child: Text('All days'),
                       ),
                       ...List.generate(
-                        _lastDayOfSelectedMonth,
+                        _maxSelectableCalendarDay,
                         (i) => i + 1,
                       ).map(
                         (d) => DropdownMenuItem<int?>(
@@ -2172,14 +2500,8 @@ class _EmployeeAttendanceContentState
           },
         ),
         const SizedBox(height: 24),
-        if (dtr.loading)
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: CircularProgressIndicator(),
-            ),
-          ),
-        if (!dtr.loading && dtr.timeRecords.isEmpty)
+        if (dtr.loading) const EmployeeTimeRecordsLoadingSkeleton(),
+        if (!dtr.loading && visibleRecords.isEmpty)
           Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
@@ -2188,16 +2510,24 @@ class _EmployeeAttendanceContentState
               border: Border.all(color: Colors.black.withOpacity(0.06)),
             ),
             child: Center(
-              child: Text(
-                'No time records for the selected period.',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'No time records for the selected period.',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-        if (!dtr.loading && dtr.timeRecords.isNotEmpty)
+        if (!dtr.loading && visibleRecords.isNotEmpty)
           LayoutBuilder(
             builder: (context, constraints) {
-              const minTableWidth = 760.0;
+              const minTableWidth = 860.0;
               final tableWidth = constraints.maxWidth < minTableWidth
                   ? minTableWidth
                   : constraints.maxWidth;
@@ -2353,7 +2683,7 @@ class _EmployeeAttendanceContentState
                             ],
                           ),
                         ),
-                        ...dtr.timeRecords.asMap().entries.map((entry) {
+                        ...visibleRecords.asMap().entries.map((entry) {
                           final i = entry.key;
                           final r = entry.value;
                           final timeIn = r.timeIn?.toLocal();
@@ -2390,7 +2720,11 @@ class _EmployeeAttendanceContentState
                                   flex: 1,
                                   child: Center(
                                     child: Text(
-                                      _formatTime(timeIn),
+                                      _formatTimeWithLocator(
+                                        r,
+                                        timeIn,
+                                        'AM IN',
+                                      ),
                                       style: TextStyle(
                                         fontSize: 13,
                                         color: AppTheme.textPrimary,
@@ -2403,7 +2737,11 @@ class _EmployeeAttendanceContentState
                                   flex: 1,
                                   child: Center(
                                     child: Text(
-                                      _formatTime(breakOut),
+                                      _formatTimeWithLocator(
+                                        r,
+                                        breakOut,
+                                        'AM OUT',
+                                      ),
                                       style: TextStyle(
                                         fontSize: 13,
                                         color: AppTheme.textPrimary,
@@ -2416,7 +2754,11 @@ class _EmployeeAttendanceContentState
                                   flex: 1,
                                   child: Center(
                                     child: Text(
-                                      _formatTime(breakIn),
+                                      _formatTimeWithLocator(
+                                        r,
+                                        breakIn,
+                                        'PM IN',
+                                      ),
                                       style: TextStyle(
                                         fontSize: 13,
                                         color: AppTheme.textPrimary,
@@ -2429,7 +2771,11 @@ class _EmployeeAttendanceContentState
                                   flex: 1,
                                   child: Center(
                                     child: Text(
-                                      _formatTime(timeOut),
+                                      _formatTimeWithLocator(
+                                        r,
+                                        timeOut,
+                                        'PM OUT',
+                                      ),
                                       style: TextStyle(
                                         fontSize: 13,
                                         color: AppTheme.textPrimary,

@@ -1,8 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import '../landingpage/constants/app_theme.dart';
-import '../providers/auth_provider.dart';
-import 'docutracker_provider.dart';
 import 'docutracker_routes.dart';
 import 'screens/docutracker_admin_screen.dart';
 import 'screens/docutracker_documents_screen.dart';

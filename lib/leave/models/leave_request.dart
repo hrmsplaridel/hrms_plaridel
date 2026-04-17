@@ -3,24 +3,58 @@ import 'leave_type.dart';
 /// Workflow status for one leave request.
 enum LeaveRequestStatus {
   draft,
-  pending,
+  pending, // legacy alias for pendingHr
+  pendingDepartmentHead, // awaiting department head
+  pendingHr, // awaiting HR/admin
+  rejectedByDepartmentHead, // department head rejected
+  rejectedByHr, // HR/admin rejected
   returned,
   approved,
-  rejected,
+  rejected, // legacy single-stage rejection
   cancelled,
 }
 
 extension LeaveRequestStatusExtension on LeaveRequestStatus {
-  String get value => name;
+  /// Return the snake_case value for API serialization.
+  String get value => switch (this) {
+    LeaveRequestStatus.draft => 'draft',
+    LeaveRequestStatus.pending => 'pending',
+    LeaveRequestStatus.pendingDepartmentHead => 'pending_department_head',
+    LeaveRequestStatus.pendingHr => 'pending_hr',
+    LeaveRequestStatus.rejectedByDepartmentHead =>
+      'rejected_by_department_head',
+    LeaveRequestStatus.rejectedByHr => 'rejected_by_hr',
+    LeaveRequestStatus.returned => 'returned',
+    LeaveRequestStatus.approved => 'approved',
+    LeaveRequestStatus.rejected => 'rejected',
+    LeaveRequestStatus.cancelled => 'cancelled',
+  };
 
   String get displayName => switch (this) {
     LeaveRequestStatus.draft => 'Draft',
     LeaveRequestStatus.pending => 'Pending',
+    LeaveRequestStatus.pendingDepartmentHead => 'Pending Department Head',
+    LeaveRequestStatus.pendingHr => 'Pending HR',
+    LeaveRequestStatus.rejectedByDepartmentHead =>
+      'Rejected by Department Head',
+    LeaveRequestStatus.rejectedByHr => 'Rejected by HR',
     LeaveRequestStatus.returned => 'Returned',
     LeaveRequestStatus.approved => 'Approved',
     LeaveRequestStatus.rejected => 'Rejected',
     LeaveRequestStatus.cancelled => 'Cancelled',
   };
+
+  /// Whether this status is any kind of pending (useful for filtering).
+  bool get isPending =>
+      this == LeaveRequestStatus.pending ||
+      this == LeaveRequestStatus.pendingDepartmentHead ||
+      this == LeaveRequestStatus.pendingHr;
+
+  /// Whether this status is any kind of rejection.
+  bool get isRejected =>
+      this == LeaveRequestStatus.rejected ||
+      this == LeaveRequestStatus.rejectedByDepartmentHead ||
+      this == LeaveRequestStatus.rejectedByHr;
 }
 
 LeaveRequestStatus leaveRequestStatusFromString(String? s) {

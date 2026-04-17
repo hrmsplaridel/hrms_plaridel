@@ -28,4 +28,13 @@ function requireRole(role) {
   };
 }
 
-module.exports = { requireAdmin, requireAdminOrSupervisor, requireRole };
+/** Admin or HR (for leave approval and other HR functions). */
+function requireAdminOrHr(req, res, next) {
+  const role = req.user?.role;
+  if (role !== 'admin' && role !== 'hr') {
+    return res.status(403).json({ error: 'Admin or HR access required' });
+  }
+  next();
+}
+
+module.exports = { requireAdmin, requireAdminOrHr, requireAdminOrSupervisor, requireRole };
