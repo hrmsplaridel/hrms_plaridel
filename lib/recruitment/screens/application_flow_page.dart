@@ -1378,6 +1378,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         ),
         backgroundColor: AppTheme.primaryNavy,
         foregroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        elevation: 1,
+        shadowColor: Colors.black.withValues(alpha: 0.12),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.of(context).pop(),
@@ -1489,66 +1492,87 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (kIsWeb)
-            _recruitmentWebPanel(
-              tinted: true,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Track your application',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: kIsWeb ? 22 : 20,
-                      color: AppTheme.primaryNavy,
+          _recruitmentWebPanel(
+            tinted: true,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Icon(
+                        Icons.manage_search_rounded,
+                        color: AppTheme.primaryNavy,
+                        size: kIsWeb ? 30 : 26,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'To start a new application, go back to the home page, open Job Vacancies, and tap Apply now on the position you want.',
-                    style: TextStyle(
-                      fontSize: 15,
-                      height: 1.45,
-                      color: AppTheme.textSecondary,
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Track your application',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: kIsWeb ? 26 : 22,
+                              height: 1.15,
+                              letterSpacing: -0.35,
+                              color: AppTheme.primaryNavy,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Look up your record by email, then continue when the process allows it.',
+                            style: TextStyle(
+                              fontSize: kIsWeb ? 14 : 13,
+                              height: 1.4,
+                              fontWeight: FontWeight.w500,
+                              color: AppTheme.textSecondary
+                                  .withValues(alpha: 0.92),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
+                  ],
+                ),
+                SizedBox(height: kIsWeb ? 20 : 16),
+                Divider(
+                  height: 1,
+                  thickness: 1,
+                  color: AppTheme.lightGray.withValues(alpha: 0.75),
+                ),
+                SizedBox(height: kIsWeb ? 18 : 14),
+                Text(
+                  'To start a new application, go back to the home page, open Job Vacancies, and tap Apply now on the position you want.',
+                  style: TextStyle(
+                    fontSize: kIsWeb ? 15 : 14,
+                    height: 1.5,
+                    color: AppTheme.textSecondary,
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Enter the email you used when you applied, then tap Check status. Continue stays off until your application is loaded and you are allowed to proceed (for example, after HR approves your documents).',
-                    style: TextStyle(
-                      fontSize: 15,
-                      height: 1.45,
-                      color: AppTheme.textSecondary,
-                    ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Enter the email you used when you applied, then tap Check status. Continue stays off until your application is loaded and you are allowed to proceed (for example, after HR approves your documents).',
+                  style: TextStyle(
+                    fontSize: kIsWeb ? 15 : 14,
+                    height: 1.5,
+                    color: AppTheme.textSecondary,
                   ),
-                  const SizedBox(height: 18),
-                  _buildContinueEmailRow(),
-                  _buildStep1StatusPreviewSection(),
-                ],
-              ),
-            )
-          else ...[
-            Text(
-              'Track your application',
-              style: TextStyle(
-                fontWeight: FontWeight.w800,
-                fontSize: 20,
-                color: AppTheme.primaryNavy,
-              ),
+                ),
+                SizedBox(height: kIsWeb ? 22 : 18),
+                _buildContinueEmailRow(),
+                _buildStep1StatusPreviewSection(),
+              ],
             ),
-            const SizedBox(height: 10),
-            Text(
-              'New applications: use Job Vacancies on the home page and tap Apply on a position. Enter your email and tap Check status first. Continue only turns on after your record loads and you may move forward (e.g. after HR approves your documents).',
-              style: TextStyle(
-                fontSize: 14,
-                height: 1.45,
-                color: AppTheme.textSecondary,
-              ),
-            ),
-            const SizedBox(height: 16),
-            _buildContinueEmailRow(),
-            _buildStep1StatusPreviewSection(),
-          ],
+          ),
         ],
       );
     }
@@ -1608,20 +1632,53 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   }
 
   Widget _recruitmentWebPanel({required bool tinted, required Widget child}) {
+    final radius = BorderRadius.circular(20);
+    final borderSide = Border.all(
+      color: AppTheme.lightGray.withValues(alpha: 0.88),
+    );
+    if (tinted) {
+      return Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF6F1),
+          borderRadius: radius,
+          border: borderSide,
+          boxShadow: AppTheme.panelShadow,
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              height: 4,
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  colors: [
+                    AppTheme.primaryNavyDark,
+                    AppTheme.primaryNavy,
+                    AppTheme.primaryNavyLight,
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 22, 24, 26),
+              child: child,
+            ),
+          ],
+        ),
+      );
+    }
     return Container(
       decoration: BoxDecoration(
-        color: tinted ? const Color(0xFFFFF6F1) : AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.lightGray),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.07),
-            blurRadius: 22,
-            offset: const Offset(0, 10),
-          ),
-        ],
+        color: AppTheme.white,
+        borderRadius: radius,
+        border: borderSide,
+        boxShadow: AppTheme.panelShadow,
       ),
-      padding: const EdgeInsets.all(22),
+      padding: const EdgeInsets.all(26),
       child: child,
     );
   }
@@ -1641,7 +1698,13 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       onPressed: _isContinueEmailRowActionEnabled ? _continueApplication : null,
       style: FilledButton.styleFrom(
         backgroundColor: navy,
+        foregroundColor: Colors.white,
+        disabledBackgroundColor:
+            AppTheme.lightGray.withValues(alpha: 0.92),
+        disabledForegroundColor:
+            AppTheme.textSecondary.withValues(alpha: 0.55),
         padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+        minimumSize: const Size(120, 48),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
       child: _continueLoading
@@ -1668,18 +1731,19 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                 color: navy,
               ),
             )
-          : const Icon(Icons.insights_outlined, size: 20),
+          : const Icon(Icons.alt_route_rounded, size: 21),
       label: Text(_step1StatusLoading ? 'Checking…' : 'Check status'),
       style: OutlinedButton.styleFrom(
         foregroundColor: navy,
         side: BorderSide(color: navy, width: 2),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+        minimumSize: const Size(0, 48),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
     final emailField = TextField(
       controller: _continueEmailController,
-      decoration: _dec('Email to continue'),
+      decoration: _trackEmailDecoration('Email to continue'),
       keyboardType: TextInputType.emailAddress,
       textInputAction: TextInputAction.done,
     );
@@ -1701,30 +1765,30 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         const SizedBox(height: 12),
         Wrap(
           alignment: WrapAlignment.end,
-          spacing: 10,
-          runSpacing: 10,
+          spacing: 12,
+          runSpacing: 12,
           children: [checkBtn, continueBtn],
         ),
         if (showCheckStatusFirstHint) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           Text(
             'Tap Check status first so we can load your application. Continue stays off until we confirm your record and you are allowed to move forward (for example, after HR approves your documents).',
             style: TextStyle(
-              fontSize: 13,
+              fontSize: 14,
               height: 1.45,
-              color: AppTheme.textSecondary,
+              color: AppTheme.textSecondary.withValues(alpha: 0.95),
               fontStyle: FontStyle.italic,
             ),
           ),
         ],
         if (showBlockedHint) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           Text(
             _trackingContinueBlockedHint(app, _step1StatusExam),
             style: TextStyle(
-              fontSize: 13,
+              fontSize: 14,
               height: 1.45,
-              color: AppTheme.textSecondary,
+              color: AppTheme.textSecondary.withValues(alpha: 0.95),
               fontStyle: FontStyle.italic,
             ),
           ),
@@ -1798,201 +1862,428 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     );
   }
 
+  Widget _step1FormSectionHeader(String title, {String? subtitle}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 4,
+              height: 22,
+              decoration: BoxDecoration(
+                color: AppTheme.primaryNavy,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  height: 1.2,
+                  letterSpacing: -0.2,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (subtitle != null) ...[
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.only(left: 16),
+            child: Text(
+              subtitle,
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.45,
+                color: AppTheme.textSecondary.withValues(alpha: 0.95),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _step1GuidelineExpansion({
+    required IconData icon,
+    required String title,
+    required String body,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: AppTheme.primaryNavy.withValues(alpha: 0.055),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: AppTheme.primaryNavy.withValues(alpha: 0.16),
+          ),
+        ),
+        child: Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            initiallyExpanded: false,
+            tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+            childrenPadding: const EdgeInsets.only(bottom: 4),
+            iconColor: AppTheme.primaryNavy,
+            collapsedIconColor: AppTheme.primaryNavy,
+            leading: Icon(
+              icon,
+              size: 22,
+              color: AppTheme.primaryNavy.withValues(alpha: 0.85),
+            ),
+            title: Text(
+              title,
+              style: const TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    body,
+                    style: TextStyle(
+                      fontSize: 13,
+                      height: 1.5,
+                      color: AppTheme.textSecondary.withValues(alpha: 0.95),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  InputDecoration _step1FieldDecoration(
+    String plainLabel, {
+    bool requiredMark = false,
+    IconData? prefixIcon,
+    String? hintText,
+  }) {
+    final radius = BorderRadius.circular(14);
+    return InputDecoration(
+      label: Text.rich(
+        TextSpan(
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+          children: [
+            TextSpan(text: plainLabel),
+            if (requiredMark)
+              const TextSpan(
+                text: ' *',
+                style: TextStyle(
+                  color: Color(0xFFC62828),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+          ],
+        ),
+      ),
+      floatingLabelBehavior: FloatingLabelBehavior.auto,
+      floatingLabelStyle: const TextStyle(
+        color: AppTheme.primaryNavy,
+        fontWeight: FontWeight.w700,
+        fontSize: 13,
+      ),
+      hintText: hintText,
+      hintStyle: TextStyle(
+        color: AppTheme.textSecondary.withValues(alpha: 0.45),
+        fontSize: 15,
+      ),
+      prefixIcon: prefixIcon == null
+          ? null
+          : Icon(
+              prefixIcon,
+              color: AppTheme.primaryNavy.withValues(alpha: 0.55),
+              size: 22,
+            ),
+      filled: true,
+      fillColor: AppTheme.white,
+      border: OutlineInputBorder(borderRadius: radius),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: radius,
+        borderSide: BorderSide(
+          color: AppTheme.lightGray.withValues(alpha: 0.95),
+          width: 1.5,
+        ),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: radius,
+        borderSide: const BorderSide(color: AppTheme.primaryNavy, width: 2),
+      ),
+      contentPadding: EdgeInsets.symmetric(
+        horizontal: prefixIcon == null ? 16 : 12,
+        vertical: 18,
+      ),
+    );
+  }
+
   Widget _buildStep1FormFields() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Step 1: Submit Basic Information',
-          style: TextStyle(
-            color: AppTheme.primaryNavy,
-            fontSize: kIsWeb ? 22 : 20,
-            fontWeight: FontWeight.w700,
-          ),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 4,
+              height: 48,
+              decoration: BoxDecoration(
+                color: AppTheme.primaryNavy,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'STEP 1',
+                    style: TextStyle(
+                      color: AppTheme.primaryNavy,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.85,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Submit Basic Information',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: kIsWeb ? 24 : 21,
+                      fontWeight: FontWeight.w800,
+                      height: 1.15,
+                      letterSpacing: -0.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         Text(
           'Provide your details. HR will review your documents before you can take the exam.',
           style: TextStyle(
             color: AppTheme.textSecondary,
             fontSize: kIsWeb ? 15 : 14,
-            height: 1.45,
+            height: 1.5,
           ),
         ),
-        const SizedBox(height: 24),
-        RspSpacedOutlineField(
+        const SizedBox(height: 22),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 18),
           child: TextField(
             controller: _nameController,
-            decoration: _dec('Full Name'),
+            decoration: _step1FieldDecoration(
+              'Full Name',
+              requiredMark: true,
+              hintText: 'As it appears on valid ID',
+              prefixIcon: Icons.person_outline_rounded,
+            ),
             textCapitalization: TextCapitalization.words,
           ),
         ),
-        const SizedBox(height: 20),
-        Text(
+        _step1FormSectionHeader(
           'Contact details',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
+          subtitle:
+              'Email and phone number are required. HR uses these to reach you about your application.',
         ),
-        const SizedBox(height: 6),
-        Text(
-          'Email and phone number are required. HR uses these to reach you about your application.',
-          style: TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: 13,
-            height: 1.4,
-          ),
-        ),
-        const SizedBox(height: 12),
-        RspSpacedOutlineField(
+        const SizedBox(height: 14),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 18),
           child: TextField(
             controller: _emailController,
-            decoration: _dec('Email'),
+            decoration: _step1FieldDecoration(
+              'Email',
+              hintText: 'you@example.com',
+              prefixIcon: Icons.alternate_email_rounded,
+            ),
             keyboardType: TextInputType.emailAddress,
             autocorrect: false,
           ),
         ),
-        RspSpacedOutlineField(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
           child: TextField(
             controller: _phoneController,
-            decoration: _dec('Phone number'),
+            decoration: _step1FieldDecoration(
+              'Phone number',
+              requiredMark: true,
+              hintText: 'Mobile you answer regularly',
+              prefixIcon: Icons.phone_outlined,
+            ),
             keyboardType: TextInputType.phone,
           ),
         ),
+        _step1GuidelineExpansion(
+          icon: Icons.contact_mail_outlined,
+          title: 'Valid contact information',
+          body:
+              'Use only a real, active email address and mobile number that you check regularly. '
+              'Do not use fake, dummy, burner, or disposable accounts or numbers. '
+              'Providing false contact information may delay or void your application.',
+        ),
+        const SizedBox(height: 18),
+        _step1FormSectionHeader(
+          'Required documents',
+          subtitle:
+              'Application letter, resume, TOR, and eligibility/trainings documents are all required to submit.',
+        ),
         const SizedBox(height: 12),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            color: AppTheme.primaryNavy.withOpacity(0.06),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppTheme.primaryNavy.withOpacity(0.2)),
-          ),
-          child: Text(
-            'Guideline: Use only a real, active email address and mobile number that you check regularly. '
-            'Do not use fake, dummy, burner, or disposable accounts or numbers. '
-            'Providing false contact information may delay or void your application.',
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 13,
-              height: 1.45,
-            ),
-          ),
+        _step1GuidelineExpansion(
+          icon: Icons.picture_as_pdf_outlined,
+          title: 'PDF files only',
+          body:
+              'Each attachment must be a PDF file (.pdf). '
+              'Microsoft Word (.doc, .docx) and other formats are not accepted—save or export as PDF before uploading.',
         ),
-        const SizedBox(height: 22),
-        Text(
-          'Required documents (attach each file)',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Application letter, resume, TOR, and eligibility/trainings documents are all required to submit.',
-          style: TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: 13,
-            height: 1.4,
-          ),
-        ),
-        const SizedBox(height: 10),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            color: AppTheme.primaryNavy.withOpacity(0.06),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppTheme.primaryNavy.withOpacity(0.2)),
-          ),
-          child: Text(
-            'Guideline: Each attachment must be a PDF file (.pdf). '
-            'Microsoft Word (.doc, .docx) and other formats are not accepted—save or export as PDF before uploading.',
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 13,
-              height: 1.45,
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 6),
         ...RspApplicationDocKind.values.map((kind) {
           final f = _pickedDocs[kind];
           return Padding(
-            padding: const EdgeInsets.only(bottom: 14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _docKindLabel(kind),
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
+            padding: const EdgeInsets.only(bottom: 12),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: AppTheme.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: AppTheme.lightGray.withValues(alpha: 0.95),
                 ),
-                const SizedBox(height: 6),
-                OutlinedButton.icon(
-                  onPressed: _submitting ? null : () => _pickDoc(kind),
-                  icon: const Icon(Icons.attach_file, size: 20),
-                  label: Text(f == null ? 'Choose file' : 'Replace file'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTheme.primaryNavy,
-                    side: const BorderSide(color: AppTheme.primaryNavy),
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 12,
-                      horizontal: 14,
-                    ),
-                    alignment: Alignment.centerLeft,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-                if (f != null) ...[
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.check_circle,
-                        size: 18,
-                        color: Colors.green.shade700,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          f.name,
-                          style: TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 13,
+                boxShadow: AppTheme.cardShadow,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.insert_drive_file_outlined,
+                          size: 20,
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.75),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            _docKindLabel(kind),
+                            style: const TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              height: 1.25,
+                            ),
                           ),
-                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    if (f == null)
+                      FilledButton.tonalIcon(
+                        onPressed: _submitting ? null : () => _pickDoc(kind),
+                        icon: const Icon(Icons.upload_file_rounded, size: 22),
+                        label: const Text('Choose PDF file'),
+                        style: FilledButton.styleFrom(
+                          foregroundColor: AppTheme.primaryNavy,
+                          backgroundColor:
+                              AppTheme.primaryNavy.withValues(alpha: 0.12),
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 14,
+                            horizontal: 16,
+                          ),
+                          minimumSize: const Size(0, 48),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      )
+                    else ...[
+                      OutlinedButton.icon(
+                        onPressed: _submitting ? null : () => _pickDoc(kind),
+                        icon: const Icon(Icons.upload_rounded, size: 20),
+                        label: const Text('Replace file'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppTheme.primaryNavy,
+                          side: const BorderSide(
+                            color: AppTheme.primaryNavy,
+                            width: 1.5,
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 12,
+                            horizontal: 14,
+                          ),
+                          minimumSize: const Size(0, 46),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
                       ),
-                      TextButton(
-                        onPressed: _submitting ? null : () => _removeDoc(kind),
-                        child: const Text('Remove'),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.check_circle_rounded,
+                            size: 20,
+                            color: Colors.green.shade700,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              f.name,
+                              style: TextStyle(
+                                color: AppTheme.textSecondary,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          TextButton(
+                            onPressed:
+                                _submitting ? null : () => _removeDoc(kind),
+                            child: const Text('Remove'),
+                          ),
+                        ],
                       ),
                     ],
-                  ),
-                ],
-              ],
+                  ],
+                ),
+              ),
             ),
           );
         }),
-        const SizedBox(height: 28),
+        const SizedBox(height: 24),
         SizedBox(
           width: double.infinity,
           child: FilledButton(
             onPressed: _submitting ? null : _submitStep1,
             style: FilledButton.styleFrom(
               backgroundColor: AppTheme.primaryNavy,
+              foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 16),
+              minimumSize: const Size(0, 52),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(14),
               ),
             ),
             child: _submitting
@@ -2004,7 +2295,15 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                       color: Colors.white,
                     ),
                   )
-                : const Text('Submit application'),
+                : const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.send_rounded, size: 22),
+                      SizedBox(width: 10),
+                      Text('Submit application'),
+                    ],
+                  ),
           ),
         ),
       ],
@@ -3479,4 +3778,47 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   }
 
   InputDecoration _dec(String label) => rspUnderlinedField(label);
+
+  InputDecoration _trackEmailDecoration(String label) {
+    final radius = BorderRadius.circular(14);
+    return InputDecoration(
+      labelText: label,
+      floatingLabelBehavior: FloatingLabelBehavior.auto,
+      labelStyle: TextStyle(
+        color: AppTheme.primaryNavy.withValues(alpha: 0.95),
+        fontWeight: FontWeight.w600,
+        fontSize: 14,
+      ),
+      floatingLabelStyle: const TextStyle(
+        color: AppTheme.primaryNavy,
+        fontWeight: FontWeight.w600,
+        fontSize: 13,
+      ),
+      hintText: 'applicant@example.com',
+      hintStyle: TextStyle(
+        color: AppTheme.textSecondary.withValues(alpha: 0.5),
+        fontSize: 15,
+      ),
+      filled: true,
+      fillColor: AppTheme.white,
+      prefixIcon: Icon(
+        Icons.alternate_email_rounded,
+        color: AppTheme.primaryNavy.withValues(alpha: 0.55),
+        size: 22,
+      ),
+      border: OutlineInputBorder(borderRadius: radius),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: radius,
+        borderSide: BorderSide(
+          color: AppTheme.lightGray.withValues(alpha: 0.95),
+          width: 1.5,
+        ),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: radius,
+        borderSide: const BorderSide(color: AppTheme.primaryNavy, width: 2),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 18),
+    );
+  }
 }

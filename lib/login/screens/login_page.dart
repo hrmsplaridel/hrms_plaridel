@@ -295,7 +295,9 @@ class _LoginFormSection extends StatelessWidget {
                         borderRadius: BorderRadius.circular(24),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF000000).withValues(alpha: 0.12),
+                            color: const Color(
+                              0xFF000000,
+                            ).withValues(alpha: 0.12),
                             blurRadius: 18,
                             offset: const Offset(0, 8),
                           ),

@@ -27,11 +27,18 @@ class HeaderSection extends StatelessWidget {
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: Colors.white,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppTheme.primaryNavy,
+            AppTheme.primaryNavyDark,
+          ],
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 12,
+            color: Colors.black.withValues(alpha: 0.18),
+            blurRadius: 14,
             offset: const Offset(0, 4),
           ),
         ],
@@ -45,7 +52,7 @@ class HeaderSection extends StatelessWidget {
             bottom: 0,
             child: CustomPaint(
               size: const Size(100, 200),
-              painter: _TriangleAccentPainter(),
+              painter: const _TriangleAccentPainter(onOrangeHeader: true),
             ),
           ),
           SectionContainer(
@@ -64,6 +71,7 @@ class HeaderSection extends StatelessWidget {
                           isWide: isWide,
                           showBackground: false,
                           expandWidth: true,
+                          lightOnColoredHeader: true,
                         ),
                       ),
                       const SizedBox(width: 40),
@@ -71,14 +79,23 @@ class HeaderSection extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          _NavLink(label: 'Home', onTap: onHomeTap),
+                          _NavLink(
+                            label: 'Home',
+                            onTap: onHomeTap,
+                            lightOnColoredHeader: true,
+                          ),
                           const SizedBox(width: 24),
                           _NavLink(
                             label: 'Job Vacancies',
                             onTap: onJobVacanciesTap,
+                            lightOnColoredHeader: true,
                           ),
                           const SizedBox(width: 24),
-                          _NavLink(label: 'Contact', onTap: onContactTap),
+                          _NavLink(
+                            label: 'Contact',
+                            onTap: onContactTap,
+                            lightOnColoredHeader: true,
+                          ),
                           const SizedBox(width: 32),
                           _HeaderLoginButton(onLoginTap: onLoginTap),
                         ],
@@ -95,12 +112,11 @@ class HeaderSection extends StatelessWidget {
                             isNarrow: isNarrow,
                             isWide: isWide,
                             showBackground: true,
+                            lightOnColoredHeader: true,
                           ),
-                          IconButton(
-                            onPressed: onLoginTap,
-                            icon: const Icon(Icons.login_rounded),
-                            color: AppTheme.primaryNavy,
-                            tooltip: 'Login',
+                          _HeaderLoginButton(
+                            onLoginTap: onLoginTap,
+                            compact: true,
                           ),
                         ],
                       ),
@@ -110,12 +126,21 @@ class HeaderSection extends StatelessWidget {
                           spacing: 12,
                           runSpacing: 8,
                           children: [
-                            _NavLink(label: 'Home', onTap: onHomeTap),
+                            _NavLink(
+                              label: 'Home',
+                              onTap: onHomeTap,
+                              lightOnColoredHeader: true,
+                            ),
                             _NavLink(
                               label: 'Job Vacancies',
                               onTap: onJobVacanciesTap,
+                              lightOnColoredHeader: true,
                             ),
-                            _NavLink(label: 'Contact', onTap: onContactTap),
+                            _NavLink(
+                              label: 'Contact',
+                              onTap: onContactTap,
+                              lightOnColoredHeader: true,
+                            ),
                           ],
                         ),
                       ],
@@ -128,11 +153,13 @@ class HeaderSection extends StatelessWidget {
   }
 }
 
-/// Single login button with icon, pill shape, and hover effect.
+/// Single login button, pill shape, and hover effect.
+/// On orange header uses white fill + orange text for contrast.
 class _HeaderLoginButton extends StatefulWidget {
-  const _HeaderLoginButton({this.onLoginTap});
+  const _HeaderLoginButton({this.onLoginTap, this.compact = false});
 
   final VoidCallback? onLoginTap;
+  final bool compact;
 
   @override
   State<_HeaderLoginButton> createState() => _HeaderLoginButtonState();
@@ -143,9 +170,15 @@ class _HeaderLoginButtonState extends State<_HeaderLoginButton> {
 
   static const _radius = 24.0;
   static const _padding = EdgeInsets.symmetric(horizontal: 24, vertical: 12);
+  static const _paddingCompact =
+      EdgeInsets.symmetric(horizontal: 18, vertical: 10);
 
   @override
   Widget build(BuildContext context) {
+    final pad = widget.compact ? _paddingCompact : _padding;
+    final minW = widget.compact ? 100.0 : 120.0;
+    final minH = widget.compact ? 42.0 : 46.0;
+
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
@@ -156,29 +189,40 @@ class _HeaderLoginButtonState extends State<_HeaderLoginButton> {
           boxShadow: _hover
               ? [
                   BoxShadow(
-                    color: AppTheme.primaryNavy.withOpacity(0.35),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
+                    color: Colors.black.withValues(alpha: 0.22),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
                   ),
                 ]
-              : null,
+              : [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.12),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
         ),
-        child: FilledButton.icon(
+        child: FilledButton(
           onPressed: widget.onLoginTap,
-          icon: const Icon(Icons.login_rounded, size: 20, color: Colors.white),
-          label: const Text(
-            'Login',
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
-          ),
           style: FilledButton.styleFrom(
-            backgroundColor: AppTheme.primaryNavy,
-            foregroundColor: Colors.white,
-            padding: _padding,
-            minimumSize: const Size(120, 46),
+            backgroundColor: Colors.white,
+            foregroundColor: AppTheme.primaryNavyDark,
+            padding: pad,
+            minimumSize: Size(minW, minH),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(_radius),
             ),
             elevation: 0,
+            side: BorderSide(
+              color: AppTheme.primaryNavyDark.withValues(alpha: 0.12),
+            ),
+          ),
+          child: Text(
+            'Login',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: widget.compact ? 14 : 15,
+            ),
           ),
         ),
       ),
@@ -187,10 +231,15 @@ class _HeaderLoginButtonState extends State<_HeaderLoginButton> {
 }
 
 class _NavLink extends StatefulWidget {
-  const _NavLink({required this.label, this.onTap});
+  const _NavLink({
+    required this.label,
+    this.onTap,
+    this.lightOnColoredHeader = false,
+  });
 
   final String label;
   final VoidCallback? onTap;
+  final bool lightOnColoredHeader;
 
   @override
   State<_NavLink> createState() => _NavLinkState();
@@ -209,11 +258,24 @@ class _NavLinkState extends State<_NavLink> {
         child: AnimatedDefaultTextStyle(
           duration: const Duration(milliseconds: 150),
           style: TextStyle(
-            color: AppTheme.primaryNavy,
+            color: widget.lightOnColoredHeader
+                ? (_hover ? Colors.white : Colors.white.withValues(alpha: 0.92))
+                : AppTheme.primaryNavy,
             fontSize: 15,
-            fontWeight: _hover ? FontWeight.w700 : FontWeight.w500,
+            fontWeight: _hover ? FontWeight.w800 : FontWeight.w600,
+            shadows: widget.lightOnColoredHeader
+                ? [
+                    Shadow(
+                      color: Colors.black.withValues(alpha: 0.25),
+                      blurRadius: 4,
+                      offset: const Offset(0, 1),
+                    ),
+                  ]
+                : null,
             decoration: _hover ? TextDecoration.underline : null,
-            decorationColor: AppTheme.primaryNavy,
+            decorationColor: widget.lightOnColoredHeader
+                ? Colors.white
+                : AppTheme.primaryNavy,
             decorationThickness: 2,
           ),
           child: Text(widget.label),
@@ -232,14 +294,28 @@ class _LguBranding extends StatelessWidget {
     required this.isWide,
     this.showBackground = true,
     this.expandWidth = false,
+    this.lightOnColoredHeader = false,
   });
 
   final bool isNarrow;
   final bool isWide;
   final bool showBackground;
   final bool expandWidth;
+  final bool lightOnColoredHeader;
 
   Widget _buildContent(BuildContext context) {
+    final lineMuted = lightOnColoredHeader
+        ? Colors.white.withValues(alpha: 0.88)
+        : AppTheme.textPrimary;
+    final titleColor =
+        lightOnColoredHeader ? Colors.white : AppTheme.textPrimary;
+    final dividerColor = lightOnColoredHeader
+        ? Colors.white.withValues(alpha: 0.55)
+        : Colors.black;
+    final hrOfficeColor = lightOnColoredHeader
+        ? Colors.white.withValues(alpha: 0.94)
+        : const Color(0xFFB85C38);
+
     final textColumn = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -247,43 +323,79 @@ class _LguBranding extends StatelessWidget {
         Text(
           'Republic of the Philippines',
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: lineMuted,
             fontSize: isNarrow ? 8 : 10,
-            fontWeight: FontWeight.w500,
+            fontWeight: FontWeight.w600,
             letterSpacing: 0.8,
+            shadows: lightOnColoredHeader
+                ? [
+                    Shadow(
+                      color: Colors.black.withValues(alpha: 0.35),
+                      blurRadius: 3,
+                      offset: const Offset(0, 1),
+                    ),
+                  ]
+                : null,
           ),
         ),
         Text(
           'PROVINCE OF MISAMIS OCCIDENTAL',
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: lineMuted,
             fontSize: isNarrow ? 8 : 10,
-            fontWeight: FontWeight.w600,
+            fontWeight: FontWeight.w700,
             letterSpacing: 1.0,
+            shadows: lightOnColoredHeader
+                ? [
+                    Shadow(
+                      color: Colors.black.withValues(alpha: 0.35),
+                      blurRadius: 3,
+                      offset: const Offset(0, 1),
+                    ),
+                  ]
+                : null,
           ),
         ),
         const SizedBox(height: 4),
-        Container(width: double.infinity, height: 2, color: Colors.black),
+        Container(width: double.infinity, height: 2, color: dividerColor),
         const SizedBox(height: 4),
         Text(
           'MUNICIPALITY OF PLARIDEL',
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: titleColor,
             fontSize: isNarrow ? 14 : (isWide ? 22 : 18),
             fontWeight: FontWeight.w800,
             letterSpacing: 1.0,
             height: 1.2,
+            shadows: lightOnColoredHeader
+                ? [
+                    Shadow(
+                      color: Colors.black.withValues(alpha: 0.45),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : null,
           ),
         ),
         const SizedBox(height: 2),
         Text(
           'HUMAN RESOURCE MANAGEMENT AND DEVELOPMENT OFFICE',
           style: TextStyle(
-            color: const Color(0xFFB85C38),
+            color: hrOfficeColor,
             fontSize: isNarrow ? 8 : (isWide ? 12 : 10),
-            fontWeight: FontWeight.w600,
+            fontWeight: FontWeight.w700,
             letterSpacing: 0.6,
-            height: 1.2,
+            height: 1.25,
+            shadows: lightOnColoredHeader
+                ? [
+                    Shadow(
+                      color: Colors.black.withValues(alpha: 0.4),
+                      blurRadius: 4,
+                      offset: const Offset(0, 1),
+                    ),
+                  ]
+                : null,
           ),
         ),
       ],
@@ -293,7 +405,10 @@ class _LguBranding extends StatelessWidget {
       mainAxisSize: expandWidth ? MainAxisSize.max : MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        _MunicipalityLogoCircular(size: isNarrow ? 64 : (isWide ? 90 : 72)),
+        _MunicipalityLogoCircular(
+          size: isNarrow ? 64 : (isWide ? 90 : 72),
+          lightEdge: lightOnColoredHeader,
+        ),
         SizedBox(width: isWide ? 20 : 12),
         if (expandWidth)
           Expanded(child: textColumn)
@@ -314,8 +429,13 @@ class _LguBranding extends StatelessWidget {
         vertical: isWide ? 8 : 6,
       ),
       decoration: BoxDecoration(
-        color: const Color(0xFFF1F3F5),
+        color: lightOnColoredHeader
+            ? Colors.white.withValues(alpha: 0.14)
+            : const Color(0xFFF1F3F5),
         borderRadius: BorderRadius.circular(12),
+        border: lightOnColoredHeader
+            ? Border.all(color: Colors.white.withValues(alpha: 0.28))
+            : null,
       ),
       child: Stack(
         clipBehavior: Clip.none,
@@ -325,7 +445,9 @@ class _LguBranding extends StatelessWidget {
             top: 0,
             child: CustomPaint(
               size: Size(isWide ? 100 : 70, 80),
-              painter: _TriangleAccentPainter(),
+              painter: _TriangleAccentPainter(
+                onOrangeHeader: lightOnColoredHeader,
+              ),
             ),
           ),
           _buildContent(context),
@@ -336,6 +458,10 @@ class _LguBranding extends StatelessWidget {
 }
 
 class _TriangleAccentPainter extends CustomPainter {
+  const _TriangleAccentPainter({this.onOrangeHeader = false});
+
+  final bool onOrangeHeader;
+
   @override
   void paint(Canvas canvas, Size size) {
     final bluePath = Path()
@@ -345,7 +471,10 @@ class _TriangleAccentPainter extends CustomPainter {
       ..close();
     canvas.drawPath(
       bluePath,
-      Paint()..color = AppTheme.primaryNavy.withOpacity(0.25),
+      Paint()
+        ..color = onOrangeHeader
+            ? Colors.white.withValues(alpha: 0.12)
+            : AppTheme.primaryNavy.withValues(alpha: 0.25),
     );
     final goldPath = Path()
       ..moveTo(0, size.height)
@@ -354,39 +483,66 @@ class _TriangleAccentPainter extends CustomPainter {
       ..close();
     canvas.drawPath(
       goldPath,
-      Paint()..color = const Color(0xFFD4A84B).withOpacity(0.4),
+      Paint()
+        ..color = onOrangeHeader
+            ? Colors.white.withValues(alpha: 0.08)
+            : const Color(0xFFD4A84B).withValues(alpha: 0.4),
     );
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _TriangleAccentPainter oldDelegate) =>
+      oldDelegate.onOrangeHeader != onOrangeHeader;
 }
 
 class _MunicipalityLogoCircular extends StatelessWidget {
-  const _MunicipalityLogoCircular({this.size = 90});
+  const _MunicipalityLogoCircular({this.size = 90, this.lightEdge = false});
 
   final double size;
+  final bool lightEdge;
 
   @override
   Widget build(BuildContext context) {
-    return ClipOval(
-      child: Image.asset(
-        'assets/images/Plaridel Logo.jpg',
-        height: size,
-        width: size,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => Container(
+    return Container(
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: lightEdge
+            ? Border.all(
+                color: Colors.white.withValues(alpha: 0.45),
+                width: 2,
+              )
+            : null,
+        boxShadow: lightEdge
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.2),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : null,
+      ),
+      child: ClipOval(
+        child: Image.asset(
+          'assets/images/Plaridel Logo.jpg',
           height: size,
           width: size,
-          decoration: BoxDecoration(
-            color: AppTheme.lightGray,
-            shape: BoxShape.circle,
-            border: Border.all(color: AppTheme.textSecondary.withOpacity(0.3)),
-          ),
-          child: Icon(
-            Icons.account_balance,
-            color: AppTheme.primaryNavy,
-            size: size * 0.45,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Container(
+            height: size,
+            width: size,
+            decoration: BoxDecoration(
+              color: AppTheme.lightGray,
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: AppTheme.textSecondary.withValues(alpha: 0.3),
+              ),
+            ),
+            child: Icon(
+              Icons.account_balance,
+              color: AppTheme.primaryNavy,
+              size: size * 0.45,
+            ),
           ),
         ),
       ),

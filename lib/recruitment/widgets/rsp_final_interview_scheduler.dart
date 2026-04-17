@@ -27,9 +27,8 @@ class _RspFinalInterviewSchedulerState
   bool _loading = true;
   final Set<String> _savingIds = {};
 
-  static const _kSectionGap = 24.0;
-  static const _kCardPadding = 22.0;
-  static const _kStepTitleGap = 6.0;
+  static const _kSectionGap = 28.0;
+  static const _kCardPadding = 24.0;
 
   @override
   void initState() {
@@ -288,7 +287,8 @@ class _RspFinalInterviewSchedulerState
                           Text(
                             headline,
                             style: TextStyle(
-                              fontSize: 14,
+                              fontFamily: 'NotoSans',
+                              fontSize: 15,
                               fontWeight: FontWeight.w800,
                               color: fg,
                               height: 1.2,
@@ -298,8 +298,10 @@ class _RspFinalInterviewSchedulerState
                           Text(
                             detail,
                             style: TextStyle(
+                              fontFamily: 'NotoSans',
                               fontSize: 13,
-                              height: 1.4,
+                              height: 1.45,
+                              fontWeight: FontWeight.w500,
                               color: AppTheme.textPrimary.withValues(
                                 alpha: 0.82,
                               ),
@@ -394,64 +396,6 @@ class _RspFinalInterviewSchedulerState
     ];
   }
 
-  /// Numbered step: clearer hierarchy than stacked gray/orange boxes.
-  Widget _workflowStep({
-    required int number,
-    required String title,
-    required String subtitle,
-    required Widget child,
-  }) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 30,
-          height: 30,
-          alignment: Alignment.center,
-          decoration: const BoxDecoration(
-            color: AppTheme.primaryNavy,
-            shape: BoxShape.circle,
-          ),
-          child: Text(
-            '$number',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 14,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.textPrimary,
-                  letterSpacing: -0.2,
-                ),
-              ),
-              const SizedBox(height: _kStepTitleGap),
-              Text(
-                subtitle,
-                style: TextStyle(
-                  fontSize: 13,
-                  height: 1.45,
-                  color: AppTheme.textSecondary,
-                ),
-              ),
-              const SizedBox(height: 14),
-              child,
-            ],
-          ),
-        ),
-      ],
-    );
-  }
 
   Widget _accountSetupStep({
     required RecruitmentApplication app,
@@ -609,35 +553,86 @@ class _RspFinalInterviewSchedulerState
 
   @override
   Widget build(BuildContext context) {
+    final w = MediaQuery.sizeOf(context).width;
+    final headerWide = w >= 720;
+
+    final titleStyle = const TextStyle(
+      fontFamily: 'NotoSans',
+      color: AppTheme.textPrimary,
+      fontSize: 24,
+      fontWeight: FontWeight.w800,
+      letterSpacing: -0.4,
+      height: 1.15,
+    );
+    final introStyle = const TextStyle(
+      fontFamily: 'NotoSans',
+      color: AppTheme.textSecondary,
+      fontSize: 14,
+      height: 1.55,
+      fontWeight: FontWeight.w500,
+    );
+    final refreshBtn = OutlinedButton.icon(
+      onPressed: _loading ? null : _load,
+      icon: Icon(
+        Icons.refresh_rounded,
+        size: 20,
+        color: AppTheme.primaryNavy.withValues(alpha: _loading ? 0.4 : 1),
+      ),
+      label: Text(
+        'Refresh list',
+        style: TextStyle(
+          fontFamily: 'NotoSans',
+          color: AppTheme.primaryNavy.withValues(alpha: _loading ? 0.4 : 1),
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: AppTheme.primaryNavy,
+        side: BorderSide(
+          color: AppTheme.primaryNavy.withValues(alpha: 0.45),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+      ),
+    );
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Final interview (passed exam)',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.3,
+        if (headerWide)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Final interview (passed exam)', style: titleStyle),
+                    const SizedBox(height: 10),
+                    Text(
+                      'Applicants listed here already passed the screening exam. Schedule the in-person interview, record the result, then open Create Account when they pass.',
+                      style: introStyle,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 20),
+              refreshBtn,
+            ],
+          )
+        else ...[
+          Text('Final interview (passed exam)', style: titleStyle),
+          const SizedBox(height: 10),
+          Text(
+            'Applicants listed here already passed the screening exam. Schedule the in-person interview, record the result, then open Create Account when they pass.',
+            style: introStyle,
           ),
-        ),
-        const SizedBox(height: 10),
-        Text(
-          'Applicants listed here already passed the screening exam. Schedule the in-person interview, record the result, then open Create Account when they pass.',
-          style: TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: 14,
-            height: 1.5,
-          ),
-        ),
-        const SizedBox(height: 22),
-        FilledButton.icon(
-          onPressed: _loading ? null : _load,
-          icon: const Icon(Icons.refresh_rounded, size: 20),
-          label: const Text('Refresh list'),
-          style: FilledButton.styleFrom(backgroundColor: AppTheme.primaryNavy),
-        ),
-        const SizedBox(height: 22),
+          const SizedBox(height: 16),
+          refreshBtn,
+        ],
+        const SizedBox(height: 24),
         if (_loading)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 48),
@@ -649,8 +644,20 @@ class _RspFinalInterviewSchedulerState
             padding: const EdgeInsets.all(28),
             decoration: BoxDecoration(
               color: AppTheme.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: Colors.black.withValues(alpha: 0.07)),
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.06),
+                  blurRadius: 22,
+                  offset: const Offset(0, 8),
+                ),
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
             ),
             child: Text(
               'No applicants have passed the exam yet. When an applicant completes the screening exam with a passing score, they will show up here automatically.',
@@ -676,205 +683,360 @@ class _RspFinalInterviewSchedulerState
               final outcome = app.finalInterviewPassed;
               final canNavigate = widget.onGoToCreateAccount != null;
               final actions = _outcomeActions(app, outcome, registered, busy);
+              final showStep3 = outcome == true && !registered;
+              final step1Summary = scheduled == null
+                  ? 'No date scheduled'
+                  : _formatSchedule(scheduled, context);
+              final step2Summary = outcome == null
+                  ? 'Pending — record result'
+                  : (outcome == true ? 'Passed' : 'Not passed');
+              const step3Summary =
+                  'Employee login & Step 8 applicant message';
+              final expandStep1 = scheduled == null;
+              final expandStep2 = !expandStep1 && outcome == null;
+              final expandStep3 =
+                  showStep3 && !expandStep1 && !expandStep2;
 
-              return Material(
-                color: AppTheme.white,
-                elevation: 0,
-                shadowColor: Colors.black.withValues(alpha: 0.08),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  side: BorderSide(color: Colors.black.withValues(alpha: 0.07)),
+              return Container(
+                decoration: BoxDecoration(
+                  color: AppTheme.white,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: Colors.black.withValues(alpha: 0.07),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                      blurRadius: 26,
+                      offset: const Offset(0, 11),
+                    ),
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.065),
+                      blurRadius: 18,
+                      offset: const Offset(0, 6),
+                    ),
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.035),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.all(_kCardPadding),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
+                clipBehavior: Clip.antiAlias,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      height: 4,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            AppTheme.primaryNavy,
+                            AppTheme.primaryNavyLight,
+                          ],
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(_kCardPadding),
+                      child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  app.fullName,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 17,
-                                    letterSpacing: -0.2,
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  app.email,
-                                  style: TextStyle(
-                                    color: AppTheme.textSecondary,
-                                    fontSize: 14,
-                                    height: 1.3,
-                                  ),
-                                ),
-                                if (app.positionAppliedFor != null &&
-                                    app.positionAppliedFor!.trim().isNotEmpty) ...[
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    'Position: ${app.positionAppliedFor!.trim()}',
-                                    style: TextStyle(
-                                      color: AppTheme.primaryNavy.withValues(
-                                        alpha: 0.92,
-                                      ),
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w700,
-                                      height: 1.3,
-                                    ),
-                                  ),
-                                ],
-                                const SizedBox(height: 8),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 5,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.primaryNavy.withValues(
-                                      alpha: 0.06,
-                                    ),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Text(
-                                    exam != null
-                                        ? 'Screening exam: ${exam.scorePercent.toStringAsFixed(0)}% · ${app.status}'
-                                        : 'Status: ${app.status}',
-                                    style: TextStyle(
-                                      color: AppTheme.primaryNavy.withValues(
-                                        alpha: 0.9,
-                                      ),
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
+                      Text(
+                        'Applicant',
+                        style: TextStyle(
+                          fontFamily: 'NotoSans',
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.1,
+                          color: AppTheme.textSecondary.withValues(alpha: 0.85),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: AppTheme.offWhite,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: const Color(0xFFE2E6EA),
                           ),
-                          if (registered) ...[
-                            const SizedBox(width: 12),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 10,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppTheme.primaryNavy.withValues(
-                                  alpha: 0.08,
-                                ),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: AppTheme.primaryNavy.withValues(
-                                    alpha: 0.22,
-                                  ),
-                                ),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.badge_rounded,
-                                    size: 20,
-                                    color: AppTheme.primaryNavy,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'Account ready',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w800,
-                                      fontSize: 12,
-                                      color: AppTheme.primaryNavy,
-                                    ),
-                                  ),
-                                ],
-                              ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.045),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                            BoxShadow(
+                              color: AppTheme.primaryNavy.withValues(alpha: 0.04),
+                              blurRadius: 10,
+                              offset: const Offset(0, 2),
                             ),
                           ],
-                        ],
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    app.fullName,
+                                    style: const TextStyle(
+                                      fontFamily: 'NotoSans',
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 18,
+                                      letterSpacing: -0.25,
+                                      color: AppTheme.textPrimary,
+                                      height: 1.2,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    app.email,
+                                    style: const TextStyle(
+                                      fontFamily: 'NotoSans',
+                                      color: AppTheme.textSecondary,
+                                      fontSize: 14,
+                                      height: 1.35,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  if (app.positionAppliedFor != null &&
+                                      app.positionAppliedFor!.trim().isNotEmpty) ...[
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      'Position: ${app.positionAppliedFor!.trim()}',
+                                      style: TextStyle(
+                                        fontFamily: 'NotoSans',
+                                        color: AppTheme.primaryNavy.withValues(
+                                          alpha: 0.95,
+                                        ),
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                        height: 1.3,
+                                      ),
+                                    ),
+                                  ],
+                                  const SizedBox(height: 10),
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 6,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(
+                                          color: AppTheme.primaryNavy.withValues(
+                                            alpha: 0.22,
+                                          ),
+                                        ),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: AppTheme.primaryNavy
+                                                .withValues(alpha: 0.08),
+                                            blurRadius: 8,
+                                            offset: const Offset(0, 2),
+                                          ),
+                                        ],
+                                      ),
+                                      child: Text(
+                                        exam != null
+                                            ? 'Screening exam: ${exam.scorePercent.toStringAsFixed(0)}% · ${app.status}'
+                                            : 'Status: ${app.status}',
+                                        style: TextStyle(
+                                          fontFamily: 'NotoSans',
+                                          color: AppTheme.primaryNavy.withValues(
+                                            alpha: 0.92,
+                                          ),
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (registered) ...[
+                              const SizedBox(width: 12),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: AppTheme.primaryNavy.withValues(
+                                      alpha: 0.28,
+                                    ),
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: AppTheme.primaryNavy.withValues(
+                                        alpha: 0.1,
+                                      ),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 3),
+                                    ),
+                                  ],
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.badge_rounded,
+                                      size: 20,
+                                      color: AppTheme.primaryNavy,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'Account ready',
+                                      style: TextStyle(
+                                        fontFamily: 'NotoSans',
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 12,
+                                        color: AppTheme.primaryNavy,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
                       ),
-                      const SizedBox(height: 4),
-                      Divider(
-                        height: 32,
-                        thickness: 1,
-                        color: Colors.black.withValues(alpha: 0.06),
+                      const SizedBox(height: 22),
+                      Text(
+                        'Workflow',
+                        style: TextStyle(
+                          fontFamily: 'NotoSans',
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.1,
+                          color: AppTheme.textSecondary.withValues(alpha: 0.85),
+                        ),
                       ),
-                      _workflowStep(
+                      const SizedBox(height: 14),
+                      _CollapsibleWorkflowStep(
+                        key: ValueKey('${app.id}-wf1'),
                         number: 1,
                         title: 'Interview appointment',
                         subtitle:
                             'Applicants see this date when they continue their application with the same email.',
+                        collapsedSummary: step1Summary,
+                        initiallyExpanded: expandStep1,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             Container(
                               width: double.infinity,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 14,
-                              ),
                               decoration: BoxDecoration(
-                                color: AppTheme.offWhite,
-                                borderRadius: BorderRadius.circular(12),
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(14),
                                 border: Border.all(
-                                  color: Colors.black.withValues(alpha: 0.07),
+                                  color: const Color(0xFFE2E6EA),
                                 ),
                               ),
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Icon(
-                                    Icons.event_note_rounded,
-                                    size: 22,
-                                    color: AppTheme.primaryNavy.withValues(
-                                      alpha: 0.85,
+                              child: IntrinsicHeight(
+                                child: Row(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Container(
+                                      width: 4,
+                                      margin: const EdgeInsets.only(
+                                        left: 12,
+                                        top: 12,
+                                        bottom: 12,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.primaryNavy,
+                                        borderRadius: BorderRadius.circular(3),
+                                      ),
                                     ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          scheduled == null
-                                              ? 'No date set'
-                                              : _formatSchedule(
-                                                  scheduled,
-                                                  context,
-                                                ),
-                                          style: TextStyle(
-                                            fontSize: 15,
-                                            fontWeight: FontWeight.w700,
-                                            color: scheduled == null
-                                                ? AppTheme.textSecondary
-                                                : AppTheme.primaryNavy,
-                                            height: 1.3,
-                                          ),
+                                    Expanded(
+                                      child: Padding(
+                                        padding: const EdgeInsets.fromLTRB(
+                                          14,
+                                          14,
+                                          16,
+                                          14,
                                         ),
-                                        if (scheduled == null)
-                                          Padding(
-                                            padding: const EdgeInsets.only(
-                                              top: 4,
+                                        child: Row(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Icon(
+                                              Icons.event_note_rounded,
+                                              size: 22,
+                                              color: AppTheme.primaryNavy
+                                                  .withValues(alpha: 0.88),
                                             ),
-                                            child: Text(
-                                              'Pick a date and time for the in-person final interview.',
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                color: AppTheme.textSecondary,
-                                                height: 1.35,
+                                            const SizedBox(width: 12),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    scheduled == null
+                                                        ? 'No date set'
+                                                        : _formatSchedule(
+                                                            scheduled,
+                                                            context,
+                                                          ),
+                                                    style: TextStyle(
+                                                      fontFamily: 'NotoSans',
+                                                      fontSize: 15,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                      color: scheduled == null
+                                                          ? AppTheme
+                                                              .textSecondary
+                                                          : AppTheme
+                                                              .primaryNavy,
+                                                      height: 1.3,
+                                                    ),
+                                                  ),
+                                                  if (scheduled == null)
+                                                    Padding(
+                                                      padding:
+                                                          const EdgeInsets.only(
+                                                        top: 4,
+                                                      ),
+                                                      child: Text(
+                                                        'Pick a date and time for the in-person final interview.',
+                                                        style:
+                                                            const TextStyle(
+                                                          fontFamily:
+                                                              'NotoSans',
+                                                          fontSize: 12,
+                                                          color: AppTheme
+                                                              .textSecondary,
+                                                          height: 1.4,
+                                                          fontWeight:
+                                                              FontWeight.w500,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                ],
                                               ),
                                             ),
-                                          ),
-                                      ],
+                                          ],
+                                        ),
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
                             const SizedBox(height: 14),
@@ -923,11 +1085,14 @@ class _RspFinalInterviewSchedulerState
                         ),
                       ),
                       SizedBox(height: _kSectionGap + 4),
-                      _workflowStep(
+                      _CollapsibleWorkflowStep(
+                        key: ValueKey('${app.id}-wf2'),
                         number: 2,
                         title: 'Final interview result',
                         subtitle:
                             'After the interview, record whether the applicant passed.',
+                        collapsedSummary: step2Summary,
+                        initiallyExpanded: expandStep2,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
@@ -946,11 +1111,14 @@ class _RspFinalInterviewSchedulerState
                       ),
                       if (outcome == true && !registered) ...[
                         SizedBox(height: _kSectionGap + 4),
-                        _workflowStep(
+                        _CollapsibleWorkflowStep(
+                          key: ValueKey('${app.id}-wf3'),
                           number: 3,
                           title: 'Employee account',
                           subtitle:
                               'Create their login from the sidebar, then update what they see on Step 8.',
+                          collapsedSummary: step3Summary,
+                          initiallyExpanded: expandStep3,
                           child: _accountSetupStep(
                             app: app,
                             busy: busy,
@@ -972,9 +1140,164 @@ class _RspFinalInterviewSchedulerState
                     ],
                   ),
                 ),
+                ],
+              ),
               );
             },
           ),
+      ],
+    );
+  }
+}
+
+/// One workflow row: tap header to expand/collapse; summary visible when collapsed.
+class _CollapsibleWorkflowStep extends StatefulWidget {
+  const _CollapsibleWorkflowStep({
+    super.key,
+    required this.number,
+    required this.title,
+    required this.subtitle,
+    required this.child,
+    required this.collapsedSummary,
+    this.initiallyExpanded = false,
+  });
+
+  final int number;
+  final String title;
+  final String subtitle;
+  final Widget child;
+  final String collapsedSummary;
+  final bool initiallyExpanded;
+
+  @override
+  State<_CollapsibleWorkflowStep> createState() =>
+      _CollapsibleWorkflowStepState();
+}
+
+class _CollapsibleWorkflowStepState extends State<_CollapsibleWorkflowStep> {
+  late bool _expanded = widget.initiallyExpanded;
+
+  @override
+  Widget build(BuildContext context) {
+    final summaryStyle = TextStyle(
+      fontFamily: 'NotoSans',
+      fontSize: 13,
+      height: 1.35,
+      fontWeight: FontWeight.w600,
+      color: AppTheme.textSecondary.withValues(alpha: 0.92),
+    );
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 34,
+          height: 34,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: AppTheme.primaryNavy,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: AppTheme.primaryNavy.withValues(alpha: 0.35),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+            border: Border.all(color: Colors.white, width: 2),
+          ),
+          child: Text(
+            '${widget.number}',
+            style: const TextStyle(
+              fontFamily: 'NotoSans',
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () => setState(() => _expanded = !_expanded),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 6, 4, 6),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                widget.title,
+                                style: const TextStyle(
+                                  fontFamily: 'NotoSans',
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppTheme.textPrimary,
+                                  letterSpacing: -0.25,
+                                  height: 1.2,
+                                ),
+                              ),
+                              if (!_expanded) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  widget.collapsedSummary,
+                                  style: summaryStyle,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        Icon(
+                          _expanded
+                              ? Icons.expand_less_rounded
+                              : Icons.expand_more_rounded,
+                          color: AppTheme.textSecondary.withValues(alpha: 0.75),
+                          size: 28,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeInOut,
+                alignment: Alignment.topCenter,
+                child: _expanded
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const SizedBox(height: 6),
+                          Text(
+                            widget.subtitle,
+                            style: const TextStyle(
+                              fontFamily: 'NotoSans',
+                              fontSize: 13,
+                              height: 1.5,
+                              color: AppTheme.textSecondary,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          widget.child,
+                        ],
+                      )
+                    : const SizedBox(width: double.infinity),
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }

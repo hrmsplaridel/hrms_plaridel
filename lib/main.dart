@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
+import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_web/webview_flutter_web.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api/client.dart';
 import 'landingpage/constants/app_theme.dart';
@@ -48,6 +50,10 @@ Widget _initialHome(AuthProvider auth, String storedLoginAs) {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  if (kIsWeb) {
+    WebViewPlatform.instance ??= WebWebViewPlatform();
+  }
 
   await MisOccBarangaysData.load();
 

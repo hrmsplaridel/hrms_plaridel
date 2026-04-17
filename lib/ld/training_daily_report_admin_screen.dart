@@ -104,13 +104,18 @@ class _TrainingDailyReportAdminScreenState
               ),
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.black.withOpacity(0.05)),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: Colors.black.withValues(alpha: 0.07)),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 18,
-                    offset: const Offset(0, 6),
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.07),
+                    blurRadius: 24,
+                    offset: const Offset(0, 10),
+                  ),
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.06),
+                    blurRadius: 16,
+                    offset: const Offset(0, 5),
                   ),
                 ],
               ),
@@ -139,46 +144,74 @@ class _TrainingDailyReportAdminScreenState
                   Row(
                     children: [
                       Expanded(
-                        child: TextField(
-                          controller: _searchController,
-                          decoration: InputDecoration(
-                            hintText: 'Search',
-                            prefixIcon: Icon(
-                              Icons.search_rounded,
-                              color: AppTheme.textSecondary.withOpacity(0.8),
-                              size: 22,
-                            ),
-                            filled: true,
-                            fillColor: Colors.white,
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(
-                                color: Colors.black.withOpacity(0.08),
-                              ),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(
-                                color: Colors.black.withOpacity(0.08),
-                              ),
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 14,
-                            ),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(14),
+                            boxShadow: AppTheme.cardShadow,
                           ),
-                          onSubmitted: (_) => _load(),
+                          child: TextField(
+                            controller: _searchController,
+                            decoration: InputDecoration(
+                              hintText: 'Search',
+                              prefixIcon: Icon(
+                                Icons.search_rounded,
+                                color:
+                                    AppTheme.textSecondary.withValues(alpha: 0.8),
+                                size: 22,
+                              ),
+                              filled: true,
+                              fillColor: Colors.white,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide(
+                                  color: Colors.black.withValues(alpha: 0.08),
+                                ),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide(
+                                  color: Colors.black.withValues(alpha: 0.08),
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide(
+                                  color: AppTheme.primaryNavy.withValues(
+                                    alpha: 0.55,
+                                  ),
+                                  width: 1.5,
+                                ),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                            ),
+                            onSubmitted: (_) => _load(),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),
-                      IconButton.filled(
-                        tooltip: 'Refresh',
-                        onPressed: _load,
-                        style: IconButton.styleFrom(
-                          backgroundColor: Colors.grey.shade100,
-                          foregroundColor: AppTheme.textPrimary,
+                      Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.06),
+                              blurRadius: 10,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
                         ),
-                        icon: const Icon(Icons.refresh_rounded, size: 22),
+                        child: IconButton.filled(
+                          tooltip: 'Refresh',
+                          onPressed: _load,
+                          style: IconButton.styleFrom(
+                            backgroundColor: Colors.grey.shade100,
+                            foregroundColor: AppTheme.textPrimary,
+                          ),
+                          icon: const Icon(Icons.refresh_rounded, size: 22),
+                        ),
                       ),
                     ],
                   ),
@@ -195,7 +228,7 @@ class _TrainingDailyReportAdminScreenState
                                       Icons.assignment_outlined,
                                       size: 48,
                                       color: AppTheme.textSecondary
-                                          .withOpacity(0.5),
+                                          .withValues(alpha: 0.5),
                                     ),
                                     const SizedBox(height: 12),
                                     Text(
@@ -346,20 +379,47 @@ class _ReportCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final r = report;
     return Container(
-      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.07)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
+            color: AppTheme.primaryNavy.withValues(alpha: 0.07),
+            blurRadius: 22,
+            offset: const Offset(0, 9),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 14,
+            offset: const Offset(0, 5),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.035),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
+      clipBehavior: Clip.antiAlias,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            height: 3,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  AppTheme.primaryNavy,
+                  AppTheme.primaryNavyLight,
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+            child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
@@ -463,6 +523,9 @@ class _ReportCard extends StatelessWidget {
             ],
           ),
         ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -492,18 +555,29 @@ class _StatusChip extends StatelessWidget {
       default:
         color = Colors.grey;
     }
+    final label = status.isEmpty
+        ? '—'
+        : (status[0].toUpperCase() + status.substring(1));
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
-        color: color.withOpacity(0.14),
+        color: color.withValues(alpha: 0.14),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.12),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Text(
-        status[0].toUpperCase() + status.substring(1),
+        label,
         style: TextStyle(
           color: color,
           fontSize: 12,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );

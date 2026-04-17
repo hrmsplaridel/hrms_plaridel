@@ -22,6 +22,34 @@ class AppTheme {
   // Section background alternation
   static const Color sectionAlt = Color(0xFFF1F3F5);
 
+  /// Standard depth for section strips and large white panels.
+  static List<BoxShadow> get panelShadow => [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.085),
+          blurRadius: 26,
+          offset: const Offset(0, 10),
+        ),
+        BoxShadow(
+          color: primaryNavy.withValues(alpha: 0.075),
+          blurRadius: 20,
+          offset: const Offset(0, 5),
+        ),
+      ];
+
+  /// Slightly softer shadow for nested cards and dense grids.
+  static List<BoxShadow> get cardShadow => [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.07),
+          blurRadius: 16,
+          offset: const Offset(0, 7),
+        ),
+        BoxShadow(
+          color: primaryNavy.withValues(alpha: 0.06),
+          blurRadius: 12,
+          offset: const Offset(0, 3),
+        ),
+      ];
+
   // Typography
   static const String fontFamily = 'Roboto';
   static const double heroTitleSize = 32.0;
@@ -69,9 +97,11 @@ class AppTheme {
       ),
       cardTheme: CardThemeData(
         color: white,
-        elevation: 1,
+        elevation: 2,
+        shadowColor: Colors.black.withValues(alpha: 0.1),
+        surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(12),
         ),
         margin: EdgeInsets.zero,
       ),

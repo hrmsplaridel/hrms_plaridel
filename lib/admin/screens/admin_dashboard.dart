@@ -38,14 +38,10 @@ import '../../../recruitment/screens/rsp_admin_screen.dart';
 import '../../../widgets/feature_card.dart';
 import '../../../api/user_facing_api_error.dart';
 
-/// Dashboard accent colors for summary cards and accents (orange theme).
+/// Dashboard accent colors (orange brand for icons / recruitment blocks).
 class _DashboardColors {
-  static const Color cardBlue = Color(0xFFFFF3E0);
-  static const Color cardGreen = Color(0xFFFFECB3);
-  static const Color cardAmber = Color(0xFFFFE0B2);
   static const Color accentBlue = Color(0xFFE85D04);
   static const Color accentGreen = Color(0xFFBF360C);
-  static const Color accentAmber = Color(0xFFFF9800);
 }
 
 /// Admin dashboard matching reference layout; features only from existing system:
@@ -176,9 +172,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             )
                           : _selectedNavIndex == 1
                           ? RspAdminContent(
-                              onNavigateToSidebarIndex: (i) => setState(
-                                () => _selectedNavIndex = i,
-                              ),
+                              onNavigateToSidebarIndex: (i) =>
+                                  setState(() => _selectedNavIndex = i),
                             )
                           : _selectedNavIndex == 2
                           ? const _LdContent()
@@ -216,34 +211,37 @@ class _Sidebar extends StatelessWidget {
   final String email;
   final ValueChanged<int> onTap;
 
+  static const String _sidebarFont = 'NotoSans';
+
   static Widget _sealAvatar({double size = 48}) {
+    final pad = size * 0.08;
     return Container(
+      padding: EdgeInsets.all(pad),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.12),
-            blurRadius: 8,
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 10,
             offset: const Offset(0, 2),
           ),
         ],
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
+      child: ClipOval(
         child: Image.asset(
           'assets/images/Plaridel Logo.jpg',
-          width: size,
-          height: size,
+          width: size - pad * 2,
+          height: size - pad * 2,
           fit: BoxFit.cover,
           errorBuilder: (_, __, ___) => Container(
-            width: size,
-            height: size,
+            width: size - pad * 2,
+            height: size - pad * 2,
             color: Colors.white,
             child: Icon(
               Icons.account_balance_rounded,
               color: AppTheme.primaryNavy,
-              size: size * 0.5,
+              size: size * 0.42,
             ),
           ),
         ),
@@ -260,39 +258,47 @@ class _Sidebar extends StatelessWidget {
         color: AppTheme.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.07),
-            blurRadius: 24,
-            offset: const Offset(4, 0),
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 28,
+            offset: const Offset(6, 0),
           ),
         ],
       ),
       child: Column(
         children: [
-          const SizedBox(height: 20),
+          const SizedBox(height: 18),
           Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16),
-            padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 18),
+            margin: const EdgeInsets.symmetric(horizontal: 14),
+            padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
+                  AppTheme.primaryNavyLight,
                   AppTheme.primaryNavy,
                   AppTheme.primaryNavyDark,
                 ],
+                stops: const [0.0, 0.45, 1.0],
               ),
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: BorderRadius.circular(20),
               boxShadow: [
                 BoxShadow(
-                  color: AppTheme.primaryNavy.withValues(alpha: 0.35),
-                  blurRadius: 18,
-                  offset: const Offset(0, 6),
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.42),
+                  blurRadius: 20,
+                  spreadRadius: -2,
+                  offset: const Offset(0, 8),
+                ),
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.06),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
                 ),
               ],
             ),
             child: Row(
               children: [
-                _sealAvatar(size: 52),
+                _sealAvatar(size: 54),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
@@ -302,6 +308,7 @@ class _Sidebar extends StatelessWidget {
                       Text(
                         'Municipality of Plaridel',
                         style: TextStyle(
+                          fontFamily: _sidebarFont,
                           color: Colors.white,
                           fontSize: 15,
                           fontWeight: FontWeight.w800,
@@ -309,15 +316,16 @@ class _Sidebar extends StatelessWidget {
                           letterSpacing: -0.2,
                         ),
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 5),
                       Text(
                         'HUMAN RESOURCE MANAGEMENT SYSTEM',
                         style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.92),
-                          fontSize: 10,
+                          fontFamily: _sidebarFont,
+                          color: Colors.white.withValues(alpha: 0.95),
+                          fontSize: 9.5,
                           fontWeight: FontWeight.w700,
-                          letterSpacing: 0.6,
-                          height: 1.25,
+                          letterSpacing: 0.85,
+                          height: 1.3,
                         ),
                       ),
                     ],
@@ -326,7 +334,7 @@ class _Sidebar extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 22),
           Expanded(
             child: SingleChildScrollView(
               child: Column(
@@ -379,15 +387,17 @@ class _Sidebar extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
               decoration: BoxDecoration(
                 color: const Color(0xFFF1F3F5),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppTheme.lightGray),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: AppTheme.lightGray.withValues(alpha: 0.85),
+                ),
               ),
               child: Row(
                 children: [
-                  _sealAvatar(size: 40),
+                  _sealAvatar(size: 42),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -399,6 +409,7 @@ class _Sidebar extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
+                            fontFamily: _sidebarFont,
                             color: AppTheme.textPrimary,
                             fontWeight: FontWeight.w700,
                             fontSize: 14,
@@ -410,7 +421,10 @@ class _Sidebar extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: AppTheme.textSecondary,
+                            fontFamily: _sidebarFont,
+                            color: AppTheme.textSecondary.withValues(
+                              alpha: 0.88,
+                            ),
                             fontSize: 12,
                             height: 1.2,
                           ),
@@ -432,6 +446,7 @@ class _Sidebar extends StatelessWidget {
                 Text(
                   '\u00a9 $year HRMS',
                   style: TextStyle(
+                    fontFamily: _sidebarFont,
                     color: AppTheme.textSecondary,
                     fontSize: 11,
                     height: 1.2,
@@ -452,11 +467,15 @@ class _Sidebar extends StatelessWidget {
                   style: TextButton.styleFrom(
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 0),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 2,
+                      vertical: 0,
+                    ),
                   ),
                   child: Text(
                     'Privacy',
                     style: TextStyle(
+                      fontFamily: _sidebarFont,
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
                       color: AppTheme.primaryNavy,
@@ -478,11 +497,15 @@ class _Sidebar extends StatelessWidget {
                   style: TextButton.styleFrom(
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 0),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 2,
+                      vertical: 0,
+                    ),
                   ),
                   child: Text(
                     'Terms',
                     style: TextStyle(
+                      fontFamily: _sidebarFont,
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
                       color: AppTheme.primaryNavy,
@@ -518,73 +541,90 @@ class _NavTileState extends State<_NavTile> {
   bool _hover = false;
 
   static const _activeFill = Color(0xFFFFF0E6);
+  static const _inactiveIcon = Color(0xFF495057);
+  static const _inactiveLabel = Color(0xFF343A40);
 
   @override
   Widget build(BuildContext context) {
     final iconColor = widget.selected
         ? AppTheme.primaryNavy
-        : (_hover ? AppTheme.primaryNavy.withValues(alpha: 0.88) : AppTheme.textSecondary);
+        : (_hover
+              ? AppTheme.primaryNavy.withValues(alpha: 0.9)
+              : _inactiveIcon);
     final labelColor = widget.selected
         ? AppTheme.primaryNavy
-        : (_hover ? AppTheme.textPrimary : AppTheme.textSecondary);
+        : (_hover ? AppTheme.textPrimary : _inactiveLabel);
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
         child: Material(
           color: Colors.transparent,
+          clipBehavior: Clip.antiAlias,
           child: InkWell(
             onTap: widget.onTap,
-            borderRadius: BorderRadius.circular(14),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              curve: Curves.easeOutCubic,
-              decoration: BoxDecoration(
-                color: widget.selected
-                    ? _activeFill
-                    : (_hover ? AppTheme.primaryNavy.withValues(alpha: 0.05) : Colors.transparent),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              // IntrinsicHeight: sidebar nav lives in a scroll view (unbounded height).
-              // Row + CrossAxisAlignment.stretch needs a finite max height on the cross axis.
-              child: IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (widget.selected)
-                      Container(
-                        width: 4,
-                        decoration: BoxDecoration(
-                          color: AppTheme.primaryNavy,
-                          borderRadius: const BorderRadius.horizontal(left: Radius.circular(14)),
-                        ),
-                      ),
-                    Expanded(
-                      child: Padding(
-                        padding: EdgeInsets.fromLTRB(widget.selected ? 12 : 16, 13, 16, 13),
-                        child: Row(
-                          children: [
-                            Icon(widget.icon, size: 22, color: iconColor),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Text(
-                                widget.label,
-                                style: TextStyle(
-                                  color: labelColor,
-                                  fontWeight: widget.selected ? FontWeight.w700 : FontWeight.w500,
-                                  fontSize: 15,
-                                  letterSpacing: -0.1,
-                                ),
-                              ),
-                            ),
-                          ],
+            borderRadius: BorderRadius.circular(16),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (widget.selected)
+                    Container(
+                      width: 5,
+                      decoration: const BoxDecoration(
+                        color: AppTheme.primaryNavy,
+                        borderRadius: BorderRadius.horizontal(
+                          left: Radius.circular(14),
                         ),
                       ),
                     ),
-                  ],
-                ),
+                  Expanded(
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      curve: Curves.easeOutCubic,
+                      decoration: BoxDecoration(
+                        color: widget.selected
+                            ? _activeFill
+                            : (_hover
+                                  ? AppTheme.primaryNavy.withValues(alpha: 0.06)
+                                  : Colors.transparent),
+                        borderRadius: widget.selected
+                            ? const BorderRadius.horizontal(
+                                right: Radius.circular(16),
+                              )
+                            : BorderRadius.circular(16),
+                      ),
+                      padding: EdgeInsets.fromLTRB(
+                        widget.selected ? 12 : 16,
+                        14,
+                        16,
+                        14,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(widget.icon, size: 22, color: iconColor),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Text(
+                              widget.label,
+                              style: TextStyle(
+                                fontFamily: _Sidebar._sidebarFont,
+                                color: labelColor,
+                                fontWeight: widget.selected
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                                fontSize: 15,
+                                letterSpacing: -0.15,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -610,6 +650,7 @@ class _TopBar extends StatelessWidget {
   final String displayName;
   final String? avatarPath;
   final bool showMenuButton;
+
   /// Dashboard tab only — search filters overview sections.
   final bool searchEnabled;
   final TextEditingController searchController;
@@ -1060,7 +1101,8 @@ class _DashboardContent extends StatelessWidget {
       'applicant',
     ]);
 
-    final anySection = showWelcome ||
+    final anySection =
+        showWelcome ||
         showSummary ||
         showDocu ||
         showDtr ||
@@ -1106,154 +1148,186 @@ class _DashboardContent extends StatelessWidget {
           ),
         if (showWelcome)
           Container(
-          padding: EdgeInsets.all(isNarrow ? 20 : 28),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                AppTheme.primaryNavy.withOpacity(0.1),
-                AppTheme.primaryNavy.withOpacity(0.04),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: AppTheme.primaryNavy.withOpacity(0.15),
-              width: 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: AppTheme.primaryNavy.withOpacity(0.06),
-                blurRadius: 24,
-                offset: const Offset(0, 8),
+            padding: EdgeInsets.all(isNarrow ? 20 : 28),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [AppTheme.primaryNavy, AppTheme.primaryNavyDark],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
-              BoxShadow(
-                color: Colors.black.withOpacity(0.03),
-                blurRadius: 12,
-                offset: const Offset(0, 2),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.22),
+                width: 1,
               ),
-            ],
-          ),
-          child: isNarrow
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _formatDate(now),
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primaryNavy.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Icon(
-                            Icons.waving_hand_rounded,
-                            color: AppTheme.primaryNavy,
-                            size: 26,
-                          ),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Welcome back, Admin!- Hello Boi Paldooooooooooo',
-                                style: TextStyle(
-                                  color: AppTheme.textPrimary,
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: -0.3,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                "Here's the latest overview of the HR activities.",
-                                style: TextStyle(
-                                  color: AppTheme.textSecondary,
-                                  fontSize: 14,
-                                  height: 1.4,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                )
-              : Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primaryNavy.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppTheme.primaryNavy.withOpacity(0.08),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: Icon(
-                        Icons.waving_hand_rounded,
-                        color: AppTheme.primaryNavy,
-                        size: 32,
-                      ),
-                    ),
-                    const SizedBox(width: 24),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _formatDate(now),
-                            style: TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Welcome back, Admin!',
-                            style: TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: 28,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -0.5,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            "Here's the latest overview of the HR activities.",
-                            style: TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 15,
-                              height: 1.5,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.primaryNavyDark.withValues(alpha: 0.45),
+                  blurRadius: 24,
+                  offset: const Offset(0, 10),
                 ),
-        ),
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.12),
+                  blurRadius: 14,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: isNarrow
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _formatDate(now),
+                        style: TextStyle(
+                          fontFamily: 'NotoSans',
+                          color: Colors.white.withValues(alpha: 0.88),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.35),
+                              ),
+                            ),
+                            child: Icon(
+                              Icons.waving_hand_rounded,
+                              color: Colors.white,
+                              size: 26,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Welcome back, Admin!',
+                                  style: TextStyle(
+                                    fontFamily: 'NotoSans',
+                                    color: Colors.white,
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -0.25,
+                                    height: 1.15,
+                                    shadows: const [
+                                      Shadow(
+                                        color: Color(0x59000000),
+                                        blurRadius: 8,
+                                        offset: Offset(0, 2),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  "Here's the latest overview of the HR activities.",
+                                  style: TextStyle(
+                                    fontFamily: 'NotoSans',
+                                    color: Colors.white.withValues(alpha: 0.92),
+                                    fontSize: 14,
+                                    height: 1.45,
+                                    fontWeight: FontWeight.w500,
+                                    letterSpacing: 0.1,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  )
+                : Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.38),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.15),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          Icons.waving_hand_rounded,
+                          color: Colors.white,
+                          size: 32,
+                        ),
+                      ),
+                      const SizedBox(width: 24),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _formatDate(now),
+                              style: TextStyle(
+                                fontFamily: 'NotoSans',
+                                color: Colors.white.withValues(alpha: 0.88),
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Welcome back, Admin!',
+                              style: TextStyle(
+                                fontFamily: 'NotoSans',
+                                color: Colors.white,
+                                fontSize: 28,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.55,
+                                height: 1.1,
+                                shadows: const [
+                                  Shadow(
+                                    color: Color(0x59000000),
+                                    blurRadius: 10,
+                                    offset: Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              "Here's the latest overview of the HR activities.",
+                              style: TextStyle(
+                                fontFamily: 'NotoSans',
+                                color: Colors.white.withValues(alpha: 0.92),
+                                fontSize: 15,
+                                height: 1.5,
+                                fontWeight: FontWeight.w500,
+                                letterSpacing: 0.12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
         if (showWelcome && showSummary) const SizedBox(height: 32),
         if (showSummary) const _SummaryCards(),
-        if ((showWelcome || showSummary) && showDocu) const SizedBox(height: 28),
+        if ((showWelcome || showSummary) && showDocu)
+          const SizedBox(height: 28),
         if (showDocu) ...[
           Text(
             'DocuTracker',
@@ -1388,8 +1462,8 @@ class _SummaryCardsState extends State<_SummaryCards> {
                   : (totalApplicants == 1
                         ? '1 total application'
                         : '$totalApplicants total applications'),
-              color: _DashboardColors.cardBlue,
-              iconColor: _DashboardColors.accentBlue,
+              color: AppTheme.white,
+              iconColor: AppTheme.primaryNavy,
               icon: Icons.person_add_rounded,
             ),
             _SummaryData(
@@ -1400,23 +1474,23 @@ class _SummaryCardsState extends State<_SummaryCards> {
                   : (pendingCount == 1
                         ? '1 awaiting document review'
                         : '$pendingCount awaiting document review'),
-              color: _DashboardColors.cardGreen,
-              iconColor: _DashboardColors.accentGreen,
+              color: AppTheme.white,
+              iconColor: AppTheme.primaryNavy,
               icon: Icons.pending_actions_rounded,
             ),
             _SummaryData(
               title: 'Job Vacancies',
               value: hiringActive ? 'Open' : 'Closed',
               subtitle: 'Landing page',
-              color: _DashboardColors.cardAmber,
-              iconColor: _DashboardColors.accentAmber,
+              color: AppTheme.white,
+              iconColor: AppTheme.primaryNavy,
               icon: Icons.work_rounded,
             ),
             _SummaryData(
               title: 'Hiring Status',
               value: hiringActive ? 'Active' : 'Inactive',
               subtitle: 'Landing page',
-              color: Colors.white,
+              color: AppTheme.white,
               iconColor: AppTheme.primaryNavy,
               icon: Icons.campaign_rounded,
             ),
@@ -1429,33 +1503,33 @@ class _SummaryCardsState extends State<_SummaryCards> {
           _cards = [
             _SummaryData(
               title: 'New Applicants',
-              value: 'â€”',
+              value: '—',
               subtitle: 'Unable to load',
-              color: _DashboardColors.cardBlue,
-              iconColor: _DashboardColors.accentBlue,
+              color: AppTheme.white,
+              iconColor: AppTheme.primaryNavy,
               icon: Icons.person_add_rounded,
             ),
             _SummaryData(
               title: 'Pending Applications',
-              value: 'â€”',
+              value: '—',
               subtitle: 'Unable to load',
-              color: _DashboardColors.cardGreen,
-              iconColor: _DashboardColors.accentGreen,
+              color: AppTheme.white,
+              iconColor: AppTheme.primaryNavy,
               icon: Icons.pending_actions_rounded,
             ),
             _SummaryData(
               title: 'Job Vacancies',
-              value: 'â€”',
-              subtitle: 'â€”',
-              color: _DashboardColors.cardAmber,
-              iconColor: _DashboardColors.accentAmber,
+              value: '—',
+              subtitle: '—',
+              color: AppTheme.white,
+              iconColor: AppTheme.primaryNavy,
               icon: Icons.work_rounded,
             ),
             _SummaryData(
               title: 'Hiring Status',
-              value: 'â€”',
-              subtitle: 'â€”',
-              color: Colors.white,
+              value: '—',
+              subtitle: '—',
+              color: AppTheme.white,
               iconColor: AppTheme.primaryNavy,
               icon: Icons.campaign_rounded,
             ),
@@ -1475,33 +1549,33 @@ class _SummaryCardsState extends State<_SummaryCards> {
         [
           _SummaryData(
             title: 'New Applicants',
-            value: 'â€¦',
+            value: '…',
             subtitle: 'Loading',
-            color: _DashboardColors.cardBlue,
-            iconColor: _DashboardColors.accentBlue,
+            color: AppTheme.white,
+            iconColor: AppTheme.primaryNavy,
             icon: Icons.person_add_rounded,
           ),
           _SummaryData(
             title: 'Pending Applications',
-            value: 'â€¦',
+            value: '…',
             subtitle: 'Loading',
-            color: _DashboardColors.cardGreen,
-            iconColor: _DashboardColors.accentGreen,
+            color: AppTheme.white,
+            iconColor: AppTheme.primaryNavy,
             icon: Icons.pending_actions_rounded,
           ),
           _SummaryData(
             title: 'Job Vacancies',
-            value: 'â€¦',
-            subtitle: 'â€¦',
-            color: _DashboardColors.cardAmber,
-            iconColor: _DashboardColors.accentAmber,
+            value: '…',
+            subtitle: '…',
+            color: AppTheme.white,
+            iconColor: AppTheme.primaryNavy,
             icon: Icons.work_rounded,
           ),
           _SummaryData(
             title: 'Hiring Status',
-            value: 'â€¦',
-            subtitle: 'â€¦',
-            color: Colors.white,
+            value: '…',
+            subtitle: '…',
+            color: AppTheme.white,
             iconColor: AppTheme.primaryNavy,
             icon: Icons.campaign_rounded,
           ),
@@ -1568,79 +1642,170 @@ class _SummaryData {
   final IconData icon;
 }
 
-class _SummaryCard extends StatelessWidget {
+class _SummaryCard extends StatefulWidget {
   const _SummaryCard({required this.data});
 
   final _SummaryData data;
 
   @override
+  State<_SummaryCard> createState() => _SummaryCardState();
+}
+
+class _SummaryCardState extends State<_SummaryCard> {
+  bool _hover = false;
+
+  @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: Container(
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: data.color,
-          borderRadius: BorderRadius.circular(20),
-          border: data.color == Colors.white
-              ? Border.all(color: Colors.black.withOpacity(0.06))
-              : null,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.06),
-              blurRadius: 20,
-              offset: const Offset(0, 6),
+    final data = widget.data;
+    final navy = AppTheme.primaryNavy;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: AnimatedScale(
+        scale: _hover ? 1.012 : 1,
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          decoration: BoxDecoration(
+            color: data.color,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: _hover
+                  ? navy.withValues(alpha: 0.28)
+                  : const Color(0xFFE2E6EA),
+              width: _hover ? 1.5 : 1,
             ),
-            BoxShadow(
-              color: Colors.black.withOpacity(0.03),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: data.iconColor.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Icon(data.icon, size: 26, color: data.iconColor),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              data.title,
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              data.value,
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 28,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.5,
-                height: 1.2,
-              ),
-            ),
-            if (data.subtitle.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text(
-                data.subtitle,
-                style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 12,
-                  height: 1.3,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(
+                  alpha: _hover ? 0.09 : 0.045,
                 ),
+                blurRadius: _hover ? 26 : 16,
+                offset: Offset(0, _hover ? 10 : 5),
+              ),
+              BoxShadow(
+                color: navy.withValues(alpha: _hover ? 0.1 : 0.05),
+                blurRadius: _hover ? 20 : 12,
+                offset: const Offset(0, 4),
               ),
             ],
-          ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(19),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  height: 4,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [navy, AppTheme.primaryNavyLight],
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 22),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              navy.withValues(alpha: 0.12),
+                              AppTheme.primaryNavyLight.withValues(alpha: 0.07),
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: navy.withValues(alpha: 0.14),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: navy.withValues(alpha: 0.06),
+                              blurRadius: 10,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                        child: Icon(data.icon, size: 26, color: data.iconColor),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        data.title,
+                        style: TextStyle(
+                          fontFamily: 'NotoSans',
+                          color: AppTheme.textSecondary.withValues(alpha: 0.94),
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.2,
+                          height: 1.25,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        data.value,
+                        style: TextStyle(
+                          fontFamily: 'NotoSans',
+                          color: AppTheme.textPrimary,
+                          fontSize: 28,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.55,
+                          height: 1.12,
+                        ),
+                      ),
+                      if (data.subtitle.isNotEmpty) ...[
+                        const SizedBox(height: 14),
+                        Divider(
+                          height: 1,
+                          thickness: 1,
+                          color: Colors.black.withValues(alpha: 0.06),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Icon(
+                                Icons.info_outline_rounded,
+                                size: 16,
+                                color: AppTheme.textSecondary.withValues(
+                                  alpha: 0.65,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                data.subtitle,
+                                style: TextStyle(
+                                  fontFamily: 'NotoSans',
+                                  color: AppTheme.textSecondary.withValues(
+                                    alpha: 0.92,
+                                  ),
+                                  fontSize: 12.5,
+                                  height: 1.45,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -2450,25 +2615,75 @@ class _LdContentState extends State<_LdContent> {
           const SizedBox(height: 20),
         ],
         if (_ldSectionIndex == 0) ...[
-          Text(
-            'L&D',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 24,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.3,
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(20, 22, 20, 24),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [AppTheme.white, AppTheme.sectionAlt],
+              ),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.06),
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: AppTheme.primaryNavy.withValues(alpha: 0.2),
+                    ),
+                  ),
+                  child: Text(
+                    'Learning & Development',
+                    style: TextStyle(
+                      color: AppTheme.primaryNavy.withValues(alpha: 0.95),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.9,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'L&D workspace',
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 26,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.5,
+                    height: 1.15,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Pick a tool to capture training needs, coaching actions, or daily monitoring reports.',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary.withValues(alpha: 0.95),
+                    fontSize: 15,
+                    height: 1.5,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Learning & Development. Choose a feature below.',
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 14,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 28),
           Wrap(
             spacing: 16,
             runSpacing: 16,
@@ -2476,22 +2691,28 @@ class _LdContentState extends State<_LdContent> {
               FeatureCard(
                 title: 'Training Need Analysis and Consolidated Report',
                 subtitle:
-                    'FOR CY [year], DEPARTMENT. Table: Name/Position, Goal, Behavior, Skills/Knowledge, Need for Training, Training Recommendations.',
+                    'Capture per-person goals, behaviors, skill gaps, and training recommendations—rolled up by department and calendar year for HR planning.',
                 icon: Icons.school_rounded,
+                actionLabel: 'Open TNA',
+                maxSubtitleLines: 6,
                 onTap: () => setState(() => _ldSectionIndex = 1),
               ),
               FeatureCard(
                 title: 'Action Brainstorming and Coaching Worksheet',
                 subtitle:
-                    'DEPARTMENT, DATE. Table: Name, Stop Doing, Do Less Of, Keep Doing, Do More Of, Start Doing, Goal. Certified by Department Head.',
+                    'Guide teams through stop / start / continue behaviors, coaching focus, and goals—with a sign-off line for the department head.',
                 icon: Icons.lightbulb_outline_rounded,
+                actionLabel: 'Open worksheet',
+                maxSubtitleLines: 6,
                 onTap: () => setState(() => _ldSectionIndex = 2),
               ),
               FeatureCard(
                 title: 'Training Daily Reports (Monitoring)',
                 subtitle:
-                    'Monitor daily reports submitted by employees under training, with attachments and status.',
+                    'Track daily training submissions from staff on assignment: narratives, attachments, and approval status in one monitoring view.',
                 icon: Icons.assignment_turned_in_outlined,
+                actionLabel: 'Open monitoring',
+                maxSubtitleLines: 6,
                 onTap: () => setState(() => _ldSectionIndex = 3),
               ),
             ],
@@ -2568,9 +2789,9 @@ class _TrainingNeedAnalysisSectionState
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
+        );
       }
     }
   }
@@ -2699,14 +2920,18 @@ class _TrainingNeedAnalysisSectionState
               onPressed: _loading ? null : _load,
               icon: const Icon(Icons.refresh_rounded, size: 20),
               label: const Text('Refresh'),
-              style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
             ),
             const SizedBox(width: 4),
             TextButton.icon(
               onPressed: _loading ? null : _openSavedRecordsBrowser,
               icon: const Icon(Icons.folder_open_outlined, size: 20),
               label: const Text('View records'),
-              style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
             ),
           ],
         ),
@@ -2800,21 +3025,22 @@ class _LdTrainingReportsSectionState extends State<_LdTrainingReportsSection> {
 
   Future<void> _markSeen(TrainingDailyReport report) async {
     try {
-      final updated =
-          await TrainingDailyReportRepo.instance.markAsSeen(report.id);
+      final updated = await TrainingDailyReportRepo.instance.markAsSeen(
+        report.id,
+      );
       if (!mounted) return;
       setState(() {
         final idx = _reports.indexWhere((r) => r.id == report.id);
         if (idx != -1) _reports[idx] = updated;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Marked report as seen.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Marked report as seen.')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to mark as seen: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to mark as seen: $e')));
     }
   }
 
@@ -2842,9 +3068,10 @@ class _LdTrainingReportsSectionState extends State<_LdTrainingReportsSection> {
         Text(
           'Monitor daily reports from employees under training, review attachments, and mark them as seen.',
           style: TextStyle(
-            color: AppTheme.textSecondary,
+            color: AppTheme.textSecondary.withValues(alpha: 0.95),
             fontSize: 14,
-            height: 1.4,
+            height: 1.45,
+            fontWeight: FontWeight.w500,
           ),
         ),
         const SizedBox(height: 24),
@@ -2852,53 +3079,80 @@ class _LdTrainingReportsSectionState extends State<_LdTrainingReportsSection> {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Expanded(
-              child: TextField(
-                controller: _searchController,
-                decoration: InputDecoration(
-                  hintText: 'Search',
-                  prefixIcon: Icon(
-                    Icons.search_rounded,
-                    color: AppTheme.textSecondary.withOpacity(0.8),
-                    size: 22,
-                  ),
-                  filled: true,
-                  fillColor: AppTheme.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(
-                      color: Colors.black.withOpacity(0.08),
-                    ),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(
-                      color: Colors.black.withOpacity(0.08),
-                    ),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 14,
-                  ),
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: AppTheme.cardShadow,
                 ),
-                onSubmitted: (_) => _load(),
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Search',
+                    prefixIcon: Icon(
+                      Icons.search_rounded,
+                      color: AppTheme.textSecondary.withValues(alpha: 0.8),
+                      size: 22,
+                    ),
+                    filled: true,
+                    fillColor: AppTheme.white,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide(
+                        color: Colors.black.withValues(alpha: 0.08),
+                      ),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide(
+                        color: Colors.black.withValues(alpha: 0.08),
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide(
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.55),
+                        width: 1.5,
+                      ),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                  ),
+                  onSubmitted: (_) => _load(),
+                ),
               ),
             ),
             const SizedBox(width: 12),
-            IconButton.filled(
-              tooltip: 'Refresh',
-              onPressed: _load,
-              style: IconButton.styleFrom(
-                backgroundColor: Colors.grey.shade100,
-                foregroundColor: AppTheme.textPrimary,
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.06),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
               ),
-              icon: const Icon(Icons.refresh_rounded, size: 22),
+              child: IconButton.filled(
+                tooltip: 'Refresh',
+                onPressed: _load,
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.grey.shade100,
+                  foregroundColor: AppTheme.textPrimary,
+                ),
+                icon: const Icon(Icons.refresh_rounded, size: 22),
+              ),
             ),
             const SizedBox(width: 4),
             TextButton.icon(
               onPressed: _loading ? null : _openSavedRecordsBrowser,
               icon: const Icon(Icons.folder_open_outlined, size: 20),
               label: const Text('View records'),
-              style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
             ),
           ],
         ),
@@ -2918,7 +3172,7 @@ class _LdTrainingReportsSectionState extends State<_LdTrainingReportsSection> {
                   Icon(
                     Icons.assignment_outlined,
                     size: 48,
-                    color: AppTheme.textSecondary.withOpacity(0.5),
+                    color: AppTheme.textSecondary.withValues(alpha: 0.5),
                   ),
                   const SizedBox(height: 12),
                   Text(
@@ -3049,20 +3303,47 @@ class _LdReportCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final r = report;
     return Container(
-      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.07)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
+            color: AppTheme.primaryNavy.withValues(alpha: 0.07),
+            blurRadius: 22,
+            offset: const Offset(0, 9),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 14,
+            offset: const Offset(0, 5),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.035),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
+      clipBehavior: Clip.antiAlias,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            height: 3,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  AppTheme.primaryNavy,
+                  AppTheme.primaryNavyLight,
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+            child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
@@ -3110,10 +3391,7 @@ class _LdReportCard extends StatelessWidget {
           const SizedBox(height: 10),
           Text(
             'Submitted ${r.submittedAt.toLocal()}',
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 12,
-            ),
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
           ),
           const SizedBox(height: 16),
           Row(
@@ -3146,6 +3424,9 @@ class _LdReportCard extends StatelessWidget {
             ],
           ),
         ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -3175,18 +3456,29 @@ class _LdStatusChip extends StatelessWidget {
       default:
         color = Colors.grey;
     }
+    final label = status.isEmpty
+        ? '—'
+        : (status[0].toUpperCase() + status.substring(1));
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
-        color: color.withOpacity(0.14),
+        color: color.withValues(alpha: 0.14),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.12),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Text(
-        status[0].toUpperCase() + status.substring(1),
+        label,
         style: TextStyle(
           color: color,
           fontSize: 12,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );
@@ -3703,9 +3995,9 @@ class _ActionBrainstormingSectionState
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
+        );
       }
     }
   }
@@ -3774,7 +4066,9 @@ class _ActionBrainstormingSectionState
       emptyMessage: 'No worksheets yet.',
       loading: _loading,
       items: _entries.map((e) {
-        final dept = e.department?.trim().isNotEmpty == true ? e.department! : '(No department)';
+        final dept = e.department?.trim().isNotEmpty == true
+            ? e.department!
+            : '(No department)';
         return SavedRecordListItem(
           title: dept,
           subtitle: '${e.date ?? "—"} · ${e.rows.length} row(s)',
@@ -3836,14 +4130,18 @@ class _ActionBrainstormingSectionState
               onPressed: _loading ? null : _load,
               icon: const Icon(Icons.refresh_rounded, size: 20),
               label: const Text('Refresh'),
-              style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
             ),
             const SizedBox(width: 4),
             TextButton.icon(
               onPressed: _loading ? null : _openSavedRecordsBrowser,
               icon: const Icon(Icons.folder_open_outlined, size: 20),
               label: const Text('View records'),
-              style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
             ),
           ],
         ),

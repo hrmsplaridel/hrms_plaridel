@@ -19,9 +19,8 @@ import '../../../widgets/user_avatar.dart';
 import '../../../ld/training_daily_report_employee_screen.dart';
 import '../../shared/screens/profile_and_settings_page.dart';
 
-/// Employee dashboard reference: dark blue sidebar (HR branding), nav items,
-/// welcome + Clock In, Attendance, Leave Balance, Payslip cards, Announcements,
-/// Upcoming Leave, Attendance Overview.
+/// Employee dashboard: light HRMS sidebar (matches admin), main content with
+/// welcome, attendance, leave, training, DocuTracker, and announcements.
 class EmployeeDashboard extends StatefulWidget {
   const EmployeeDashboard({super.key});
 
@@ -68,6 +67,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
               child: SafeArea(
                 child: _EmployeeSidebar(
                   displayName: displayName,
+                  email: email,
                   avatarPath: avatarPath,
                   selectedIndex: _selectedNavIndex,
                   onTap: (i) {
@@ -82,6 +82,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
           if (isWide)
             _EmployeeSidebar(
               displayName: displayName,
+              email: email,
               avatarPath: avatarPath,
               selectedIndex: _selectedNavIndex,
               onTap: (i) => setState(() => _selectedNavIndex = i),
@@ -133,191 +134,137 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
   }
 }
 
-/// Dark blue sidebar: HR branding, nav (Dashboard, My Attendance, My Leave, DocuTracker, Announcements), user block, footer.
+/// Light sidebar aligned with admin HRMS drawer: orange header, nav tiles, profile card, footer.
 class _EmployeeSidebar extends StatelessWidget {
   const _EmployeeSidebar({
     required this.displayName,
+    required this.email,
     this.avatarPath,
     required this.selectedIndex,
     required this.onTap,
   });
 
   final String displayName;
+  final String email;
   final String? avatarPath;
   final int selectedIndex;
   final ValueChanged<int> onTap;
 
-  @override
-  Widget build(BuildContext context) {
+  static const String _sidebarFont = 'NotoSans';
+
+  static Widget _sealAvatar({double size = 48}) {
+    final pad = size * 0.08;
     return Container(
-      width: 268,
-      decoration: const BoxDecoration(color: AppTheme.primaryNavy),
-      child: Column(
-        children: [
-          const SizedBox(height: 24),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
-              decoration: BoxDecoration(
-                color: AppTheme.primaryNavy,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: Colors.white.withOpacity(0.1),
-                  width: 1,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.3),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.white, width: 2),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.2),
-                          blurRadius: 6,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.asset(
-                        'assets/images/Plaridel Logo.jpg',
-                        width: 48,
-                        height: 48,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
-                          width: 48,
-                          height: 48,
-                          color: AppTheme.primaryNavy,
-                          child: const Icon(
-                            Icons.shield_rounded,
-                            color: Colors.white,
-                            size: 28,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            'Municipality of Plaridel',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w800,
-                              height: 1.2,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            'HUMAN RESOURCE MANAGEMENT SYSTEM',
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.95),
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 0.4,
-                              height: 1.2,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+      padding: EdgeInsets.all(pad),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: ClipOval(
+        child: Image.asset(
+          'assets/images/Plaridel Logo.jpg',
+          width: size - pad * 2,
+          height: size - pad * 2,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Container(
+            width: size - pad * 2,
+            height: size - pad * 2,
+            color: Colors.white,
+            child: Icon(
+              Icons.account_balance_rounded,
+              color: AppTheme.primaryNavy,
+              size: size * 0.42,
             ),
           ),
-          const SizedBox(height: 28),
-          _EmployeeNavTile(
-            icon: Icons.home_rounded,
-            label: 'Dashboard',
-            selected: selectedIndex == 0,
-            onTap: () => onTap(0),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final year = DateTime.now().year;
+    return Container(
+      width: 288,
+      decoration: BoxDecoration(
+        color: AppTheme.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 28,
+            offset: const Offset(6, 0),
           ),
-          _EmployeeNavTile(
-            icon: Icons.event_available_rounded,
-            label: 'My Attendance',
-            selected: selectedIndex == 1,
-            onTap: () => onTap(1),
-          ),
-          _EmployeeNavTile(
-            icon: Icons.event_busy_rounded,
-            label: 'My Leave',
-            selected: selectedIndex == 2,
-            onTap: () => onTap(2),
-          ),
-          _EmployeeNavTile(
-            icon: Icons.assignment_rounded,
-            label: 'Training Reports',
-            selected: selectedIndex == 3,
-            onTap: () => onTap(3),
-          ),
-          _EmployeeNavTile(
-            icon: Icons.description_rounded,
-            label: 'DocuTracker',
-            selected: selectedIndex == 4,
-            onTap: () => onTap(4),
-          ),
-          _EmployeeNavTile(
-            icon: Icons.campaign_rounded,
-            label: 'Announcements',
-            selected: selectedIndex == 5,
-            onTap: () => onTap(5),
-          ),
-          const Spacer(),
-          const Divider(height: 1, color: Colors.white24),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+        ],
+      ),
+      child: Column(
+        children: [
+          const SizedBox(height: 18),
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 14),
+            padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  AppTheme.primaryNavyLight,
+                  AppTheme.primaryNavy,
+                  AppTheme.primaryNavyDark,
+                ],
+                stops: const [0.0, 0.45, 1.0],
+              ),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.42),
+                  blurRadius: 20,
+                  spreadRadius: -2,
+                  offset: const Offset(0, 8),
+                ),
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.06),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
             child: Row(
               children: [
-                UserAvatar(
-                  avatarPath: avatarPath,
-                  radius: 24,
-                  backgroundColor: Colors.white.withOpacity(0.25),
-                  placeholderIconColor: Colors.white,
-                ),
-                const SizedBox(width: 12),
+                _sealAvatar(size: 54),
+                const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        displayName,
-                        style: const TextStyle(
+                        'Municipality of Plaridel',
+                        style: TextStyle(
+                          fontFamily: _sidebarFont,
                           color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          height: 1.2,
+                          letterSpacing: -0.2,
                         ),
                       ),
+                      const SizedBox(height: 5),
                       Text(
-                        'Employee',
+                        'HUMAN RESOURCE MANAGEMENT SYSTEM',
                         style: TextStyle(
-                          color: Colors.white.withOpacity(0.85),
-                          fontSize: 12,
+                          fontFamily: _sidebarFont,
+                          color: Colors.white.withValues(alpha: 0.95),
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.85,
+                          height: 1.3,
                         ),
                       ),
                     ],
@@ -326,70 +273,195 @@ class _EmployeeSidebar extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 22),
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _EmployeeNavTile(
+                    icon: Icons.home_rounded,
+                    label: 'Dashboard',
+                    selected: selectedIndex == 0,
+                    onTap: () => onTap(0),
+                  ),
+                  _EmployeeNavTile(
+                    icon: Icons.event_available_rounded,
+                    label: 'My Attendance',
+                    selected: selectedIndex == 1,
+                    onTap: () => onTap(1),
+                  ),
+                  _EmployeeNavTile(
+                    icon: Icons.event_busy_rounded,
+                    label: 'My Leave',
+                    selected: selectedIndex == 2,
+                    onTap: () => onTap(2),
+                  ),
+                  _EmployeeNavTile(
+                    icon: Icons.assignment_rounded,
+                    label: 'Training Reports',
+                    selected: selectedIndex == 3,
+                    onTap: () => onTap(3),
+                  ),
+                  _EmployeeNavTile(
+                    icon: Icons.description_rounded,
+                    label: 'DocuTracker',
+                    selected: selectedIndex == 4,
+                    onTap: () => onTap(4),
+                  ),
+                  _EmployeeNavTile(
+                    icon: Icons.campaign_rounded,
+                    label: 'Announcements',
+                    selected: selectedIndex == 5,
+                    onTap: () => onTap(5),
+                  ),
+                ],
+              ),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Column(
+            child: Divider(
+              height: 1,
+              thickness: 1,
+              color: AppTheme.lightGray,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF1F3F5),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: AppTheme.lightGray.withValues(alpha: 0.85),
+                ),
+              ),
+              child: Row(
+                children: [
+                  UserAvatar(
+                    avatarPath: avatarPath,
+                    radius: 21,
+                    backgroundColor: AppTheme.lightGray,
+                    placeholderIconColor: AppTheme.textSecondary,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          displayName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontFamily: _sidebarFont,
+                            color: AppTheme.textPrimary,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          email.isNotEmpty ? email : 'Employee',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontFamily: _sidebarFont,
+                            color: AppTheme.textSecondary.withValues(alpha: 0.88),
+                            fontSize: 12,
+                            height: 1.2,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
+            child: Wrap(
+              alignment: WrapAlignment.center,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 0,
               children: [
                 Text(
-                  '© 2026 HRMS',
+                  '\u00a9 $year HRMS',
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.6),
+                    fontFamily: _sidebarFont,
+                    color: AppTheme.textSecondary,
                     fontSize: 11,
+                    height: 1.2,
                   ),
                 ),
-                const SizedBox(height: 4),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    TextButton(
-                      onPressed: () {},
-                      style: TextButton.styleFrom(
-                        minimumSize: Size.zero,
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                      ),
-                      child: Text(
-                        'Privacy Policy',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.white.withOpacity(0.7),
-                        ),
-                      ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Text(
+                    '\u00b7',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.textSecondary.withValues(alpha: 0.7),
                     ),
-                    Text(
-                      ' | ',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.white.withOpacity(0.6),
-                      ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () {},
+                  style: TextButton.styleFrom(
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 0),
+                  ),
+                  child: Text(
+                    'Privacy',
+                    style: TextStyle(
+                      fontFamily: _sidebarFont,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.primaryNavy,
                     ),
-                    TextButton(
-                      onPressed: () {},
-                      style: TextButton.styleFrom(
-                        minimumSize: Size.zero,
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                      ),
-                      child: Text(
-                        'Terms',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.white.withOpacity(0.7),
-                        ),
-                      ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Text(
+                    '\u00b7',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.textSecondary.withValues(alpha: 0.7),
                     ),
-                  ],
+                  ),
+                ),
+                TextButton(
+                  onPressed: () {},
+                  style: TextButton.styleFrom(
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 0),
+                  ),
+                  child: Text(
+                    'Terms',
+                    style: TextStyle(
+                      fontFamily: _sidebarFont,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.primaryNavy,
+                    ),
+                  ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 16),
         ],
       ),
     );
   }
 }
 
-class _EmployeeNavTile extends StatelessWidget {
+class _EmployeeNavTile extends StatefulWidget {
   const _EmployeeNavTile({
     required this.icon,
     required this.label,
@@ -403,36 +475,95 @@ class _EmployeeNavTile extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
+  State<_EmployeeNavTile> createState() => _EmployeeNavTileState();
+}
+
+class _EmployeeNavTileState extends State<_EmployeeNavTile> {
+  bool _hover = false;
+
+  static const _activeFill = Color(0xFFFFF0E6);
+  static const _inactiveIcon = Color(0xFF495057);
+  static const _inactiveLabel = Color(0xFF343A40);
+
+  @override
   Widget build(BuildContext context) {
-    final bgColor = selected
-        ? Colors.white.withOpacity(0.22)
-        : Colors.transparent;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(10),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: bgColor,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              children: [
-                Icon(icon, size: 22, color: Colors.white),
-                const SizedBox(width: 14),
-                Text(
-                  label,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w500,
-                    fontSize: 14,
+    final iconColor = widget.selected
+        ? AppTheme.primaryNavy
+        : (_hover ? AppTheme.primaryNavy.withValues(alpha: 0.9) : _inactiveIcon);
+    final labelColor = widget.selected
+        ? AppTheme.primaryNavy
+        : (_hover ? AppTheme.textPrimary : _inactiveLabel);
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        child: Material(
+          color: Colors.transparent,
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: widget.onTap,
+            borderRadius: BorderRadius.circular(16),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (widget.selected)
+                    Container(
+                      width: 5,
+                      decoration: const BoxDecoration(
+                        color: AppTheme.primaryNavy,
+                        borderRadius: BorderRadius.horizontal(
+                          left: Radius.circular(14),
+                        ),
+                      ),
+                    ),
+                  Expanded(
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      curve: Curves.easeOutCubic,
+                      decoration: BoxDecoration(
+                        color: widget.selected
+                            ? _activeFill
+                            : (_hover
+                                ? AppTheme.primaryNavy.withValues(alpha: 0.06)
+                                : Colors.transparent),
+                        borderRadius: widget.selected
+                            ? const BorderRadius.horizontal(
+                                right: Radius.circular(16),
+                              )
+                            : BorderRadius.circular(16),
+                      ),
+                      padding: EdgeInsets.fromLTRB(
+                        widget.selected ? 12 : 16,
+                        14,
+                        16,
+                        14,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(widget.icon, size: 22, color: iconColor),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Text(
+                              widget.label,
+                              style: TextStyle(
+                                fontFamily: _EmployeeSidebar._sidebarFont,
+                                color: labelColor,
+                                fontWeight:
+                                    widget.selected ? FontWeight.w700 : FontWeight.w500,
+                                fontSize: 15,
+                                letterSpacing: -0.15,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

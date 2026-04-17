@@ -42,7 +42,7 @@ class RecruitmentProcessSection extends StatelessWidget {
             width: 48,
             height: 4,
             decoration: BoxDecoration(
-              color: AppTheme.primaryNavy.withOpacity(0.8),
+              color: AppTheme.primaryNavy.withValues(alpha: 0.8),
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -73,7 +73,7 @@ class RecruitmentProcessSection extends StatelessWidget {
                           padding: const EdgeInsets.only(top: 32),
                           child: Icon(
                             Icons.arrow_forward,
-                            color: AppTheme.textSecondary.withOpacity(0.6),
+                            color: AppTheme.textSecondary.withValues(alpha: 0.6),
                             size: 20,
                           ),
                         ),
@@ -93,7 +93,7 @@ class RecruitmentProcessSection extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(vertical: 8),
                           child: Icon(
                             Icons.arrow_downward,
-                            color: AppTheme.textSecondary.withOpacity(0.6),
+                            color: AppTheme.textSecondary.withValues(alpha: 0.6),
                             size: 24,
                           ),
                         ),
@@ -115,7 +115,7 @@ class RecruitmentProcessSection extends StatelessWidget {
                   borderRadius: BorderRadius.circular(14),
                 ),
                 elevation: 2,
-                shadowColor: AppTheme.primaryNavy.withOpacity(0.35),
+                shadowColor: AppTheme.primaryNavy.withValues(alpha: 0.35),
               ),
             ),
           ),
@@ -155,14 +155,25 @@ class _ProcessStepState extends State<_ProcessStep> {
           color: _hover ? AppTheme.offWhite : AppTheme.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: _hover ? AppTheme.primaryNavy.withOpacity(0.35) : const Color(0xFFE8EAED),
+            color: _hover
+                ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                : const Color(0xFFE8EAED),
             width: 1.5,
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(_hover ? 0.08 : 0.04),
-              blurRadius: _hover ? 16 : 10,
-              offset: Offset(0, _hover ? 4 : 2),
+              color: Colors.black.withValues(
+                alpha: _hover ? 0.09 : 0.055,
+              ),
+              blurRadius: _hover ? 20 : 14,
+              offset: Offset(0, _hover ? 7 : 4),
+            ),
+            BoxShadow(
+              color: AppTheme.primaryNavy.withValues(
+                alpha: _hover ? 0.08 : 0.05,
+              ),
+              blurRadius: _hover ? 14 : 10,
+              offset: const Offset(0, 3),
             ),
           ],
         ),
@@ -180,7 +191,7 @@ class _ProcessStepState extends State<_ProcessStep> {
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: AppTheme.primaryNavy.withOpacity(0.3),
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.3),
                         blurRadius: 8,
                         offset: const Offset(0, 2),
                       ),

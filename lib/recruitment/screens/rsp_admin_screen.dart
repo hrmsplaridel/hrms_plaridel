@@ -7915,7 +7915,23 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
   bool _loading = true;
   bool _hasVacancies = true;
   final List<_VacancyFormItem> _vacancies = [];
+  /// Parallel to [_vacancies]: when false, only the header row is shown.
+  final List<bool> _vacancyExpanded = [];
   bool _saving = false;
+
+  String _vacancyEntrySummary(_VacancyFormItem v) {
+    final h = v.headline.text.trim();
+    if (h.isNotEmpty) {
+      return h.length > 52 ? '${h.substring(0, 52)}…' : h;
+    }
+    final b = v.body.text.trim();
+    if (b.isNotEmpty) {
+      return b.length > 64 ? '${b.substring(0, 64)}…' : b;
+    }
+    final m = v.maxApplicants.text.trim();
+    if (m.isNotEmpty) return 'Max applicants: $m';
+    return 'No headline yet — expand to edit';
+  }
 
   @override
   void initState() {
@@ -7943,6 +7959,9 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
           ..clear()
           ..addAll(next);
         setState(() {
+          _vacancyExpanded
+            ..clear()
+            ..addAll(List<bool>.filled(_vacancies.length, true));
           _loading = false;
           _hasVacancies = a.hasVacancies;
         });
@@ -7959,7 +7978,10 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
   }
 
   void _addVacancy() {
-    setState(() => _vacancies.add(_VacancyFormItem()));
+    setState(() {
+      _vacancies.add(_VacancyFormItem());
+      _vacancyExpanded.add(true);
+    });
   }
 
   void _removeVacancy(int index) {
@@ -7967,6 +7989,9 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
     setState(() {
       _vacancies[index].dispose();
       _vacancies.removeAt(index);
+      if (index < _vacancyExpanded.length) {
+        _vacancyExpanded.removeAt(index);
+      }
     });
   }
 
@@ -8056,259 +8081,533 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
           'Job Vacancies Announcement',
           style: TextStyle(
             color: AppTheme.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
+            fontSize: 24,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.35,
+            height: 1.2,
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
         Text(
           'Control what appears in the Job Vacancies section on the landing page. Add multiple entries when you have more than one position.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          style: TextStyle(
+            color: AppTheme.textSecondary.withValues(alpha: 0.95),
+            fontSize: 14,
+            height: 1.45,
+            fontWeight: FontWeight.w500,
+          ),
         ),
         const SizedBox(height: 24),
         Container(
-          padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
             color: AppTheme.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: Colors.black.withValues(alpha: 0.07),
+            ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
+                color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                blurRadius: 28,
+                offset: const Offset(0, 12),
+              ),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.07),
+                blurRadius: 20,
+                offset: const Offset(0, 7),
+              ),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
               ),
             ],
           ),
-          child: _loading
-              ? const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(32),
-                    child: CircularProgressIndicator(),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                height: 4,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      AppTheme.primaryNavy,
+                      AppTheme.primaryNavyLight,
+                    ],
                   ),
-                )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'Accepting applications',
-                            style: TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(22, 20, 22, 22),
+                child: _loading
+                    ? const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(32),
+                          child: CircularProgressIndicator(),
                         ),
-                        Switch(
-                          value: _hasVacancies,
-                          onChanged: (v) => setState(() => _hasVacancies = v),
-                          activeTrackColor: AppTheme.primaryNavy.withOpacity(
-                            0.5,
-                          ),
-                          activeThumbColor: AppTheme.primaryNavy,
-                        ),
-                      ],
-                    ),
-                    Text(
-                      'When ON, the landing page shows that you are hiring. When OFF, it shows no vacancies.',
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(height: 28),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Job vacancy entries',
-                          style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        FilledButton.icon(
-                          onPressed: _addVacancy,
-                          icon: const Icon(Icons.add_rounded, size: 20),
-                          label: const Text('Add new vacancy'),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: AppTheme.primaryNavy,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 12,
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.fromLTRB(
+                              16,
+                              14,
+                              10,
+                              14,
                             ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    ...List.generate(_vacancies.length, (i) {
-                      final v = _vacancies[i];
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 24),
-                        child: Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            color: AppTheme.offWhite.withOpacity(0.6),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: Colors.black.withOpacity(0.06),
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(
-                                    'Position ${i + 1}',
-                                    style: TextStyle(
-                                      color: AppTheme.textPrimary,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                    ),
+                            decoration: BoxDecoration(
+                              color: AppTheme.sectionAlt,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: Colors.black.withValues(alpha: 0.06),
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(
+                                    alpha: 0.045,
                                   ),
-                                  if (_vacancies.length > 1)
-                                    OutlinedButton.icon(
-                                      onPressed: () =>
-                                          _confirmDeleteVacancy(context, i),
-                                      icon: Icon(
-                                        Icons.delete_outline_rounded,
-                                        size: 18,
-                                        color: Colors.red.shade700,
-                                      ),
-                                      label: Text(
-                                        'Delete',
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 3),
+                                ),
+                              ],
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        'Accepting applications',
                                         style: TextStyle(
-                                          color: Colors.red.shade700,
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w600,
+                                          color: AppTheme.textPrimary,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w700,
                                         ),
-                                      ),
-                                      style: OutlinedButton.styleFrom(
-                                        foregroundColor: Colors.red.shade700,
-                                        side: BorderSide(
-                                          color: Colors.red.shade400,
-                                        ),
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 8,
-                                        ),
-                                        minimumSize: Size.zero,
                                       ),
                                     ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
+                                    Switch(
+                                      value: _hasVacancies,
+                                      onChanged: (v) =>
+                                          setState(() => _hasVacancies = v),
+                                      activeTrackColor:
+                                          AppTheme.primaryNavy.withValues(
+                                        alpha: 0.45,
+                                      ),
+                                      activeThumbColor: AppTheme.primaryNavy,
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'When ON, the landing page shows that you are hiring. When OFF, it shows no vacancies.',
+                                  style: TextStyle(
+                                    color: AppTheme.textSecondary.withValues(
+                                      alpha: 0.92,
+                                    ),
+                                    fontSize: 13,
+                                    height: 1.4,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 26),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
                               Text(
-                                'Headline (optional)',
+                                'Job vacancy entries',
                                 style: TextStyle(
-                                  color: AppTheme.textSecondary,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
+                                  color: AppTheme.textPrimary,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -0.2,
                                 ),
                               ),
-                              const SizedBox(height: 6),
-                              TextField(
-                                controller: v.headline,
-                                onChanged: (_) => setState(() {}),
-                                decoration: InputDecoration(
-                                  hintText:
-                                      'e.g. Now Hiring: Human Resource Assistant',
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.white,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
+                              FilledButton.icon(
+                                onPressed: _addVacancy,
+                                icon: const Icon(Icons.add_rounded, size: 20),
+                                label: const Text('Add new vacancy'),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: AppTheme.primaryNavy,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
                                     vertical: 12,
                                   ),
-                                ),
-                                maxLines: 1,
-                              ),
-                              const SizedBox(height: 14),
-                              Text(
-                                'Description (optional)',
-                                style: TextStyle(
-                                  color: AppTheme.textSecondary,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              TextField(
-                                controller: v.body,
-                                onChanged: (_) => setState(() {}),
-                                decoration: InputDecoration(
-                                  hintText:
-                                      'Short description for this position.',
-                                  border: OutlineInputBorder(
+                                  shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(10),
                                   ),
-                                  filled: true,
-                                  fillColor: Colors.white,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
-                                    vertical: 12,
-                                  ),
-                                  alignLabelWithHint: true,
                                 ),
-                                maxLines: 3,
-                              ),
-                              const SizedBox(height: 14),
-                              Text(
-                                'Max applicants (optional)',
-                                style: TextStyle(
-                                  color: AppTheme.textSecondary,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Counts only applicants still in process. Document declined, exam failed, final interview failed, or hired (registered) frees a slot.',
-                                style: TextStyle(
-                                  color: AppTheme.textSecondary.withOpacity(0.9),
-                                  fontSize: 11.5,
-                                  height: 1.35,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              TextField(
-                                controller: v.maxApplicants,
-                                onChanged: (_) => setState(() {}),
-                                keyboardType: TextInputType.number,
-                                decoration: InputDecoration(
-                                  hintText:
-                                      'Leave blank for no limit (e.g. 50)',
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.white,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
-                                    vertical: 12,
-                                  ),
-                                ),
-                                maxLines: 1,
                               ),
                             ],
                           ),
-                        ),
-                      );
-                    }),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Tap a row to expand or collapse fields. Delete is available when there is more than one entry.',
+                            style: TextStyle(
+                              color: AppTheme.textSecondary.withValues(
+                                alpha: 0.88,
+                              ),
+                              fontSize: 12.5,
+                              height: 1.35,
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          ...List.generate(_vacancies.length, (i) {
+                            final v = _vacancies[i];
+                            final expanded = i < _vacancyExpanded.length
+                                ? _vacancyExpanded[i]
+                                : true;
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 16),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: AppTheme.white,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: Colors.black.withValues(
+                                      alpha: 0.08,
+                                    ),
+                                  ),
+                                  boxShadow: AppTheme.cardShadow,
+                                ),
+                                clipBehavior: Clip.antiAlias,
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Container(
+                                      height: 3,
+                                      decoration: BoxDecoration(
+                                        gradient: LinearGradient(
+                                          colors: [
+                                            AppTheme.primaryNavy.withValues(
+                                              alpha: 0.85,
+                                            ),
+                                            AppTheme.primaryNavyLight
+                                                .withValues(alpha: 0.5),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        4,
+                                        2,
+                                        8,
+                                        2,
+                                      ),
+                                      child: Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Expanded(
+                                            child: Material(
+                                              color: Colors.transparent,
+                                              child: InkWell(
+                                                onTap: () => setState(() {
+                                                  if (i <
+                                                      _vacancyExpanded
+                                                          .length) {
+                                                    _vacancyExpanded[i] =
+                                                        !_vacancyExpanded[i];
+                                                  }
+                                                }),
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                                child: Padding(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                    horizontal: 10,
+                                                    vertical: 10,
+                                                  ),
+                                                  child: Row(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      Padding(
+                                                        padding:
+                                                            const EdgeInsets.only(
+                                                          top: 2,
+                                                        ),
+                                                        child: Icon(
+                                                          expanded
+                                                              ? Icons
+                                                                  .expand_less_rounded
+                                                              : Icons
+                                                                  .expand_more_rounded,
+                                                          color: AppTheme
+                                                              .textSecondary
+                                                              .withValues(
+                                                            alpha: 0.75,
+                                                          ),
+                                                          size: 26,
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 6),
+                                                      Expanded(
+                                                        child: Column(
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .start,
+                                                          children: [
+                                                            Text(
+                                                              'Position ${i + 1}',
+                                                              style:
+                                                                  const TextStyle(
+                                                                color: AppTheme
+                                                                    .textPrimary,
+                                                                fontSize: 15,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w800,
+                                                                letterSpacing:
+                                                                    -0.2,
+                                                              ),
+                                                            ),
+                                                            if (!expanded) ...[
+                                                              const SizedBox(
+                                                                height: 6,
+                                                              ),
+                                                              Text(
+                                                                _vacancyEntrySummary(
+                                                                  v,
+                                                                ),
+                                                                style:
+                                                                    TextStyle(
+                                                                  color: AppTheme
+                                                                      .textSecondary
+                                                                      .withValues(
+                                                                    alpha:
+                                                                        0.92,
+                                                                  ),
+                                                                  fontSize:
+                                                                      12.5,
+                                                                  height: 1.4,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .w500,
+                                                                ),
+                                                                maxLines: 2,
+                                                                overflow:
+                                                                    TextOverflow
+                                                                        .ellipsis,
+                                                              ),
+                                                            ],
+                                                          ],
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          if (_vacancies.length > 1)
+                                            Padding(
+                                              padding: const EdgeInsets.only(
+                                                top: 6,
+                                              ),
+                                              child: OutlinedButton.icon(
+                                                onPressed: () =>
+                                                    _confirmDeleteVacancy(
+                                                  context,
+                                                  i,
+                                                ),
+                                                icon: Icon(
+                                                  Icons.delete_outline_rounded,
+                                                  size: 18,
+                                                  color: Colors.red.shade700,
+                                                ),
+                                                label: Text(
+                                                  'Delete',
+                                                  style: TextStyle(
+                                                    color: Colors.red.shade700,
+                                                    fontSize: 13,
+                                                    fontWeight:
+                                                        FontWeight.w600,
+                                                  ),
+                                                ),
+                                                style: OutlinedButton.styleFrom(
+                                                  foregroundColor:
+                                                      Colors.red.shade700,
+                                                  side: BorderSide(
+                                                    color: Colors.red.shade400,
+                                                  ),
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                    horizontal: 12,
+                                                    vertical: 8,
+                                                  ),
+                                                  minimumSize: Size.zero,
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                    AnimatedSize(
+                                      duration: const Duration(
+                                        milliseconds: 220,
+                                      ),
+                                      curve: Curves.easeInOut,
+                                      alignment: Alignment.topCenter,
+                                      child: expanded
+                                          ? Padding(
+                                              padding:
+                                                  const EdgeInsets.fromLTRB(
+                                                18,
+                                                0,
+                                                18,
+                                                18,
+                                              ),
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    'Headline (optional)',
+                                                    style: TextStyle(
+                                                      color: AppTheme
+                                                          .textSecondary,
+                                                      fontSize: 13,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 6),
+                                                  TextField(
+                                                    controller: v.headline,
+                                                    onChanged: (_) =>
+                                                        setState(() {}),
+                                                    decoration: InputDecoration(
+                                                      hintText:
+                                                          'e.g. Now Hiring: Human Resource Assistant',
+                                                      border:
+                                                          OutlineInputBorder(
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(10),
+                                                      ),
+                                                      filled: true,
+                                                      fillColor: Colors.white,
+                                                      contentPadding:
+                                                          const EdgeInsets
+                                                              .symmetric(
+                                                        horizontal: 14,
+                                                        vertical: 12,
+                                                      ),
+                                                    ),
+                                                    maxLines: 1,
+                                                  ),
+                                                  const SizedBox(height: 14),
+                                                  Text(
+                                                    'Description (optional)',
+                                                    style: TextStyle(
+                                                      color: AppTheme
+                                                          .textSecondary,
+                                                      fontSize: 13,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 6),
+                                                  TextField(
+                                                    controller: v.body,
+                                                    onChanged: (_) =>
+                                                        setState(() {}),
+                                                    decoration: InputDecoration(
+                                                      hintText:
+                                                          'Short description for this position.',
+                                                      border:
+                                                          OutlineInputBorder(
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(10),
+                                                      ),
+                                                      filled: true,
+                                                      fillColor: Colors.white,
+                                                      contentPadding:
+                                                          const EdgeInsets
+                                                              .symmetric(
+                                                        horizontal: 14,
+                                                        vertical: 12,
+                                                      ),
+                                                      alignLabelWithHint: true,
+                                                    ),
+                                                    maxLines: 3,
+                                                  ),
+                                                  const SizedBox(height: 14),
+                                                  Text(
+                                                    'Max applicants (optional)',
+                                                    style: TextStyle(
+                                                      color: AppTheme
+                                                          .textSecondary,
+                                                      fontSize: 13,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 4),
+                                                  Text(
+                                                    'Counts only applicants still in process. Document declined, exam failed, final interview failed, or hired (registered) frees a slot.',
+                                                    style: TextStyle(
+                                                      color: AppTheme
+                                                          .textSecondary
+                                                          .withValues(
+                                                        alpha: 0.9,
+                                                      ),
+                                                      fontSize: 11.5,
+                                                      height: 1.35,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 6),
+                                                  TextField(
+                                                    controller:
+                                                        v.maxApplicants,
+                                                    onChanged: (_) =>
+                                                        setState(() {}),
+                                                    keyboardType:
+                                                        TextInputType.number,
+                                                    decoration: InputDecoration(
+                                                      hintText:
+                                                          'Leave blank for no limit (e.g. 50)',
+                                                      border:
+                                                          OutlineInputBorder(
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(10),
+                                                      ),
+                                                      filled: true,
+                                                      fillColor: Colors.white,
+                                                      contentPadding:
+                                                          const EdgeInsets
+                                                              .symmetric(
+                                                        horizontal: 14,
+                                                        vertical: 12,
+                                                      ),
+                                                    ),
+                                                    maxLines: 1,
+                                                  ),
+                                                ],
+                                              ),
+                                            )
+                                          : const SizedBox(
+                                              width: double.infinity,
+                                            ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }),
                     const SizedBox(height: 28),
                     SizedBox(
                       width: double.infinity,
@@ -8340,6 +8639,9 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
                     ),
                   ],
                 ),
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -9078,8 +9380,109 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     return TableCell(
       verticalAlignment: TableCellVerticalAlignment.middle,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: SizedBox(width: width, child: child),
+      ),
+    );
+  }
+
+  /// Readable status pill with color by outcome (tooltip shows raw value).
+  Widget _applicationStatusBadge(String status) {
+    final raw = status.trim();
+    final s = raw.toLowerCase();
+    late Color bg;
+    late Color fg;
+    late IconData icon;
+    if (s.contains('passed') ||
+        s == 'registered' ||
+        s.contains('approved') ||
+        s.contains('hire')) {
+      bg = const Color(0xFFE8F5E9);
+      fg = const Color(0xFF2E7D32);
+      icon = Icons.check_circle_outline_rounded;
+    } else if (s.contains('declined') ||
+        s.contains('failed') ||
+        s.contains('reject')) {
+      bg = const Color(0xFFFFEBEE);
+      fg = const Color(0xFFC62828);
+      icon = Icons.cancel_outlined;
+    } else if (s.contains('pending') ||
+        s.contains('submitted') ||
+        s.contains('review') ||
+        s.contains('exam')) {
+      bg = AppTheme.primaryNavy.withValues(alpha: 0.12);
+      fg = AppTheme.primaryNavyDark;
+      icon = Icons.schedule_rounded;
+    } else {
+      bg = AppTheme.sectionAlt;
+      fg = AppTheme.textSecondary;
+      icon = Icons.label_outline_rounded;
+    }
+    final display =
+        raw.isEmpty ? _kNa : raw.replaceAll('_', ' ');
+    return Tooltip(
+      message: raw.isEmpty ? '' : raw,
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 158),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+            decoration: BoxDecoration(
+              color: bg,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: fg.withValues(alpha: 0.22)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 4,
+                  offset: const Offset(0, 1),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 14, color: fg),
+                const SizedBox(width: 5),
+                Flexible(
+                  child: Text(
+                    display,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: fg,
+                      height: 1.25,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _examOutcomeChip(bool passed) {
+    final fg = passed ? const Color(0xFF2E7D32) : const Color(0xFFC62828);
+    final bg = passed ? const Color(0xFFE8F5E9) : const Color(0xFFFFEBEE);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: fg.withValues(alpha: 0.25)),
+      ),
+      child: Text(
+        passed ? 'Passed' : 'Failed',
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+          color: fg,
+        ),
       ),
     );
   }
@@ -9090,20 +9493,26 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Text(
               'Applications & Exam Results',
               style: TextStyle(
                 color: AppTheme.textPrimary,
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
+                fontSize: 24,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.35,
+                height: 1.2,
               ),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 8),
             IconButton(
-              icon: const Icon(Icons.refresh_rounded),
+              icon: const Icon(Icons.refresh_rounded, size: 22),
               onPressed: _loading ? null : _load,
               tooltip: 'Refresh',
+              style: IconButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
             ),
             const SizedBox(width: 8),
             OutlinedButton.icon(
@@ -9112,7 +9521,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
               label: const Text('View Scores'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppTheme.primaryNavy,
-                side: const BorderSide(color: AppTheme.primaryNavy, width: 2),
+                side: BorderSide(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.85),
+                  width: 1.5,
+                ),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 16,
                   vertical: 12,
@@ -9141,49 +9553,85 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                 ),
                 style: TextButton.styleFrom(
                   foregroundColor: AppTheme.primaryNavy,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                 ),
               ),
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
         Text(
           'Monitor all documents (basic info) and screening exam results from applicants.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          style: TextStyle(
+            color: AppTheme.textSecondary.withValues(alpha: 0.95),
+            fontSize: 14,
+            height: 1.45,
+            fontWeight: FontWeight.w500,
+          ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 20),
         Container(
           decoration: BoxDecoration(
             color: AppTheme.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: Colors.black.withValues(alpha: 0.07),
+            ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
+                color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                blurRadius: 28,
+                offset: const Offset(0, 12),
+              ),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.07),
+                blurRadius: 20,
+                offset: const Offset(0, 7),
+              ),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
               ),
             ],
           ),
-          child: _loading
-              ? const Padding(
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                height: 4,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      AppTheme.primaryNavy,
+                      AppTheme.primaryNavyLight,
+                    ],
+                  ),
+                ),
+              ),
+              if (_loading)
+                const Padding(
                   padding: EdgeInsets.all(48),
                   child: Center(child: CircularProgressIndicator()),
                 )
-              : _applications.isEmpty
-              ? Padding(
+              else if (_applications.isEmpty)
+                Padding(
                   padding: const EdgeInsets.all(32),
                   child: Center(
                     child: Text(
                       'No applications yet. Applicants will appear here after they submit Step 1 from the recruitment flow.',
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.textSecondary.withValues(alpha: 0.92),
                         fontSize: 14,
+                        height: 1.45,
                       ),
                     ),
                   ),
                 )
-              : LayoutBuilder(
+              else
+                LayoutBuilder(
                   builder: (context, constraints) {
                     final scrollWidth = constraints.maxWidth.isFinite
                         ? constraints.maxWidth
@@ -9227,14 +9675,20 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                     TableCellVerticalAlignment.middle,
                                 border: TableBorder.symmetric(
                                   inside: BorderSide(
-                                    color: Colors.black.withOpacity(0.08),
+                                    color: Colors.black.withValues(alpha: 0.07),
                                   ),
                                 ),
                                 children: [
                                   TableRow(
                                     decoration: BoxDecoration(
-                                      color: AppTheme.primaryNavy.withOpacity(
-                                        0.08,
+                                      color: AppTheme.primaryNavy.withValues(
+                                        alpha: 0.1,
+                                      ),
+                                      border: Border(
+                                        bottom: BorderSide(
+                                          color: AppTheme.primaryNavy
+                                              .withValues(alpha: 0.15),
+                                        ),
                                       ),
                                     ),
                                     children: [
@@ -9370,14 +9824,22 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                       ),
                                     ],
                                   ),
-                                  ..._applications.map((app) {
+                                  ...List.generate(_applications.length, (ri) {
+                                    final app = _applications[ri];
                                     final exam =
                                         _examResults[app.id.toLowerCase()];
                                     final textStyle = TextStyle(
                                       fontSize: 13,
                                       color: AppTheme.textPrimary,
+                                      fontWeight: FontWeight.w500,
                                     );
                                     return TableRow(
+                                      decoration: ri.isOdd
+                                          ? BoxDecoration(
+                                              color: AppTheme.sectionAlt
+                                                  .withValues(alpha: 0.4),
+                                            )
+                                          : null,
                                       children: [
                                         _tableCell(
                                           160,
@@ -9436,26 +9898,28 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         ),
                                         _tableCell(
                                           170,
-                                          Tooltip(
-                                            message: app.status,
-                                            child: Text(
-                                              app.status,
-                                              style: textStyle,
-                                              overflow: TextOverflow.ellipsis,
-                                              maxLines: 1,
-                                            ),
+                                          _applicationStatusBadge(
+                                            app.status,
                                           ),
                                         ),
                                         _tableCell(
                                           76,
-                                          Text(
-                                            exam == null
-                                                ? _kNa
-                                                : (exam.passed
-                                                      ? 'Passed'
-                                                      : 'Failed'),
-                                            style: textStyle,
-                                          ),
+                                          exam == null
+                                              ? Text(
+                                                  _kNa,
+                                                  style: textStyle.copyWith(
+                                                    color: AppTheme
+                                                        .textSecondary,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                )
+                                              : Align(
+                                                  alignment:
+                                                      Alignment.centerLeft,
+                                                  child: _examOutcomeChip(
+                                                    exam.passed,
+                                                  ),
+                                                ),
                                         ),
                                         _tableCell(
                                           108,
@@ -9645,6 +10109,8 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                     );
                   },
                 ),
+            ],
+          ),
         ),
       ],
     );

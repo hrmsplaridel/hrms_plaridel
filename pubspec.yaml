@@ -78,6 +78,16 @@ flutter:
     - assets/fonts/
     - assets/data/mis_occ_barangays.json
 
+  fonts:
+    - family: NotoSans
+      fonts:
+        - asset: assets/fonts/NotoSans-Regular.ttf
+        - asset: assets/fonts/NotoSans-Bold.ttf
+          weight: 700
+    - family: Milanello
+      fonts:
+        - asset: assets/fonts/milanello-font/MilanelloFree-51Lwv.otf
+
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
 
