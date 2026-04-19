@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../providers/auth_provider.dart';
-import '../../widgets/rsp_form_header_footer.dart';
 import '../docutracker_provider.dart';
 import '../docutracker_styles.dart';
 import '../docutracker_repository.dart';
@@ -10,6 +9,10 @@ import '../models/document.dart';
 import '../models/document_action.dart';
 import '../models/document_status.dart';
 import '../models/document_type.dart';
+import '../widgets/docutracker_create_document_dialog.dart';
+import '../widgets/docutracker_responsive_body.dart';
+import '../widgets/docutracker_status_badge.dart';
+import '../widgets/docutracker_status_theme.dart';
 import 'docutracker_document_detail_screen.dart';
 
 /// Document list screen. Step 2: Role-Based Visibility - shows only
@@ -40,7 +43,6 @@ class _DocuTrackerDocumentsScreenState
     final auth = context.read<AuthProvider>();
     final provider = context.read<DocuTrackerProvider>();
     await provider.loadRoutingConfigs();
-    await provider.checkAndEscalateOverdue();
     await provider.loadDocumentsForUser(
       userId: auth.user?.id ?? '',
       isAdmin: widget.isAdmin,
@@ -56,7 +58,7 @@ class _DocuTrackerDocumentsScreenState
       userId: userId,
       roleId: roleId,
       documentType: '*',
-      action: DocumentAction.delete.name,
+      action: DocumentAction.create.name,
     );
 
     if (!mounted) return;
@@ -68,10 +70,13 @@ class _DocuTrackerDocumentsScreenState
     final provider = context.watch<DocuTrackerProvider>();
     final auth = context.watch<AuthProvider>();
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
+    return DocuTrackerResponsiveBody(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               child: Text(
@@ -83,6 +88,22 @@ class _DocuTrackerDocumentsScreenState
                 ),
               ),
             ),
+            if (_canCreateDocuments == true) ...[
+              FilledButton.icon(
+                onPressed: provider.loading
+                    ? null
+                    : () => showDocuTrackerCreateDocumentDialog(
+                          context,
+                          auth: auth,
+                          provider: provider,
+                          onCreated: _load,
+                        ),
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('Create'),
+                style: DocuTrackerStyles.primaryButtonStyleNavy(),
+              ),
+              const SizedBox(width: 8),
+            ],
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -191,7 +212,12 @@ class _DocuTrackerDocumentsScreenState
         else if (provider.documents.isEmpty)
           _EmptyState(
             onCreateTap: _canCreateDocuments == true
-                ? () => _showCreateDialog(context, auth, provider)
+                ? () => showDocuTrackerCreateDocumentDialog(
+                      context,
+                      auth: auth,
+                      provider: provider,
+                      onCreated: _load,
+                    )
                 : null,
           )
         else
@@ -201,149 +227,6 @@ class _DocuTrackerDocumentsScreenState
             onRefresh: _load,
           ),
       ],
-    );
-  }
-
-  void _showCreateDialog(
-    BuildContext context,
-    AuthProvider auth,
-    DocuTrackerProvider provider,
-  ) {
-    String title = '';
-    DocumentType type = DocumentType.memo;
-    String? description;
-
-    final size = MediaQuery.of(context).size;
-    final dialogWidth = (size.width * 0.78).clamp(640.0, 960.0);
-    final dialogHeight = (size.height * 0.75).clamp(520.0, 820.0);
-
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setState) => Dialog(
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 24,
-            vertical: 32,
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: SizedBox(
-              width: dialogWidth,
-              height: dialogHeight,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(
-                    child: SingleChildScrollView(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          RspFormHeader(
-                            formTitle: 'Create Document',
-                            subtitle: 'DocuTracker - Municipality of Plaridel',
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(32, 24, 32, 24),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                TextField(
-                                  decoration: DocuTrackerStyles.inputDecoration(
-                                    'Enter title',
-                                    Icons.title_rounded,
-                                  ),
-                                  onChanged: (v) => title = v,
-                                ),
-                                const SizedBox(height: 20),
-                                DropdownButtonFormField<DocumentType>(
-                                  value: type,
-                                  decoration:
-                                      DocuTrackerStyles.dropdownDecoration(
-                                        'Document Type',
-                                      ),
-                                  items: DocumentType.values
-                                      .map(
-                                        (t) => DropdownMenuItem(
-                                          value: t,
-                                          child: Text(t.displayName),
-                                        ),
-                                      )
-                                      .toList(),
-                                  onChanged: (v) => v != null
-                                      ? setState(() => type = v)
-                                      : null,
-                                ),
-                                const SizedBox(height: 20),
-                                TextField(
-                                  decoration: DocuTrackerStyles.inputDecoration(
-                                    'Description (optional)',
-                                    Icons.notes_rounded,
-                                  ),
-                                  maxLines: 6,
-                                  onChanged: (v) =>
-                                      description = v.isEmpty ? null : v,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade50,
-                      border: Border(
-                        top: BorderSide(color: Colors.black.withOpacity(0.06)),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        OutlinedButton(
-                          onPressed: () => Navigator.of(ctx).pop(),
-                          style: DocuTrackerStyles.outlinedButtonStyle(),
-                          child: const Text('Cancel'),
-                        ),
-                        const SizedBox(width: 12),
-                        FilledButton(
-                          onPressed: () async {
-                            if (title.trim().isEmpty) return;
-                            final created = await provider.createDocument(
-                              title: title.trim(),
-                              documentType: type,
-                              description: description,
-                              createdBy: auth.user?.id ?? '',
-                            );
-                            if (ctx.mounted) {
-                              Navigator.of(ctx).pop();
-                              if (created != null) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Document created.'),
-                                  ),
-                                );
-                                _load();
-                              }
-                            }
-                          },
-                          style: DocuTrackerStyles.primaryButtonStyle(),
-                          child: const Text('Create'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
       ),
     );
   }
@@ -421,21 +304,48 @@ class _DocumentList extends StatelessWidget {
             Divider(height: 1, color: Colors.black.withOpacity(0.06)),
         itemBuilder: (context, i) {
           final doc = documents[i];
+          final isOverdue = doc.status == DocumentStatus.overdue ||
+              (doc.deadlineTime != null &&
+                  DateTime.now().isAfter(doc.deadlineTime!));
+          final statusForUi =
+              isOverdue ? DocumentStatus.overdue : doc.status;
           return ListTile(
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             leading: CircleAvatar(
-              backgroundColor: AppTheme.primaryNavy.withOpacity(0.12),
+              backgroundColor:
+                  DocuTrackerStatusTheme.chipBackground(statusForUi),
               child: Icon(
-                Icons.description_rounded,
-                color: AppTheme.primaryNavy,
-                size: 24,
+                DocuTrackerStatusTheme.icon(statusForUi),
+                color: DocuTrackerStatusTheme.foreground(statusForUi),
+                size: 22,
               ),
             ),
-            title: Text(
-              doc.title,
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+            title: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    doc.title,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                      color: isOverdue
+                          ? DocuTrackerStatusTheme.foreground(
+                              DocumentStatus.overdue,
+                            )
+                          : AppTheme.textPrimary,
+                    ),
+                  ),
+                ),
+                DocuTrackerStatusBadge(
+                  status: statusForUi,
+                  compact: true,
+                  showIcon: false,
+                ),
+              ],
             ),
             subtitle: Text(
-              '${doc.documentType} • ${doc.status.displayName} • ${doc.creatorName ?? '—'}',
+              '${doc.documentType} • ${doc.creatorName ?? '—'}',
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
             ),
             trailing: Icon(

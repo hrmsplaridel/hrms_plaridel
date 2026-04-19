@@ -42,7 +42,7 @@ function getRouteHandler(router, method, path) {
   return layer.route.stack[layer.route.stack.length - 1].handle;
 }
 
-test('GET /permissions/effective returns explanation payload', async () => {
+test('GET /permission-explain returns explanation payload', async () => {
   const workflowService = {
     DOC_ACTIONS: new Set(['view', 'approve', 'submit']),
     hasPermission: async () => null,
@@ -82,7 +82,7 @@ test('GET /permissions/effective returns explanation payload', async () => {
   const routePath = require.resolve('../src/routes/docutracker');
   delete require.cache[routePath];
   const router = require('../src/routes/docutracker');
-  const handler = getRouteHandler(router, 'get', '/permissions/effective');
+  const handler = getRouteHandler(router, 'get', '/permission-explain');
 
   const req = {
     query: { document_type: 'memo', action: 'view' },
@@ -103,7 +103,7 @@ test('GET /permissions/effective returns explanation payload', async () => {
   delete require.cache[routePath];
 });
 
-test('POST /documents/:id/approve forwards idempotency header', async () => {
+test('POST /documents/:id/transition forwards idempotency key in body', async () => {
   let capturedPayload = null;
   const workflowService = {
     DOC_ACTIONS: new Set(['view', 'approve', 'submit']),
@@ -138,12 +138,12 @@ test('POST /documents/:id/approve forwards idempotency header', async () => {
   const routePath = require.resolve('../src/routes/docutracker');
   delete require.cache[routePath];
   const router = require('../src/routes/docutracker');
-  const handler = getRouteHandler(router, 'post', '/documents/:id/approve');
+  const handler = getRouteHandler(router, 'post', '/documents/:id/transition');
 
   const req = {
     params: { id: 'doc-99' },
-    body: { remarks: 'ok' },
-    headers: { 'idempotency-key': 'idem-99' },
+    body: { action: 'approve', remarks: 'ok', idempotency_key: 'idem-99' },
+    headers: {},
     user: { id: 'user-2', role: 'admin' },
   };
   const res = createMockResponse();

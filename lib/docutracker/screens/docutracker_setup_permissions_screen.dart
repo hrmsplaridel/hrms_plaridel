@@ -5,6 +5,7 @@ import '../../landingpage/constants/app_theme.dart';
 import '../../widgets/rsp_form_header_footer.dart';
 import '../docutracker_repository.dart';
 import '../docutracker_styles.dart';
+import '../widgets/docutracker_responsive_body.dart';
 import '../models/document_action.dart';
 import '../models/document_permission.dart';
 import '../models/document_type.dart';
@@ -34,6 +35,11 @@ class _DocuTrackerSetupPermissionsScreenState
   final _repo = DocuTrackerRepository.instance;
 
   static const _restrictionItems = <_RestrictionItem>[
+    _RestrictionItem(
+      action: DocumentAction.create,
+      title: 'Create documents',
+      icon: Icons.add_circle_outline_rounded,
+    ),
     _RestrictionItem(
       action: DocumentAction.view,
       title: 'Auditing',
@@ -205,7 +211,7 @@ class _DocuTrackerSetupPermissionsScreenState
       color: Theme.of(context).scaffoldBackgroundColor,
       child: SafeArea(
         child: SingleChildScrollView(
-          child: Padding(
+          child: DocuTrackerResponsiveBody(
             padding: const EdgeInsets.all(16),
             child: Container(
               decoration: DocuTrackerStyles.listCardDecoration(),
@@ -396,7 +402,7 @@ class _DocuTrackerSetupPermissionsScreenState
                             Switch(
                               value:
                                   _grantedByActionName[item.action.name] ??
-                                      true,
+                                      false,
                               onChanged: (v) {
                                 setState(() {
                                   _grantedByActionName[item.action.name] = v;

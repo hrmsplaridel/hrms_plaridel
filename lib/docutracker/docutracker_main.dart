@@ -2,10 +2,15 @@ import 'package:flutter/material.dart';
 import '../landingpage/constants/app_theme.dart';
 import 'docutracker_routes.dart';
 import 'screens/docutracker_admin_screen.dart';
+import 'screens/docutracker_dashboard_screen.dart';
 import 'screens/docutracker_documents_screen.dart';
+import 'widgets/docutracker_responsive_body.dart';
 
 /// Main DocuTracker module entry.
-/// Sections: Documents, Admin (for privilege management).
+/// Sections: Dashboard, Documents, and Admin (admin only).
+///
+/// DocuTracker alerts are opened from the dashboard top bar (document icon + badge)
+/// when this module is selected.
 class DocuTrackerMain extends StatefulWidget {
   const DocuTrackerMain({super.key, this.section, this.isAdmin = false});
 
@@ -20,7 +25,7 @@ class DocuTrackerMain extends StatefulWidget {
 }
 
 class _DocuTrackerMainState extends State<DocuTrackerMain> {
-  DocuTrackerSection _currentSection = DocuTrackerSection.documents;
+  DocuTrackerSection _currentSection = DocuTrackerSection.dashboard;
 
   DocuTrackerSection get _activeSection => widget.section ?? _currentSection;
 
@@ -28,35 +33,43 @@ class _DocuTrackerMainState extends State<DocuTrackerMain> {
   Widget build(BuildContext context) {
     final useSidebarNav = widget.section != null;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'DocuTracker',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
+    return DocuTrackerResponsiveBody(
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'DocuTracker',
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+            ),
           ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          useSidebarNav
-              ? 'Document routing and workflow tracking.'
-              : 'Document routing and workflow tracking. Choose a feature below.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-        ),
-        if (!useSidebarNav) ...[const SizedBox(height: 24), _buildSectionNav()],
-        const SizedBox(height: 24),
-        _buildContent(),
-      ],
+          const SizedBox(height: 8),
+          Text(
+            useSidebarNav
+                ? 'Document routing and workflow tracking.'
+                : 'Document routing and workflow tracking. Choose a feature below.',
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          ),
+          if (!useSidebarNav) ...[
+            const SizedBox(height: 24),
+            _buildSectionNav(),
+          ],
+          const SizedBox(height: 24),
+          _buildContent(),
+        ],
+      ),
     );
   }
 
   Widget _buildSectionNav() {
-    final sections = widget.isAdmin
-        ? [DocuTrackerSection.documents, DocuTrackerSection.admin]
-        : [DocuTrackerSection.documents];
+    final sections = <DocuTrackerSection>[
+      DocuTrackerSection.dashboard,
+      DocuTrackerSection.documents,
+      if (widget.isAdmin) DocuTrackerSection.admin,
+    ];
 
     if (sections.length <= 1) return const SizedBox.shrink();
 
@@ -118,13 +131,13 @@ class _DocuTrackerMainState extends State<DocuTrackerMain> {
     return ConstrainedBox(
       constraints: const BoxConstraints(minHeight: 200),
       child: switch (_activeSection) {
+        DocuTrackerSection.dashboard => DocuTrackerDashboardScreen(
+          isAdmin: widget.isAdmin,
+        ),
         DocuTrackerSection.documents => DocuTrackerDocumentsScreen(
           isAdmin: widget.isAdmin,
         ),
         DocuTrackerSection.admin => const DocuTrackerAdminScreen(),
-        DocuTrackerSection.dashboard => DocuTrackerDocumentsScreen(
-          isAdmin: widget.isAdmin,
-        ),
       },
     );
   }

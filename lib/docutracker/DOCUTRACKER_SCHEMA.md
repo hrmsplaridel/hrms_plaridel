@@ -29,7 +29,7 @@ Complete database schema for the DocuTracker module. Run migrations in order.
 | created_at | TIMESTAMPTZ | Creation time |
 | updated_at | TIMESTAMPTZ | Last update |
 | current_step | INT | Workflow step (1-based) |
-| status | TEXT | pending, inReview, approved, rejected, returned, forwarded, overdue, escalated |
+| status | TEXT | pending, inReview, approved, rejected, returned, overdue, escalated |
 | sent_time | TIMESTAMPTZ | When sent to current reviewer |
 | deadline_time | TIMESTAMPTZ | Review deadline |
 | reviewed_time | TIMESTAMPTZ | When reviewed |

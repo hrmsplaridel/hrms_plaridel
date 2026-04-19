@@ -22,6 +22,7 @@ class DocuTrackerDocument {
     this.creatorName,
     this.assigneeName,
     this.currentHolderId,
+    this.workflowVersion,
     this.escalationLevel = 0,
     this.needsAdminIntervention = false,
   });
@@ -62,6 +63,9 @@ class DocuTrackerDocument {
   /// Step 9: Current holder user ID
   final String? currentHolderId;
 
+  /// Workflow config version used for routing this document.
+  final int? workflowVersion;
+
   /// Step 6: Current escalation level (0 = none)
   final int escalationLevel;
 
@@ -100,6 +104,7 @@ class DocuTrackerDocument {
       creatorName: json['creator_name']?.toString(),
       assigneeName: json['assignee_name']?.toString(),
       currentHolderId: json['current_holder_id']?.toString(),
+      workflowVersion: (json['workflow_version'] as num?)?.toInt(),
       escalationLevel: (json['escalation_level'] as num?)?.toInt() ?? 0,
       needsAdminIntervention: json['needs_admin_intervention'] == true,
     );
@@ -120,6 +125,7 @@ class DocuTrackerDocument {
         if (deadlineTime != null) 'deadline_time': deadlineTime!.toIso8601String(),
         if (reviewedTime != null) 'reviewed_time': reviewedTime!.toIso8601String(),
         if (currentHolderId != null) 'current_holder_id': currentHolderId,
+        if (workflowVersion != null) 'workflow_version': workflowVersion,
         'escalation_level': escalationLevel,
         'needs_admin_intervention': needsAdminIntervention,
         'updated_at': DateTime.now().toIso8601String(),
@@ -144,6 +150,7 @@ class DocuTrackerDocument {
     String? creatorName,
     String? assigneeName,
     String? currentHolderId,
+    int? workflowVersion,
     int? escalationLevel,
     bool? needsAdminIntervention,
   }) {
@@ -166,6 +173,7 @@ class DocuTrackerDocument {
       creatorName: creatorName ?? this.creatorName,
       assigneeName: assigneeName ?? this.assigneeName,
       currentHolderId: currentHolderId ?? this.currentHolderId,
+      workflowVersion: workflowVersion ?? this.workflowVersion,
       escalationLevel: escalationLevel ?? this.escalationLevel,
       needsAdminIntervention:
           needsAdminIntervention ?? this.needsAdminIntervention,

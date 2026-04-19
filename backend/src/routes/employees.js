@@ -349,13 +349,16 @@ router.post('/bulk-status', protect, requireAdmin, async (req, res) => {
   }
 });
 
-// GET /api/employees/:id - get one employee (matches profiles)
+// GET /api/employees/:id - get one employee (matches profiles + list row department/position)
 router.get('/:id', protect, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, employee_number, full_name, role, email, is_active, avatar_path, middle_name, suffix, sex, date_of_birth, contact_number, address,
-              employment_type, salary_grade, date_hired, employment_status
-       FROM users WHERE id = $1`,
+      `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.is_active, u.avatar_path, u.middle_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
+              u.employment_type, u.salary_grade, u.date_hired, u.employment_status,
+              cur.current_department_name, cur.current_position_name
+       FROM users u
+       ${employeeListLateralCurSql()}
+       WHERE u.id = $1`,
       [req.params.id]
     );
     const r = result.rows[0];
@@ -379,6 +382,8 @@ router.get('/:id', protect, async (req, res) => {
       salary_grade: r.salary_grade,
       date_hired: r.date_hired,
       employment_status: r.employment_status ?? 'active',
+      current_department_name: r.current_department_name ?? null,
+      current_position_name: r.current_position_name ?? null,
     });
   } catch (err) {
     console.error('[employees GET :id]', err);
@@ -445,7 +450,25 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 router.put('/:id', protect, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { full_name, role, email, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address, avatar_path, employment_type, salary_grade, date_hired, employment_status, biometric_user_id } = req.body;
+    const {
+      full_name,
+      role,
+      email,
+      is_active,
+      middle_name,
+      suffix,
+      sex,
+      date_of_birth,
+      contact_number,
+      address,
+      avatar_path,
+      employment_type,
+      salary_grade,
+      date_hired,
+      employment_status,
+      biometric_user_id,
+      office_id,
+    } = req.body;
 
     const existingRes = await pool.query(
       'SELECT biometric_user_id FROM users WHERE id = $1::uuid',
@@ -491,12 +514,19 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       ['date_hired', date_hired],
       ['employment_status', employment_status],
       ['biometric_user_id', biometric_user_id],
+      ['office_id', office_id],
     ];
     for (const [col, val] of fields) {
       if (val !== undefined) {
         if (col === 'role' && !['admin', 'employee'].includes(val)) continue;
         if (col === 'employment_type' && val && !['regular', 'contractual', 'job_order', 'casual'].includes(val)) continue;
         if (col === 'employment_status' && val && !['active', 'inactive', 'resigned', 'retired', 'terminated'].includes(val)) continue;
+        if (col === 'office_id') {
+          const raw = val === null || val === '' ? null : String(val).trim();
+          updates.push(`office_id = $${i++}::uuid`);
+          values.push(raw);
+          continue;
+        }
         if (col === 'date_of_birth' || col === 'date_hired') {
           updates.push(`${col} = $${i++}::date`);
           values.push(val || null);
@@ -513,7 +543,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
     const result = await pool.query(
       `UPDATE users SET ${updates.join(', ')} WHERE id = $${i}
-       RETURNING id, employee_number, email, role, full_name, avatar_path, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address, biometric_user_id`,
+       RETURNING id, employee_number, email, role, full_name, avatar_path, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address, biometric_user_id, office_id`,
       values
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Employee not found' });

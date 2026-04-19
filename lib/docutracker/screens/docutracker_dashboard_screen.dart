@@ -1,12 +1,22 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../docutracker_provider.dart';
+import '../docutracker_repository.dart';
 import '../docutracker_styles.dart';
+import '../models/document_action.dart';
 import '../models/document.dart';
+import '../models/document_notification.dart';
 import '../models/document_status.dart';
 import '../widgets/document_countdown_timer.dart';
+import '../widgets/docutracker_create_document_dialog.dart';
+import '../docutracker_notification_navigation.dart';
+import '../widgets/docutracker_notifications_panel.dart';
+import '../widgets/docutracker_responsive_body.dart';
+import '../widgets/docutracker_status_badge.dart';
+import '../widgets/docutracker_status_theme.dart';
 import '../widgets/docutracker_summary_card.dart';
 import 'docutracker_document_detail_screen.dart';
 
@@ -28,7 +38,11 @@ class DocuTrackerDashboardScreen extends StatefulWidget {
       _DocuTrackerDashboardScreenState();
 }
 
-class _DocuTrackerDashboardScreenState extends State<DocuTrackerDashboardScreen> {
+class _DocuTrackerDashboardScreenState
+    extends State<DocuTrackerDashboardScreen> {
+  Timer? _pollTimer;
+  bool? _canCreateDocuments;
+
   @override
   void initState() {
     super.initState();
@@ -39,11 +53,42 @@ class _DocuTrackerDashboardScreenState extends State<DocuTrackerDashboardScreen>
     final auth = context.read<AuthProvider>();
     final provider = context.read<DocuTrackerProvider>();
     await provider.loadRoutingConfigs();
-    await provider.checkAndEscalateOverdue();
     await provider.loadDocumentsForUser(
       userId: auth.user?.id ?? '',
       isAdmin: widget.isAdmin,
     );
+    await provider.loadNotifications();
+
+    final userId = auth.user?.id ?? '';
+    final repo = DocuTrackerRepository.instance;
+    final roleId = auth.user?.role;
+    final canCreate = await repo.hasPermission(
+      userId: userId,
+      roleId: roleId,
+      documentType: '*',
+      action: DocumentAction.create.name,
+    );
+    if (!mounted) return;
+    setState(() => _canCreateDocuments = canCreate);
+
+    // Keep document list in sync with server-side workflow/escalation changes.
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(seconds: 60), (_) async {
+      if (!mounted) return;
+      final auth = context.read<AuthProvider>();
+      final userId = auth.user?.id ?? '';
+      await provider.loadDocumentsForUser(
+        userId: userId,
+        isAdmin: widget.isAdmin,
+      );
+      await provider.loadNotifications();
+    });
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -51,32 +96,94 @@ class _DocuTrackerDashboardScreenState extends State<DocuTrackerDashboardScreen>
     final provider = context.watch<DocuTrackerProvider>();
     final auth = context.watch<AuthProvider>();
     final userId = auth.user?.id ?? '';
+    final unreadCount = provider.unreadNotificationsCount;
 
     return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (widget.showTitle) ...[
-            Text(
-              widget.isAdmin ? 'DocuTracker Dashboard' : 'My Documents',
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
+      child: DocuTrackerResponsiveBody(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (widget.showTitle) ...[
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.isAdmin
+                              ? 'DocuTracker Dashboard'
+                              : 'My Documents',
+                          style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          widget.isAdmin
+                              ? 'All routed documents, workflow status, overdue, escalated.'
+                              : 'Incoming, pending reviews, deadlines, and completed documents.',
+                          style: TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (_canCreateDocuments == true)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 12),
+                      child: FilledButton.icon(
+                        onPressed: provider.loading
+                            ? null
+                            : () => showDocuTrackerCreateDocumentDialog(
+                                context,
+                                auth: auth,
+                                provider: provider,
+                                onCreated: _load,
+                              ),
+                        icon: const Icon(Icons.add_rounded, size: 18),
+                        label: const Text('Create'),
+                        style: DocuTrackerStyles.primaryButtonStyleNavy(),
+                      ),
+                    ),
+                ],
               ),
+              const SizedBox(height: 24),
+            ],
+            if (provider.notifications.isNotEmpty) ...[
+            DocuTrackerNotificationPanel(
+              notifications: provider.notifications,
+              unreadCount: unreadCount,
+              onMarkAllRead: () => provider.markAllNotificationsRead(),
+              onNotificationTap: (n) => _openNotification(context, n),
             ),
-            const SizedBox(height: 6),
-            Text(
-              widget.isAdmin
-                  ? 'All routed documents, workflow status, overdue, escalated.'
-                  : 'Incoming, pending reviews, deadlines, and completed documents.',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-            ),
-            const SizedBox(height: 24),
+              const SizedBox(height: 20),
+            ],
+            if (widget.isAdmin)
+              _buildAdminDashboard(provider)
+            else
+              _buildEmployeeDashboard(provider, userId),
           ],
-          if (widget.isAdmin) _buildAdminDashboard(provider) else _buildEmployeeDashboard(provider, userId),
-        ],
+        ),
       ),
+    );
+  }
+
+  Future<void> _openNotification(
+    BuildContext context,
+    DocumentNotification n,
+  ) async {
+    await navigateFromDocuTrackerNotification(
+      context,
+      notification: n,
+      isAdmin: widget.isAdmin,
+      afterNavigation: _load,
     );
   }
 
@@ -93,7 +200,8 @@ class _DocuTrackerDashboardScreenState extends State<DocuTrackerDashboardScreen>
         .where((d) => d.createdBy == userId || d.currentHolderId == userId)
         .toList();
 
-    final hasAnyDocs = overdue.isNotEmpty ||
+    final hasAnyDocs =
+        overdue.isNotEmpty ||
         nearing.isNotEmpty ||
         incoming.isNotEmpty ||
         returned.isNotEmpty ||
@@ -112,10 +220,14 @@ class _DocuTrackerDashboardScreenState extends State<DocuTrackerDashboardScreen>
         const SizedBox(height: 24),
         if (hasAnyDocs) ...[
           if (overdue.isNotEmpty) _buildDocSection('Overdue', overdue, true),
-          if (nearing.isNotEmpty) _buildDocSection('Nearing Deadline', nearing, false),
-          if (incoming.isNotEmpty) _buildDocSection('Incoming / Pending', incoming, false),
-          if (returned.isNotEmpty) _buildDocSection('Returned', returned, false),
-          if (completed.isNotEmpty) _buildDocSection('Completed', completed, false),
+          if (nearing.isNotEmpty)
+            _buildDocSection('Nearing Deadline', nearing, false),
+          if (incoming.isNotEmpty)
+            _buildDocSection('Incoming / Pending', incoming, false),
+          if (returned.isNotEmpty)
+            _buildDocSection('Returned', returned, false),
+          if (completed.isNotEmpty)
+            _buildDocSection('Completed', completed, false),
         ] else
           _buildEmptyState(),
       ],
@@ -137,7 +249,8 @@ class _DocuTrackerDashboardScreenState extends State<DocuTrackerDashboardScreen>
         ),
         const SizedBox(height: 24),
         if (overdue.isNotEmpty) _buildDocSection('Overdue', overdue, true),
-        if (escalated.isNotEmpty) _buildDocSection('Escalated', escalated, true),
+        if (escalated.isNotEmpty)
+          _buildDocSection('Escalated', escalated, true),
         _buildDocSection('All Documents', all, false, true),
       ],
     );
@@ -421,23 +534,21 @@ class _DocumentTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isOverdue = document.status == DocumentStatus.overdue ||
+    final isOverdue =
+        document.status == DocumentStatus.overdue ||
         (document.deadlineTime != null &&
             DateTime.now().isAfter(document.deadlineTime!));
-    final isEscalated = document.status == DocumentStatus.escalated;
+
+    final statusForUi = isOverdue ? DocumentStatus.overdue : document.status;
 
     return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       leading: CircleAvatar(
-        backgroundColor: (highlightOverdue || isOverdue
-                ? Colors.red
-                : AppTheme.primaryNavy)
-            .withOpacity(0.12),
+        backgroundColor: DocuTrackerStatusTheme.chipBackground(statusForUi),
         child: Icon(
-          Icons.description_rounded,
-          color: highlightOverdue || isOverdue
-              ? Colors.red
-              : AppTheme.primaryNavy,
-          size: 24,
+          DocuTrackerStatusTheme.icon(statusForUi),
+          color: DocuTrackerStatusTheme.foreground(statusForUi),
+          size: 22,
         ),
       ),
       title: Row(
@@ -448,50 +559,39 @@ class _DocumentTile extends StatelessWidget {
               style: TextStyle(
                 fontWeight: FontWeight.w600,
                 fontSize: 14,
-                color: isOverdue ? Colors.red.shade800 : AppTheme.textPrimary,
+                color: isOverdue
+                    ? DocuTrackerStatusTheme.foreground(DocumentStatus.overdue)
+                    : AppTheme.textPrimary,
               ),
             ),
           ),
-          if (isEscalated)
-            Container(
-              margin: const EdgeInsets.only(left: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.purple.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: Colors.purple),
-              ),
-              child: Text(
-                'Escalated',
-                style: TextStyle(
-                  color: Colors.purple.shade800,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
+          DocuTrackerStatusBadge(
+            status: statusForUi,
+            compact: true,
+            showIcon: false,
+          ),
         ],
       ),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '${document.documentNumber ?? '—'} • ${document.status.displayName}',
+            document.documentNumber ?? '—',
             style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
           ),
           if (showHolder && document.assigneeName != null)
             Text(
               'Holder: ${document.assigneeName}',
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 12,
-              ),
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
             ),
           const SizedBox(height: 4),
           DocumentCountdownTimer(document: document, compact: true),
         ],
       ),
-      trailing: Icon(Icons.chevron_right_rounded, color: AppTheme.textSecondary),
+      trailing: Icon(
+        Icons.chevron_right_rounded,
+        color: AppTheme.textSecondary,
+      ),
       onTap: onTap,
     );
   }

@@ -38,7 +38,8 @@ class DocumentPermission {
     final normalized = actionStr.toLowerCase().replaceAll(' ', '');
     DocumentAction action = DocumentAction.view;
     for (final e in DocumentAction.values) {
-      if (e.name == normalized || (e == DocumentAction.returnDoc && normalized == 'return')) {
+      if (e.name == normalized ||
+          (e == DocumentAction.returnDoc && normalized == 'return')) {
         action = e;
         break;
       }

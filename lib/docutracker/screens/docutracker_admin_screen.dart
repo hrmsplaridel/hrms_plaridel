@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../widgets/rsp_form_header_footer.dart';
 import '../docutracker_provider.dart';
@@ -9,7 +10,14 @@ import '../models/document_action.dart';
 import '../models/document_permission.dart';
 import '../models/document_routing_config.dart';
 import '../models/document_type.dart';
+import '../models/workflow_step.dart';
+import '../security/docutracker_roles.dart';
+import '../services/employee_directory_lookup.dart';
+import '../widgets/docutracker_responsive_body.dart';
+import 'docutracker_workflow_editor_screen.dart';
+import 'docutracker_permission_editor_screen.dart';
 import 'docutracker_setup_permissions_screen.dart';
+import 'docutracker_step_assignees_editor_screen.dart';
 
 /// Admin panel for DocuTracker (Step 4: Admin Privilege Management).
 /// Manage per-role or per-user privileges: View, Edit, Download, Delete,
@@ -28,6 +36,8 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
   String? _selectedUserId;
   String? _selectedDocumentType;
   final _searchController = TextEditingController();
+  final EmployeeDirectoryLookup _employeeDirectory = EmployeeDirectoryLookup();
+  final Map<String, String> _departmentNameById = {};
 
   @override
   void initState() {
@@ -41,15 +51,131 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
     super.dispose();
   }
 
+  Future<void> _loadDepartmentNames() async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>('/api/departments');
+      final data = res.data ?? [];
+      final map = <String, String>{};
+      for (final e in data) {
+        final m = e as Map<String, dynamic>;
+        final id = m['id']?.toString();
+        if (id == null || id.isEmpty) continue;
+        map[id] = m['name']?.toString() ?? '—';
+      }
+      if (mounted) setState(() => _departmentNameById..clear()..addAll(map));
+    } catch (_) {}
+  }
+
   Future<void> _load() async {
     final provider = context.read<DocuTrackerProvider>();
-    await provider.loadRoutingConfigs();
+    await Future.wait([
+      provider.loadRoutingConfigs(),
+      _employeeDirectory.load(),
+      _loadDepartmentNames(),
+    ]);
+    if (!mounted) return;
     await provider.loadPermissions(
       roleId: null,
       userId: _selectedUserId,
       userOnly: true,
       documentType: _selectedDocumentType,
     );
+    if (!mounted) return;
+    final ids = provider.permissions.map((p) => p.userId).whereType<String>().toSet();
+    await _employeeDirectory.ensureIds(ids);
+    if (mounted) setState(() {});
+  }
+
+  String _formatPermissionTarget(DocumentPermission p) {
+    if (p.roleId != null) return 'Role: ${p.roleId}';
+    final uid = p.userId;
+    if (uid == null || uid.isEmpty) return '—';
+    return _employeeDirectory.formatUserLine(uid);
+  }
+
+  /// One row per document type (highest version wins if the API ever returns duplicates).
+  List<DocumentRoutingConfig> _routingConfigsForDisplay(DocuTrackerProvider provider) {
+    final byType = <String, DocumentRoutingConfig>{};
+    for (final c in provider.routingConfigs) {
+      final key = c.documentType.value;
+      final prev = byType[key];
+      if (prev == null || c.version > prev.version) {
+        byType[key] = c;
+      }
+    }
+    final out = byType.values.toList()
+      ..sort((a, b) => a.documentType.displayName.toLowerCase().compareTo(b.documentType.displayName.toLowerCase()));
+    return out;
+  }
+
+  Future<void> _createNewWorkflow(BuildContext context, DocuTrackerProvider provider) async {
+    final type = await showDialog<DocumentType>(
+      context: context,
+      builder: (ctx) {
+        var selected = DocumentType.values.first;
+        return StatefulBuilder(
+          builder: (ctx, setModal) {
+            return AlertDialog(
+              title: const Text('New workflow'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Pick a document type. Add steps in the editor; saving publishes the next workflow version for that type.',
+                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.3),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<DocumentType>(
+                    key: ValueKey<DocumentType>(selected),
+                    initialValue: selected,
+                    decoration: DocuTrackerStyles.dropdownDecoration('Document type'),
+                    items: [
+                      for (final t in DocumentType.values)
+                        DropdownMenuItem(value: t, child: Text(t.displayName)),
+                    ],
+                    onChanged: (v) {
+                      if (v == null) return;
+                      setModal(() => selected = v);
+                    },
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, selected),
+                  child: const Text('Continue'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    if (type == null || !context.mounted) return;
+    final configs = _routingConfigsForDisplay(provider);
+    DocumentRoutingConfig? existing;
+    for (final c in configs) {
+      if (c.documentType == type) {
+        existing = c;
+        break;
+      }
+    }
+    final baseVersion = existing?.version ?? 1;
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => DocuTrackerWorkflowEditorScreen(
+          initialConfig: DocumentRoutingConfig(
+            documentType: type,
+            steps: const [],
+            reviewDeadlineHours: 24,
+            version: baseVersion,
+          ),
+        ),
+      ),
+    );
+    if (saved == true && mounted) await _load();
   }
 
   @override
@@ -57,25 +183,29 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
     final provider = context.watch<DocuTrackerProvider>();
     final isNarrow = MediaQuery.of(context).size.width < 700;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Admin',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w800,
+    return DocuTrackerResponsiveBody(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Admin',
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+            ),
           ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Manage per-role or per-user privileges and workflow configurations.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-        ),
-        const SizedBox(height: 24),
-        isNarrow ? _buildNarrowLayout(provider) : _buildWideLayout(provider),
-      ],
+          const SizedBox(height: 8),
+          Text(
+            'Workflows (who moves the document) and permissions (view / create / download) are separate. '
+            'Use the workflows card to edit routes or start an additional workflow version.',
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 14, height: 1.35),
+          ),
+          const SizedBox(height: 24),
+          isNarrow ? _buildNarrowLayout(provider) : _buildWideLayout(provider),
+        ],
+      ),
     );
   }
 
@@ -102,10 +232,85 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
   }
 
   Widget _buildLeftPanel(DocuTrackerProvider provider) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildWorkflowsManagementCard(context, provider),
+        const SizedBox(height: 16),
+        _buildPermissionsManagementCard(provider),
+      ],
+    );
+  }
+
+  Widget _buildWorkflowsManagementCard(BuildContext context, DocuTrackerProvider provider) {
+    final configs = _routingConfigsForDisplay(provider);
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: DocuTrackerStyles.listCardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.account_tree_rounded, color: AppTheme.primaryNavy, size: 24),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Workflows',
+                      style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Routes are per document type. Use Edit on a card to change steps; use New workflow to draft another version from scratch.',
+                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, height: 1.35),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.tonalIcon(
+                onPressed: provider.loading ? null : () => _createNewWorkflow(context, provider),
+                icon: const Icon(Icons.add_rounded, size: 20),
+                label: const Text('New workflow'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (configs.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'No workflow definitions loaded. Tap New workflow to create one, or Refresh if you expect data from the server.',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+              ),
+            )
+          else
+            ...configs.map(
+              (config) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _RoutingConfigCard(
+                  config: config,
+                  employeeDirectory: _employeeDirectory,
+                  departmentNameById: _departmentNameById,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPermissionsManagementCard(DocuTrackerProvider provider) {
     final search = _searchController.text.toLowerCase();
     final filtered = provider.permissions.where((p) {
       if (search.isEmpty) return true;
-      final target = p.roleId != null ? 'role ${p.roleId}' : 'user ${p.userId}';
+      final target = p.roleId != null
+          ? 'role ${p.roleId}'
+          : '${p.userId ?? ''} ${_formatPermissionTarget(p)}';
       return target.toLowerCase().contains(search) ||
           p.documentType.toLowerCase().contains(search) ||
           p.action.displayName.toLowerCase().contains(search);
@@ -117,6 +322,29 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Row(
+            children: [
+              Icon(Icons.description_outlined, color: AppTheme.primaryNavy, size: 24),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Document permissions',
+                      style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Who may view, create, or download documents by type. Workflow approve/forward rules are managed under Workflows and Step assignees.',
+                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, height: 1.35),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
           Wrap(
             spacing: 12,
             runSpacing: 12,
@@ -141,21 +369,26 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                 SizedBox(
                   width: 140,
                   child: _buildFilterDropdown<String?>(
-                    _selectedRoleId == null ? 'All roles' : (_selectedRoleId == 'admin' ? 'Admin' : _selectedRoleId ?? 'All'),
+                    _selectedRoleId == null
+                        ? 'All roles'
+                        : (_userGroups[_selectedRoleId] ?? _selectedRoleId ?? 'All'),
                     _selectedRoleId,
-                    [null, 'admin', 'hr_staff', 'dept_head', 'employee'],
+                    [null, ..._userGroups.keys],
                     (v) {
                       setState(() => _selectedRoleId = v);
                       _load();
                     },
-                    labels: const ['All roles', 'Admin', 'HR Staff', 'Dept Head', 'Employee'],
+                    labels: ['All roles', ..._userGroups.values],
                   ),
                 ),
               if (_filterBy == 'user')
                 SizedBox(
-                  width: 180,
+                  width: 200,
                   child: TextField(
-                    decoration: DocuTrackerStyles.inputDecoration('User ID', Icons.person_outline_rounded),
+                    decoration: DocuTrackerStyles.inputDecoration(
+                      'User ID (optional)',
+                      Icons.person_outline_rounded,
+                    ),
                     onChanged: (v) {
                       setState(() => _selectedUserId = v.isEmpty ? null : v);
                       _load();
@@ -177,9 +410,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 20),
-          _buildWorkflowSection(provider),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             decoration: BoxDecoration(
@@ -190,7 +421,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
               children: [
                 Expanded(
                   flex: 2,
-                  child: Text('Role/User', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppTheme.textPrimary)),
+                  child: Text('Person / role', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppTheme.textPrimary)),
                 ),
                 Expanded(child: Text('Document Type', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppTheme.textPrimary))),
                 Expanded(child: Text('Action', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppTheme.textPrimary))),
@@ -220,6 +451,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
             ...filtered.map(
               (p) => _PermissionRow(
                 permission: p,
+                targetLabel: _formatPermissionTarget(p),
                 onEdit: () => _openSetupForPermission(p),
               ),
             ),
@@ -268,24 +500,6 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
     );
   }
 
-  Widget _buildWorkflowSection(DocuTrackerProvider provider) {
-    if (provider.routingConfigs.isEmpty) return const SizedBox.shrink();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(Icons.account_tree_rounded, color: AppTheme.primaryNavy, size: 20),
-            const SizedBox(width: 8),
-            Text('Workflows', style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w700)),
-          ],
-        ),
-        const SizedBox(height: 8),
-        ...provider.routingConfigs.map((config) => _RoutingConfigCard(config: config)),
-      ],
-    );
-  }
-
   Widget _buildRightPanel(DocuTrackerProvider provider) {
     return Container(
       padding: const EdgeInsets.all(24),
@@ -317,11 +531,41 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: () => _showUserPermissionsDialog(context),
+              onPressed: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const DocuTrackerPermissionEditorScreen(),
+                  ),
+                );
+                if (mounted) _load();
+              },
               icon: const Icon(Icons.add_rounded, size: 20),
-              label: const Text('Edit Permissions'),
+              label: const Text('Manage Permissions'),
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFF4CAF50),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                elevation: 0,
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const DocuTrackerStepAssigneesEditorScreen(),
+                  ),
+                );
+                if (mounted) _load();
+              },
+              icon: const Icon(Icons.group_rounded, size: 20),
+              label: const Text('Manage Step Assignees'),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.primaryNavy,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -351,18 +595,6 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
         ],
       ),
     );
-  }
-
-  Future<void> _showUserPermissionsDialog(BuildContext dialogContext) async {
-    final saved = await Navigator.of(dialogContext).push<bool>(
-      MaterialPageRoute<bool>(
-        builder: (_) => DocuTrackerSetupPermissionsScreen(
-          initialUserId: _selectedUserId,
-          initialDocumentType: _selectedDocumentType ?? '*',
-        ),
-      ),
-    );
-    if (saved == true && mounted) _load();
   }
 
   Future<void> _openSetupForPermission(DocumentPermission permission) async {
@@ -569,13 +801,18 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
   }
 
   static const _userGroups = <String, String>{
-    'admin': 'Administrator',
-    'hr_staff': 'HR Staff',
-    'dept_head': 'Dept Head',
-    'employee': 'Employee',
+    DocuTrackerRoles.admin: 'Administrator',
+    DocuTrackerRoles.hr: 'HR',
+    DocuTrackerRoles.supervisor: 'Supervisor',
+    DocuTrackerRoles.employee: 'Employee',
   };
 
   static const _restrictionItems = <_RestrictionItem>[
+    _RestrictionItem(
+      action: DocumentAction.create,
+      title: 'Create documents',
+      icon: Icons.add_circle_outline_rounded,
+    ),
     _RestrictionItem(
       action: DocumentAction.view,
       title: 'Auditing',
@@ -650,10 +887,15 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
   Future<void> _load() async {
     setState(() => _loading = true);
 
-    final perms = await _repo.listPermissions(
-      roleId: _selectedRoleId,
-      documentType: '*',
-    );
+    final perms = <DocumentPermission>[];
+    for (final r in DocuTrackerRoles.equivalentsForRead(_selectedRoleId)) {
+      perms.addAll(
+        await _repo.listPermissions(
+          roleId: r,
+          documentType: '*',
+        ),
+      );
+    }
 
     _existingByActionName = {
       for (final p in perms) p.action.name: p,
@@ -661,7 +903,8 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
 
     _grantedByActionName = {
       for (final item in _DocuTrackerAdminScreenState._restrictionItems)
-        item.action.name: _existingByActionName[item.action.name]?.granted ?? true,
+        item.action.name:
+            _existingByActionName[item.action.name]?.granted ?? false,
     };
 
     if (!mounted) return;
@@ -673,19 +916,19 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
 
     for (final item in _DocuTrackerAdminScreenState._restrictionItems) {
       final actionName = item.action.name;
-      final granted = _grantedByActionName[actionName] ?? true;
+      final granted = _grantedByActionName[actionName] ?? false;
       final existing = _existingByActionName[actionName];
 
       if (existing == null) {
-        // Keep "implicit allow" behavior: only insert explicit denies.
-        if (!granted) {
+        // Strict default-deny: insert explicit allows (and explicit denies if you want them visible).
+        if (granted) {
           await _repo.savePermission(
             DocumentPermission(
               roleId: _selectedRoleId,
               userId: null,
               documentType: '*',
               action: item.action,
-              granted: false,
+              granted: true,
             ),
           );
         }
@@ -869,15 +1112,16 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
 class _PermissionRow extends StatelessWidget {
   const _PermissionRow({
     required this.permission,
+    required this.targetLabel,
     required this.onEdit,
   });
 
   final DocumentPermission permission;
+  final String targetLabel;
   final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
-    final target = permission.roleId != null ? 'Role: ${permission.roleId}' : 'User: ${permission.userId}';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       child: Row(
@@ -885,8 +1129,9 @@ class _PermissionRow extends StatelessWidget {
           Expanded(
             flex: 2,
             child: Text(
-              target,
+              targetLabel,
               style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -929,9 +1174,42 @@ class _PermissionRow extends StatelessWidget {
 }
 
 class _RoutingConfigCard extends StatelessWidget {
-  const _RoutingConfigCard({required this.config});
+  const _RoutingConfigCard({
+    required this.config,
+    required this.employeeDirectory,
+    required this.departmentNameById,
+  });
 
   final DocumentRoutingConfig config;
+  final EmployeeDirectoryLookup employeeDirectory;
+  final Map<String, String> departmentNameById;
+
+  String _stepChipLabel(WorkflowStep s) {
+    final title = (s.label ?? '').trim().isNotEmpty ? s.label!.trim() : 'Step';
+    final t = s.assigneeType.trim().toLowerCase();
+    switch (t) {
+      case 'user':
+        final ids = s.userIds?.where((e) => e.trim().isNotEmpty).toList() ?? [];
+        if (ids.isNotEmpty) {
+          final line = employeeDirectory.formatUserLine(ids.first);
+          return '${s.stepOrder}. $title · $line';
+        }
+        final did = s.departmentId?.trim();
+        final dn = (did != null && did.isNotEmpty) ? (departmentNameById[did] ?? did) : null;
+        return '${s.stepOrder}. $title · ${dn ?? 'Choose department & people'}';
+      case 'department':
+        final did = s.departmentId?.trim();
+        final dn = (did != null && did.isNotEmpty) ? (departmentNameById[did] ?? did) : '—';
+        return '${s.stepOrder}. $title · Dept pool: $dn';
+      case 'office':
+        return '${s.stepOrder}. $title · Office routing';
+      case 'role':
+        final r = s.roleId?.trim();
+        return '${s.stepOrder}. $title · Role: ${r?.isNotEmpty == true ? r : '—'}';
+      default:
+        return '${s.stepOrder}. $title';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -939,9 +1217,9 @@ class _RoutingConfigCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppTheme.lightGray.withOpacity(0.3),
+        color: AppTheme.lightGray.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -957,8 +1235,25 @@ class _RoutingConfigCard extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Text(
-                '• ${config.reviewDeadlineHours}h deadline',
+                '• v${config.version} • ${config.reviewDeadlineHours}h deadline',
                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+              ),
+              const Spacer(),
+              IconButton(
+                tooltip: 'Edit workflow',
+                icon: const Icon(Icons.edit_rounded, size: 20),
+                onPressed: () async {
+                  final saved = await Navigator.of(context).push<bool>(
+                    MaterialPageRoute<bool>(
+                      builder: (_) => DocuTrackerWorkflowEditorScreen(
+                        initialConfig: config,
+                      ),
+                    ),
+                  );
+                  if (saved == true && context.mounted) {
+                    await context.read<DocuTrackerProvider>().loadRoutingConfigs();
+                  }
+                },
               ),
             ],
           ),
@@ -968,16 +1263,17 @@ class _RoutingConfigCard extends StatelessWidget {
             runSpacing: 8,
             children: config.steps
                 .map((s) => Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       decoration: BoxDecoration(
                         color: AppTheme.offWhite,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.black.withOpacity(0.06)),
+                        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
                       ),
                       child: Text(
-                        '${s.stepOrder}. ${s.label ?? s.assigneeType}',
+                        _stepChipLabel(s),
                         style: TextStyle(
                           fontSize: 12,
+                          height: 1.25,
                           color: AppTheme.textPrimary,
                         ),
                       ),

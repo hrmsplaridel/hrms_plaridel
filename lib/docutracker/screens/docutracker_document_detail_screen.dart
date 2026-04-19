@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../landingpage/constants/app_theme.dart';
@@ -9,7 +10,14 @@ import '../docutracker_repository.dart';
 import '../models/document.dart';
 import '../models/document_action.dart';
 import '../models/document_history.dart';
+import '../models/document_routing_config.dart';
+import '../models/document_routing_record.dart';
 import '../models/document_status.dart';
+import '../models/document_type.dart';
+import '../models/workflow_step.dart';
+import '../widgets/docutracker_document_summary_header.dart';
+import '../widgets/docutracker_responsive_body.dart';
+import '../widgets/docutracker_status_badge.dart';
 
 /// Step 9: Document detail with audit trail timeline.
 /// Step 8: Document actions - Review, Approve, Reject, Return, Forward, Add remarks.
@@ -32,12 +40,21 @@ class _DocuTrackerDocumentDetailScreenState
     extends State<DocuTrackerDocumentDetailScreen> {
   final _remarkController = TextEditingController();
 
+  Timer? _pollTimer;
+  List<DocumentRoutingRecord> _routingRecords = const [];
+  bool _routingLoading = true;
+
+  DocuTrackerDocument _resolveDocForView(DocuTrackerProvider provider) {
+    final docId = widget.document.id;
+    if (docId == null) return widget.document;
+    for (final d in provider.documents) {
+      if (d.id == docId) return d;
+    }
+    return widget.document;
+  }
+
   bool _permissionsLoading = true;
   bool _canViewAuditTrail = false;
-  bool _canApprove = false;
-  bool _canReject = false;
-  bool _canReturn = false;
-  bool _canForward = false;
   bool _canEdit = false; // Candidate documents / remark ability
 
   @override
@@ -56,19 +73,25 @@ class _DocuTrackerDocumentDetailScreenState
       if (!context.mounted) return;
       if (!canAccess) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('You do not have access to this document.')),
+          const SnackBar(
+            content: Text('You do not have access to this document.'),
+          ),
         );
         Navigator.of(context).pop();
         return;
       }
       // Load audit trail eagerly; we'll still hide it if permissions deny access.
       provider.loadDocumentHistory(widget.document.id!);
+      _routingRecords = await repo.getDocumentRoutingRecords(widget.document.id!);
+      if (mounted) setState(() => _routingLoading = false);
+      // Keep shared notification badges in sync while this screen is open.
+      await provider.loadNotifications();
 
       final userId = auth.user?.id ?? '';
       final roleId = auth.user?.role;
       final docType = widget.document.documentType;
 
-      // Step 4: apply per-action permissions (and "restrictions" from the dialog).
+      // Role-based permissions are only for general access.
       final results = await Future.wait<bool>([
         repo.hasPermission(
           userId: userId,
@@ -76,35 +99,51 @@ class _DocuTrackerDocumentDetailScreenState
           documentType: docType,
           action: DocumentAction.view.name,
         ),
-        repo.hasPermission(
-          userId: userId,
-          roleId: roleId,
-          documentType: docType,
-          action: DocumentAction.approve.name,
-        ),
-        repo.hasPermission(
-          userId: userId,
-          roleId: roleId,
-          documentType: docType,
-          action: DocumentAction.forward.name,
-        ),
-        repo.hasPermission(
-          userId: userId,
-          roleId: roleId,
-          documentType: docType,
-          action: DocumentAction.edit.name,
-        ),
       ]);
 
       if (!mounted) return;
       setState(() {
         _canViewAuditTrail = results[0];
-        _canApprove = results[1];
-        _canReject = results[1]; // tie "Candidate activation" to both approve + reject
-        _canForward = results[2];
-        _canReturn = results[2]; // tie "Allocate job authority" to forward + return
-        _canEdit = results[3];
+        _canEdit = widget.isAdmin;
         _permissionsLoading = false;
+      });
+
+      // Poll for server-side workflow changes (escalation, overdue transitions).
+      _pollTimer?.cancel();
+      _pollTimer = Timer.periodic(const Duration(seconds: 60), (_) async {
+        if (!mounted) return;
+        final provider = context.read<DocuTrackerProvider>();
+        final auth = context.read<AuthProvider>();
+        final userId = auth.user?.id ?? '';
+        final roleId = auth.user?.role;
+        final docId = widget.document.id!;
+
+        await provider.refreshDocument(docId, reloadHistory: true);
+        _routingRecords = await repo.getDocumentRoutingRecords(docId);
+        if (!mounted) return;
+        DocuTrackerDocument? updatedDoc;
+        for (final d in provider.documents) {
+          if (d.id == docId) {
+            updatedDoc = d;
+            break;
+          }
+        }
+        if (!mounted) return;
+        if (updatedDoc == null) return;
+
+        final results2 = await Future.wait<bool>([
+          repo.hasPermission(
+            userId: userId,
+            roleId: roleId,
+            documentType: updatedDoc.documentType,
+            action: DocumentAction.view.name,
+          ),
+        ]);
+
+        setState(() {
+          _canViewAuditTrail = results2[0];
+          _canEdit = widget.isAdmin;
+        });
       });
     });
   }
@@ -112,6 +151,7 @@ class _DocuTrackerDocumentDetailScreenState
   @override
   void dispose() {
     _remarkController.dispose();
+    _pollTimer?.cancel();
     super.dispose();
   }
 
@@ -119,10 +159,36 @@ class _DocuTrackerDocumentDetailScreenState
   Widget build(BuildContext context) {
     final provider = context.watch<DocuTrackerProvider>();
     final auth = context.watch<AuthProvider>();
-    final doc = widget.document;
+    final docId = widget.document.id;
+    final doc = docId != null ? _resolveDocForView(provider) : widget.document;
     final userId = auth.user?.id ?? '';
-    final canAct = doc.status != DocumentStatus.approved &&
+    final canAct =
+        doc.status != DocumentStatus.approved &&
         doc.status != DocumentStatus.rejected;
+    final currentStep = doc.currentStep ?? 1;
+    final currentRouting = _routingRecords
+        .where((r) => r.stepOrder == currentStep)
+        .cast<DocumentRoutingRecord?>()
+        .firstWhere((_) => true, orElse: () => null);
+    final isAssignedReviewer = !_routingLoading &&
+        userId.isNotEmpty &&
+        (doc.currentHolderId == userId ||
+            (currentRouting?.assigneeIds.contains(userId) ?? false));
+    final canApprove = isAssignedReviewer;
+    final canForward = isAssignedReviewer;
+    final canReject = isAssignedReviewer;
+    final canReturn = isAssignedReviewer;
+    final showYourTurn =
+        canAct &&
+        !_permissionsLoading &&
+        userId.isNotEmpty &&
+        isAssignedReviewer;
+
+    final showActions = _shouldShowActionsPanel(doc,
+        canApprove: canApprove,
+        canForward: canForward,
+        canReject: canReject,
+        canReturn: canReturn);
 
     return SingleChildScrollView(
       child: Column(
@@ -132,19 +198,34 @@ class _DocuTrackerDocumentDetailScreenState
             formTitle: doc.title,
             subtitle: '${doc.documentNumber ?? '—'} • ${doc.documentType}',
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
+          DocuTrackerResponsiveBody(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildHeader(doc),
-                const SizedBox(height: 24),
-                _buildInfoCard(doc),
-                const SizedBox(height: 24),
-                if (canAct && !_permissionsLoading)
-                  _buildActionButtons(doc, provider, userId),
-                const SizedBox(height: 24),
-                _buildAuditTrail(provider),
+                DocuTrackerDocumentSummaryHeader(
+                  document: doc,
+                  onBack: () => Navigator.of(context).pop(),
+                  showYourTurnBanner: showYourTurn,
+                ),
+                const SizedBox(height: 20),
+                _buildDocumentInfoSection(doc),
+                const SizedBox(height: 20),
+                _buildWorkflowSection(doc, provider, userId),
+                const SizedBox(height: 20),
+                if (showActions) ...[
+                  _buildActionsSection(
+                    doc,
+                    provider,
+                    userId,
+                    canAct,
+                    canApprove: canApprove,
+                    canForward: canForward,
+                    canReject: canReject,
+                    canReturn: canReturn,
+                  ),
+                  const SizedBox(height: 20),
+                ],
+                _buildHistorySection(provider),
                 const SizedBox(height: 24),
                 const RspFormFooter(),
                 const SizedBox(height: 32),
@@ -156,54 +237,57 @@ class _DocuTrackerDocumentDetailScreenState
     );
   }
 
-  Widget _buildHeader(DocuTrackerDocument doc) {
-    return Row(
-      children: [
-        IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => Navigator.of(context).pop(),
-          style: DocuTrackerStyles.iconButtonStyle(),
-        ),
-        const Spacer(),
-        _StatusChip(status: doc.status),
-        if (doc.needsAdminIntervention)
-          Container(
-            margin: const EdgeInsets.only(left: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.orange.shade100,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.orange),
-            ),
-            child: Text(
-              'Admin intervention',
-              style: TextStyle(
-                color: Colors.orange.shade900,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-      ],
-    );
+  DocumentRoutingConfig? _routingConfigFor(
+    DocuTrackerProvider provider,
+    DocuTrackerDocument doc,
+  ) {
+    final dt = documentTypeFromString(doc.documentType);
+    final fromProvider = provider.getRoutingConfigForType(dt);
+    if (fromProvider != null) return fromProvider;
+    for (final c in DocumentRoutingConfig.defaults) {
+      if (c.documentType == dt) return c;
+    }
+    return null;
   }
 
-  Widget _buildInfoCard(DocuTrackerDocument doc) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: DocuTrackerStyles.listCardDecoration(),
+  bool _shouldShowActionsPanel(
+    DocuTrackerDocument doc, {
+    required bool canApprove,
+    required bool canForward,
+    required bool canReject,
+    required bool canReturn,
+  }) {
+    if (_permissionsLoading) return false;
+    final terminal =
+        doc.status == DocumentStatus.approved ||
+        doc.status == DocumentStatus.rejected;
+    if (terminal) return _canEdit;
+    return canApprove || canReject || canReturn || canForward || _canEdit;
+  }
+
+  Widget _buildDocumentInfoSection(DocuTrackerDocument doc) {
+    return _DocuTrackerDetailSection(
+      icon: Icons.article_outlined,
+      title: 'Document information',
+      subtitle: 'Reference details and timeline for this routing.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _InfoRow(label: 'Document no.', value: doc.documentNumber ?? '—'),
           _InfoRow(label: 'Type', value: doc.documentType),
-          _InfoRow(label: 'Sender', value: doc.creatorName ?? doc.createdBy ?? '—'),
-          _InfoRow(label: 'Current holder', value: doc.assigneeName ?? doc.currentHolderId ?? '—'),
-          _InfoRow(label: 'Route step', value: '${doc.currentStep ?? 1}'),
           _InfoRow(
-            label: 'Sent',
-            value: doc.sentTime != null
-                ? _formatDateTime(doc.sentTime!)
+            label: 'Sender',
+            value: doc.creatorName ?? doc.createdBy ?? '—',
+          ),
+          _InfoRow(
+            label: 'Created',
+            value: doc.createdAt != null
+                ? _formatDateTime(doc.createdAt!)
                 : '—',
+          ),
+          _InfoRow(
+            label: 'Sent to reviewer',
+            value: doc.sentTime != null ? _formatDateTime(doc.sentTime!) : '—',
           ),
           _InfoRow(
             label: 'Deadline',
@@ -211,9 +295,20 @@ class _DocuTrackerDocumentDetailScreenState
                 ? _formatDateTime(doc.deadlineTime!)
                 : '—',
           ),
+          _InfoRow(
+            label: 'Review completed',
+            value: doc.reviewedTime != null
+                ? _formatDateTime(doc.reviewedTime!)
+                : '—',
+          ),
+          if (doc.workflowVersion != null)
+            _InfoRow(
+              label: 'Workflow version',
+              value: '${doc.workflowVersion}',
+            ),
           if (doc.description != null && doc.description!.isNotEmpty) ...[
             const SizedBox(height: 12),
-            const Divider(),
+            const Divider(height: 1),
             const SizedBox(height: 12),
             Text(
               'Description',
@@ -223,13 +318,13 @@ class _DocuTrackerDocumentDetailScreenState
                 fontWeight: FontWeight.w600,
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
+            const SizedBox(height: 6),
+            SelectableText(
               doc.description!,
               style: TextStyle(
                 color: AppTheme.textPrimary,
                 fontSize: 14,
-                height: 1.2,
+                height: 1.35,
               ),
             ),
           ],
@@ -238,22 +333,141 @@ class _DocuTrackerDocumentDetailScreenState
     );
   }
 
-  Widget _buildActionButtons(
+  Widget _buildWorkflowSection(
+    DocuTrackerDocument doc,
+    DocuTrackerProvider provider,
+    String currentUserId,
+  ) {
+    final cfg = _routingConfigFor(provider, doc);
+    final steps =
+        (cfg?.steps ?? const <WorkflowStep>[]).where((s) => s.enabled).toList()
+          ..sort((a, b) => a.stepOrder.compareTo(b.stepOrder));
+    final current = doc.currentStep ?? 1;
+    final total = steps.isEmpty ? null : steps.length;
+    final currentRouting = _routingRecords
+        .where((r) => r.stepOrder == current)
+        .cast<DocumentRoutingRecord?>()
+        .firstWhere((_) => true, orElse: () => null);
+    final assigneeNames = currentRouting?.assigneeNames ?? const <String>[];
+    final isAssignedReviewer =
+        !_routingLoading &&
+        currentUserId.isNotEmpty &&
+        (doc.currentHolderId == currentUserId ||
+            (currentRouting?.assigneeIds.contains(currentUserId) ?? false));
+    final stepLabel = steps.isEmpty
+        ? null
+        : () {
+            for (final s in steps) {
+              if (s.stepOrder == current) return s.label;
+            }
+            return null;
+          }();
+
+    return _DocuTrackerDetailSection(
+      icon: Icons.account_tree_outlined,
+      title: 'Workflow & routing',
+      subtitle:
+          'Current status, step in the defined route, and who is assigned to act.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Status',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        DocuTrackerStatusBadge(
+                          status: doc.status,
+                          compact: true,
+                        ),
+                        Text(
+                          doc.status.displayName,
+                          style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            total != null ? 'Step $current of $total' : 'Step $current',
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          if (stepLabel != null && stepLabel.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              stepLabel,
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+            ),
+          ],
+          if (steps.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            _WorkflowStepStrip(steps: steps, currentStepOrder: current),
+          ],
+          const SizedBox(height: 16),
+          _CurrentStepReviewersCard(
+            reviewers: assigneeNames,
+            youAreAssigned: isAssignedReviewer,
+          ),
+          const SizedBox(height: 10),
+          _CurrentHolderCard(
+            name: doc.assigneeName,
+            userId: doc.currentHolderId,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionsSection(
     DocuTrackerDocument doc,
     DocuTrackerProvider provider,
     String userId,
+    bool canAct,
+    {required bool canApprove,
+    required bool canForward,
+    required bool canReject,
+    required bool canReturn}
   ) {
-    return Wrap(
-      spacing: 12,
-      runSpacing: 8,
-      children: [
-        if (_canApprove)
-          FilledButton.icon(
+    final actions = <Widget>[
+      if (canAct && canApprove)
+        FilledButton.icon(
           onPressed: provider.loading
               ? null
               : () async {
-                  final ok = await provider.approveDocument(doc,
-                      actionBy: userId, remarks: _remarkController.text);
+                  final ok = await provider.approveDocument(
+                    doc,
+                    actionBy: userId,
+                    remarks: _remarkController.text,
+                  );
                   if (context.mounted && ok) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('Document approved.')),
@@ -264,115 +478,135 @@ class _DocuTrackerDocumentDetailScreenState
           icon: const Icon(Icons.check_circle_rounded, size: 18),
           label: const Text('Approve'),
           style: DocuTrackerStyles.approveButtonStyle(),
-          ),
-        if (_canReject)
-          OutlinedButton.icon(
+        ),
+      if (canAct && canReject)
+        OutlinedButton.icon(
           onPressed: provider.loading
               ? null
               : () async {
-                  _remarkController.clear();
-                  showDialog<void>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text('Reject - Remarks'),
-                      content: TextField(
-                        controller: _remarkController,
-                        decoration: DocuTrackerStyles.inputDecoration(
-                          'Reason for rejection (required)',
-                          Icons.cancel_rounded,
+                  final remarkCtrl = TextEditingController();
+                  try {
+                    await showDialog<void>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Reject document'),
+                        content: TextField(
+                          controller: remarkCtrl,
+                          autofocus: true,
+                          decoration: DocuTrackerStyles.inputDecoration(
+                            'Reason for rejection (required)',
+                            Icons.cancel_rounded,
+                          ),
+                          maxLines: 3,
                         ),
-                        maxLines: 3,
-                      ),
-                      actions: [
-                        OutlinedButton(
-                          onPressed: () => Navigator.of(ctx).pop(),
-                          style: DocuTrackerStyles.outlinedButtonStyle(),
-                          child: const Text('Cancel'),
-                        ),
-                        FilledButton(
-                          onPressed: () async {
-                            final remarks = _remarkController.text.trim();
-                            if (remarks.isEmpty) return;
-                            Navigator.of(ctx).pop();
-                            final ok = await provider.rejectDocument(doc,
-                                remarks: remarks, actionBy: userId);
-                            if (context.mounted && ok) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Document rejected.')),
+                        actions: [
+                          OutlinedButton(
+                            onPressed: () => Navigator.of(ctx).pop(),
+                            style: DocuTrackerStyles.outlinedButtonStyle(),
+                            child: const Text('Cancel'),
+                          ),
+                          FilledButton(
+                            onPressed: () async {
+                              final remarks = remarkCtrl.text.trim();
+                              if (remarks.isEmpty) return;
+                              Navigator.of(ctx).pop();
+                              final ok = await provider.rejectDocument(
+                                doc,
+                                remarks: remarks,
+                                actionBy: userId,
                               );
-                              Navigator.of(context).pop();
-                            }
-                          },
-                          style: DocuTrackerStyles.destructiveButtonStyle(),
-                          child: const Text('Reject'),
-                        ),
-                      ],
-                    ),
-                  );
+                              if (context.mounted && ok) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Document rejected.'),
+                                  ),
+                                );
+                                Navigator.of(context).pop();
+                              }
+                            },
+                            style: DocuTrackerStyles.destructiveButtonStyle(),
+                            child: const Text('Reject'),
+                          ),
+                        ],
+                      ),
+                    );
+                  } finally {
+                    remarkCtrl.dispose();
+                  }
                 },
           icon: const Icon(Icons.cancel_rounded, size: 18),
           label: const Text('Reject'),
           style: DocuTrackerStyles.outlinedRedStyle(),
-          ),
-        if (_canReturn)
-          OutlinedButton.icon(
+        ),
+      if (canAct && canReturn)
+        OutlinedButton.icon(
           onPressed: provider.loading
               ? null
               : () async {
-                  _remarkController.clear();
-                  showDialog<void>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text('Return - Remarks'),
-                      content: TextField(
-                        controller: _remarkController,
-                        decoration: DocuTrackerStyles.inputDecoration(
-                          'Reason for return (optional)',
-                          Icons.reply_rounded,
+                  final returnCtrl = TextEditingController();
+                  try {
+                    await showDialog<void>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Return document'),
+                        content: TextField(
+                          controller: returnCtrl,
+                          decoration: DocuTrackerStyles.inputDecoration(
+                            'Reason for return (optional)',
+                            Icons.reply_rounded,
+                          ),
+                          maxLines: 3,
                         ),
-                        maxLines: 3,
-                      ),
-                      actions: [
-                        OutlinedButton(
-                          onPressed: () => Navigator.of(ctx).pop(),
-                          style: DocuTrackerStyles.outlinedButtonStyle(),
-                          child: const Text('Cancel'),
-                        ),
-                        FilledButton(
-                          onPressed: () async {
-                            final ok = await provider.returnDocument(doc,
-                                remarks: _remarkController.text.trim().isEmpty
-                                    ? null
-                                    : _remarkController.text.trim(),
-                                actionBy: userId);
-                            if (context.mounted && ok) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Document returned.')),
-                              );
+                        actions: [
+                          OutlinedButton(
+                            onPressed: () => Navigator.of(ctx).pop(),
+                            style: DocuTrackerStyles.outlinedButtonStyle(),
+                            child: const Text('Cancel'),
+                          ),
+                          FilledButton(
+                            onPressed: () async {
+                              final remarks = returnCtrl.text.trim();
                               Navigator.of(ctx).pop();
-                            }
-                          },
-                          style: DocuTrackerStyles.primaryButtonStyle(),
-                          child: const Text('Return'),
-                        ),
-                      ],
-                    ),
-                  );
+                              final ok = await provider.returnDocument(
+                                doc,
+                                remarks: remarks.isEmpty ? null : remarks,
+                                actionBy: userId,
+                              );
+                              if (context.mounted && ok) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Document returned.'),
+                                  ),
+                                );
+                                Navigator.of(context).pop();
+                              }
+                            },
+                            style: DocuTrackerStyles.primaryButtonStyle(),
+                            child: const Text('Return'),
+                          ),
+                        ],
+                      ),
+                    );
+                  } finally {
+                    returnCtrl.dispose();
+                  }
                 },
           icon: const Icon(Icons.reply_rounded, size: 18),
           label: const Text('Return'),
           style: DocuTrackerStyles.outlinedButtonStyle(),
-          ),
-        if (_canForward)
-          OutlinedButton.icon(
+        ),
+      if (canAct && canForward)
+        OutlinedButton.icon(
           onPressed: provider.loading
               ? null
               : () async {
-                  final ok = await provider.forwardDocument(doc,
-                      actionBy: userId,
-                      remarks: _remarkController.text.trim().isEmpty
-                          ? null
-                          : _remarkController.text.trim());
+                  final ok = await provider.forwardDocument(
+                    doc,
+                    actionBy: userId,
+                    remarks: _remarkController.text.trim().isEmpty
+                        ? null
+                        : _remarkController.text.trim(),
+                  );
                   if (context.mounted && ok) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('Document forwarded.')),
@@ -383,82 +617,130 @@ class _DocuTrackerDocumentDetailScreenState
           icon: const Icon(Icons.forward_rounded, size: 18),
           label: const Text('Forward'),
           style: DocuTrackerStyles.outlinedButtonStyle(),
-          ),
-        if (_canEdit)
-          OutlinedButton.icon(
+        ),
+      if (_canEdit)
+        OutlinedButton.icon(
           onPressed: provider.loading
               ? null
-              : () {
-                  _remarkController.clear();
-                  showDialog<void>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text('Add Remark'),
-                      content: TextField(
-                        controller: _remarkController,
-                        decoration: DocuTrackerStyles.inputDecoration(
-                          'Enter your remark or comment',
-                          Icons.comment_rounded,
+              : () async {
+                  final remarkCtrl = TextEditingController();
+                  try {
+                    await showDialog<void>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Remark'),
+                        content: TextField(
+                          controller: remarkCtrl,
+                          autofocus: true,
+                          decoration: DocuTrackerStyles.inputDecoration(
+                            'Enter remark (logged to history)',
+                            Icons.comment_rounded,
+                          ),
+                          maxLines: 4,
                         ),
-                        maxLines: 3,
-                      ),
-                      actions: [
-                        OutlinedButton(
-                          onPressed: () => Navigator.of(ctx).pop(),
-                          style: DocuTrackerStyles.outlinedButtonStyle(),
-                          child: const Text('Cancel'),
-                        ),
-                        FilledButton(
-                          onPressed: () async {
-                            final remarks = _remarkController.text.trim();
-                            if (remarks.isEmpty) return;
-                            Navigator.of(ctx).pop();
-                            final ok = await provider.addRemark(doc,
-                                actorId: userId, remarks: remarks);
-                            if (context.mounted && ok) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Remark added.')),
+                        actions: [
+                          OutlinedButton(
+                            onPressed: () => Navigator.of(ctx).pop(),
+                            style: DocuTrackerStyles.outlinedButtonStyle(),
+                            child: const Text('Cancel'),
+                          ),
+                          FilledButton(
+                            onPressed: () async {
+                              final remarks = remarkCtrl.text.trim();
+                              if (remarks.isEmpty) return;
+                              Navigator.of(ctx).pop();
+                              final ok = await provider.addRemark(
+                                doc,
+                                actorId: userId,
+                                remarks: remarks,
                               );
-                              provider.loadDocumentHistory(doc.id!);
-                            }
-                          },
-                          style: DocuTrackerStyles.primaryButtonStyle(),
-                          child: const Text('Add'),
-                        ),
-                      ],
-                    ),
-                  );
+                              if (context.mounted && ok) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Remark added.'),
+                                  ),
+                                );
+                                provider.loadDocumentHistory(doc.id!);
+                              }
+                            },
+                            style: DocuTrackerStyles.primaryButtonStyle(),
+                            child: const Text('Save'),
+                          ),
+                        ],
+                      ),
+                    );
+                  } finally {
+                    remarkCtrl.dispose();
+                  }
                 },
           icon: const Icon(Icons.comment_rounded, size: 18),
-          label: const Text('Add Remark'),
+          label: const Text('Remark'),
           style: DocuTrackerStyles.outlinedButtonStyle(),
+        ),
+    ];
+
+    return _DocuTrackerDetailSection(
+      icon: Icons.touch_app_outlined,
+      title: 'Actions',
+      subtitle:
+          'Workflow buttons appear only when you are assigned to the current step.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (canAct && (canApprove || canForward)) ...[
+            Text(
+              'Optional note (Approve / Forward)',
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _remarkController,
+              maxLines: 2,
+              decoration: DocuTrackerStyles.inputDecoration(
+                'Add context for approver or next recipient',
+                Icons.notes_rounded,
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              for (final w in actions)
+                ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  child: w,
+                ),
+            ],
           ),
-      ],
+        ],
+      ),
     );
   }
 
-  Widget _buildAuditTrail(DocuTrackerProvider provider) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: DocuTrackerStyles.listCardDecoration(),
+  List<DocumentHistoryEntry> _sortedHistory(List<DocumentHistoryEntry> raw) {
+    final copy = [...raw];
+    int key(DocumentHistoryEntry e) => e.createdAt?.millisecondsSinceEpoch ?? 0;
+    copy.sort((a, b) => key(a).compareTo(key(b)));
+    return copy;
+  }
+
+  Widget _buildHistorySection(DocuTrackerProvider provider) {
+    final sorted = _sortedHistory(provider.documentHistory);
+
+    return _DocuTrackerDetailSection(
+      icon: Icons.history_rounded,
+      title: 'History & audit trail',
+      subtitle:
+          'Oldest entries first. Includes routing, decisions, and remarks.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(Icons.history_rounded, color: AppTheme.primaryNavy, size: 22),
-              const SizedBox(width: 10),
-              Text(
-                'Audit Trail',
-                style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 17,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
           if (_permissionsLoading)
             const Center(
               child: Padding(
@@ -468,30 +750,24 @@ class _DocuTrackerDocumentDetailScreenState
             )
           else if (!_canViewAuditTrail)
             Padding(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.symmetric(vertical: 8),
               child: Text(
                 'You do not have access to view the audit trail.',
-                style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 14,
-                ),
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
               ),
             )
-          else if (provider.documentHistory.isEmpty)
+          else if (sorted.isEmpty)
             Padding(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.symmetric(vertical: 16),
               child: Center(
                 child: Text(
                   'No history yet.',
-                  style: TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 14,
-                  ),
+                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
                 ),
               ),
             )
           else
-            _Timeline(entries: provider.documentHistory),
+            _Timeline(entries: sorted),
         ],
       ),
     );
@@ -504,37 +780,385 @@ class _DocuTrackerDocumentDetailScreenState
   }
 }
 
-class _StatusChip extends StatelessWidget {
-  const _StatusChip({required this.status});
+class _DocuTrackerDetailSection extends StatelessWidget {
+  const _DocuTrackerDetailSection({
+    required this.icon,
+    required this.title,
+    this.subtitle,
+    required this.child,
+  });
 
-  final DocumentStatus status;
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    final color = switch (status) {
-      DocumentStatus.pending => Colors.grey,
-      DocumentStatus.inReview => Colors.blue,
-      DocumentStatus.approved => Colors.green,
-      DocumentStatus.rejected => Colors.red,
-      DocumentStatus.returned => Colors.orange,
-      DocumentStatus.forwarded => Colors.teal,
-      DocumentStatus.overdue => Colors.deepOrange,
-      DocumentStatus.escalated => Colors.purple,
-    };
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.15),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.5)),
+      decoration: DocuTrackerStyles.listCardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryNavy.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(icon, color: AppTheme.primaryNavy, size: 22),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (subtitle != null && subtitle!.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          subtitle!,
+                          style: TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 12,
+                            height: 1.35,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+            child: Material(
+              color: Colors.transparent,
+              child: child,
+            ),
+          ),
+        ],
       ),
-      child: Text(
-        status.displayName,
-        style: TextStyle(
-          color: color,
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
+    );
+  }
+}
+
+class _WorkflowStepStrip extends StatelessWidget {
+  const _WorkflowStepStrip({
+    required this.steps,
+    required this.currentStepOrder,
+  });
+
+  final List<WorkflowStep> steps;
+  final int currentStepOrder;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (var i = 0; i < steps.length; i++) ...[
+            if (i > 0)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: Icon(
+                  Icons.chevron_right_rounded,
+                  size: 20,
+                  color: AppTheme.textSecondary.withOpacity(0.45),
+                ),
+              ),
+            _WorkflowStepPill(
+              order: steps[i].stepOrder,
+              label: steps[i].label ?? 'Step ${steps[i].stepOrder}',
+              state: steps[i].stepOrder < currentStepOrder
+                  ? _WorkflowStepVisual.complete
+                  : steps[i].stepOrder == currentStepOrder
+                  ? _WorkflowStepVisual.current
+                  : _WorkflowStepVisual.upcoming,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+enum _WorkflowStepVisual { complete, current, upcoming }
+
+class _WorkflowStepPill extends StatelessWidget {
+  const _WorkflowStepPill({
+    required this.order,
+    required this.label,
+    required this.state,
+  });
+
+  final int order;
+  final String label;
+  final _WorkflowStepVisual state;
+
+  @override
+  Widget build(BuildContext context) {
+    final isCurrent = state == _WorkflowStepVisual.current;
+    final isDone = state == _WorkflowStepVisual.complete;
+    final bg = isCurrent
+        ? AppTheme.primaryNavy.withOpacity(0.12)
+        : isDone
+        ? AppTheme.primaryNavy.withOpacity(0.06)
+        : AppTheme.lightGray.withOpacity(0.85);
+    final border = isCurrent
+        ? AppTheme.primaryNavy
+        : Colors.black.withOpacity(0.08);
+    final fg = isCurrent
+        ? AppTheme.primaryNavy
+        : isDone
+        ? AppTheme.textPrimary
+        : AppTheme.textSecondary;
+
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 168),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: border, width: isCurrent ? 1.5 : 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (isDone)
+                Icon(
+                  Icons.check_circle_rounded,
+                  size: 14,
+                  color: AppTheme.primaryNavy,
+                )
+              else if (isCurrent)
+                Icon(
+                  Icons.radio_button_checked_rounded,
+                  size: 14,
+                  color: AppTheme.primaryNavy,
+                )
+              else
+                Icon(
+                  Icons.radio_button_off_rounded,
+                  size: 14,
+                  color: AppTheme.textSecondary,
+                ),
+              const SizedBox(width: 6),
+              Text(
+                'Step $order',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: fg,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: fg, height: 1.2),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CurrentStepReviewersCard extends StatelessWidget {
+  const _CurrentStepReviewersCard({
+    required this.reviewers,
+    required this.youAreAssigned,
+  });
+
+  final List<String> reviewers;
+  final bool youAreAssigned;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = 'Current step reviewers (${reviewers.length})';
+    final bg = youAreAssigned
+        ? AppTheme.primaryNavy.withValues(alpha: 0.07)
+        : AppTheme.lightGray.withValues(alpha: 0.45);
+    final border = youAreAssigned
+        ? AppTheme.primaryNavy.withValues(alpha: 0.22)
+        : Colors.black.withValues(alpha: 0.08);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                youAreAssigned ? Icons.verified_user_rounded : Icons.group_rounded,
+                size: 18,
+                color: youAreAssigned ? AppTheme.primaryNavy : AppTheme.textSecondary,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ),
+              if (youAreAssigned)
+                Chip(
+                  label: const Text(
+                    'You are assigned',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                  ),
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  side: BorderSide(color: AppTheme.primaryNavy.withValues(alpha: 0.22)),
+                  backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (reviewers.isEmpty)
+            Text(
+              'No reviewers recorded for this step.',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+            )
+          else
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final n in reviewers)
+                  Chip(
+                    label: Text(
+                      n,
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                    ),
+                    visualDensity: VisualDensity.compact,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CurrentHolderCard extends StatelessWidget {
+  const _CurrentHolderCard({this.name, this.userId});
+
+  final String? name;
+  final String? userId;
+
+  @override
+  Widget build(BuildContext context) {
+    final display = (name != null && name!.trim().isNotEmpty)
+        ? name!.trim()
+        : null;
+    final idLine = userId != null && userId!.isNotEmpty ? userId : null;
+
+    if (display == null && idLine == null) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppTheme.lightGray.withOpacity(0.45),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.black.withOpacity(0.08)),
         ),
+        child: Text(
+          'No primary holder recorded. Use “Current step reviewers” as the source of truth.',
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+        ),
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.primaryNavy.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.primaryNavy.withOpacity(0.22)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            radius: 22,
+            backgroundColor: AppTheme.primaryNavy.withOpacity(0.14),
+            child: Icon(Icons.person_rounded, color: AppTheme.primaryNavy),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Primary holder (legacy)',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                if (display != null)
+                  Text(
+                    display,
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                if (idLine != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      display != null ? 'User ID: $idLine' : idLine,
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -557,10 +1181,7 @@ class _InfoRow extends StatelessWidget {
             width: 120,
             child: Text(
               label,
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 13,
-              ),
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
             ),
           ),
           Expanded(
@@ -639,11 +1260,7 @@ class _TimelineItem extends StatelessWidget {
                 shape: BoxShape.circle,
                 border: Border.all(color: color, width: 2),
               ),
-              child: Icon(
-                _iconForAction(entry.action),
-                size: 12,
-                color: color,
-              ),
+              child: Icon(_iconForAction(entry.action), size: 12, color: color),
             ),
             if (!isLast)
               Container(
@@ -660,6 +1277,16 @@ class _TimelineItem extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (entry.createdAt != null)
+                  Text(
+                    _formatEntryTime(entry.createdAt!),
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                if (entry.createdAt != null) const SizedBox(height: 4),
                 Text(
                   _actionLabel(entry.action),
                   style: TextStyle(
@@ -669,32 +1296,46 @@ class _TimelineItem extends StatelessWidget {
                   ),
                 ),
                 if (entry.actorName != null || entry.actorId != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      'By ${entry.actorName ?? entry.actorId ?? '—'}',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                if (entry.fromStep != null || entry.toStep != null) ...[
+                  const SizedBox(height: 4),
                   Text(
-                    'By: ${entry.actorName ?? entry.actorId ?? '—'}',
+                    _stepLine(entry),
                     style: TextStyle(
                       color: AppTheme.textSecondary,
                       fontSize: 12,
                     ),
                   ),
+                ],
+                if (entry.fromStatus != null || entry.toStatus != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    _statusLine(entry),
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
                 if (entry.remarks != null && entry.remarks!.isNotEmpty)
                   Padding(
-                    padding: const EdgeInsets.only(top: 4),
+                    padding: const EdgeInsets.only(top: 6),
                     child: Text(
                       entry.remarks!,
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.textPrimary,
                         fontSize: 13,
-                        fontStyle: FontStyle.italic,
+                        height: 1.35,
                       ),
-                    ),
-                  ),
-                if (entry.createdAt != null)
-                  Text(
-                    '${entry.createdAt!.toLocal().year}-${entry.createdAt!.toLocal().month.toString().padLeft(2, '0')}-${entry.createdAt!.toLocal().day.toString().padLeft(2, '0')} '
-                    '${entry.createdAt!.toLocal().hour.toString().padLeft(2, '0')}:${entry.createdAt!.toLocal().minute.toString().padLeft(2, '0')}',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 11,
                     ),
                   ),
               ],
@@ -713,6 +1354,7 @@ class _TimelineItem extends StatelessWidget {
       'rejected' => Icons.cancel_outlined,
       'returned' => Icons.reply,
       'forwarded' => Icons.forward,
+      'overdue' => Icons.warning_amber_rounded,
       'escalated' => Icons.trending_up,
       'remark' => Icons.comment_outlined,
       _ => Icons.circle_outlined,
@@ -727,9 +1369,34 @@ class _TimelineItem extends StatelessWidget {
       'rejected' => 'Rejected',
       'returned' => 'Returned to sender',
       'forwarded' => 'Forwarded',
+      'overdue' => 'Overdue',
       'escalated' => 'Escalated',
       'remark' => 'Remark added',
       _ => action ?? '—',
     };
+  }
+
+  static String _formatEntryTime(DateTime dt) {
+    final local = dt.toLocal();
+    return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')} '
+        '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
+
+  static String _stepLine(DocumentHistoryEntry e) {
+    if (e.fromStep != null && e.toStep != null) {
+      return 'Step ${e.fromStep} → ${e.toStep}';
+    }
+    if (e.toStep != null) return 'Step ${e.toStep}';
+    if (e.fromStep != null) return 'Step ${e.fromStep}';
+    return '';
+  }
+
+  static String _statusLine(DocumentHistoryEntry e) {
+    final from = e.fromStatus?.displayName;
+    final to = e.toStatus?.displayName;
+    if (from != null && to != null) return '$from → $to';
+    if (to != null) return to;
+    if (from != null) return from;
+    return '';
   }
 }

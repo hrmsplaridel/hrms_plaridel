@@ -12,6 +12,8 @@ import '../../../data/time_record.dart';
 import '../../../dtr/widgets/attendance_display.dart';
 import '../../../dtr/widgets/attendance_source_badge.dart';
 import '../../../docutracker/docutracker_main.dart';
+import '../../../docutracker/docutracker_notification_sheet.dart';
+import '../../../docutracker/docutracker_provider.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
 import '../../../leave/leave_provider.dart';
@@ -107,6 +109,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
     'Announcements',
   ];
 
+  void _prefetchDocuTrackerNotificationsIfNeeded(int index) {
+    if (index != 5) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<DocuTrackerProvider>().loadNotifications(forceRefresh: true);
+    });
+  }
+
   Future<void> _handleOpenNotifications() async {
     final result = await openNotificationsPanel(context);
     if (!mounted) return;
@@ -178,6 +188,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                   selectedIndex: _selectedNavIndex,
                   onTap: (i) {
                     setState(() => _selectedNavIndex = i);
+                    _prefetchDocuTrackerNotificationsIfNeeded(i);
                     if (context.mounted) Navigator.of(context).pop();
                   },
                 ),
@@ -191,7 +202,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                 displayName: displayName,
                 avatarPath: avatarPath,
                 selectedIndex: _selectedNavIndex,
-                onTap: (i) => setState(() => _selectedNavIndex = i),
+                onTap: (i) {
+                  setState(() => _selectedNavIndex = i);
+                  _prefetchDocuTrackerNotificationsIfNeeded(i);
+                },
               ),
             Expanded(
               child: Column(
@@ -201,6 +215,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                     email: email,
                     avatarPath: avatarPath,
                     showMenuButton: !isWide,
+                    showDocuTrackerBell: _selectedNavIndex == 5,
                     onOpenNotifications: _handleOpenNotifications,
                     onProfileTap: () {
                       Navigator.of(context).push(
@@ -760,6 +775,7 @@ class _EmployeeTopBar extends StatelessWidget {
     required this.email,
     this.avatarPath,
     this.showMenuButton = false,
+    this.showDocuTrackerBell = false,
     required this.onOpenNotifications,
     this.onProfileTap,
   });
@@ -768,6 +784,7 @@ class _EmployeeTopBar extends StatelessWidget {
   final String email;
   final String? avatarPath;
   final bool showMenuButton;
+  final bool showDocuTrackerBell;
   final Future<void> Function() onOpenNotifications;
   final VoidCallback? onProfileTap;
 
@@ -833,6 +850,13 @@ class _EmployeeTopBar extends StatelessWidget {
                   ),
           ),
           if (isCompact) const Spacer(),
+          if (showDocuTrackerBell) ...[
+            DocuTrackerBellIconButton(
+              isAdmin: false,
+              compact: isCompact,
+            ),
+            SizedBox(width: isCompact ? 2 : 6),
+          ],
           Consumer<NotificationProvider>(
             builder: (context, np, _) {
               final c = np.unreadCount;
@@ -845,7 +869,7 @@ class _EmployeeTopBar extends StatelessWidget {
                       color: AppTheme.textPrimary,
                       size: isCompact ? 22 : 24,
                     ),
-                    tooltip: 'Notifications',
+                    tooltip: 'HR notifications',
                     onPressed: () {
                       onOpenNotifications();
                     },

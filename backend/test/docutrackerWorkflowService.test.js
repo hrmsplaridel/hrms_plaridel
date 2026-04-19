@@ -199,9 +199,11 @@ test('getEffectivePermissionExplanation shows explicit deny precedence', async (
     }),
   };
 
+  // Use a general permission action (not approve/forward/etc.); workflow actions
+  // bypass the permission table when a document is supplied.
   const result = await getEffectivePermissionExplanation(mockClient, {
     user: { id: 'user-1', role: 'hr_staff' },
-    action: 'approve',
+    action: 'view',
     documentType: 'memo',
     document: {
       id: 'doc-3',
@@ -274,8 +276,8 @@ test('transitionDocument blocks non-holder even with explicit approve grant', as
   await assert.rejects(
     () => transitionDocument(pool, actor, 'doc-holder', 'approve', {}),
     (err) => {
-      assert.equal(err.code, 'VALIDATION');
-      assert.match(err.message, /Only the current holder can perform this action/);
+      assert.equal(err.code, 'FORBIDDEN');
+      assert.match(err.message, /You do not have permission to approve this document/);
       return true;
     }
   );

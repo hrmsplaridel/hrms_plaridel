@@ -1,6 +1,8 @@
 /// Document actions that can be permission-controlled (Step 4: Admin Privilege Management).
 enum DocumentAction {
   view,
+  create,
+  submit,
   edit,
   download,
   delete,
@@ -15,6 +17,8 @@ extension DocumentActionExtension on DocumentAction {
 
   String get displayName => switch (this) {
         DocumentAction.view => 'View',
+        DocumentAction.create => 'Create',
+        DocumentAction.submit => 'Submit',
         DocumentAction.edit => 'Edit',
         DocumentAction.download => 'Download',
         DocumentAction.delete => 'Delete',

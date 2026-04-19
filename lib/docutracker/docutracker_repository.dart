@@ -1,19 +1,42 @@
+import 'package:dio/dio.dart';
+
 import '../api/client.dart';
+import 'docutracker_api_result.dart';
 import 'models/document.dart';
 import 'models/document_history.dart';
 import 'models/document_notification.dart';
 import 'models/document_action.dart';
 import 'models/document_permission.dart';
 import 'models/document_routing_config.dart';
+import 'models/document_routing_record.dart';
 import 'models/document_status.dart';
-import 'models/escalation_config.dart';
+import 'services/docutracker_permission_service.dart';
+import 'services/docutracker_permissions_datasource.dart';
+
+String _apiErrorMessage(Object e) {
+  if (e is DioException) {
+    final data = e.response?.data;
+    if (data is Map) {
+      final err = data['error'];
+      if (err is String && err.isNotEmpty) return err;
+    }
+    final code = e.response?.statusCode;
+    if (code != null) return 'Request failed ($code)';
+    if (e.message != null && e.message!.isNotEmpty) return e.message!;
+  }
+  return e.toString();
+}
 
 /// DocuTracker data via HRMS PostgreSQL API (replaces Supabase client).
-class DocuTrackerRepository {
-  DocuTrackerRepository._();
+class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
+  DocuTrackerRepository._() {
+    _permissionService = DocuTrackerPermissionService(this);
+  }
   static final DocuTrackerRepository instance = DocuTrackerRepository._();
 
   static const _base = '/api/docutracker';
+
+  late final DocuTrackerPermissionService _permissionService;
 
   Future<List<DocumentRoutingConfig>> getRoutingConfigs() async {
     try {
@@ -34,7 +57,19 @@ class DocuTrackerRepository {
     }
   }
 
-  Future<List<DocuTrackerDocument>> listDocumentsForUser({
+  Future<DocuTrackerResult<bool>> saveRoutingConfig(DocumentRoutingConfig config) async {
+    try {
+      await ApiClient.instance.post<void>(
+        '$_base/routing-configs',
+        data: config.toJson(),
+      );
+      return const DocuTrackerSuccess(true);
+    } catch (e) {
+      return DocuTrackerFailure(_apiErrorMessage(e));
+    }
+  }
+
+  Future<DocuTrackerResult<List<DocuTrackerDocument>>> listDocumentsForUser({
     required String userId,
     String? userRoleId,
     String? userDepartmentId,
@@ -54,37 +89,20 @@ class DocuTrackerRepository {
         queryParameters: qp,
       );
       final list = res.data ?? [];
-      return list
+      final mapped = list
           .map(
             (e) => DocuTrackerDocument.fromJson(
               Map<String, dynamic>.from(e as Map),
             ),
           )
           .toList();
-    } catch (_) {
-      return [];
+      return DocuTrackerSuccess(mapped);
+    } catch (e) {
+      return DocuTrackerFailure(_apiErrorMessage(e));
     }
   }
 
-  Future<List<DocuTrackerDocument>> listOverdueForEscalation() async {
-    try {
-      final res = await ApiClient.instance.get<List<dynamic>>(
-        '$_base/documents-overdue',
-      );
-      final list = res.data ?? [];
-      return list
-          .map(
-            (e) => DocuTrackerDocument.fromJson(
-              Map<String, dynamic>.from(e as Map),
-            ),
-          )
-          .toList();
-    } catch (_) {
-      return [];
-    }
-  }
-
-  Future<List<DocuTrackerDocument>> listAllDocuments({
+  Future<DocuTrackerResult<List<DocuTrackerDocument>>> listAllDocuments({
     String? documentType,
     DocumentStatus? status,
     int? limit,
@@ -100,43 +118,56 @@ class DocuTrackerRepository {
         queryParameters: qp,
       );
       final list = res.data ?? [];
-      return list
+      final mapped = list
           .map(
             (e) => DocuTrackerDocument.fromJson(
               Map<String, dynamic>.from(e as Map),
             ),
           )
           .toList();
-    } catch (_) {
-      return [];
+      return DocuTrackerSuccess(mapped);
+    } catch (e) {
+      return DocuTrackerFailure(_apiErrorMessage(e));
     }
   }
 
-  Future<DocuTrackerDocument?> getDocument(String id) async {
+  Future<DocuTrackerResult<DocuTrackerDocument>> getDocument(String id) async {
     try {
       final res = await ApiClient.instance.get<Map<String, dynamic>>(
         '$_base/documents/$id',
       );
       final doc = res.data?['document'];
-      if (doc is! Map) return null;
-      return DocuTrackerDocument.fromJson(Map<String, dynamic>.from(doc));
-    } catch (_) {
-      return null;
+      if (doc is! Map) {
+        return DocuTrackerFailure<DocuTrackerDocument>('Document not found');
+      }
+      return DocuTrackerSuccess(
+        DocuTrackerDocument.fromJson(Map<String, dynamic>.from(doc)),
+      );
+    } catch (e) {
+      return DocuTrackerFailure(_apiErrorMessage(e));
     }
   }
 
-  Future<String> getNextDocumentNumber() async {
+  Future<List<DocumentRoutingRecord>> getDocumentRoutingRecords(String id) async {
     try {
       final res = await ApiClient.instance.get<Map<String, dynamic>>(
-        '$_base/next-document-number',
+        '$_base/documents/$id',
       );
-      final n = res.data?['document_number']?.toString();
-      if (n != null && n.isNotEmpty) return n;
-    } catch (_) {}
-    return 'DOC-${DateTime.now().year}-0001';
+      final routing = res.data?['routing'];
+      if (routing is! List) return const [];
+      return routing
+          .map(
+            (e) => DocumentRoutingRecord.fromJson(
+              Map<String, dynamic>.from(e as Map),
+            ),
+          )
+          .toList();
+    } catch (_) {
+      return const [];
+    }
   }
 
-  Future<DocuTrackerDocument?> createDocument(DocuTrackerDocument doc) async {
+  Future<DocuTrackerResult<DocuTrackerDocument>> createDocument(DocuTrackerDocument doc) async {
     try {
       final payload = Map<String, dynamic>.from(doc.toJson())
         ..remove('id')
@@ -149,23 +180,13 @@ class DocuTrackerRepository {
         data: payload,
       );
       final row = res.data;
-      if (row == null) return null;
-      return DocuTrackerDocument.fromJson(row);
-    } catch (_) {
-      return null;
+      if (row == null) {
+        return DocuTrackerFailure<DocuTrackerDocument>('Empty response from server');
+      }
+      return DocuTrackerSuccess(DocuTrackerDocument.fromJson(row));
+    } catch (e) {
+      return DocuTrackerFailure(_apiErrorMessage(e));
     }
-  }
-
-  Future<void> addDocumentHistory(DocumentHistoryEntry entry) async {
-    try {
-      final payload = Map<String, dynamic>.from(entry.toJson())
-        ..remove('id')
-        ..remove('created_at');
-      await ApiClient.instance.post<void>(
-        '$_base/documents/${entry.documentId}/history',
-        data: payload,
-      );
-    } catch (_) {}
   }
 
   Future<List<DocumentHistoryEntry>> listDocumentHistory(String documentId) async {
@@ -186,14 +207,49 @@ class DocuTrackerRepository {
     }
   }
 
-  Future<void> addNotification(DocumentNotification notif) async {
+  Future<DocuTrackerResult<DocuTrackerDocument>> transitionDocument({
+    required String documentId,
+    required String action,
+    String? remarks,
+    String? targetHolderId,
+    String? idempotencyKey,
+  }) async {
     try {
-      final payload = Map<String, dynamic>.from(notif.toJson())..remove('id');
-      await ApiClient.instance.post<void>('$_base/notifications', data: payload);
-    } catch (_) {}
+      final res = await ApiClient.instance.post<Map<String, dynamic>>(
+        '$_base/documents/$documentId/transition',
+        data: {
+          'action': action,
+          if (remarks != null) 'remarks': remarks,
+          if (targetHolderId != null) 'target_holder_id': targetHolderId,
+          if (idempotencyKey != null) 'idempotency_key': idempotencyKey,
+        },
+      );
+      final row = res.data;
+      if (row == null) {
+        return DocuTrackerFailure<DocuTrackerDocument>('Empty response from server');
+      }
+      return DocuTrackerSuccess(DocuTrackerDocument.fromJson(row));
+    } catch (e) {
+      return DocuTrackerFailure(_apiErrorMessage(e));
+    }
   }
 
-  Future<List<DocumentNotification>> listNotificationsForUser(String userId) async {
+  Future<bool> addDocumentRemark({
+    required String documentId,
+    required String remarks,
+  }) async {
+    try {
+      await ApiClient.instance.post<void>(
+        '$_base/documents/$documentId/remark',
+        data: {'remarks': remarks},
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<List<DocumentNotification>> listMyNotifications() async {
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '$_base/notifications',
@@ -211,42 +267,37 @@ class DocuTrackerRepository {
     }
   }
 
-  Future<EscalationConfig?> getEscalationConfig(
-    String documentType, {
-    String? departmentId,
-  }) async {
+  /// Marks one notification as read for the current user.
+  Future<DocumentNotification?> markNotificationRead(String notificationId) async {
     try {
-      final res = await ApiClient.instance.get<List<dynamic>>(
-        '$_base/escalation-configs',
-        queryParameters: {
-          'document_type': documentType,
-          if (departmentId != null) 'department_id': departmentId,
-        },
+      final res = await ApiClient.instance.patch<Map<String, dynamic>>(
+        '$_base/notifications/$notificationId/read',
+        data: const <String, dynamic>{},
       );
-      final list = res.data ?? [];
-      if (list.isEmpty) return null;
-      return EscalationConfig.fromJson(
-        Map<String, dynamic>.from(list.first as Map),
-      );
+      final row = res.data;
+      if (row == null) return null;
+      return DocumentNotification.fromJson(row);
     } catch (_) {
       return null;
     }
   }
 
-  Future<void> updateDocument(DocuTrackerDocument doc) async {
-    if (doc.id == null) return;
+  /// Marks all notifications read for the current user. Returns rows updated or null on failure.
+  Future<int?> markAllNotificationsRead() async {
     try {
-      final payload = Map<String, dynamic>.from(doc.toJson())
-        ..remove('creator_name')
-        ..remove('assignee_name')
-        ..remove('created_at');
-      await ApiClient.instance.put<void>(
-        '$_base/documents/${doc.id}',
-        data: payload,
+      final res = await ApiClient.instance.post<Map<String, dynamic>>(
+        '$_base/notifications/mark-all-read',
+        data: const <String, dynamic>{},
       );
-    } catch (_) {}
+      final n = res.data?['updated'];
+      if (n is num) return n.toInt();
+      return 0;
+    } catch (_) {
+      return null;
+    }
   }
 
+  @override
   Future<List<DocumentPermission>> listPermissions({
     String? roleId,
     String? userId,
@@ -281,6 +332,40 @@ class DocuTrackerRepository {
     }
   }
 
+  Future<List<Map<String, dynamic>>> getWorkflowSteps({
+    required String documentType,
+    required int workflowVersion,
+  }) async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '$_base/workflow-steps',
+        queryParameters: {
+          'document_type': documentType,
+          'workflow_version': workflowVersion,
+        },
+      );
+      final list = res.data ?? const [];
+      return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<DocuTrackerResult<bool>> updateWorkflowStepAssignees({
+    required String stepId,
+    required List<Map<String, dynamic>> assignees,
+  }) async {
+    try {
+      await ApiClient.instance.put<void>(
+        '$_base/workflow-steps/$stepId/assignees',
+        data: {'assignees': assignees},
+      );
+      return const DocuTrackerSuccess(true);
+    } catch (e) {
+      return DocuTrackerFailure(_apiErrorMessage(e));
+    }
+  }
+
   Future<void> savePermission(DocumentPermission perm) async {
     try {
       await ApiClient.instance.post<void>(
@@ -293,7 +378,33 @@ class DocuTrackerRepository {
           'granted': perm.granted,
         },
       );
+      _permissionService.clearCache();
     } catch (_) {}
+  }
+
+  Future<int> resetPermissions({
+    String? userId,
+    String? roleId,
+    required String documentType,
+    String? action,
+  }) async {
+    try {
+      final res = await ApiClient.instance.delete<Map<String, dynamic>>(
+        '$_base/permissions',
+        data: {
+          if (userId != null) 'user_id': userId,
+          if (roleId != null) 'role_id': roleId,
+          'document_type': documentType,
+          if (action != null) 'action': action,
+        },
+      );
+      _permissionService.clearCache();
+      final deleted = res.data?['deleted'];
+      if (deleted is num) return deleted.toInt();
+      return 0;
+    } catch (_) {
+      return 0;
+    }
   }
 
   Future<bool> canAccessDocument({
@@ -303,9 +414,17 @@ class DocuTrackerRepository {
   }) async {
     if (isAdmin) return true;
     try {
-      final doc = await getDocument(documentId);
-      if (doc == null) return false;
+      final res = await getDocument(documentId);
+      if (res is DocuTrackerFailure<DocuTrackerDocument>) return false;
+      if (res is! DocuTrackerSuccess<DocuTrackerDocument>) return false;
+      final doc = res.value;
       if (doc.createdBy == userId || doc.currentHolderId == userId) return true;
+      final routing = await getDocumentRoutingRecords(documentId);
+      final current = doc.currentStep ?? 1;
+      for (final r in routing) {
+        if (r.stepOrder != current) continue;
+        if (r.assigneeIds.contains(userId)) return true;
+      }
       return false;
     } catch (_) {
       return false;
@@ -319,44 +438,73 @@ class DocuTrackerRepository {
     required String action,
   }) async {
     try {
-      final userPerms = await listPermissions(
+      return await _permissionService.hasPermission(
         userId: userId,
+        roleId: roleId,
         documentType: documentType,
+        action: action,
       );
-      final userAction = userPerms.where((p) => p.action.name == action);
-      if (userAction.isNotEmpty) return userAction.first.granted;
+    } catch (_) {
+      // Default deny on any error (security > convenience).
+      return false;
+    }
+  }
 
-      if (roleId != null) {
-        final rolePerms = await listPermissions(
-          roleId: roleId,
-          documentType: documentType,
+  Future<DocuTrackerPermissionExplanation> explainPermission({
+    required String userId,
+    String? roleId,
+    required String documentType,
+    required String action,
+    String? documentId,
+    bool isAdmin = false,
+  }) async {
+    const workflowActions = {'approve', 'forward', 'reject', 'return'};
+    if (!isAdmin && workflowActions.contains(action)) {
+      try {
+        final res = await ApiClient.instance.get<Map<String, dynamic>>(
+          '$_base/permission-explain',
+          queryParameters: {
+            'document_type': documentType,
+            'action': action,
+            if (documentId != null && documentId.trim().isNotEmpty) 'document_id': documentId,
+          },
         );
-        final roleAction = rolePerms.where((p) => p.action.name == action);
-        if (roleAction.isNotEmpty) return roleAction.first.granted;
-      }
-
-      final wildUserPerms = await listPermissions(
-        userId: userId,
-        documentType: '*',
-      );
-      final wildUserAction = wildUserPerms.where((p) => p.action.name == action);
-      if (wildUserAction.isNotEmpty) return wildUserAction.first.granted;
-
-      if (roleId != null) {
-        final wildRolePerms = await listPermissions(
-          roleId: roleId,
-          documentType: '*',
+        final data = res.data ?? const <String, dynamic>{};
+        final granted = data['final_decision'] == true;
+        final reason = data['reason']?.toString();
+        final rel = data['relationship'];
+        final isHolder = rel is Map && rel['isCurrentHolder'] == true;
+        final isAssignee = rel is Map && rel['isStepAssignee'] == true;
+        final source = isHolder
+            ? DocuTrackerPermissionSource.currentHolder
+            : isAssignee
+                ? DocuTrackerPermissionSource.stepAssignee
+                : DocuTrackerPermissionSource.defaultDeny;
+        return DocuTrackerPermissionExplanation(
+          granted: granted,
+          source: granted ? source : DocuTrackerPermissionSource.defaultDeny,
+          matchedDocumentType: documentType,
+          matchedRoleId: null,
+          reason: reason,
         );
-        final wildRoleAction = wildRolePerms.where((p) => p.action.name == action);
-        if (wildRoleAction.isNotEmpty) return wildRoleAction.first.granted;
+      } catch (_) {
+        // Default deny on any error.
+        return const DocuTrackerPermissionExplanation(
+          granted: false,
+          source: DocuTrackerPermissionSource.defaultDeny,
+          matchedDocumentType: null,
+          matchedRoleId: null,
+          reason: 'explain_failed',
+        );
       }
+    }
 
-      final globalWildPerms = await listPermissions(documentType: '*');
-      final globalWildAction = globalWildPerms.where(
-        (p) => p.action.name == action,
-      );
-      if (globalWildAction.isNotEmpty) return globalWildAction.first.granted;
-    } catch (_) {}
-    return true;
+    return _permissionService.explainPermission(
+      userId: userId,
+      roleId: roleId,
+      documentType: documentType,
+      action: action,
+      isAdmin: isAdmin,
+    );
   }
 }

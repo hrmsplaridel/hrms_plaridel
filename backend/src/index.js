@@ -7,6 +7,7 @@ const { scheduleLeaveMonthlyAccrualCron } = require('./jobs/leaveMonthlyAccrualS
 
 const authRoutes = require('./routes/auth');
 const departmentsRoutes = require('./routes/departments');
+const officesRoutes = require('./routes/offices');
 const positionsRoutes = require('./routes/positions');
 const shiftsRoutes = require('./routes/shifts');
 const assignmentsRoutes = require('./routes/assignments');
@@ -32,6 +33,8 @@ const rspLdSavedEntriesRoutes = require('./routes/rspLdSavedEntries');
 const leaveRoutes = require('./routes/leaveRoutes');
 const notificationsRoutes = require('./routes/notifications');
 const locatorSlipsRoutes = require('./routes/locatorSlips');
+
+const { startDocutrackerEscalationWorker } = require('./services/docutrackerEscalationWorker');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -88,6 +91,7 @@ app.get('/health/db', async (_req, res) => {
 // API routes
 app.use('/auth', authRoutes);
 app.use('/api/departments', departmentsRoutes);
+app.use('/api/offices', officesRoutes);
 app.use('/api/positions', positionsRoutes);
 app.use('/api/shifts', shiftsRoutes);
 app.use('/api/assignments', assignmentsRoutes);
@@ -136,6 +140,12 @@ const server = app.listen(PORT, HOST, () => {
   console.log('  GET  /api/rsp/storage/signed-url - admin signed attachment URL (service role)');
   console.log('  API  /api/rsp-ld-saved-entries/:table - RSP/L&D saved forms (admin JWT, PostgreSQL)');
   scheduleLeaveMonthlyAccrualCron(pool);
+  // DocuTracker: server-side escalation worker (workflow control).
+  try {
+    startDocutrackerEscalationWorker();
+  } catch (e) {
+    console.error('[docutracker escalation worker] failed to start', e);
+  }
 });
 
 // Initialize WebSocket server for Biometrics/DTR updates

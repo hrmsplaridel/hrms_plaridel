@@ -5,7 +5,6 @@ enum DocumentStatus {
   approved,
   rejected,
   returned,
-  forwarded,
   overdue,
   escalated,
 }
@@ -19,7 +18,6 @@ extension DocumentStatusExtension on DocumentStatus {
         DocumentStatus.approved => 'Approved',
         DocumentStatus.rejected => 'Rejected',
         DocumentStatus.returned => 'Returned',
-        DocumentStatus.forwarded => 'Forwarded',
         DocumentStatus.overdue => 'Overdue',
         DocumentStatus.escalated => 'Escalated',
       };
@@ -28,6 +26,7 @@ extension DocumentStatusExtension on DocumentStatus {
 DocumentStatus documentStatusFromString(String? s) {
   if (s == null || s.isEmpty) return DocumentStatus.pending;
   final normalized = s.toLowerCase().replaceAll(' ', '').replaceAll('_', '');
+  if (normalized == 'forwarded') return DocumentStatus.inReview;
   for (final e in DocumentStatus.values) {
     if (e.name.toLowerCase().replaceAll('_', '') == normalized) return e;
   }

@@ -28,12 +28,15 @@ import '../../../dtr/dtr_routes.dart';
 import '../../../dtr/manage/manage_employee.dart';
 import '../../../dtr/manage/manage_assignment.dart';
 import '../../../dtr/manage/manage_department.dart';
+import '../../../dtr/manage/manage_office.dart';
 import '../../../dtr/manage/manage_position.dart';
 import '../../../dtr/manage/manage_shift.dart';
 import '../../../dtr/manage/manage_holiday.dart';
 import '../../../dtr/manage/manage_attendance_policy.dart';
 import '../../../dtr/manage/manage_biometric_devices.dart';
 import '../../../docutracker/docutracker_main.dart';
+import '../../../docutracker/docutracker_notification_sheet.dart';
+import '../../../docutracker/docutracker_provider.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
 import '../../../leave/leave_provider.dart';
@@ -161,6 +164,12 @@ class _AdminDashboardState extends State<AdminDashboard>
         _dashboardSearchQuery = '';
       }
     });
+    if (menu == AdminMenu.docutracker) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        context.read<DocuTrackerProvider>().loadNotifications(forceRefresh: true);
+      });
+    }
   }
 
   /// Same flow as [LeaveMain] — admin My Portal must pass a handler or File Leave stays disabled.
@@ -301,6 +310,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                     displayName: displayName,
                     avatarPath: avatarPath,
                     showMenuButton: !isWide,
+                    showDocuTrackerBell: _selectedMenu == AdminMenu.docutracker,
                     searchEnabled: _selectedMenu == AdminMenu.dashboard,
                     searchController: _dashboardSearchController,
                     searchQuery: _dashboardSearchQuery,
@@ -763,6 +773,7 @@ class _TopBar extends StatelessWidget {
     required this.displayName,
     this.avatarPath,
     this.showMenuButton = false,
+    this.showDocuTrackerBell = false,
     this.searchEnabled = false,
     required this.searchController,
     required this.searchQuery,
@@ -774,6 +785,7 @@ class _TopBar extends StatelessWidget {
   final String displayName;
   final String? avatarPath;
   final bool showMenuButton;
+  final bool showDocuTrackerBell;
 
   /// Dashboard tab only — search filters overview sections.
   final bool searchEnabled;
@@ -888,6 +900,14 @@ class _TopBar extends StatelessWidget {
                   ),
           ),
           if (!searchEnabled) const Spacer(),
+          if (showDocuTrackerBell) ...[
+            DocuTrackerBellIconButton(
+              isAdmin: true,
+              adminChrome: true,
+              compact: isCompact,
+            ),
+            SizedBox(width: isCompact ? 6 : 10),
+          ],
           Consumer<NotificationProvider>(
             builder: (context, np, _) {
               final c = np.unreadCount;
@@ -900,7 +920,7 @@ class _TopBar extends StatelessWidget {
                       color: AppTheme.textPrimary,
                       size: isCompact ? 24 : 26,
                     ),
-                    tooltip: 'Notifications',
+                    tooltip: 'HR notifications',
                     onPressed: () {
                       onOpenNotifications();
                     },
@@ -2390,7 +2410,7 @@ class _DtrContentState extends State<_DtrContent> {
   /// 0 = menu, 1 = Time Logs, 2 = Reports, 3 = Employees, 4 = Assignment,
   /// 5 = Department, 6 = Position, 7 = Shift, 8 = Leave Management,
   /// 9–10 = Holiday / Policy via [_ManageContent], 11 = Biometric Devices,
-  /// 12 = Locator Slip Management
+  /// 12 = Locator Slip Management, 13 = Offices
   int _dtrSectionIndex = 0;
 
   /// When opening **Assignment** from Employees, pre-select this employee once.
@@ -2509,6 +2529,12 @@ class _DtrContentState extends State<_DtrContent> {
                       onTap: () => setState(() => _dtrSectionIndex = 5),
                     ),
                     FeatureCard(
+                      title: 'Office',
+                      subtitle: 'Manage branch or site offices (DocuTracker routing).',
+                      icon: Icons.domain_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 13),
+                    ),
+                    FeatureCard(
                       title: 'Position',
                       subtitle: 'Manage positions.',
                       icon: Icons.work_rounded,
@@ -2567,6 +2593,8 @@ class _DtrContentState extends State<_DtrContent> {
                 const ManageBiometricDevices()
               else if (_dtrSectionIndex == 12)
                 const AdminLocatorManagementScreen()
+              else if (_dtrSectionIndex == 13)
+                const ManageOffice()
               else
                 _ManageContent(
                   subIndex: _dtrSectionIndex - 3,
