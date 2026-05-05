@@ -28,10 +28,10 @@ class DocuTrackerSummaryCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: backgroundColor,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -43,7 +43,7 @@ class DocuTrackerSummaryCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: iconColor.withOpacity(0.3),
+              color: iconColor.withValues(alpha: 0.3),
               borderRadius: BorderRadius.circular(14),
             ),
             child: Icon(icon, size: 26, color: iconColor),

@@ -1,3 +1,17 @@
+-- =============================================================================
+-- HRMS Plaridel — DocuTracker: PRODUCTION HARDENING (apply once)
+-- =============================================================================
+-- Source: migrate-docutracker-production-hardening-apply-once.sql
+-- Run AFTER phase 1 (docutracker-install-core.sql) completes successfully.
+-- Run BEFORE phase 3 (docutracker-install-post-production-hardening.sql).
+--
+-- This script is large and may require data fixes if constraints fail; fix rows,
+-- then re-run with ON_ERROR_STOP.
+--
+-- USAGE:
+--   psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f scripts/docutracker-install-production-hardening-apply-once.sql
+-- =============================================================================
+
 -- DocuTracker production hardening (apply-once, labeled sections)
 -- Date: 2026-04-16
 --
@@ -577,4 +591,3 @@ CREATE INDEX IF NOT EXISTS idx_docutracker_routing_records_document_step
   ON docutracker_routing_records(document_id, step_order);
 
 -- End of migration
-

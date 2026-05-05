@@ -122,7 +122,7 @@ class _DocuTrackerNotificationPanelState
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: AppTheme.primaryNavy.withOpacity(0.08),
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Icon(
@@ -221,6 +221,7 @@ class _DocuTrackerNotificationPanelState
                     subtitle: 'Resolve or reassign as soon as possible.',
                     emphasize: true,
                     items: urgent,
+                    unreadCount: urgent.where((n) => !n.read).length,
                     visibleLimit: urgentShow,
                     onShowMore: urgentRemain > 0
                         ? () => setState(() {
@@ -238,6 +239,7 @@ class _DocuTrackerNotificationPanelState
                         'New work on your desk or time-sensitive reviews.',
                     emphasize: false,
                     items: routing,
+                    unreadCount: routing.where((n) => !n.read).length,
                     visibleLimit: routingShow,
                     onShowMore: routingRemain > 0
                         ? () => setState(() {
@@ -254,6 +256,7 @@ class _DocuTrackerNotificationPanelState
                     subtitle: 'Outcomes you should be aware of.',
                     emphasize: false,
                     items: outcomes,
+                    unreadCount: outcomes.where((n) => !n.read).length,
                     visibleLimit: outcomesShow,
                     onShowMore: outcomesRemain > 0
                         ? () => setState(() {
@@ -279,6 +282,7 @@ class _NotificationGroup extends StatelessWidget {
     required this.subtitle,
     required this.emphasize,
     required this.items,
+    required this.unreadCount,
     required this.visibleLimit,
     required this.remainingCount,
     this.onShowMore,
@@ -289,6 +293,7 @@ class _NotificationGroup extends StatelessWidget {
   final String subtitle;
   final bool emphasize;
   final List<DocumentNotification> items;
+  final int unreadCount;
   final int visibleLimit;
   final int remainingCount;
   final VoidCallback? onShowMore;
@@ -321,13 +326,35 @@ class _NotificationGroup extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    Row(
+                      children: [
+                        Text(
+                          title,
+                          style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        if (unreadCount > 0) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: accent,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              '$unreadCount new',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                     Text(
                       subtitle,
@@ -390,7 +417,7 @@ class _NotificationTile extends StatelessWidget {
   }
 
   static Color _accent(String type, bool read) {
-    if (read) return AppTheme.textSecondary.withOpacity(0.35);
+    if (read) return AppTheme.textSecondary.withValues(alpha: 0.35);
     return switch (type) {
       DocumentNotification.typeOverdue => Colors.deepOrange.shade800,
       DocumentNotification.typeEscalated => Colors.red.shade800,
@@ -430,8 +457,8 @@ class _NotificationTile extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 8),
       child: Material(
         color: read
-            ? AppTheme.offWhite.withOpacity(0.35)
-            : AppTheme.primaryNavy.withOpacity(0.05),
+            ? AppTheme.offWhite.withValues(alpha: 0.35)
+            : AppTheme.primaryNavy.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(10),
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
@@ -444,7 +471,7 @@ class _NotificationTile extends StatelessWidget {
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       border: Border.all(
-                        color: Colors.black.withOpacity(0.06),
+                        color: Colors.black.withValues(alpha: 0.06),
                       ),
                     ),
                   ),
@@ -457,83 +484,114 @@ class _NotificationTile extends StatelessWidget {
                   child: ColoredBox(color: accent),
                 ),
                 Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    (read ? 1 : 3) + 12,
-                    10,
-                    12,
-                    10,
-                  ),
+                  padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
                   child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(_icon(n.type), size: 22, color: accent),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Text(
-                              headline,
-                              style: TextStyle(
-                                fontWeight: read
-                                    ? FontWeight.w500
-                                    : FontWeight.w700,
-                                fontSize: 13,
-                                color: read
-                                    ? AppTheme.textSecondary
-                                    : AppTheme.textPrimary,
-                              ),
-                            ),
-                          ),
-                          if (!read)
-                            Container(
-                              width: 8,
-                              height: 8,
-                              margin: const EdgeInsets.only(top: 4, left: 6),
-                              decoration: const BoxDecoration(
-                                color: AppTheme.primaryNavy,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                        ],
-                      ),
-                      if (body != null) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          body,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 12,
-                            height: 1.25,
-                            color: AppTheme.textSecondary.withOpacity(
-                              read ? 0.75 : 1,
-                            ),
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: read ? AppTheme.lightGray.withValues(alpha: 0.5) : accent.withValues(alpha: 0.12),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: read ? Colors.transparent : accent.withValues(alpha: 0.2),
                           ),
                         ),
-                      ],
-                      const SizedBox(height: 4),
-                      Text(
-                        '${n.displayType} · ${_relativeTime(n.createdAt)}',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: AppTheme.textSecondary.withOpacity(0.9),
+                        child: Icon(
+                          _icon(n.type),
+                          size: 20,
+                          color: read ? AppTheme.textSecondary.withValues(alpha: 0.8) : accent,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    headline,
+                                    style: TextStyle(
+                                      fontWeight: read ? FontWeight.w500 : FontWeight.w700,
+                                      fontSize: 14,
+                                      color: read ? AppTheme.textSecondary : AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  _relativeTime(n.createdAt),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: read ? AppTheme.textSecondary.withValues(alpha: 0.6) : accent,
+                                    fontWeight: read ? FontWeight.normal : FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (body != null) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                body,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  height: 1.3,
+                                  color: read ? AppTheme.textSecondary.withValues(alpha: 0.7) : AppTheme.textSecondary,
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.lightGray,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    n.displayType.toUpperCase(),
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 0.5,
+                                      color: AppTheme.textSecondary,
+                                    ),
+                                  ),
+                                ),
+                                if (!read) ...[
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    width: 6,
+                                    height: 6,
+                                    decoration: const BoxDecoration(
+                                      color: AppTheme.primaryNavy,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Icon(
+                          Icons.chevron_right_rounded,
+                          color: AppTheme.textSecondary.withValues(alpha: 0.4),
+                          size: 22,
                         ),
                       ),
                     ],
                   ),
-                ),
-                Icon(
-                  Icons.chevron_right_rounded,
-                  color: AppTheme.textSecondary.withOpacity(0.6),
-                  size: 22,
-                ),
-              ],
-            ),
                 ),
               ],
             ),

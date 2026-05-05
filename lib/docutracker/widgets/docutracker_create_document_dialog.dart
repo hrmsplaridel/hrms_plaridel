@@ -47,7 +47,7 @@ Future<void> showDocuTrackerCreateDocumentDialog(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         const RspFormHeader(
-                          formTitle: 'Create Document',
+                          formTitle: 'Create Draft',
                           subtitle: 'DocuTracker - Municipality of Plaridel',
                         ),
                         Padding(
@@ -102,7 +102,7 @@ Future<void> showDocuTrackerCreateDocumentDialog(
                   decoration: BoxDecoration(
                     color: Colors.grey.shade50,
                     border: Border(
-                      top: BorderSide(color: Colors.black.withOpacity(0.06)),
+                      top: BorderSide(color: Colors.black.withValues(alpha: 0.06)),
                     ),
                   ),
                   child: Row(
@@ -129,7 +129,7 @@ Future<void> showDocuTrackerCreateDocumentDialog(
                               if (created != null) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
-                                    content: Text('Document created.'),
+                                    content: Text('Draft created successfully.'),
                                   ),
                                 );
                                 onCreated?.call();
@@ -149,7 +149,7 @@ Future<void> showDocuTrackerCreateDocumentDialog(
                           }
                         },
                         style: DocuTrackerStyles.primaryButtonStyle(),
-                        child: const Text('Create'),
+                        child: const Text('Create Draft'),
                       ),
                     ],
                   ),

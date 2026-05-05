@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../landingpage/constants/app_theme.dart';
+import 'theme/docutracker_tokens.dart';
 
 /// Shared DocuTracker design tokens matching admin/DTR patterns.
 class DocuTrackerStyles {
@@ -19,7 +20,7 @@ class DocuTrackerStyles {
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: Colors.black.withOpacity(0.08)),
+        borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.08)),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
@@ -37,7 +38,7 @@ class DocuTrackerStyles {
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: Colors.black.withOpacity(0.08)),
+        borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.08)),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
@@ -69,7 +70,7 @@ class DocuTrackerStyles {
 
   static ButtonStyle outlinedButtonStyle() => OutlinedButton.styleFrom(
         foregroundColor: AppTheme.textPrimary,
-        side: BorderSide(color: AppTheme.primaryNavy.withOpacity(0.6)),
+        side: BorderSide(color: AppTheme.primaryNavy.withValues(alpha: 0.6)),
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(10),
@@ -108,10 +109,24 @@ class DocuTrackerStyles {
         backgroundColor: primaryGreen,
         foregroundColor: Colors.white,
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         elevation: 0,
+      );
+
+  // Blue filled — Forward action
+  static ButtonStyle forwardButtonStyle() => FilledButton.styleFrom(
+        backgroundColor: const Color(0xFF3B5BDB),
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        elevation: 0,
+      );
+
+  // Subtle text — Return action (least destructive)
+  static ButtonStyle returnButtonStyle() => TextButton.styleFrom(
+        foregroundColor: const Color(0xFF6B7280),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       );
 
   static ButtonStyle iconButtonStyle() => IconButton.styleFrom(
@@ -121,41 +136,14 @@ class DocuTrackerStyles {
   static Widget filterDropdownWrapper(Widget child) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         decoration: BoxDecoration(
-          color: AppTheme.lightGray.withOpacity(0.5),
+          color: const Color(0xFFF8F9FB),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.transparent),
+          border: Border.all(color: const Color(0xFFE4E7ED)),
         ),
         child: child,
       );
 
-  static BoxDecoration cardDecoration() => BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 20,
-            offset: const Offset(0, 4),
-          ),
-          BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 16,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      );
+  static BoxDecoration cardDecoration() => DocuTrackerTokens.cardDecoration();
 
-  static BoxDecoration listCardDecoration() => BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      );
+  static BoxDecoration listCardDecoration() => DocuTrackerTokens.cardDecoration();
 }

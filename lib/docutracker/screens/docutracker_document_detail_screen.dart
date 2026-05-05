@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../landingpage/constants/app_theme.dart';
@@ -15,7 +16,7 @@ import '../models/document_routing_record.dart';
 import '../models/document_status.dart';
 import '../models/document_type.dart';
 import '../models/workflow_step.dart';
-import '../widgets/docutracker_document_summary_header.dart';
+import '../theme/docutracker_tokens.dart';
 import '../widgets/docutracker_responsive_body.dart';
 import '../widgets/docutracker_status_badge.dart';
 
@@ -70,8 +71,9 @@ class _DocuTrackerDocumentDetailScreenState
         documentId: widget.document.id!,
         isAdmin: widget.isAdmin,
       );
-      if (!context.mounted) return;
+      if (!mounted) return;
       if (!canAccess) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('You do not have access to this document.'),
@@ -82,7 +84,9 @@ class _DocuTrackerDocumentDetailScreenState
       }
       // Load audit trail eagerly; we'll still hide it if permissions deny access.
       provider.loadDocumentHistory(widget.document.id!);
-      _routingRecords = await repo.getDocumentRoutingRecords(widget.document.id!);
+      _routingRecords = await repo.getDocumentRoutingRecords(
+        widget.document.id!,
+      );
       if (mounted) setState(() => _routingLoading = false);
       // Keep shared notification badges in sync while this screen is open.
       await provider.loadNotifications();
@@ -162,78 +166,344 @@ class _DocuTrackerDocumentDetailScreenState
     final docId = widget.document.id;
     final doc = docId != null ? _resolveDocForView(provider) : widget.document;
     final userId = auth.user?.id ?? '';
+    final isPending = doc.status == DocumentStatus.pending;
+    final isReturned = doc.status == DocumentStatus.returned;
+    final isCreator = doc.createdBy == userId;
     final canAct =
         doc.status != DocumentStatus.approved &&
-        doc.status != DocumentStatus.rejected;
+        doc.status != DocumentStatus.rejected &&
+        doc.status != DocumentStatus.cancelled;
+
     final currentStep = doc.currentStep ?? 1;
     final currentRouting = _routingRecords
         .where((r) => r.stepOrder == currentStep)
         .cast<DocumentRoutingRecord?>()
         .firstWhere((_) => true, orElse: () => null);
-    final isAssignedReviewer = !_routingLoading &&
+
+    // isAssignedReviewer is true when:
+    // 1. current_holder matches this user (legacy single-holder), OR
+    // 2. user appears in routing_record_assignees snapshot (primary + backup)
+    // We gate on !_routingLoading so buttons don't flash-hide before data loads.
+    final isAssignedReviewer =
+        !_routingLoading &&
         userId.isNotEmpty &&
-        (doc.currentHolderId == userId ||
-            (currentRouting?.assigneeIds.contains(userId) ?? false));
-    final canApprove = isAssignedReviewer;
-    final canForward = isAssignedReviewer;
-    final canReject = isAssignedReviewer;
-    final canReturn = isAssignedReviewer;
+        (
+          doc.currentHolderId == userId ||
+          (currentRouting?.assigneeIds.contains(userId) ?? false) ||
+          // Fallback for legacy docs where snapshot table may be empty but holder is set.
+          (currentRouting == null && doc.currentHolderId == userId)
+        );
+
+    // WIP Logic: Can only submit if pending or returned
+    final canSubmit =
+        (isPending || isReturned) && (isCreator || _canEdit);
+
+    // Review actions only valid if NOT pending.
+    // While routing is still loading, preserve prior state (don't flip to false).
+    final canApprove =
+        !isPending && (isAssignedReviewer || _canEdit);
+    final canForward =
+        !isPending && (isAssignedReviewer || _canEdit);
+    final canReject =
+        !isPending && (isAssignedReviewer || _canEdit);
+    final canReturn =
+        !isPending && (isAssignedReviewer || _canEdit);
+
     final showYourTurn =
         canAct &&
         !_permissionsLoading &&
         userId.isNotEmpty &&
-        isAssignedReviewer;
+        (isAssignedReviewer || canSubmit);
 
-    final showActions = _shouldShowActionsPanel(doc,
-        canApprove: canApprove,
-        canForward: canForward,
-        canReject: canReject,
-        canReturn: canReturn);
+    final showActions =
+        _shouldShowActionsPanel(
+          doc,
+          canApprove: canApprove,
+          canForward: canForward,
+          canReject: canReject,
+          canReturn: canReturn,
+        ) ||
+        canSubmit;
 
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          RspFormHeader(
-            formTitle: doc.title,
-            subtitle: '${doc.documentNumber ?? '—'} • ${doc.documentType}',
+    return Scaffold(
+      backgroundColor: DocuTrackerTokens.canvas,
+      body: SingleChildScrollView(
+        child: DocuTrackerResponsiveBody(
+          maxWidth: DocuTrackerTokens.maxContentWidth,
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildHeroHeader(doc, showYourTurn),
+              const SizedBox(height: 32),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final isDesktop = constraints.maxWidth > 800;
+
+                  final leftColumn = Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildWorkflowSection(doc, provider, userId),
+                      const SizedBox(height: 24),
+                      _buildHistorySection(provider),
+                    ],
+                  );
+
+                  final rightColumn = Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (showActions) ...[
+                        _buildActionsCard(
+                          doc,
+                          provider,
+                          userId,
+                          canAct,
+                          canSubmit,
+                          canApprove: canApprove,
+                          canForward: canForward,
+                          canReject: canReject,
+                          canReturn: canReturn,
+                        ),
+                        const SizedBox(height: 24),
+                      ],
+                      _buildDocumentInfoSection(doc),
+                    ],
+                  );
+
+                  if (isDesktop) {
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(flex: 7, child: leftColumn),
+                        const SizedBox(width: 32),
+                        Expanded(flex: 4, child: rightColumn),
+                      ],
+                    );
+                  }
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildWorkflowSection(doc, provider, userId),
+                      const SizedBox(height: 24),
+                      if (showActions) ...[
+                        _buildActionsCard(
+                          doc,
+                          provider,
+                          userId,
+                          canAct,
+                          canSubmit,
+                          canApprove: canApprove,
+                          canForward: canForward,
+                          canReject: canReject,
+                          canReturn: canReturn,
+                        ),
+                        const SizedBox(height: 24),
+                      ],
+                      _buildDocumentInfoSection(doc),
+                      const SizedBox(height: 24),
+                      _buildHistorySection(provider),
+                    ],
+                  );
+                },
+              ),
+              const SizedBox(height: 48),
+              const RspFormFooter(),
+              const SizedBox(height: 32),
+            ],
           ),
-          DocuTrackerResponsiveBody(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                DocuTrackerDocumentSummaryHeader(
-                  document: doc,
-                  onBack: () => Navigator.of(context).pop(),
-                  showYourTurnBanner: showYourTurn,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeroHeader(DocuTrackerDocument doc, bool showYourTurn) {
+    final typeName = documentTypeFromString(doc.documentType).displayName;
+
+    String deadlineLabel = '';
+    Color deadlineColor = const Color(0xFF6B7280);
+    IconData deadlineIcon = Icons.schedule_rounded;
+    if (doc.deadlineTime == null &&
+        doc.status == DocumentStatus.pending) {
+      deadlineLabel = 'Awaiting submission';
+      deadlineColor = const Color(0xFF9CA3AF);
+      deadlineIcon = Icons.edit_note_rounded;
+    } else if (doc.deadlineTime != null &&
+        doc.status != DocumentStatus.approved &&
+        doc.status != DocumentStatus.rejected) {
+      final diff = doc.deadlineTime!.difference(DateTime.now());
+      if (diff.isNegative) {
+        deadlineLabel = 'Overdue';
+        deadlineColor = const Color(0xFFDC2626);
+        deadlineIcon = Icons.warning_amber_rounded;
+      } else {
+        final d = diff.inDays;
+        final h = diff.inHours % 24;
+        deadlineLabel = d > 0
+            ? '$d days left'
+            : (h > 0
+                  ? '${diff.inHours}h left'
+                  : '${diff.inMinutes % 60}m left');
+        if (diff.inHours < 24) {
+          deadlineColor = const Color(0xFFEA580C);
+        }
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        InkWell(
+          borderRadius: BorderRadius.circular(4),
+          onTap: () => Navigator.of(context).pop(),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                Icon(
+                  Icons.arrow_back_rounded,
+                  size: 16,
+                  color: Color(0xFF6B7280),
                 ),
-                const SizedBox(height: 20),
-                _buildDocumentInfoSection(doc),
-                const SizedBox(height: 20),
-                _buildWorkflowSection(doc, provider, userId),
-                const SizedBox(height: 20),
-                if (showActions) ...[
-                  _buildActionsSection(
-                    doc,
-                    provider,
-                    userId,
-                    canAct,
-                    canApprove: canApprove,
-                    canForward: canForward,
-                    canReject: canReject,
-                    canReturn: canReturn,
+                SizedBox(width: 4),
+                Text(
+                  'Back to documents',
+                  style: TextStyle(
+                    color: Color(0xFF6B7280),
+                    fontWeight: FontWeight.w500,
                   ),
-                  const SizedBox(height: 20),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF3F4F6),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          typeName,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF4B5563),
+                          ),
+                        ),
+                      ),
+                      if (doc.documentNumber != null) ...[
+                        const SizedBox(width: 12),
+                        Text(
+                          doc.documentNumber!,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF9CA3AF),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    doc.title,
+                    style: const TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF111827),
+                      height: 1.2,
+                      letterSpacing: -0.5,
+                    ),
+                  ),
                 ],
-                _buildHistorySection(provider),
-                const SizedBox(height: 24),
-                const RspFormFooter(),
-                const SizedBox(height: 32),
+              ),
+            ),
+            const SizedBox(width: 24),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                DocuTrackerStatusBadge(status: doc.status),
+                if (deadlineLabel.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: deadlineColor.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: deadlineColor.withValues(alpha: 0.2),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(deadlineIcon, size: 14, color: deadlineColor),
+                        const SizedBox(width: 6),
+                        Text(
+                          deadlineLabel,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: deadlineColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ),
+        if (showYourTurn) ...[
+          const SizedBox(height: 24),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEFF6FF),
+              border: Border.all(color: const Color(0xFFBFDBFE)),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.info_outline_rounded,
+                  color: Color(0xFF1D4ED8),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'It is your turn to act on this document.',
+                    style: TextStyle(
+                      color: Color(0xFF1E3A8A),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
         ],
-      ),
+      ],
     );
   }
 
@@ -349,11 +619,15 @@ class _DocuTrackerDocumentDetailScreenState
         .cast<DocumentRoutingRecord?>()
         .firstWhere((_) => true, orElse: () => null);
     final assigneeNames = currentRouting?.assigneeNames ?? const <String>[];
+    // Same logic as the build() permission gate: include both holder and snapshot assignees.
     final isAssignedReviewer =
         !_routingLoading &&
         currentUserId.isNotEmpty &&
-        (doc.currentHolderId == currentUserId ||
-            (currentRouting?.assigneeIds.contains(currentUserId) ?? false));
+        (
+          doc.currentHolderId == currentUserId ||
+          (currentRouting?.assigneeIds.contains(currentUserId) ?? false) ||
+          (currentRouting == null && doc.currentHolderId == currentUserId)
+        );
     final stepLabel = steps.isEmpty
         ? null
         : () {
@@ -371,48 +645,6 @@ class _DocuTrackerDocumentDetailScreenState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Status',
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.3,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 8,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        DocuTrackerStatusBadge(
-                          status: doc.status,
-                          compact: true,
-                        ),
-                        Text(
-                          doc.status.displayName,
-                          style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
           Text(
             total != null ? 'Step $current of $total' : 'Step $current',
             style: TextStyle(
@@ -432,293 +664,415 @@ class _DocuTrackerDocumentDetailScreenState
             const SizedBox(height: 14),
             _WorkflowStepStrip(steps: steps, currentStepOrder: current),
           ],
-          const SizedBox(height: 16),
-          _CurrentStepReviewersCard(
+          const SizedBox(height: 20),
+          _CurrentAssignmentCard(
             reviewers: assigneeNames,
             youAreAssigned: isAssignedReviewer,
-          ),
-          const SizedBox(height: 10),
-          _CurrentHolderCard(
-            name: doc.assigneeName,
-            userId: doc.currentHolderId,
+            primaryHolderName: doc.assigneeName,
+            primaryHolderId: doc.currentHolderId,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildActionsSection(
+  Widget _buildActionsCard(
     DocuTrackerDocument doc,
     DocuTrackerProvider provider,
     String userId,
     bool canAct,
-    {required bool canApprove,
+    bool canSubmit, {
+    required bool canApprove,
     required bool canForward,
     required bool canReject,
-    required bool canReturn}
-  ) {
-    final actions = <Widget>[
+    required bool canReturn,
+  }) {
+    final primaryActions = <Widget>[
+      if (canAct && canSubmit)
+        Tooltip(
+          message: 'Submit document to start the workflow',
+          child: FilledButton.icon(
+            onPressed: provider.loading
+                ? null
+                : () async {
+                    final ok = await provider.submitDocument(
+                      doc,
+                      actionBy: userId,
+                      remarks: _remarkController.text,
+                    );
+                    if (mounted && ok) {
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Document submitted successfully.'),
+                        ),
+                      );
+                      Navigator.of(context).pop();
+                    }
+                  },
+            icon: const Icon(Icons.send_rounded, size: 18),
+            label: const Text('Submit'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF3B5BDB), // Navy/Blue
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+            ),
+          ),
+        ),
       if (canAct && canApprove)
-        FilledButton.icon(
-          onPressed: provider.loading
-              ? null
-              : () async {
-                  final ok = await provider.approveDocument(
-                    doc,
-                    actionBy: userId,
-                    remarks: _remarkController.text,
-                  );
-                  if (context.mounted && ok) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Document approved.')),
+        Tooltip(
+          message: 'Approve this document to advance workflow',
+          child: FilledButton.icon(
+            onPressed: provider.loading
+                ? null
+                : () async {
+                    final ok = await provider.approveDocument(
+                      doc,
+                      actionBy: userId,
+                      remarks: _remarkController.text,
                     );
-                    Navigator.of(context).pop();
-                  }
-                },
-          icon: const Icon(Icons.check_circle_rounded, size: 18),
-          label: const Text('Approve'),
-          style: DocuTrackerStyles.approveButtonStyle(),
-        ),
-      if (canAct && canReject)
-        OutlinedButton.icon(
-          onPressed: provider.loading
-              ? null
-              : () async {
-                  final remarkCtrl = TextEditingController();
-                  try {
-                    await showDialog<void>(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text('Reject document'),
-                        content: TextField(
-                          controller: remarkCtrl,
-                          autofocus: true,
-                          decoration: DocuTrackerStyles.inputDecoration(
-                            'Reason for rejection (required)',
-                            Icons.cancel_rounded,
-                          ),
-                          maxLines: 3,
-                        ),
-                        actions: [
-                          OutlinedButton(
-                            onPressed: () => Navigator.of(ctx).pop(),
-                            style: DocuTrackerStyles.outlinedButtonStyle(),
-                            child: const Text('Cancel'),
-                          ),
-                          FilledButton(
-                            onPressed: () async {
-                              final remarks = remarkCtrl.text.trim();
-                              if (remarks.isEmpty) return;
-                              Navigator.of(ctx).pop();
-                              final ok = await provider.rejectDocument(
-                                doc,
-                                remarks: remarks,
-                                actionBy: userId,
-                              );
-                              if (context.mounted && ok) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Document rejected.'),
-                                  ),
-                                );
-                                Navigator.of(context).pop();
-                              }
-                            },
-                            style: DocuTrackerStyles.destructiveButtonStyle(),
-                            child: const Text('Reject'),
-                          ),
-                        ],
-                      ),
-                    );
-                  } finally {
-                    remarkCtrl.dispose();
-                  }
-                },
-          icon: const Icon(Icons.cancel_rounded, size: 18),
-          label: const Text('Reject'),
-          style: DocuTrackerStyles.outlinedRedStyle(),
-        ),
-      if (canAct && canReturn)
-        OutlinedButton.icon(
-          onPressed: provider.loading
-              ? null
-              : () async {
-                  final returnCtrl = TextEditingController();
-                  try {
-                    await showDialog<void>(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text('Return document'),
-                        content: TextField(
-                          controller: returnCtrl,
-                          decoration: DocuTrackerStyles.inputDecoration(
-                            'Reason for return (optional)',
-                            Icons.reply_rounded,
-                          ),
-                          maxLines: 3,
-                        ),
-                        actions: [
-                          OutlinedButton(
-                            onPressed: () => Navigator.of(ctx).pop(),
-                            style: DocuTrackerStyles.outlinedButtonStyle(),
-                            child: const Text('Cancel'),
-                          ),
-                          FilledButton(
-                            onPressed: () async {
-                              final remarks = returnCtrl.text.trim();
-                              Navigator.of(ctx).pop();
-                              final ok = await provider.returnDocument(
-                                doc,
-                                remarks: remarks.isEmpty ? null : remarks,
-                                actionBy: userId,
-                              );
-                              if (context.mounted && ok) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Document returned.'),
-                                  ),
-                                );
-                                Navigator.of(context).pop();
-                              }
-                            },
-                            style: DocuTrackerStyles.primaryButtonStyle(),
-                            child: const Text('Return'),
-                          ),
-                        ],
-                      ),
-                    );
-                  } finally {
-                    returnCtrl.dispose();
-                  }
-                },
-          icon: const Icon(Icons.reply_rounded, size: 18),
-          label: const Text('Return'),
-          style: DocuTrackerStyles.outlinedButtonStyle(),
+                    if (mounted && ok) {
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Document approved.')),
+                      );
+                      Navigator.of(context).pop();
+                    }
+                  },
+            icon: const Icon(Icons.check_circle_rounded, size: 18),
+            label: const Text('Approve'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF10B981), // Green
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+            ),
+          ),
         ),
       if (canAct && canForward)
-        OutlinedButton.icon(
-          onPressed: provider.loading
-              ? null
-              : () async {
-                  final ok = await provider.forwardDocument(
-                    doc,
-                    actionBy: userId,
-                    remarks: _remarkController.text.trim().isEmpty
-                        ? null
-                        : _remarkController.text.trim(),
-                  );
-                  if (context.mounted && ok) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Document forwarded.')),
+        Tooltip(
+          message: 'Send document to the next recipient',
+          child: FilledButton.icon(
+            onPressed: provider.loading
+                ? null
+                : () async {
+                    final ok = await provider.forwardDocument(
+                      doc,
+                      actionBy: userId,
+                      remarks: _remarkController.text.trim().isEmpty
+                          ? null
+                          : _remarkController.text.trim(),
                     );
-                    Navigator.of(context).pop();
-                  }
-                },
-          icon: const Icon(Icons.forward_rounded, size: 18),
-          label: const Text('Forward'),
-          style: DocuTrackerStyles.outlinedButtonStyle(),
-        ),
-      if (_canEdit)
-        OutlinedButton.icon(
-          onPressed: provider.loading
-              ? null
-              : () async {
-                  final remarkCtrl = TextEditingController();
-                  try {
-                    await showDialog<void>(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text('Remark'),
-                        content: TextField(
-                          controller: remarkCtrl,
-                          autofocus: true,
-                          decoration: DocuTrackerStyles.inputDecoration(
-                            'Enter remark (logged to history)',
-                            Icons.comment_rounded,
-                          ),
-                          maxLines: 4,
-                        ),
-                        actions: [
-                          OutlinedButton(
-                            onPressed: () => Navigator.of(ctx).pop(),
-                            style: DocuTrackerStyles.outlinedButtonStyle(),
-                            child: const Text('Cancel'),
-                          ),
-                          FilledButton(
-                            onPressed: () async {
-                              final remarks = remarkCtrl.text.trim();
-                              if (remarks.isEmpty) return;
-                              Navigator.of(ctx).pop();
-                              final ok = await provider.addRemark(
-                                doc,
-                                actorId: userId,
-                                remarks: remarks,
-                              );
-                              if (context.mounted && ok) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Remark added.'),
-                                  ),
-                                );
-                                provider.loadDocumentHistory(doc.id!);
-                              }
-                            },
-                            style: DocuTrackerStyles.primaryButtonStyle(),
-                            child: const Text('Save'),
-                          ),
-                        ],
-                      ),
-                    );
-                  } finally {
-                    remarkCtrl.dispose();
-                  }
-                },
-          icon: const Icon(Icons.comment_rounded, size: 18),
-          label: const Text('Remark'),
-          style: DocuTrackerStyles.outlinedButtonStyle(),
+                    if (mounted && ok) {
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Document forwarded.')),
+                      );
+                      Navigator.of(context).pop();
+                    }
+                  },
+            icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+            label: const Text('Forward'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF3B82F6), // Blue
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+            ),
+          ),
         ),
     ];
 
-    return _DocuTrackerDetailSection(
-      icon: Icons.touch_app_outlined,
-      title: 'Actions',
-      subtitle:
-          'Workflow buttons appear only when you are assigned to the current step.',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (canAct && (canApprove || canForward)) ...[
-            Text(
-              'Optional note (Approve / Forward)',
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
+    final secondaryActions = <Widget>[
+      if (canAct && canReturn)
+        Tooltip(
+          message: 'Send back to sender for corrections',
+          child: OutlinedButton.icon(
+            onPressed: provider.loading
+                ? null
+                : () async {
+                    final returnCtrl = TextEditingController();
+                    try {
+                      await showDialog<void>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Return document'),
+                          content: TextField(
+                            controller: returnCtrl,
+                            decoration: DocuTrackerStyles.inputDecoration(
+                              'Reason for return (optional)',
+                              Icons.reply_rounded,
+                            ),
+                            maxLines: 3,
+                          ),
+                          actions: [
+                            OutlinedButton(
+                              onPressed: () => Navigator.of(ctx).pop(),
+                              style: DocuTrackerStyles.outlinedButtonStyle(),
+                              child: const Text('Cancel'),
+                            ),
+                            FilledButton(
+                              onPressed: () async {
+                                final remarks = returnCtrl.text.trim();
+                                Navigator.of(ctx).pop();
+                                final ok = await provider.returnDocument(
+                                  doc,
+                                  remarks: remarks.isEmpty ? null : remarks,
+                                  actionBy: userId,
+                                );
+                                if (mounted && ok) {
+                                  if (!mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Document returned.'),
+                                    ),
+                                  );
+                                  Navigator.of(context).pop();
+                                }
+                              },
+                              style: DocuTrackerStyles.primaryButtonStyle(),
+                              child: const Text('Return'),
+                            ),
+                          ],
+                        ),
+                      );
+                    } finally {
+                      returnCtrl.dispose();
+                    }
+                  },
+            icon: const Icon(Icons.undo_rounded, size: 18),
+            label: const Text('Return'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFFF59E0B), // Orange
+              side: const BorderSide(color: Color(0xFFF59E0B)),
+              padding: const EdgeInsets.symmetric(vertical: 16),
             ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _remarkController,
-              maxLines: 2,
-              decoration: DocuTrackerStyles.inputDecoration(
-                'Add context for approver or next recipient',
-                Icons.notes_rounded,
+          ),
+        ),
+      if (canAct && canReject)
+        Tooltip(
+          message: 'Terminate document workflow permanently',
+          child: OutlinedButton.icon(
+            onPressed: provider.loading
+                ? null
+                : () async {
+                    final remarkCtrl = TextEditingController();
+                    try {
+                      await showDialog<void>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Reject document'),
+                          content: TextField(
+                            controller: remarkCtrl,
+                            autofocus: true,
+                            decoration: DocuTrackerStyles.inputDecoration(
+                              'Reason for rejection (required)',
+                              Icons.cancel_rounded,
+                            ),
+                            maxLines: 3,
+                          ),
+                          actions: [
+                            OutlinedButton(
+                              onPressed: () => Navigator.of(ctx).pop(),
+                              style: DocuTrackerStyles.outlinedButtonStyle(),
+                              child: const Text('Cancel'),
+                            ),
+                            FilledButton(
+                              onPressed: () async {
+                                final remarks = remarkCtrl.text.trim();
+                                if (remarks.isEmpty) return;
+                                Navigator.of(ctx).pop();
+                                final ok = await provider.rejectDocument(
+                                  doc,
+                                  remarks: remarks,
+                                  actionBy: userId,
+                                );
+                                if (mounted && ok) {
+                                  if (!mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Document rejected.'),
+                                    ),
+                                  );
+                                  Navigator.of(context).pop();
+                                }
+                              },
+                              style: DocuTrackerStyles.destructiveButtonStyle(),
+                              child: const Text('Reject'),
+                            ),
+                          ],
+                        ),
+                      );
+                    } finally {
+                      remarkCtrl.dispose();
+                    }
+                  },
+            icon: const Icon(Icons.cancel_rounded, size: 18),
+            label: const Text('Reject'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFFEF4444), // Red
+              side: const BorderSide(color: Color(0xFFEF4444)),
+              padding: const EdgeInsets.symmetric(vertical: 16),
+            ),
+          ),
+        ),
+    ];
+
+    final adminRemark = _canEdit
+        ? OutlinedButton.icon(
+            onPressed: provider.loading
+                ? null
+                : () async {
+                    final remarkCtrl = TextEditingController();
+                    try {
+                      await showDialog<void>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Remark'),
+                          content: TextField(
+                            controller: remarkCtrl,
+                            autofocus: true,
+                            decoration: DocuTrackerStyles.inputDecoration(
+                              'Enter remark (logged to history)',
+                              Icons.comment_rounded,
+                            ),
+                            maxLines: 4,
+                          ),
+                          actions: [
+                            OutlinedButton(
+                              onPressed: () => Navigator.of(ctx).pop(),
+                              style: DocuTrackerStyles.outlinedButtonStyle(),
+                              child: const Text('Cancel'),
+                            ),
+                            FilledButton(
+                              onPressed: () async {
+                                final remarks = remarkCtrl.text.trim();
+                                if (remarks.isEmpty) return;
+                                Navigator.of(ctx).pop();
+                                final ok = await provider.addRemark(
+                                  doc,
+                                  actorId: userId,
+                                  remarks: remarks,
+                                );
+                                if (mounted && ok) {
+                                  if (!mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Remark added.'),
+                                    ),
+                                  );
+                                  provider.loadDocumentHistory(doc.id!);
+                                }
+                              },
+                              style: DocuTrackerStyles.primaryButtonStyle(),
+                              child: const Text('Save'),
+                            ),
+                          ],
+                        ),
+                      );
+                    } finally {
+                      remarkCtrl.dispose();
+                    }
+                  },
+            icon: const Icon(Icons.comment_rounded, size: 18),
+            label: const Text('Add remark (admin)'),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+            ),
+          )
+        : null;
+
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Actions',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF111827),
               ),
             ),
             const SizedBox(height: 16),
-          ],
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              for (final w in actions)
-                ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 48),
-                  child: w,
+            if (canAct && (canApprove || canForward)) ...[
+              TextField(
+                controller: _remarkController,
+                maxLines: 2,
+                decoration: DocuTrackerStyles.inputDecoration(
+                  'Optional note for next recipient...',
+                  Icons.notes_rounded,
                 ),
+              ),
+              const SizedBox(height: 16),
             ],
-          ),
-        ],
+            if (primaryActions.isNotEmpty) ...[
+              const Text(
+                'PRIMARY',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF9CA3AF),
+                  letterSpacing: 0.5,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: primaryActions
+                    .map(
+                      (w) => Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: w,
+                      ),
+                    )
+                    .toList(),
+              ),
+              const SizedBox(height: 8),
+            ],
+            if (secondaryActions.isNotEmpty) ...[
+              const Text(
+                'SECONDARY',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF9CA3AF),
+                  letterSpacing: 0.5,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: secondaryActions
+                    .map(
+                      (w) => Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: w,
+                      ),
+                    )
+                    .toList(),
+              ),
+            ],
+            if ((primaryActions.isNotEmpty || secondaryActions.isNotEmpty) &&
+                adminRemark != null)
+              const SizedBox(height: 6),
+            if (adminRemark != null) adminRemark,
+          ],
+        ),
       ),
     );
   }
@@ -780,6 +1134,15 @@ class _DocuTrackerDocumentDetailScreenState
   }
 }
 
+String _getInitials(String name) {
+  if (name.isEmpty) return '??';
+  final parts = name.trim().split(' ');
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+  return parts[0][0].toUpperCase();
+}
+
 class _DocuTrackerDetailSection extends StatelessWidget {
   const _DocuTrackerDetailSection({
     required this.icon,
@@ -801,15 +1164,17 @@ class _DocuTrackerDetailSection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: AppTheme.primaryNavy.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(10),
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(
+                      DocuTrackerTokens.radiusSm,
+                    ),
                   ),
                   child: Icon(icon, color: AppTheme.primaryNavy, size: 22),
                 ),
@@ -820,20 +1185,19 @@ class _DocuTrackerDetailSection extends StatelessWidget {
                     children: [
                       Text(
                         title,
-                        style: TextStyle(
+                        style: const TextStyle(
                           color: AppTheme.textPrimary,
                           fontSize: 16,
                           fontWeight: FontWeight.w700,
+                          letterSpacing: -0.2,
                         ),
                       ),
                       if (subtitle != null && subtitle!.isNotEmpty) ...[
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 6),
                         Text(
                           subtitle!,
-                          style: TextStyle(
-                            color: AppTheme.textSecondary,
+                          style: DocuTrackerTokens.subtitleStyle().copyWith(
                             fontSize: 12,
-                            height: 1.35,
                           ),
                         ),
                       ],
@@ -843,13 +1207,13 @@ class _DocuTrackerDetailSection extends StatelessWidget {
               ],
             ),
           ),
-          const Divider(height: 1),
+          Divider(
+            height: 1,
+            color: DocuTrackerTokens.borderSubtle.withValues(alpha: 0.9),
+          ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
-            child: Material(
-              color: Colors.transparent,
-              child: child,
-            ),
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+            child: Material(color: Colors.transparent, child: child),
           ),
         ],
       ),
@@ -870,29 +1234,33 @@ class _WorkflowStepStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          for (var i = 0; i < steps.length; i++) ...[
-            if (i > 0)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2),
-                child: Icon(
-                  Icons.chevron_right_rounded,
-                  size: 20,
-                  color: AppTheme.textSecondary.withOpacity(0.45),
-                ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var i = 0; i < steps.length; i++) ...[
+              _WorkflowStepNode(
+                order: steps[i].stepOrder,
+                label: steps[i].label ?? 'Step ${steps[i].stepOrder}',
+                state: steps[i].stepOrder < currentStepOrder
+                    ? _WorkflowStepVisual.complete
+                    : steps[i].stepOrder == currentStepOrder
+                    ? _WorkflowStepVisual.current
+                    : _WorkflowStepVisual.upcoming,
               ),
-            _WorkflowStepPill(
-              order: steps[i].stepOrder,
-              label: steps[i].label ?? 'Step ${steps[i].stepOrder}',
-              state: steps[i].stepOrder < currentStepOrder
-                  ? _WorkflowStepVisual.complete
-                  : steps[i].stepOrder == currentStepOrder
-                  ? _WorkflowStepVisual.current
-                  : _WorkflowStepVisual.upcoming,
-            ),
+              if (i < steps.length - 1)
+                Container(
+                  margin: const EdgeInsets.only(top: 14, left: 4, right: 4),
+                  width: 32,
+                  height: 2,
+                  color: steps[i].stepOrder < currentStepOrder
+                      ? const Color(0xFF3B5BDB)
+                      : const Color(0xFFE5E7EB),
+                ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -900,8 +1268,8 @@ class _WorkflowStepStrip extends StatelessWidget {
 
 enum _WorkflowStepVisual { complete, current, upcoming }
 
-class _WorkflowStepPill extends StatelessWidget {
-  const _WorkflowStepPill({
+class _WorkflowStepNode extends StatelessWidget {
+  const _WorkflowStepNode({
     required this.order,
     required this.label,
     required this.state,
@@ -915,246 +1283,274 @@ class _WorkflowStepPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final isCurrent = state == _WorkflowStepVisual.current;
     final isDone = state == _WorkflowStepVisual.complete;
-    final bg = isCurrent
-        ? AppTheme.primaryNavy.withOpacity(0.12)
-        : isDone
-        ? AppTheme.primaryNavy.withOpacity(0.06)
-        : AppTheme.lightGray.withOpacity(0.85);
-    final border = isCurrent
-        ? AppTheme.primaryNavy
-        : Colors.black.withOpacity(0.08);
-    final fg = isCurrent
-        ? AppTheme.primaryNavy
-        : isDone
-        ? AppTheme.textPrimary
-        : AppTheme.textSecondary;
 
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 168),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: border, width: isCurrent ? 1.5 : 1),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (isDone)
-                Icon(
-                  Icons.check_circle_rounded,
-                  size: 14,
-                  color: AppTheme.primaryNavy,
-                )
-              else if (isCurrent)
-                Icon(
-                  Icons.radio_button_checked_rounded,
-                  size: 14,
-                  color: AppTheme.primaryNavy,
-                )
-              else
-                Icon(
-                  Icons.radio_button_off_rounded,
-                  size: 14,
-                  color: AppTheme.textSecondary,
-                ),
-              const SizedBox(width: 6),
-              Text(
-                'Step $order',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: fg,
-                ),
-              ),
-            ],
+    final nodeColor = isCurrent
+        ? const Color(0xFF3B5BDB)
+        : isDone
+        ? const Color(0xFF3B5BDB)
+        : Colors.white;
+
+    final borderColor = isCurrent || isDone
+        ? const Color(0xFF3B5BDB)
+        : const Color(0xFFD1D5DB);
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 30,
+          height: 30,
+          decoration: BoxDecoration(
+            color: nodeColor,
+            shape: BoxShape.circle,
+            border: Border.all(color: borderColor, width: 2),
+            boxShadow: isCurrent
+                ? [
+                    BoxShadow(
+                      color: const Color(0xFF3B5BDB).withValues(alpha: 0.3),
+                      blurRadius: 8,
+                      spreadRadius: 2,
+                    ),
+                  ]
+                : null,
           ),
-          const SizedBox(height: 4),
-          Text(
+          child: Center(
+            child: isDone
+                ? const Icon(Icons.check_rounded, size: 16, color: Colors.white)
+                : Text(
+                    order.toString(),
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: isCurrent ? Colors.white : const Color(0xFF6B7280),
+                    ),
+                  ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: 80,
+          child: Text(
             label,
+            textAlign: TextAlign.center,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 12, color: fg, height: 1.2),
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: isCurrent ? FontWeight.w700 : FontWeight.w500,
+              color: isCurrent
+                  ? const Color(0xFF111827)
+                  : const Color(0xFF6B7280),
+              height: 1.2,
+            ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
 
-class _CurrentStepReviewersCard extends StatelessWidget {
-  const _CurrentStepReviewersCard({
+class _CurrentAssignmentCard extends StatelessWidget {
+  const _CurrentAssignmentCard({
     required this.reviewers,
     required this.youAreAssigned,
+    this.primaryHolderName,
+    this.primaryHolderId,
   });
 
   final List<String> reviewers;
   final bool youAreAssigned;
+  final String? primaryHolderName;
+  final String? primaryHolderId;
 
   @override
   Widget build(BuildContext context) {
-    final title = 'Current step reviewers (${reviewers.length})';
-    final bg = youAreAssigned
-        ? AppTheme.primaryNavy.withValues(alpha: 0.07)
-        : AppTheme.lightGray.withValues(alpha: 0.45);
-    final border = youAreAssigned
-        ? AppTheme.primaryNavy.withValues(alpha: 0.22)
-        : Colors.black.withValues(alpha: 0.08);
+    final hasLegacyHolder =
+        (primaryHolderName != null && primaryHolderName!.trim().isNotEmpty) ||
+        (primaryHolderId != null && primaryHolderId!.isNotEmpty);
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: border),
+        color: youAreAssigned ? const Color(0xFFEFF6FF) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: youAreAssigned
+              ? const Color(0xFF93C5FD)
+              : const Color(0xFFE5E7EB),
+          width: youAreAssigned ? 1.5 : 1,
+        ),
+        boxShadow: [
+          if (youAreAssigned)
+            BoxShadow(
+              color: const Color(0xFF3B82F6).withValues(alpha: 0.08),
+              blurRadius: 12,
+              spreadRadius: 2,
+            ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(
-                youAreAssigned ? Icons.verified_user_rounded : Icons.group_rounded,
-                size: 18,
-                color: youAreAssigned ? AppTheme.primaryNavy : AppTheme.textSecondary,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  title,
-                  style: TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ),
-              if (youAreAssigned)
-                Chip(
-                  label: const Text(
-                    'You are assigned',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
-                  ),
-                  visualDensity: VisualDensity.compact,
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  side: BorderSide(color: AppTheme.primaryNavy.withValues(alpha: 0.22)),
-                  backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.08),
-                ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          if (reviewers.isEmpty)
-            Text(
-              'No reviewers recorded for this step.',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-            )
-          else
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (final n in reviewers)
-                  Chip(
-                    label: Text(
-                      n,
-                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-                    ),
-                    visualDensity: VisualDensity.compact,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-              ],
+          // Header
+          Padding(
+            padding: const EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 16,
+              bottom: 12,
             ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CurrentHolderCard extends StatelessWidget {
-  const _CurrentHolderCard({this.name, this.userId});
-
-  final String? name;
-  final String? userId;
-
-  @override
-  Widget build(BuildContext context) {
-    final display = (name != null && name!.trim().isNotEmpty)
-        ? name!.trim()
-        : null;
-    final idLine = userId != null && userId!.isNotEmpty ? userId : null;
-
-    if (display == null && idLine == null) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: AppTheme.lightGray.withOpacity(0.45),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.black.withOpacity(0.08)),
-        ),
-        child: Text(
-          'No primary holder recorded. Use “Current step reviewers” as the source of truth.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-        ),
-      );
-    }
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppTheme.primaryNavy.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppTheme.primaryNavy.withOpacity(0.22)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          CircleAvatar(
-            radius: 22,
-            backgroundColor: AppTheme.primaryNavy.withOpacity(0.14),
-            child: Icon(Icons.person_rounded, color: AppTheme.primaryNavy),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
               children: [
-                Text(
-                  'Primary holder (legacy)',
-                  style: TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                  ),
+                Icon(
+                  youAreAssigned
+                      ? Icons.person_pin_circle_rounded
+                      : Icons.pending_actions_rounded,
+                  size: 20,
+                  color: youAreAssigned
+                      ? const Color(0xFF2563EB)
+                      : const Color(0xFF4B5563),
                 ),
-                const SizedBox(height: 4),
-                if (display != null)
-                  Text(
-                    display,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Currently assigned to',
                     style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: 15,
+                      color: youAreAssigned
+                          ? const Color(0xFF1D4ED8)
+                          : const Color(0xFF374151),
+                      fontSize: 13,
                       fontWeight: FontWeight.w700,
+                      letterSpacing: 0.3,
                     ),
                   ),
-                if (idLine != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      display != null ? 'User ID: $idLine' : idLine,
+                ),
+                if (youAreAssigned)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2563EB),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Text(
+                      'Your Action Required',
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 12,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
                       ),
                     ),
                   ),
+              ],
+            ),
+          ),
+          const Divider(height: 1, color: Color(0xFFE5E7EB)),
+
+          // Reviewers List
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (reviewers.isEmpty && !hasLegacyHolder)
+                  const Text(
+                    'No reviewers recorded for this step.',
+                    style: TextStyle(color: Color(0xFF6B7280), fontSize: 13),
+                  )
+                else ...[
+                  if (reviewers.isNotEmpty) ...[
+                    const Text(
+                      'Designated Reviewers:',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF6B7280),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: reviewers
+                          .map(
+                            (n) => Chip(
+                              avatar: CircleAvatar(
+                                backgroundColor: const Color(0xFFDBEAFE),
+                                child: Text(
+                                  n[0].toUpperCase(),
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    color: Color(0xFF1E40AF),
+                                  ),
+                                ),
+                              ),
+                              label: Text(
+                                n,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              backgroundColor: Colors.white,
+                              side: const BorderSide(color: Color(0xFFE5E7EB)),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ],
+                  if (hasLegacyHolder && reviewers.isEmpty) ...[
+                    const Text(
+                      'Primary Holder:',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF6B7280),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const CircleAvatar(
+                          radius: 16,
+                          backgroundColor: Color(0xFFF3F4F6),
+                          child: Icon(
+                            Icons.person,
+                            size: 16,
+                            color: Color(0xFF9CA3AF),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                primaryHolderName ?? 'Unknown User',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF111827),
+                                ),
+                              ),
+                              if (primaryHolderId != null)
+                                Text(
+                                  'ID: $primaryHolderId',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Color(0xFF6B7280),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
               ],
             ),
           ),
@@ -1209,20 +1605,12 @@ class _Timeline extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        for (var i = 0; i < entries.length; i++) ...[
+        for (var i = 0; i < entries.length; i++)
           _TimelineItem(
             entry: entries[i],
             isFirst: i == 0,
             isLast: i == entries.length - 1,
           ),
-          if (i < entries.length - 1)
-            Container(
-              margin: const EdgeInsets.only(left: 11),
-              width: 2,
-              height: 8,
-              color: Colors.black.withOpacity(0.06),
-            ),
-        ],
       ],
     );
   }
@@ -1241,124 +1629,285 @@ class _TimelineItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isOverdue = entry.isOverdueLog;
-    final isEscalation = entry.isEscalationLog;
-    final color = isOverdue || isEscalation
-        ? Colors.orange
-        : AppTheme.primaryNavy.withOpacity(0.6);
+    final isSystemEvent =
+        entry.isOverdueLog ||
+        entry.isEscalationLog ||
+        entry.action == 'overdue' ||
+        entry.action == 'escalated';
+    final isPositive =
+        entry.action == 'approved' ||
+        entry.action == 'created' ||
+        entry.action == 'forwarded';
+    final isNegative = entry.action == 'rejected' || entry.action == 'returned';
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Column(
-          children: [
-            Container(
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.2),
-                shape: BoxShape.circle,
-                border: Border.all(color: color, width: 2),
-              ),
-              child: Icon(_iconForAction(entry.action), size: 12, color: color),
-            ),
-            if (!isLast)
-              Container(
-                width: 2,
-                height: 40,
-                color: Colors.black.withOpacity(0.06),
-              ),
-          ],
-        ),
-        const SizedBox(width: 6),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 16),
+    Color dotColor = const Color(0xFF6B7280);
+    Color bgColor = Colors.white;
+    Color borderColor = const Color(0xFFE4E7ED);
+
+    if (isSystemEvent) {
+      dotColor = const Color(0xFFF59E0B);
+      bgColor = const Color(0xFFFFFBEB);
+      borderColor = const Color(0xFFFDE68A);
+    } else if (isPositive) {
+      dotColor = const Color(0xFF10B981);
+    } else if (isNegative) {
+      dotColor = const Color(0xFFEF4444);
+    }
+
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Timeline Track
+          SizedBox(
+            width: 32,
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (entry.createdAt != null)
-                  Text(
-                    _formatEntryTime(entry.createdAt!),
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: dotColor.withValues(alpha: 0.3),
+                      width: 2,
                     ),
                   ),
-                if (entry.createdAt != null) const SizedBox(height: 4),
-                Text(
-                  _actionLabel(entry.action),
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
+                  child: Center(
+                    child: isSystemEvent
+                        ? Icon(
+                            entry.isEscalationLog
+                                ? Icons.trending_up_rounded
+                                : Icons.alarm_rounded,
+                            size: 16,
+                            color: dotColor,
+                          )
+                        : CircleAvatar(
+                            radius: 14,
+                            backgroundColor: dotColor.withValues(alpha: 0.1),
+                            child: Text(
+                              _getInitials(entry.actorName ?? '??'),
+                              style: TextStyle(
+                                color: dotColor,
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
                   ),
                 ),
-                if (entry.actorName != null || entry.actorId != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      'By ${entry.actorName ?? entry.actorId ?? '—'}',
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                if (entry.fromStep != null || entry.toStep != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    _stepLine(entry),
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-                if (entry.fromStatus != null || entry.toStatus != null) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    _statusLine(entry),
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-                if (entry.remarks != null && entry.remarks!.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(
-                      entry.remarks!,
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 13,
-                        height: 1.35,
-                      ),
-                    ),
+                if (!isLast)
+                  Expanded(
+                    child: Container(width: 2, color: const Color(0xFFE5E7EB)),
                   ),
               ],
             ),
           ),
-        ),
-      ],
+          const SizedBox(width: 16),
+          // Content Card
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 24),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: bgColor,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: borderColor),
+                  boxShadow: [
+                    if (!isSystemEvent)
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.02),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                  ],
+                ),
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _actionLabel(entry.action),
+                            style: TextStyle(
+                              color: isSystemEvent
+                                  ? const Color(0xFF92400E)
+                                  : const Color(0xFF111827),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        if (entry.createdAt != null)
+                          Text(
+                            _formatEntryTime(entry.createdAt!),
+                            style: TextStyle(
+                              color: isSystemEvent
+                                  ? const Color(0xFFB45309)
+                                  : const Color(0xFF6B7280),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                      ],
+                    ),
+                    if (entry.actorName != null || entry.actorId != null) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Text(
+                            isSystemEvent
+                                ? 'System Action'
+                                : (entry.actorName ?? 'Unknown User'),
+                            style: TextStyle(
+                              color: isSystemEvent
+                                  ? const Color(0xFFD97706)
+                                  : const Color(0xFF111827),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (!isSystemEvent && entry.actorId != null) ...[
+                            const SizedBox(width: 6),
+                            Text(
+                              '#${entry.actorId!.substring(0, min(8, entry.actorId!.length))}',
+                              style: const TextStyle(
+                                color: Color(0xFF9CA3AF),
+                                fontSize: 11,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                    if (entry.fromStep != null ||
+                        entry.toStep != null ||
+                        entry.fromStatus != null ||
+                        entry.toStatus != null) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isSystemEvent
+                              ? Colors.white.withValues(alpha: 0.5)
+                              : const Color(0xFFF8F9FB),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isSystemEvent
+                                ? const Color(0xFFFDE68A)
+                                : const Color(0xFFF3F4F6),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (entry.fromStep != null || entry.toStep != null)
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.route_rounded,
+                                    size: 14,
+                                    color: Color(0xFF9CA3AF),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    _stepLine(entry),
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFF4B5563),
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            if ((entry.fromStep != null ||
+                                    entry.toStep != null) &&
+                                (entry.fromStatus != null ||
+                                    entry.toStatus != null))
+                              const SizedBox(height: 4),
+                            if (entry.fromStatus != null ||
+                                entry.toStatus != null)
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.track_changes_rounded,
+                                    size: 14,
+                                    color: Color(0xFF9CA3AF),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    _statusLine(entry),
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFF4B5563),
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    if (entry.remarks != null && entry.remarks!.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: isSystemEvent
+                              ? Colors.white.withValues(alpha: 0.5)
+                              : const Color(0xFFF8F9FB),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isSystemEvent
+                                ? const Color(0xFFFDE68A)
+                                : const Color(0xFFE4E7ED),
+                          ),
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: IntrinsicHeight(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Container(width: 4, color: dotColor),
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Text(
+                                    entry.remarks!,
+                                    style: TextStyle(
+                                      color: isSystemEvent
+                                          ? const Color(0xFF92400E)
+                                          : const Color(0xFF374151),
+                                      fontSize: 13,
+                                      height: 1.4,
+                                      fontStyle: FontStyle.italic,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
-  }
-
-  IconData _iconForAction(String? action) {
-    return switch (action) {
-      'created' => Icons.add_circle_outline,
-      'assigned' => Icons.person_add_outlined,
-      'approved' => Icons.check_circle_outline,
-      'rejected' => Icons.cancel_outlined,
-      'returned' => Icons.reply,
-      'forwarded' => Icons.forward,
-      'overdue' => Icons.warning_amber_rounded,
-      'escalated' => Icons.trending_up,
-      'remark' => Icons.comment_outlined,
-      _ => Icons.circle_outlined,
-    };
   }
 
   String _actionLabel(String? action) {

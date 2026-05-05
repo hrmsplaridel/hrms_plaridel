@@ -1,4 +1,8 @@
+const { coalesceDocumentTitle } = require('../utils/docutrackerDisplayTitle');
+const { sameEntityId } = require('../utils/sameEntityId');
+
 const VALID_STATUSES = new Set([
+  'draft',
   'pending',
   'in_review',
   'approved',
@@ -25,7 +29,7 @@ const DOC_ACTIONS = new Set([
 ]);
 // Overdue is still "at holder / active review" — same holder actions as in_review / escalated.
 const TRANSITION_ALLOWED_FROM = {
-  submit: new Set(['pending', 'returned']),
+  submit: new Set(['draft', 'pending', 'returned']),
   forward: new Set(['in_review', 'escalated', 'overdue']),
   approve: new Set(['in_review', 'escalated', 'overdue']),
   reject: new Set(['in_review', 'escalated', 'overdue']),
@@ -47,7 +51,7 @@ function mapDocumentRow(row) {
     id: row.id,
     document_number: row.document_number,
     document_type: row.document_type,
-    title: row.title,
+    title: coalesceDocumentTitle(row),
     description: row.description,
     source_module: row.source_module,
     source_table: row.source_table,
@@ -771,12 +775,15 @@ async function hasPermission(client, { role, userId, documentType, action }) {
 }
 
 function getRelationshipFlags(document, user) {
+  if (!user || !document) {
+    return { isAdmin: false, isCreator: false, isReviewer: false };
+  }
   return {
     isAdmin: user.role === 'admin',
-    isCreator: !!document && document.created_by === user.id,
+    isCreator: sameEntityId(document.created_by, user.id),
     // Kept for backward compatibility (single-holder flows). For multi-assignee steps,
     // view/action checks should use isUserAssignedToCurrentStep().
-    isReviewer: !!document && document.current_holder_id === user.id,
+    isReviewer: sameEntityId(document.current_holder_id, user.id),
   };
 }
 
@@ -784,31 +791,58 @@ const WORKFLOW_STEP_ACTIONS = new Set(['forward', 'approve', 'reject', 'return']
 const GENERAL_PERMISSION_ACTIONS = new Set(['view', 'create', 'download']);
 
 function isCurrentHolder(document, userId) {
-  return !!document && !!userId && document.current_holder_id === userId;
+  return !!document && !!userId && sameEntityId(document.current_holder_id, userId);
 }
 
 async function getWorkflowStepAssigneeRecord(client, { document, userId }) {
   if (!document || !userId) return null;
   const step = Number(document.current_step || 1);
-  const version = document.workflow_version || null;
-  if (!version) return null;
-  const r = await client.query(
-    `SELECT a.is_enabled,
-            a.allowed_actions,
-            a.is_primary,
-            a.backup_rank
-     FROM docutracker_workflow_steps s
-     JOIN docutracker_workflow_step_assignees a
-       ON a.step_id = s.id
-     WHERE s.document_type = $1
-       AND s.workflow_version = $2
-       AND s.step_order = $3
-       AND a.user_id = $4::uuid
-     LIMIT 1`,
-    [document.document_type, version, step, userId]
-  );
+  const docType = document.document_type;
+
+  let r;
+  if (document.workflow_version != null) {
+    // Fast path: known version.
+    r = await client.query(
+      `SELECT a.is_enabled,
+              a.allowed_actions,
+              a.is_primary,
+              a.backup_rank
+       FROM docutracker_workflow_steps s
+       JOIN docutracker_workflow_step_assignees a
+         ON a.step_id = s.id
+       WHERE s.document_type = $1
+         AND s.workflow_version = $2
+         AND s.step_order = $3
+         AND a.user_id = $4::uuid
+       LIMIT 1`,
+      [docType, document.workflow_version, step, userId]
+    );
+  } else {
+    // Legacy fallback: query against the latest version for this document type.
+    r = await client.query(
+      `SELECT a.is_enabled,
+              a.allowed_actions,
+              a.is_primary,
+              a.backup_rank
+       FROM docutracker_workflow_steps s
+       JOIN docutracker_workflow_step_assignees a
+         ON a.step_id = s.id
+       WHERE s.document_type = $1
+         AND s.workflow_version = (
+           SELECT MAX(version)
+           FROM docutracker_routing_config_versions
+           WHERE document_type = $1
+         )
+         AND s.step_order = $2
+         AND a.user_id = $3::uuid
+       LIMIT 1`,
+      [docType, step, userId]
+    );
+  }
   return r.rows?.[0] || null;
 }
+
+
 
 function assigneeAllowsAction(assigneeRow, action) {
   if (!assigneeRow) return null; // unknown (likely legacy config)
@@ -857,19 +891,10 @@ async function resolveStepAssignees(client, { explicitAssigneeId, stepConfig, cu
   }
 
   if (type === 'user' || !type) {
-    // Prefer normalized assignees table when a department-scoped step is configured.
-    // Fallback to legacy JSON-configured user_ids to keep the system running during migration.
-    const configured =
-      Array.isArray(stepConfig?.user_ids) ? stepConfig.user_ids.filter(Boolean) : [];
-    // If no users configured, fall back to current holder (legacy behavior).
-    const candidate = currentHolderId ? [currentHolderId] : [];
-    let ids = configured.length ? configured : candidate;
-
-    // If stepConfig includes department_id, treat it as "selected persons per department".
-    // Pull the enabled assignees from the normalized tables (primary + backups).
-    // (Note: we don't require a DB roundtrip for every step; only when dept is set.)
-    const dept = stepConfig?.department_id;
-    if (dept && stepConfig?.step_order && documentType && workflowVersion) {
+    // ALWAYS try to pull primary + backup assignees from the normalized table first.
+    // This is the correct source of truth for both department-scoped and plain user steps.
+    if (stepConfig?.step_order && documentType && workflowVersion) {
+      const versionToUse = workflowVersion ?? null;
       const r = await client.query(
         `SELECT a.user_id::text AS user_id
          FROM docutracker_workflow_steps s
@@ -881,11 +906,18 @@ async function resolveStepAssignees(client, { explicitAssigneeId, stepConfig, cu
            AND (s.enabled IS NULL OR s.enabled = true)
            AND a.is_enabled = true
          ORDER BY a.is_primary DESC, a.backup_rank ASC NULLS LAST, a.created_at ASC`,
-        [documentType, workflowVersion, stepConfig.step_order]
+        [documentType, versionToUse, stepConfig.step_order]
       );
       const fromDb = (r.rows || []).map((x) => x.user_id).filter(Boolean);
-      if (fromDb.length) ids = fromDb;
+      if (fromDb.length) return fromDb;
     }
+
+    // Fallback: legacy JSON-configured user_ids from routing config.
+    const configured =
+      Array.isArray(stepConfig?.user_ids) ? stepConfig.user_ids.filter(Boolean) : [];
+    const candidate = currentHolderId ? [currentHolderId] : [];
+    const ids = configured.length ? configured : candidate;
+
     if (!ids.length) {
       throw validationError(
         `No valid assignee configured for step ${stepConfig?.step_order ?? 'unknown'}`
@@ -906,6 +938,7 @@ async function resolveStepAssignees(client, { explicitAssigneeId, stepConfig, cu
     return active;
   }
 
+
   // For legacy step types, keep single-resolve behavior but return as a 1-element array.
   const single = await resolveStepAssignee(client, { explicitAssigneeId: null, stepConfig, currentHolderId });
   return single ? [single] : [];
@@ -914,7 +947,25 @@ async function resolveStepAssignees(client, { explicitAssigneeId, stepConfig, cu
 async function isUserAssignedToCurrentStep(client, { document, userId }) {
   if (!document || !userId) return false;
   try {
+    // PRIMARY PATH: read from the committed routing-record-assignees snapshot.
+    // This is more reliable than re-resolving from config (config may have changed)
+    // and correctly includes both primary and backup assignees.
     const step = Number(document.current_step || 1);
+    const snapRes = await client.query(
+      `SELECT 1
+       FROM docutracker_routing_records rr
+       JOIN docutracker_routing_record_assignees a
+         ON a.routing_record_id = rr.id
+       WHERE rr.document_id = $1
+         AND rr.step_order = $2
+         AND a.user_id = $3::uuid
+       LIMIT 1`,
+      [document.id, step, userId]
+    );
+    if (snapRes.rowCount > 0) return true;
+
+    // FALLBACK: snapshot table is empty (document just created, or legacy).
+    // Re-resolve from workflow config.
     const config = await getRoutingConfig(
       client,
       document.document_type,
@@ -937,12 +988,70 @@ async function isUserAssignedToCurrentStep(client, { document, userId }) {
   }
 }
 
+async function isUserAssignedToAnyStep(client, { document, userId }) {
+  if (!document || !userId) return false;
+  try {
+    // Check if the user is assigned to ANY step in the committed routing records.
+    const snapRes = await client.query(
+      `SELECT 1
+       FROM docutracker_routing_records rr
+       JOIN docutracker_routing_record_assignees a
+         ON a.routing_record_id = rr.id
+       WHERE rr.document_id = $1
+         AND a.user_id = $2::uuid
+       LIMIT 1`,
+      [document.id, userId]
+    );
+    if (snapRes.rowCount > 0) return true;
+
+    // Check if the user has any historical actions on the document.
+    const histRes = await client.query(
+      `SELECT 1
+       FROM docutracker_document_history
+       WHERE document_id = $1
+         AND actor_id = $2::uuid
+       LIMIT 1`,
+      [document.id, userId]
+    );
+    if (histRes.rowCount > 0) return true;
+
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
 async function canUserPerformDocumentAction(client, { user, document, action }) {
   const relationship = getRelationshipFlags(document, user);
   if (relationship.isAdmin) return true;
 
+  const status = normalizeStatus(document.status);
+
+  // WIP (Draft) Logic:
+  if (status === 'draft') {
+    // Creator can view, edit, or delete their own draft.
+    if (action === 'view' || action === 'edit' || action === 'delete') {
+      return relationship.isCreator;
+    }
+    // Only authorized users (e.g. HR, Supervisors) can submit.
+    if (action === 'submit') {
+      return hasPermission(client, {
+        role: user.role,
+        userId: user.id,
+        documentType: document.document_type,
+        action: 'submit',
+      });
+    }
+    return false; // No workflow actions (approve/forward) allowed for drafts.
+  }
+
+  // Once submitted (not a draft):
+  if (action === 'edit' || action === 'delete') {
+    // Lock document from creator once it enters workflow.
+    return false;
+  }
+
   // Workflow actions: ONLY admin OR current holder OR assigned-to-step.
-  // No role-based permission rows are consulted for approve/forward/reject/return.
   if (WORKFLOW_STEP_ACTIONS.has(action)) {
     return canUserPerformWorkflowAction(client, { user, document, action });
   }
@@ -953,21 +1062,13 @@ async function canUserPerformDocumentAction(client, { user, document, action }) 
     if (action === 'view') {
       if (relationship.isCreator || relationship.isReviewer) return true;
       if (await isUserAssignedToCurrentStep(client, { document, userId: user.id })) return true;
+      if (await isUserAssignedToAnyStep(client, { document, userId: user.id })) return true;
     }
     return canUserPerformGeneralAction(client, {
       user,
       documentType: document.document_type,
       action,
     });
-  }
-
-  // Other actions (edit/delete/submit/etc): keep existing permission-table behavior for now.
-  // (You can tighten this later once you decide how non-workflow actions should be governed.)
-  if (action === 'view') {
-    if (relationship.isCreator || relationship.isReviewer) return true;
-    // Multi-assignee reviewer steps: assigned users can always view the document.
-    if (await isUserAssignedToCurrentStep(client, { document, userId: user.id })) return true;
-    // Fall through to explicit permission rows.
   }
 
   const explicit = await hasPermission(client, {
@@ -1338,15 +1439,21 @@ async function createDocument(pool, user, input) {
       documentType: input.document_type,
       workflowVersion: wfVer,
     });
+    // 'draft' is not allowed by the DB check constraint (prod_v2).
+    // Documents immediately enter a workflow on creation, so we treat
+    // 'draft' as 'pending' — the initial step-1 holding state.
+    const rawStatus = normalizeStatus(input.status || 'pending');
+    const initialStatus = rawStatus === 'draft' ? 'pending' : rawStatus;
+    if (!VALID_STATUSES.has(initialStatus)) {
+      throw new Error('Invalid status');
+    }
+
+    // Resolve step-1 assignee as the initial current holder.
     const currentHolder = await resolveStepAssignee(client, {
       explicitAssigneeId: sanitizedExplicit,
       stepConfig: stepOne,
       currentHolderId: user.id,
     });
-    const initialStatus = normalizeStatus(input.status || 'pending');
-    if (!VALID_STATUSES.has(initialStatus)) {
-      throw new Error('Invalid status');
-    }
 
     const docRes = await client.query(
       `INSERT INTO docutracker_documents
@@ -1838,35 +1945,54 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
     }
 
     if (notificationType) {
-      let targetUserId = null;
-      if (notificationType === 'assigned') {
-        targetUserId = nextHolder;
-      } else if (notificationType === 'returned') {
-        targetUserId = nextHolder;
-      } else if (notificationType === 'rejected') {
-        targetUserId = doc.created_by;
-      }
-
-      // Use idempotency key when available so retries/double taps dedupe, but
-      // legitimate future transitions generate new notifications.
       const notificationEventKey = idempotencyKey
         ? `${notificationType}:doc:${documentId}:step:${nextStep}:req:${idempotencyKey}`
         : null;
 
-      await insertNotificationIfNotRecent(client, {
-        document_id: documentId,
-        user_id: targetUserId,
-        type: notificationType,
-        event_key: notificationEventKey,
-        step_order: nextStep,
-        escalation_level: updated.escalation_level,
-        title:
-          notificationType === 'assigned'
-            ? 'Document requires your review'
-            : `Document ${notificationType}`,
-        body: `${doc.title} was ${historyAction}.`,
-      });
+      if (notificationType === 'assigned') {
+        // Notify ALL assignees for the next step (primary + backups).
+        const allNextAssignees = Array.from(new Set(
+          [...(typeof nextAssignees !== 'undefined' ? nextAssignees : []), nextHolder].filter(Boolean)
+        ));
+        for (const uid of allNextAssignees) {
+          // eslint-disable-next-line no-await-in-loop
+          await insertNotificationIfNotRecent(client, {
+            document_id: documentId,
+            user_id: uid,
+            type: 'assigned',
+            event_key: notificationEventKey,
+            step_order: nextStep,
+            escalation_level: updated.escalation_level,
+            title: 'Document requires your review',
+            body: `${doc.title} was forwarded and requires your review.`,
+          });
+        }
+      } else if (notificationType === 'returned') {
+        // Notify the current holder (who sent it back) AND the person it's returned to.
+        await insertNotificationIfNotRecent(client, {
+          document_id: documentId,
+          user_id: nextHolder,
+          type: 'returned',
+          event_key: notificationEventKey,
+          step_order: nextStep,
+          escalation_level: updated.escalation_level,
+          title: 'Document returned to you',
+          body: `${doc.title} was returned and requires your attention.`,
+        });
+      } else if (notificationType === 'rejected') {
+        await insertNotificationIfNotRecent(client, {
+          document_id: documentId,
+          user_id: doc.created_by,
+          type: 'rejected',
+          event_key: notificationEventKey,
+          step_order: nextStep,
+          escalation_level: updated.escalation_level,
+          title: 'Document rejected',
+          body: `${doc.title} was rejected.`,
+        });
+      }
     }
+
 
     await client.query('COMMIT');
     return mapDocumentRow(updated);

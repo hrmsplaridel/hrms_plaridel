@@ -2,40 +2,52 @@ import 'package:flutter/material.dart';
 import '../models/document_status.dart';
 import 'docutracker_status_theme.dart';
 
-/// Status chip with icon + label (accessible, consistent across DocuTracker).
+/// Status chip with dot + label. Consistent across DocuTracker.
 class DocuTrackerStatusBadge extends StatelessWidget {
   const DocuTrackerStatusBadge({
     super.key,
     required this.status,
     this.compact = false,
     this.showIcon = true,
+    this.dotStyle = false,
   });
 
   final DocumentStatus status;
   final bool compact;
   final bool showIcon;
 
+  /// When true, renders a colored dot instead of an icon.
+  final bool dotStyle;
+
   @override
   Widget build(BuildContext context) {
     final fg = DocuTrackerStatusTheme.foreground(status);
-    final fontSize = compact ? 11.0 : 13.0;
-    final padH = compact ? 8.0 : 12.0;
-    final padV = compact ? 4.0 : 6.0;
+    final fontSize = compact ? 11.0 : 12.0;
+    final padH = compact ? 8.0 : 10.0;
+    final padV = compact ? 3.0 : 4.0;
 
     return Container(
       padding: EdgeInsets.symmetric(horizontal: padH, vertical: padV),
       decoration: BoxDecoration(
         color: DocuTrackerStatusTheme.chipBackground(status),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(6), // Less rounded for a modern SaaS look
         border: Border.all(color: DocuTrackerStatusTheme.chipBorder(status)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          if (showIcon) ...[
+          if (dotStyle) ...[
+            Container(
+              width: compact ? 6 : 8,
+              height: compact ? 6 : 8,
+              decoration: BoxDecoration(color: fg, shape: BoxShape.circle),
+            ),
+            SizedBox(width: compact ? 5 : 6),
+          ] else if (showIcon) ...[
             Icon(
               DocuTrackerStatusTheme.icon(status),
-              size: compact ? 14 : 16,
+              size: compact ? 12 : 14,
               color: fg,
             ),
             SizedBox(width: compact ? 4 : 6),
@@ -46,6 +58,8 @@ class DocuTrackerStatusBadge extends StatelessWidget {
               color: fg,
               fontSize: fontSize,
               fontWeight: FontWeight.w600,
+              letterSpacing: 0.1,
+              height: 1.2,
             ),
           ),
         ],

@@ -50,12 +50,12 @@ class DocumentRoutingConfig {
           steps: [
             const WorkflowStep(
               stepOrder: 1,
-              assigneeType: 'role',
+              assigneeType: 'user',
               label: 'HR Staff',
             ),
             const WorkflowStep(
               stepOrder: 2,
-              assigneeType: 'department',
+              assigneeType: 'user',
               label: 'Department Head',
             ),
             const WorkflowStep(
@@ -71,22 +71,22 @@ class DocumentRoutingConfig {
           steps: [
             const WorkflowStep(
               stepOrder: 1,
-              assigneeType: 'department',
+              assigneeType: 'user',
               label: 'Requesting Department',
             ),
             const WorkflowStep(
               stepOrder: 2,
-              assigneeType: 'department',
+              assigneeType: 'user',
               label: 'Procurement',
             ),
             const WorkflowStep(
               stepOrder: 3,
-              assigneeType: 'department',
+              assigneeType: 'user',
               label: 'Accounting',
             ),
             const WorkflowStep(
               stepOrder: 4,
-              assigneeType: 'role',
+              assigneeType: 'user',
               label: 'Approving Officer',
             ),
           ],

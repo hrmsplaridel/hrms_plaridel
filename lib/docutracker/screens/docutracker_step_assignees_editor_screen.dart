@@ -39,7 +39,8 @@ class _DocStep {
   final bool enabled;
   final List<_Assignee> assignees;
 
-  String get displayLabel => (label ?? '').trim().isEmpty ? 'Step $stepOrder' : label!.trim();
+  String get displayLabel =>
+      (label ?? '').trim().isEmpty ? 'Step $stepOrder' : label!.trim();
 }
 
 class _Assignee {
@@ -105,7 +106,24 @@ class _DocuTrackerStepAssigneesEditorScreenState
   bool _empLoading = false;
   List<_EmpRow> _empHits = const [];
 
-  static const _workflowActions = <String>['approve', 'forward', 'reject', 'return'];
+  static const _workflowActions = <String>[
+    'approve',
+    'forward',
+    'reject',
+    'return',
+  ];
+
+  static Color _stepColor(int order) {
+    const colors = [
+      Color(0xFF3B82F6),
+      Color(0xFF8B5CF6),
+      Color(0xFF10B981),
+      Color(0xFFF59E0B),
+      Color(0xFFEF4444),
+      Color(0xFF06B6D4),
+    ];
+    return colors[(order - 1) % colors.length];
+  }
 
   @override
   void initState() {
@@ -127,7 +145,10 @@ class _DocuTrackerStepAssigneesEditorScreenState
 
   void _scheduleEmpSearch() {
     _empSearchDebounce?.cancel();
-    _empSearchDebounce = Timer(const Duration(milliseconds: 350), _fetchEmployees);
+    _empSearchDebounce = Timer(
+      const Duration(milliseconds: 350),
+      _fetchEmployees,
+    );
   }
 
   Future<void> _fetchEmployees({String? departmentId}) async {
@@ -143,7 +164,8 @@ class _DocuTrackerStepAssigneesEditorScreenState
           'limit': 50,
           'offset': 0,
           if (q.isNotEmpty) 'q': q,
-          if (departmentId != null && departmentId.trim().isNotEmpty) 'department_id': departmentId,
+          if (departmentId != null && departmentId.trim().isNotEmpty)
+            'department_id': departmentId,
           'sort': 'full_name',
           'order': 'asc',
         },
@@ -182,8 +204,10 @@ class _DocuTrackerStepAssigneesEditorScreenState
       final list = res.data ?? const [];
       if (list.isEmpty) return null;
       final first = list.first;
-      if (first is Map && first['version'] is num) return (first['version'] as num).toInt();
-      if (first is Map && first['version'] != null) return int.tryParse(first['version'].toString());
+      if (first is Map && first['version'] is num)
+        return (first['version'] as num).toInt();
+      if (first is Map && first['version'] != null)
+        return int.tryParse(first['version'].toString());
       return null;
     } catch (_) {
       return null;
@@ -193,7 +217,9 @@ class _DocuTrackerStepAssigneesEditorScreenState
   Future<void> _ensureDepartmentNames() async {
     if (_departmentNameById.isNotEmpty) return;
     try {
-      final res = await ApiClient.instance.get<List<dynamic>>('/api/departments');
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/departments',
+      );
       final data = res.data ?? [];
       final map = <String, String>{};
       for (final e in data) {
@@ -234,7 +260,10 @@ class _DocuTrackerStepAssigneesEditorScreenState
       }
       _workflowVersion = v;
 
-      final rows = await _repo.getWorkflowSteps(documentType: dt, workflowVersion: v);
+      final rows = await _repo.getWorkflowSteps(
+        documentType: dt,
+        workflowVersion: v,
+      );
       final steps = <_DocStep>[];
       for (final r in rows) {
         final assigneesRaw = r['assignees'];
@@ -248,7 +277,9 @@ class _DocuTrackerStepAssigneesEditorScreenState
             final name = m['full_name']?.toString() ?? uid;
             final deptName = m['department_name']?.toString();
             final isPrimary = m['is_primary'] == true;
-            final backupRank = m['backup_rank'] is num ? (m['backup_rank'] as num).toInt() : int.tryParse('${m['backup_rank']}');
+            final backupRank = m['backup_rank'] is num
+                ? (m['backup_rank'] as num).toInt()
+                : int.tryParse('${m['backup_rank']}');
             final isEnabled = m['is_enabled'] != false;
             final acts = <String>{};
             final aa = m['allowed_actions'];
@@ -332,7 +363,8 @@ class _DocuTrackerStepAssigneesEditorScreenState
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setModalState) {
-            final youMustHavePrimary = draft.isNotEmpty && !draft.any((a) => a.isPrimary);
+            final youMustHavePrimary =
+                draft.isNotEmpty && !draft.any((a) => a.isPrimary);
             return Padding(
               padding: EdgeInsets.only(
                 bottom: MediaQuery.of(ctx).viewInsets.bottom,
@@ -363,12 +395,16 @@ class _DocuTrackerStepAssigneesEditorScreenState
                         ],
                       ),
                     ),
-                    if (step.departmentId != null && step.departmentId!.isNotEmpty)
+                    if (step.departmentId != null &&
+                        step.departmentId!.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: Text(
                           'Department-scoped step: only users in this department should be assigned.',
-                          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                          style: TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 12,
+                          ),
                         ),
                       ),
                     const SizedBox(height: 8),
@@ -382,7 +418,9 @@ class _DocuTrackerStepAssigneesEditorScreenState
                                 child: OutlinedButton.icon(
                                   onPressed: () async {
                                     _empSearchController.text = '';
-                                    await _fetchEmployees(departmentId: step.departmentId);
+                                    await _fetchEmployees(
+                                      departmentId: step.departmentId,
+                                    );
                                     final picked = await showDialog<_EmpRow>(
                                       context: ctx,
                                       builder: (dctx) {
@@ -394,28 +432,66 @@ class _DocuTrackerStepAssigneesEditorScreenState
                                             child: Column(
                                               children: [
                                                 TextField(
-                                                  controller: _empSearchController,
-                                                  decoration: DocuTrackerStyles.inputDecoration(
-                                                    'Search name',
-                                                    Icons.search_rounded,
-                                                  ),
+                                                  controller:
+                                                      _empSearchController,
+                                                  decoration:
+                                                      DocuTrackerStyles.inputDecoration(
+                                                        'Search name',
+                                                        Icons.search_rounded,
+                                                      ),
                                                 ),
                                                 const SizedBox(height: 10),
                                                 Expanded(
                                                   child: _empLoading
-                                                      ? const Center(child: CircularProgressIndicator())
+                                                      ? const Center(
+                                                          child:
+                                                              CircularProgressIndicator(),
+                                                        )
                                                       : ListView.builder(
-                                                          itemCount: _empHits.length,
+                                                          itemCount:
+                                                              _empHits.length,
                                                           itemBuilder: (_, i) {
-                                                            final e = _empHits[i];
-                                                            final exists = draft.any((a) => a.userId == e.id);
+                                                            final e =
+                                                                _empHits[i];
+                                                            final exists = draft
+                                                                .any(
+                                                                  (a) =>
+                                                                      a.userId ==
+                                                                      e.id,
+                                                                );
                                                             return ListTile(
                                                               dense: true,
                                                               enabled: !exists,
-                                                              title: Text(e.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                                                              subtitle: Text(e.id, maxLines: 1, overflow: TextOverflow.ellipsis),
-                                                              trailing: exists ? const Text('Added') : const Icon(Icons.add_rounded),
-                                                              onTap: exists ? null : () => Navigator.of(dctx).pop(e),
+                                                              title: Text(
+                                                                e.name,
+                                                                maxLines: 1,
+                                                                overflow:
+                                                                    TextOverflow
+                                                                        .ellipsis,
+                                                              ),
+                                                              subtitle: Text(
+                                                                e.id,
+                                                                maxLines: 1,
+                                                                overflow:
+                                                                    TextOverflow
+                                                                        .ellipsis,
+                                                              ),
+                                                              trailing: exists
+                                                                  ? const Text(
+                                                                      'Added',
+                                                                    )
+                                                                  : const Icon(
+                                                                      Icons
+                                                                          .add_rounded,
+                                                                    ),
+                                                              onTap: exists
+                                                                  ? null
+                                                                  : () =>
+                                                                        Navigator.of(
+                                                                          dctx,
+                                                                        ).pop(
+                                                                          e,
+                                                                        ),
                                                             );
                                                           },
                                                         ),
@@ -425,7 +501,8 @@ class _DocuTrackerStepAssigneesEditorScreenState
                                           ),
                                           actions: [
                                             TextButton(
-                                              onPressed: () => Navigator.of(dctx).pop(),
+                                              onPressed: () =>
+                                                  Navigator.of(dctx).pop(),
                                               child: const Text('Close'),
                                             ),
                                           ],
@@ -440,15 +517,21 @@ class _DocuTrackerStepAssigneesEditorScreenState
                                           fullName: picked.name,
                                           departmentName: null,
                                           isPrimary: draft.isEmpty,
-                                          backupRank: draft.isEmpty ? null : draft.length,
+                                          backupRank: draft.isEmpty
+                                              ? null
+                                              : draft.length,
                                           isEnabled: true,
-                                          allowedActions: _workflowActions.toSet(),
+                                          allowedActions: _workflowActions
+                                              .toSet(),
                                         ),
                                       );
                                       normalizePrimaryAndRanks(draft);
                                     });
                                   },
-                                  icon: const Icon(Icons.person_add_alt_1_rounded, size: 18),
+                                  icon: const Icon(
+                                    Icons.person_add_alt_1_rounded,
+                                    size: 18,
+                                  ),
                                   label: const Text('Add user'),
                                 ),
                               ),
@@ -472,7 +555,9 @@ class _DocuTrackerStepAssigneesEditorScreenState
                                     for (var j = 0; j < draft.length; j++) {
                                       draft[j] = draft[j].copyWith(
                                         isPrimary: j == i,
-                                        backupRank: j == i ? null : draft[j].backupRank ?? 1,
+                                        backupRank: j == i
+                                            ? null
+                                            : draft[j].backupRank ?? 1,
                                       );
                                     }
                                     normalizePrimaryAndRanks(draft);
@@ -485,13 +570,17 @@ class _DocuTrackerStepAssigneesEditorScreenState
                                 },
                                 onToggleAction: (action, v) {
                                   setModalState(() {
-                                    final next = Set<String>.from(draft[i].allowedActions);
+                                    final next = Set<String>.from(
+                                      draft[i].allowedActions,
+                                    );
                                     if (v) {
                                       next.add(action);
                                     } else {
                                       next.remove(action);
                                     }
-                                    draft[i] = draft[i].copyWith(allowedActions: next);
+                                    draft[i] = draft[i].copyWith(
+                                      allowedActions: next,
+                                    );
                                   });
                                 },
                                 onRemove: () {
@@ -507,7 +596,10 @@ class _DocuTrackerStepAssigneesEditorScreenState
                           if (youMustHavePrimary)
                             Text(
                               'Pick exactly one primary user.',
-                              style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.w700),
+                              style: TextStyle(
+                                color: Colors.red.shade700,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                         ],
                       ),
@@ -558,26 +650,25 @@ class _DocuTrackerStepAssigneesEditorScreenState
     }
 
     setState(() => _loading = true);
-    final saveResult =
-        await _repo.updateWorkflowStepAssignees(stepId: step.stepId, assignees: payload);
+    final saveResult = await _repo.updateWorkflowStepAssignees(
+      stepId: step.stepId,
+      assignees: payload,
+    );
     await _load();
     if (!mounted) return;
     final msg = saveResult is DocuTrackerSuccess<bool>
         ? 'Saved step assignees.'
         : saveResult is DocuTrackerFailure<bool>
-            ? saveResult.message
-            : 'Failed to save step assignees.';
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg)),
-    );
+        ? saveResult.message
+        : 'Failed to save step assignees.';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   @override
   Widget build(BuildContext context) {
     final typeOptions = [
       for (final c in DocumentRoutingConfig.defaults) c.documentType.value,
-    ].toSet().toList()
-      ..sort();
+    ].toSet().toList()..sort();
 
     return Scaffold(
       appBar: AppBar(
@@ -621,7 +712,9 @@ class _DocuTrackerStepAssigneesEditorScreenState
                         Expanded(
                           child: DropdownButtonFormField<String>(
                             initialValue: _documentType,
-                            decoration: DocuTrackerStyles.dropdownDecoration('Document type'),
+                            decoration: DocuTrackerStyles.dropdownDecoration(
+                              'Document type',
+                            ),
                             items: [
                               for (final t in typeOptions)
                                 DropdownMenuItem(value: t, child: Text(t)),
@@ -641,7 +734,10 @@ class _DocuTrackerStepAssigneesEditorScreenState
                           width: 140,
                           child: TextFormField(
                             initialValue: _workflowVersion?.toString() ?? '',
-                            decoration: DocuTrackerStyles.inputDecoration('Version', Icons.tag_rounded),
+                            decoration: DocuTrackerStyles.inputDecoration(
+                              'Version',
+                              Icons.tag_rounded,
+                            ),
                             keyboardType: TextInputType.number,
                             onFieldSubmitted: (v) async {
                               final n = int.tryParse(v.trim());
@@ -655,7 +751,10 @@ class _DocuTrackerStepAssigneesEditorScreenState
                     const SizedBox(height: 8),
                     Text(
                       'Approve/Forward/Reject/Return are enforced by these assignees (server-side).',
-                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                      ),
                     ),
                   ],
                 ),
@@ -665,7 +764,10 @@ class _DocuTrackerStepAssigneesEditorScreenState
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: Text(_error!, style: TextStyle(color: Colors.red.shade700)),
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: Colors.red.shade700),
+                ),
               ),
             Expanded(
               child: _loading
@@ -674,48 +776,179 @@ class _DocuTrackerStepAssigneesEditorScreenState
                       itemCount: _steps.length,
                       itemBuilder: (ctx, i) {
                         final s = _steps[i];
-                        final primary = s.assignees.where((a) => a.isPrimary).toList();
+                        final primary = s.assignees
+                            .where((a) => a.isPrimary)
+                            .toList();
                         final p = primary.isEmpty ? null : primary.first;
                         final primaryLine = p == null
                             ? '—'
-                            : (p.departmentName != null && p.departmentName!.trim().isNotEmpty)
-                                ? '${p.fullName} · ${p.departmentName}'
-                                : p.fullName;
+                            : (p.departmentName != null &&
+                                  p.departmentName!.trim().isNotEmpty)
+                            ? '${p.fullName} · ${p.departmentName}'
+                            : p.fullName;
                         final did = s.departmentId?.trim();
                         final stepDeptLabel = (did != null && did.isNotEmpty)
                             ? 'Step scope: ${_departmentNameById[did] ?? did}'
                             : null;
+                        final stepColor = _stepColor(s.stepOrder);
+                        final initials = p == null
+                            ? '?'
+                            : p.fullName
+                                  .trim()
+                                  .split(' ')
+                                  .take(2)
+                                  .map(
+                                    (w) =>
+                                        w.isNotEmpty ? w[0].toUpperCase() : '',
+                                  )
+                                  .join();
                         return Card(
                           elevation: 0,
+                          margin: const EdgeInsets.only(bottom: 2),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14),
-                            side: BorderSide(color: Colors.black.withValues(alpha: 0.08)),
+                            side: BorderSide(
+                              color: Colors.black.withValues(alpha: 0.07),
+                            ),
                           ),
-                          child: ListTile(
-                            title: Text(
-                              '${s.stepOrder}. ${s.displayLabel}',
-                              style: TextStyle(fontWeight: FontWeight.w800, color: AppTheme.textPrimary),
-                            ),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Primary: $primaryLine',
-                                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-                                ),
-                                Text(
-                                  '${s.assignees.length} assignee${s.assignees.length == 1 ? '' : 's'}',
-                                  style: TextStyle(color: AppTheme.textSecondary.withValues(alpha: 0.95), fontSize: 12),
-                                ),
-                                if (stepDeptLabel != null)
-                                  Text(
-                                    stepDeptLabel,
-                                    style: TextStyle(color: AppTheme.textSecondary.withValues(alpha: 0.85), fontSize: 11),
-                                  ),
-                              ],
-                            ),
-                            trailing: const Icon(Icons.chevron_right_rounded),
+                          child: InkWell(
                             onTap: () => _editAssignees(s),
+                            borderRadius: BorderRadius.circular(14),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                              child: Row(
+                                children: [
+                                  // Colored step number badge
+                                  Container(
+                                    width: 36,
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      color: stepColor,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        '${s.stepOrder}',
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w800,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          s.displayLabel,
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 14,
+                                            color: AppTheme.textPrimary,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Row(
+                                          children: [
+                                            // Primary avatar
+                                            CircleAvatar(
+                                              radius: 12,
+                                              backgroundColor: stepColor
+                                                  .withValues(alpha: 0.15),
+                                              child: Text(
+                                                initials,
+                                                style: TextStyle(
+                                                  fontSize: 9,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: stepColor,
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Expanded(
+                                              child: Text(
+                                                p == null
+                                                    ? 'No primary assignee'
+                                                    : primaryLine,
+                                                style: TextStyle(
+                                                  color: AppTheme.textSecondary,
+                                                  fontSize: 12,
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 8,
+                                                    vertical: 2,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: stepColor.withValues(
+                                                  alpha: 0.1,
+                                                ),
+                                                borderRadius:
+                                                    BorderRadius.circular(20),
+                                                border: Border.all(
+                                                  color: stepColor.withValues(
+                                                    alpha: 0.3,
+                                                  ),
+                                                ),
+                                              ),
+                                              child: Text(
+                                                '${s.assignees.length} ${s.assignees.length == 1 ? 'user' : 'users'}',
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: stepColor,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        if (stepDeptLabel != null) ...[
+                                          const SizedBox(height: 4),
+                                          Row(
+                                            children: [
+                                              Icon(
+                                                Icons.business_rounded,
+                                                size: 11,
+                                                color: AppTheme.textSecondary
+                                                    .withValues(alpha: 0.6),
+                                              ),
+                                              const SizedBox(width: 3),
+                                              Text(
+                                                stepDeptLabel,
+                                                style: TextStyle(
+                                                  color: AppTheme.textSecondary
+                                                      .withValues(alpha: 0.7),
+                                                  fontSize: 11,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  Icon(
+                                    Icons.chevron_right_rounded,
+                                    color: AppTheme.textSecondary.withValues(
+                                      alpha: 0.5,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         );
                       },
@@ -762,21 +995,32 @@ class _AssigneeEditorCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     assignee.fullName,
-                    style: TextStyle(fontWeight: FontWeight.w800, color: AppTheme.textPrimary),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.textPrimary,
+                    ),
                   ),
                 ),
                 IconButton(
                   tooltip: 'Remove',
                   onPressed: onRemove,
-                  icon: Icon(Icons.delete_outline_rounded, color: Colors.red.shade700),
+                  icon: Icon(
+                    Icons.delete_outline_rounded,
+                    color: Colors.red.shade700,
+                  ),
                 ),
               ],
             ),
-            if (assignee.departmentName != null && assignee.departmentName!.trim().isNotEmpty) ...[
+            if (assignee.departmentName != null &&
+                assignee.departmentName!.trim().isNotEmpty) ...[
               const SizedBox(height: 2),
               Text(
                 assignee.departmentName!,
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w600),
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ],
             const SizedBox(height: 4),
@@ -791,11 +1035,15 @@ class _AssigneeEditorCard extends StatelessWidget {
                   child: OutlinedButton.icon(
                     onPressed: onSetPrimary,
                     icon: Icon(
-                      assignee.isPrimary ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
+                      assignee.isPrimary
+                          ? Icons.radio_button_checked_rounded
+                          : Icons.radio_button_off_rounded,
                       size: 18,
                       color: AppTheme.primaryNavy,
                     ),
-                    label: Text(assignee.isPrimary ? 'Primary' : 'Make primary'),
+                    label: Text(
+                      assignee.isPrimary ? 'Primary' : 'Make primary',
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -805,7 +1053,10 @@ class _AssigneeEditorCard extends StatelessWidget {
                     contentPadding: EdgeInsets.zero,
                     value: assignee.isEnabled,
                     onChanged: onToggleEnabled,
-                    title: const Text('Enabled', style: TextStyle(fontWeight: FontWeight.w700)),
+                    title: const Text(
+                      'Enabled',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
                   ),
                 ),
               ],
@@ -813,7 +1064,11 @@ class _AssigneeEditorCard extends StatelessWidget {
             const SizedBox(height: 10),
             Text(
               'Allowed actions',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w700),
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
             ),
             const SizedBox(height: 6),
             Wrap(
@@ -834,4 +1089,3 @@ class _AssigneeEditorCard extends StatelessWidget {
     );
   }
 }
-

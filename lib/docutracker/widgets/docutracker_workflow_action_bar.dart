@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import '../../landingpage/constants/app_theme.dart';
-import '../docutracker_styles.dart';
+import '../theme/docutracker_tokens.dart';
 
-/// Groups workflow actions with a clear label and comfortable tap targets.
+/// Card strip for workflow actions (approve / forward / return / reject).
+/// Order buttons from positive → neutral → destructive when building [actions].
 class DocuTrackerWorkflowActionBar extends StatelessWidget {
   const DocuTrackerWorkflowActionBar({
     super.key,
     required this.actions,
     this.title = 'Workflow actions',
-    this.description =
-        'Approve, reject, return, or forward when you are the current holder and your role allows it. Remarks are logged to the history.',
+    this.description,
   });
 
   final List<Widget> actions;
@@ -21,41 +21,72 @@ class DocuTrackerWorkflowActionBar extends StatelessWidget {
     if (actions.isEmpty) return const SizedBox.shrink();
 
     return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: DocuTrackerStyles.listCardDecoration(),
+      decoration: DocuTrackerTokens.cardDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            title,
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 0),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEEF2FF),
+                    borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusSm),
+                  ),
+                  child: const Icon(
+                    Icons.touch_app_rounded,
+                    size: 17,
+                    color: Color(0xFF3B5BDB),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                      if (description != null && description!.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          description!,
+                          style: DocuTrackerTokens.metaStyle(),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
-          if (description != null && description!.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(
-              description!,
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 12,
-                height: 1.35,
-              ),
+          const SizedBox(height: 14),
+          Divider(height: 1, color: DocuTrackerTokens.borderSubtle.withValues(alpha: 0.85)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            child: Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                for (final w in actions)
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: 44),
+                    child: w,
+                  ),
+              ],
             ),
-          ],
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              for (final w in actions)
-                ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 48),
-                  child: w,
-                ),
-            ],
           ),
         ],
       ),

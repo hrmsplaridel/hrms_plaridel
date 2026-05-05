@@ -122,12 +122,9 @@ class _WorkflowStepEditorPanelState extends State<WorkflowStepEditorPanel> {
     _departmentManualController.text = did;
 
     _loadDepartments();
-    _loadOffices();
     _fetchEmployees();
     _empSearchController.addListener(_scheduleEmpSearch);
-    if (_assigneeType == 'user') {
-      Future<void>.microtask(() => _loadDepartmentRoster());
-    }
+    Future<void>.microtask(() => _loadDepartmentRoster());
   }
 
   @override
@@ -367,34 +364,14 @@ class _WorkflowStepEditorPanelState extends State<WorkflowStepEditorPanel> {
       if (h <= 0) return 'Deadline hours must be greater than zero.';
     }
     if (!_enabled) return null;
-    final t = _assigneeType;
-    if (t == 'user') {
-      final dept = _departments.isNotEmpty
-          ? (_departmentDropdownValue ?? '').trim()
-          : _departmentManualController.text.trim();
-      if (dept.isEmpty) {
-        return 'Choose which department this step belongs to, or disable this step.';
-      }
-      if ((_primaryUserId ?? '').trim().isEmpty) {
-        return 'Choose a primary reviewer from the department list, or disable this step.';
-      }
-    } else if (t == 'role') {
-      final role = (_rolePreset ?? _roleCustomController.text.trim());
-      if (role.isEmpty) return 'Choose or enter a role, or disable this step.';
-    } else if (t == 'department') {
-      final dept = _departments.isNotEmpty
-          ? (_departmentDropdownValue ?? '').trim()
-          : _departmentManualController.text.trim();
-      if (dept.isEmpty) {
-        return 'Select or enter a department, or disable this step.';
-      }
-    } else if (t == 'office') {
-      final office = _offices.isNotEmpty
-          ? (_officeDropdownValue ?? '').trim()
-          : _officeManualController.text.trim();
-      if (office.isEmpty) {
-        return 'Select or enter an office, or disable this step.';
-      }
+    final dept = _departments.isNotEmpty
+        ? (_departmentDropdownValue ?? '').trim()
+        : _departmentManualController.text.trim();
+    if (dept.isEmpty) {
+      return 'Choose which department this step belongs to, or disable this step.';
+    }
+    if ((_primaryUserId ?? '').trim().isEmpty) {
+      return 'Choose a primary reviewer from the department list, or disable this step.';
     }
     return null;
   }
@@ -420,26 +397,18 @@ class _WorkflowStepEditorPanelState extends State<WorkflowStepEditorPanel> {
     final label = _labelController.text.trim();
     final deadlineRaw = _deadlineController.text.trim();
     final deadlineHours = deadlineRaw.isEmpty ? null : int.tryParse(deadlineRaw);
-    final role = (_rolePreset ?? _roleCustomController.text.trim());
     final dept = _departments.isNotEmpty
         ? (_departmentDropdownValue ?? '').trim()
         : _departmentManualController.text.trim();
-    final office = _offices.isNotEmpty
-        ? (_officeDropdownValue ?? '').trim()
-        : _officeManualController.text.trim();
 
     Navigator.of(context).pop(
       WorkflowStep(
         stepOrder: widget.initial.stepOrder,
-        assigneeType: _assigneeType,
+        assigneeType: 'user',
         label: label.isEmpty ? null : label,
         enabled: _enabled,
-        roleId: _assigneeType == 'role' ? (role.isEmpty ? null : role) : null,
-        departmentId: (_assigneeType == 'department' || _assigneeType == 'user')
-            ? (dept.isEmpty ? null : dept)
-            : null,
-        officeId: _assigneeType == 'office' ? (office.isEmpty ? null : office) : null,
-        userIds: _assigneeType == 'user' ? _orderedUserIds : null,
+        departmentId: dept.isEmpty ? null : dept,
+        userIds: _orderedUserIds,
         deadlineHours: deadlineHours,
       ),
     );
@@ -479,36 +448,57 @@ class _WorkflowStepEditorPanelState extends State<WorkflowStepEditorPanel> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(
-                    'Assignee and deadlines apply only while the step is enabled.',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 12,
-                      height: 1.25,
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: _enabled
+                          ? AppTheme.primaryNavy.withValues(alpha: 0.04)
+                          : Colors.grey.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: _enabled
+                            ? AppTheme.primaryNavy.withValues(alpha: 0.2)
+                            : Colors.black.withValues(alpha: 0.08),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Step enabled',
-                          style: TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Step enabled',
+                                  style: TextStyle(
+                                    color: AppTheme.textPrimary,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Assignee and deadlines apply only while the step is enabled.',
+                                  style: TextStyle(
+                                    color: AppTheme.textSecondary,
+                                    fontSize: 12,
+                                    height: 1.25,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
+                          Switch(
+                            value: _enabled,
+                            onChanged: (v) => setState(() {
+                              _enabled = v;
+                              _dialogError = null;
+                            }),
+                            activeTrackColor: AppTheme.primaryNavy.withValues(alpha: 0.8),
+                          ),
+                        ],
                       ),
-                      Switch(
-                        value: _enabled,
-                        onChanged: (v) => setState(() {
-                          _enabled = v;
-                          _dialogError = null;
-                        }),
-                        activeTrackColor: AppTheme.primaryNavy.withValues(alpha: 0.6),
-                      ),
-                    ],
+                    ),
                   ),
                   const SizedBox(height: 12),
                   TextField(
@@ -520,172 +510,6 @@ class _WorkflowStepEditorPanelState extends State<WorkflowStepEditorPanel> {
                     onChanged: (_) => setState(() => _dialogError = null),
                   ),
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    key: ValueKey<String>('assignee-type-$_assigneeType'),
-                    initialValue: _assigneeType,
-                    decoration: DocuTrackerStyles.dropdownDecoration('Who handles this step?'),
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'user',
-                        child: Text('Selected people (by department) — recommended'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'department',
-                        child: Text('Anyone in a department (pool)'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'office',
-                        child: Text('Office / branch pool'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'role',
-                        child: Text('By job role (legacy)'),
-                      ),
-                    ],
-                    onChanged: (v) {
-                      if (v == null) return;
-                      setState(() {
-                        _assigneeType = v;
-                        _dialogError = null;
-                      });
-                      if (v == 'user') {
-                        Future<void>.microtask(() => _loadDepartmentRoster());
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  if (_assigneeType == 'role') ...[
-                    DropdownButtonFormField<String?>(
-                      key: ValueKey<String?>('role-preset-$_rolePreset'),
-                      initialValue: _rolePresets.contains(_rolePreset) ? _rolePreset : null,
-                      decoration: DocuTrackerStyles.dropdownDecoration('Common roles'),
-                      hint: const Text('Custom role (use field below)'),
-                      items: [
-                        ..._rolePresets.map(
-                          (r) => DropdownMenuItem<String?>(value: r, child: Text(r)),
-                        ),
-                      ],
-                      onChanged: (v) => setState(() {
-                        _rolePreset = v;
-                        if (v != null) _roleCustomController.clear();
-                        _dialogError = null;
-                      }),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _roleCustomController,
-                      decoration: DocuTrackerStyles.inputDecoration(
-                        'Custom role id (if not using list above)',
-                        Icons.badge_rounded,
-                      ),
-                      onChanged: (_) => setState(() {
-                        if (_roleCustomController.text.trim().isNotEmpty) {
-                          _rolePreset = null;
-                        }
-                        _dialogError = null;
-                      }),
-                    ),
-                  ],
-                  if (_assigneeType == 'department') ...[
-                    if (_departmentsLoading)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 12),
-                        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-                      )
-                    else if (_departments.isEmpty)
-                      Text(
-                        'Could not load departments. Enter a department id below.',
-                        style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                      ),
-                    if (_departments.isNotEmpty)
-                      DropdownButtonFormField<String>(
-                        key: ValueKey<String?>('dept-only-$_departmentDropdownValue'),
-                        initialValue: _departmentDropdownValue,
-                        decoration: DocuTrackerStyles.dropdownDecoration('Department'),
-                        hint: const Text('Select department'),
-                        isExpanded: true,
-                        items: _departments
-                            .map(
-                              (d) => DropdownMenuItem(
-                                value: d.id,
-                                child: Text(d.name, overflow: TextOverflow.ellipsis),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (v) => setState(() {
-                          _departmentDropdownValue = v;
-                          if (v != null) _departmentManualController.text = v;
-                          _dialogError = null;
-                        }),
-                      ),
-                    if (_departments.isEmpty) ...[
-                      TextField(
-                        controller: _departmentManualController,
-                        decoration: DocuTrackerStyles.inputDecoration(
-                          'Department id (UUID)',
-                          Icons.apartment_rounded,
-                        ),
-                        onChanged: (_) => setState(() => _dialogError = null),
-                      ),
-                    ],
-                    const SizedBox(height: 8),
-                    Text(
-                      _departments.isEmpty
-                          ? 'When the directory loads, you can pick from the list instead.'
-                          : 'If the list is incomplete, you can still paste an id after selecting the closest match or use another tool to copy the UUID.',
-                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
-                    ),
-                  ],
-                  if (_assigneeType == 'office') ...[
-                    if (_officesLoading)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 12),
-                        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-                      )
-                    else if (_offices.isEmpty)
-                      Text(
-                        'Could not load offices. Enter an office id below (run DB migration if needed).',
-                        style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                      ),
-                    if (_offices.isNotEmpty)
-                      DropdownButtonFormField<String>(
-                        key: ValueKey<String?>('office-only-$_officeDropdownValue'),
-                        initialValue: _officeDropdownValue,
-                        decoration: DocuTrackerStyles.dropdownDecoration('Office'),
-                        hint: const Text('Select office'),
-                        isExpanded: true,
-                        items: _offices
-                            .map(
-                              (o) => DropdownMenuItem(
-                                value: o.id,
-                                child: Text(o.name, overflow: TextOverflow.ellipsis),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (v) => setState(() {
-                          _officeDropdownValue = v;
-                          if (v != null) _officeManualController.text = v;
-                          _dialogError = null;
-                        }),
-                      ),
-                    if (_offices.isEmpty) ...[
-                      TextField(
-                        controller: _officeManualController,
-                        decoration: DocuTrackerStyles.inputDecoration(
-                          'Office id (UUID)',
-                          Icons.domain_rounded,
-                        ),
-                        onChanged: (_) => setState(() => _dialogError = null),
-                      ),
-                    ],
-                    const SizedBox(height: 8),
-                    Text(
-                      _offices.isEmpty
-                          ? 'After running migrate-add-offices-v1.sql and adding rows, the list appears here.'
-                          : 'Routing picks the first active employee linked to this office (users.office_id).',
-                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
-                    ),
-                  ],
                   if (_assigneeType == 'user') ...[
                     _WorkflowStepSectionLabel(
                       stepNumber: 1,

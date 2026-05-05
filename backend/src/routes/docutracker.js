@@ -10,6 +10,9 @@ const {
   listDocuments,
 } = require('../services/docutrackerWorkflowService');
 
+const { coalesceDocumentTitle } = require('../utils/docutrackerDisplayTitle');
+const { sameEntityId } = require('../utils/sameEntityId');
+
 const router = express.Router();
 const protect = [authMiddleware];
 
@@ -44,7 +47,7 @@ function mapDocumentRow(row) {
     id: row.id,
     document_number: row.document_number,
     document_type: row.document_type,
-    title: row.title,
+    title: coalesceDocumentTitle(row),
     description: row.description,
     source_module: row.source_module,
     source_table: row.source_table,
@@ -80,29 +83,17 @@ function normalizeDocStatus(s) {
   return map[x] || x;
 }
 
+const { canUserPerformDocumentAction } = require('../services/docutrackerWorkflowService');
+
 async function assertDocumentReadable(req, documentId) {
   const isAdmin = req.user.role === 'admin';
   if (isAdmin) return true;
-  const uid = req.user.id;
-  const r = await pool.query(
-    `SELECT d.created_by,
-            d.current_holder_id,
-            EXISTS (
-              SELECT 1
-              FROM docutracker_routing_records rr
-              JOIN docutracker_routing_record_assignees a
-                ON a.routing_record_id = rr.id
-              WHERE rr.document_id = d.id
-                AND rr.step_order = d.current_step
-                AND a.user_id = $2::uuid
-            ) AS is_step_assignee
-     FROM docutracker_documents d
-     WHERE d.id = $1`,
-    [documentId, uid]
-  );
-  const row = r.rows[0];
-  if (!row) return false;
-  return row.created_by === uid || row.current_holder_id === uid || row.is_step_assignee === true;
+
+  const r = await pool.query(`SELECT * FROM docutracker_documents WHERE id = $1`, [documentId]);
+  const docRow = r.rows[0];
+  if (!docRow) return false;
+
+  return canUserPerformDocumentAction(pool, { user: req.user, document: docRow, action: 'view' });
 }
 
 /**
@@ -840,14 +831,15 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
     try {
       await client.query('BEGIN');
 
-      // If a "user" step provides a department_id, enforce that every selected user
+      // If a "user" step provides a department_id, enforce that the PRIMARY user
       // currently belongs to that department (active assignment).
+      // Backup users are admin-curated selections and bypass the department constraint.
       for (const s of normalizedSteps) {
         if (!s.enabled) continue;
         const ids = Array.isArray(s.user_ids) ? s.user_ids.filter(Boolean) : [];
         if (!ids.length) continue;
 
-        // Inactive users cannot be assigned.
+        // Inactive users cannot be assigned (check ALL users: primary + backups).
         const activeRes = await client.query(
           `SELECT id::text AS id
            FROM users
@@ -864,28 +856,28 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
           });
         }
 
+        // Department membership: only validate the PRIMARY user (first in list).
         if (s.assignee_type !== 'user') continue;
         const deptId = s.department_id;
         if (!deptId) continue;
+        const primaryId = ids[0]; // Only the primary user is department-scoped.
         const r = await client.query(
           `SELECT u.id::text AS id
            FROM users u
            JOIN assignments a
              ON a.employee_id = u.id
            WHERE a.department_id = $1::uuid
-             AND u.id = ANY($2::uuid[])
+             AND u.id = $2::uuid
              AND (a.is_active IS NULL OR a.is_active = true)
              AND a.effective_from <= CURRENT_DATE
              AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
              AND (u.is_active IS NULL OR u.is_active = true)`,
-          [deptId, ids]
+          [deptId, primaryId]
         );
-        const allowed = new Set((r.rows || []).map((x) => x.id));
-        const invalid = ids.filter((id) => !allowed.has(String(id)));
-        if (invalid.length) {
+        if (r.rowCount === 0) {
           return res.status(400).json({
-            error: `User step ${s.step_order} contains users not assigned to the selected department.`,
-            invalid_user_ids: invalid,
+            error: `The primary user for step ${s.step_order} is not assigned to the selected department.`,
+            invalid_user_ids: [primaryId],
             department_id: deptId,
           });
         }
@@ -941,13 +933,13 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
         const ins = await client.query(
           `INSERT INTO docutracker_workflow_steps
            (document_type, workflow_version, step_order, department_id, label, enabled)
-           VALUES ($1, $2, $3, $4::uuid, $5, $6)
+           VALUES ($1, $2, $3, $4, $5, $6)
            RETURNING id`,
           [
             document_type,
             nextVersion,
             s.step_order,
-            s.department_id || null,
+            s.department_id || null, // null is fine; no ::uuid cast needed for null
             s.label || null,
             s.enabled !== false,
           ]
@@ -990,8 +982,9 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
       client.release();
     }
   } catch (err) {
-    console.error('[docutracker POST /routing-configs]', err);
-    res.status(500).json({ error: 'Failed to save routing config' });
+    console.error('[docutracker POST /routing-configs] error:', err?.message || err);
+    console.error('[docutracker POST /routing-configs] stack:', err?.stack);
+    res.status(500).json({ error: err?.message || 'Failed to save routing config' });
   }
 });
 

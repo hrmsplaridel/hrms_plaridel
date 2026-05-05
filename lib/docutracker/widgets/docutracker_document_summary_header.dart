@@ -70,10 +70,10 @@ class DocuTrackerDocumentSummaryHeader extends StatelessWidget {
                         width: double.infinity,
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(
-                          color: AppTheme.primaryNavy.withOpacity(0.08),
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.08),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                            color: AppTheme.primaryNavy.withOpacity(0.25),
+                            color: AppTheme.primaryNavy.withValues(alpha: 0.25),
                           ),
                         ),
                         child: Row(

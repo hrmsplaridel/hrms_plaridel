@@ -465,6 +465,21 @@ class DocuTrackerProvider extends ChangeNotifier {
     }
   }
 
+  /// Submit document to start workflow (Step 10).
+  Future<bool> submitDocument(
+    DocuTrackerDocument doc, {
+    required String actionBy,
+    String? remarks,
+  }) async {
+    return _transitionWithAction(
+      doc: doc,
+      action: 'submit',
+      actionBy: actionBy,
+      remarks: remarks,
+      failureMessage: 'Failed to submit document.',
+    );
+  }
+
   /// Forward document to next reviewer (Step 3, Step 8).
   Future<bool> forwardDocument(
     DocuTrackerDocument doc, {

@@ -36,6 +36,11 @@ class _DocuTrackerSetupPermissionsScreenState
 
   static const _restrictionItems = <_RestrictionItem>[
     _RestrictionItem(
+      action: DocumentAction.submit,
+      title: 'Submit drafts',
+      icon: Icons.send_and_archive_rounded,
+    ),
+    _RestrictionItem(
       action: DocumentAction.create,
       title: 'Create documents',
       icon: Icons.add_circle_outline_rounded,
@@ -112,15 +117,23 @@ class _DocuTrackerSetupPermissionsScreenState
       final data = res.data ?? [];
       _employees
         ..clear()
-        ..addAll(data.map((e) {
-          final m = e as Map;
-          final id = m['id']?.toString() ?? '';
-          final fullName = (m['full_name']?.toString() ?? '').isEmpty
-              ? 'Unknown'
-              : m['full_name'].toString();
-          final roleId = m['role']?.toString() ?? 'employee';
-          return _EmployeeOption(id: id, fullName: fullName, roleId: roleId);
-        }).where((e) => e.id.isNotEmpty));
+        ..addAll(
+          data
+              .map((e) {
+                final m = e as Map;
+                final id = m['id']?.toString() ?? '';
+                final fullName = (m['full_name']?.toString() ?? '').isEmpty
+                    ? 'Unknown'
+                    : m['full_name'].toString();
+                final roleId = m['role']?.toString() ?? 'employee';
+                return _EmployeeOption(
+                  id: id,
+                  fullName: fullName,
+                  roleId: roleId,
+                );
+              })
+              .where((e) => e.id.isNotEmpty),
+        );
     } catch (_) {
       _employees.clear();
     }
@@ -251,15 +264,14 @@ class _DocuTrackerSetupPermissionsScreenState
 
                   RspFormHeader(
                     formTitle: 'User Permissions',
-                    subtitle:
-                        'Edit explicit permissions for a single employee',
+                    subtitle: 'Edit explicit permissions for a single employee',
                   ),
                   const SizedBox(height: 12),
 
                   Text(
                     'Employee',
                     style: TextStyle(
-                      color: AppTheme.textSecondary.withOpacity(0.9),
+                      color: AppTheme.textSecondary.withValues(alpha: 0.9),
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
                     ),
@@ -273,16 +285,18 @@ class _DocuTrackerSetupPermissionsScreenState
                     )
                   else if (_employees.isEmpty)
                     const Padding(
-                      padding:
-                          EdgeInsets.symmetric(vertical: 16),
-                      child: Text('No employees found.',
-                          style: TextStyle(fontSize: 14)),
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Text(
+                        'No employees found.',
+                        style: TextStyle(fontSize: 14),
+                      ),
                     )
                   else
                     DropdownButtonFormField<String>(
                       value: _selectedUserId,
-                      decoration:
-                          DocuTrackerStyles.dropdownDecoration('Select user'),
+                      decoration: DocuTrackerStyles.dropdownDecoration(
+                        'Select user',
+                      ),
                       items: _employees
                           .map(
                             (e) => DropdownMenuItem(
@@ -296,7 +310,9 @@ class _DocuTrackerSetupPermissionsScreenState
                           .toList(),
                       onChanged: (v) async {
                         if (v == null) return;
-                        final pick = _employees.where((e) => e.id == v).firstOrNull;
+                        final pick = _employees
+                            .where((e) => e.id == v)
+                            .firstOrNull;
                         if (pick == null) return;
 
                         setState(() {
@@ -313,7 +329,7 @@ class _DocuTrackerSetupPermissionsScreenState
                   Text(
                     'Document Type',
                     style: TextStyle(
-                      color: AppTheme.textSecondary.withOpacity(0.9),
+                      color: AppTheme.textSecondary.withValues(alpha: 0.9),
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
                     ),
@@ -322,10 +338,14 @@ class _DocuTrackerSetupPermissionsScreenState
 
                   DropdownButtonFormField<String>(
                     value: _selectedDocumentType,
-                    decoration:
-                        DocuTrackerStyles.dropdownDecoration('Select type'),
+                    decoration: DocuTrackerStyles.dropdownDecoration(
+                      'Select type',
+                    ),
                     items: [
-                      const DropdownMenuItem(value: '*', child: Text('All (*)')),
+                      const DropdownMenuItem(
+                        value: '*',
+                        child: Text('All (*)'),
+                      ),
                       ...DocumentType.values.map(
                         (t) => DropdownMenuItem(
                           value: t.value,
@@ -367,10 +387,10 @@ class _DocuTrackerSetupPermissionsScreenState
                           vertical: 12,
                         ),
                         decoration: BoxDecoration(
-                          color: AppTheme.lightGray.withOpacity(0.25),
+                          color: AppTheme.lightGray.withValues(alpha: 0.25),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: Colors.black.withOpacity(0.06),
+                            color: Colors.black.withValues(alpha: 0.06),
                           ),
                         ),
                         child: Row(
@@ -379,7 +399,9 @@ class _DocuTrackerSetupPermissionsScreenState
                               width: 34,
                               height: 34,
                               decoration: BoxDecoration(
-                                color: AppTheme.primaryNavy.withOpacity(0.12),
+                                color: AppTheme.primaryNavy.withValues(
+                                  alpha: 0.12,
+                                ),
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Icon(
@@ -402,14 +424,15 @@ class _DocuTrackerSetupPermissionsScreenState
                             Switch(
                               value:
                                   _grantedByActionName[item.action.name] ??
-                                      false,
+                                  false,
                               onChanged: (v) {
                                 setState(() {
                                   _grantedByActionName[item.action.name] = v;
                                 });
                               },
-                              activeTrackColor:
-                                  AppTheme.primaryNavy.withOpacity(0.6),
+                              activeTrackColor: AppTheme.primaryNavy.withValues(
+                                alpha: 0.6,
+                              ),
                             ),
                           ],
                         ),
@@ -468,4 +491,3 @@ class _EmployeeOption {
 extension _FirstOrNullExt<T> on Iterable<T> {
   T? get firstOrNull => isEmpty ? null : first;
 }
-

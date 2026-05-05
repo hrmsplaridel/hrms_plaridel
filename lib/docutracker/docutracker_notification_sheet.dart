@@ -49,7 +49,7 @@ Future<void> showDocuTrackerNotificationSheet(
                         width: 40,
                         height: 4,
                         decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.15),
+                          color: Colors.black.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(999),
                         ),
                       ),

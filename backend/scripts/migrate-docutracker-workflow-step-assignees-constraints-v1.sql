@@ -23,6 +23,11 @@ BEGIN
     RETURN NULL;
   END IF;
 
+  -- If the parent step has been deleted (or is being deleted), we don't need to enforce this.
+  IF NOT EXISTS (SELECT 1 FROM docutracker_workflow_steps WHERE id = sid) THEN
+    RETURN NULL;
+  END IF;
+
   SELECT
     COUNT(*) FILTER (WHERE a.is_enabled = true) AS enabled_count,
     COUNT(*) FILTER (WHERE a.is_enabled = true AND a.is_primary = true) AS enabled_primary_count
@@ -51,7 +56,7 @@ AFTER INSERT OR UPDATE OR DELETE
 ON docutracker_workflow_step_assignees
 DEFERRABLE INITIALLY DEFERRED
 FOR EACH ROW
-EXECUTE FUNCTION docutracker_enforce_step_assignees_invariants();
+EXECUTE PROCEDURE docutracker_enforce_step_assignees_invariants();
 
 COMMIT;
 

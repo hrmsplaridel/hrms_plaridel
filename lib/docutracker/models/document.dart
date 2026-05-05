@@ -28,6 +28,7 @@ class DocuTrackerDocument {
   });
 
   final String? id;
+
   /// Step 9: Unique document number (e.g. DOC-2025-0001)
   final String? documentNumber;
   final String documentType;
@@ -74,12 +75,32 @@ class DocuTrackerDocument {
 
   static const String tableName = 'docutracker_documents';
 
+  static String _displayTitleFromJson(Map<String, dynamic> json) {
+    String t(String? x) => (x ?? '').trim();
+    final fromTitle = t(json['title'] as String?);
+    if (fromTitle.isNotEmpty) return fromTitle;
+    final fromSource = t(json['source_title'] as String?);
+    if (fromSource.isNotEmpty) return fromSource;
+    final fromFile = t(json['file_name'] as String?);
+    if (fromFile.isNotEmpty) return fromFile;
+    final num = t(json['document_number'] as String?);
+    if (num.isNotEmpty) return num;
+    final desc = t(json['description'] as String?);
+    if (desc.isNotEmpty) {
+      final line = desc.split('\n').first.trim();
+      if (line.isNotEmpty) {
+        return line.length > 200 ? '${line.substring(0, 200)}…' : line;
+      }
+    }
+    return 'Untitled document';
+  }
+
   factory DocuTrackerDocument.fromJson(Map<String, dynamic> json) {
     return DocuTrackerDocument(
       id: json['id']?.toString(),
       documentNumber: json['document_number']?.toString(),
       documentType: json['document_type'] as String? ?? 'memo',
-      title: json['title'] as String? ?? '',
+      title: _displayTitleFromJson(json),
       description: json['description']?.toString(),
       filePath: json['file_path']?.toString(),
       fileName: json['file_name']?.toString(),
@@ -111,25 +132,25 @@ class DocuTrackerDocument {
   }
 
   Map<String, dynamic> toJson() => {
-        if (id != null) 'id': id,
-        if (documentNumber != null) 'document_number': documentNumber,
-        'document_type': documentType,
-        'title': title,
-        if (description != null) 'description': description,
-        if (filePath != null) 'file_path': filePath,
-        if (fileName != null) 'file_name': fileName,
-        if (createdBy != null) 'created_by': createdBy,
-        if (currentStep != null) 'current_step': currentStep,
-        'status': status.value,
-        if (sentTime != null) 'sent_time': sentTime!.toIso8601String(),
-        if (deadlineTime != null) 'deadline_time': deadlineTime!.toIso8601String(),
-        if (reviewedTime != null) 'reviewed_time': reviewedTime!.toIso8601String(),
-        if (currentHolderId != null) 'current_holder_id': currentHolderId,
-        if (workflowVersion != null) 'workflow_version': workflowVersion,
-        'escalation_level': escalationLevel,
-        'needs_admin_intervention': needsAdminIntervention,
-        'updated_at': DateTime.now().toIso8601String(),
-      };
+    if (id != null) 'id': id,
+    if (documentNumber != null) 'document_number': documentNumber,
+    'document_type': documentType,
+    'title': title,
+    if (description != null) 'description': description,
+    if (filePath != null) 'file_path': filePath,
+    if (fileName != null) 'file_name': fileName,
+    if (createdBy != null) 'created_by': createdBy,
+    if (currentStep != null) 'current_step': currentStep,
+    'status': status.value,
+    if (sentTime != null) 'sent_time': sentTime!.toIso8601String(),
+    if (deadlineTime != null) 'deadline_time': deadlineTime!.toIso8601String(),
+    if (reviewedTime != null) 'reviewed_time': reviewedTime!.toIso8601String(),
+    if (currentHolderId != null) 'current_holder_id': currentHolderId,
+    if (workflowVersion != null) 'workflow_version': workflowVersion,
+    'escalation_level': escalationLevel,
+    'needs_admin_intervention': needsAdminIntervention,
+    'updated_at': DateTime.now().toIso8601String(),
+  };
 
   DocuTrackerDocument copyWith({
     String? id,
