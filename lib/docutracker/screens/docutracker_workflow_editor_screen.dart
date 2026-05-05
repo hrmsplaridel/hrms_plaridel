@@ -271,6 +271,7 @@ class _DocuTrackerWorkflowEditorScreenState
     setState(() {
       final removedKey = _rowKeys.removeAt(index);
       _stepItemKeys.removeAt(index);
+      _assigneeSnapshotsByKey.remove(removedKey);
       _steps.removeAt(index);
       if (_selectedRowKey == removedKey) {
         final nextIndex = index >= _rowKeys.length ? _rowKeys.length - 1 : index;
@@ -278,6 +279,28 @@ class _DocuTrackerWorkflowEditorScreenState
             ? null
             : _rowKeys[nextIndex];
       }
+      _renumberStepsContiguously();
+      _revalidate();
+    });
+  }
+
+  void _onReorderSteps(int oldIndex, int newIndex) {
+    if (oldIndex < 0 || oldIndex >= _steps.length) return;
+    if (newIndex < 0 || newIndex > _steps.length) return;
+
+    setState(() {
+      if (newIndex > oldIndex) newIndex -= 1;
+      if (newIndex == oldIndex) return;
+
+      final movedStep = _steps.removeAt(oldIndex);
+      _steps.insert(newIndex, movedStep);
+
+      final movedRowKey = _rowKeys.removeAt(oldIndex);
+      _rowKeys.insert(newIndex, movedRowKey);
+
+      final movedItemKey = _stepItemKeys.removeAt(oldIndex);
+      _stepItemKeys.insert(newIndex, movedItemKey);
+
       _renumberStepsContiguously();
       _revalidate();
     });
@@ -444,19 +467,7 @@ class _DocuTrackerWorkflowEditorScreenState
                       padding: const EdgeInsets.only(bottom: 8),
                       sliver: SliverReorderableList(
                         itemCount: _steps.length,
-                        onReorder: (oldIndex, newIndex) {
-                          setState(() {
-                            if (newIndex > oldIndex) newIndex -= 1;
-                            final item = _steps.removeAt(oldIndex);
-                            _steps.insert(newIndex, item);
-                            final k = _rowKeys.removeAt(oldIndex);
-                            _rowKeys.insert(newIndex, k);
-                            final gk = _stepItemKeys.removeAt(oldIndex);
-                            _stepItemKeys.insert(newIndex, gk);
-                            _renumberStepsContiguously();
-                            _revalidate();
-                          });
-                        },
+                        onReorder: _onReorderSteps,
                         proxyDecorator: (child, index, animation) {
                           return AnimatedBuilder(
                             animation: animation,
@@ -815,21 +826,6 @@ class _EmptySteps extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-String _assigneeTypeLabel(String raw) {
-  switch (raw.trim().toLowerCase()) {
-    case 'user':
-      return 'Selected people';
-    case 'department':
-      return 'Department pool';
-    case 'office':
-      return 'Office pool';
-    case 'role':
-      return 'By role';
-    default:
-      return raw;
   }
 }
 
@@ -1391,7 +1387,7 @@ class _WorkflowStepFlowCard extends StatelessWidget {
             : DocuTrackerTokens.borderSubtle;
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: 14),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1403,207 +1399,188 @@ class _WorkflowStepFlowCard extends StatelessWidget {
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusLg),
-                border: Border.all(
-                  color: borderColor,
-                  width: isSelected || hasBlockingIssue ? 2 : 1,
+            child: InkWell(
+              onTap: onSelect,
+              borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusLg),
+              splashColor: accent.withValues(alpha: 0.12),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOut,
+                decoration: BoxDecoration(
+                  color: DocuTrackerTokens.surface,
+                  borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusLg),
+                  border: Border.all(
+                    color: borderColor,
+                    width: isSelected || hasBlockingIssue ? 2 : 1,
+                  ),
+                  boxShadow: [
+                    if (isSelected)
+                      BoxShadow(
+                        color: accent.withValues(alpha: 0.2),
+                        blurRadius: 20,
+                        offset: const Offset(0, 8),
+                      )
+                    else
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.06),
+                        blurRadius: 12,
+                        offset: const Offset(0, 3),
+                      ),
+                  ],
                 ),
-                boxShadow: [
-                  if (isSelected)
-                    BoxShadow(
-                      color: accent.withValues(alpha: 0.2),
-                      blurRadius: 20,
-                      offset: const Offset(0, 8),
-                    )
-                  else
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.05),
-                      blurRadius: 12,
-                      offset: const Offset(0, 3),
-                    ),
-                ],
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusLg),
-                child: Stack(
-                  clipBehavior: Clip.hardEdge,
-                  children: [
-                    Positioned(
-                      left: 0,
-                      top: 0,
-                      bottom: 0,
-                      child: Container(width: 5, color: accent),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.only(left: 5),
-                      child: Material(
-                        color: isSelected
-                            ? accent.withValues(alpha: 0.04)
-                            : DocuTrackerTokens.surface,
-                        child: InkWell(
-                          onTap: onSelect,
-                          splashColor: accent.withValues(alpha: 0.1),
-                          highlightColor: accent.withValues(alpha: 0.05),
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(14, 14, 10, 14),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 14, 14),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 18,
+                            backgroundColor: accent.withValues(alpha: 0.14),
+                            foregroundColor: accent,
+                            child: Text(
+                              '${step.stepOrder}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
                             child: Column(
+                              mainAxisSize: MainAxisSize.min,
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Wrap(
-                                            spacing: 8,
-                                            runSpacing: 6,
-                                            crossAxisAlignment: WrapCrossAlignment.center,
-                                            children: [
-                                              _StepBadge(label: 'Step ${step.stepOrder}', color: accent),
-                                              if (isSelected)
-                                                _StepBadge(
-                                                  label: 'Highlighted',
-                                                  color: AppTheme.primaryNavy,
-                                                  isSoft: true,
-                                                ),
-                                              if (!step.enabled)
-                                                _StepBadge(
-                                                  label: 'Disabled',
-                                                  color: Colors.grey.shade700,
-                                                  isSoft: true,
-                                                ),
-                                              if (hasBlockingIssue)
-                                                _StepBadge(
-                                                  label: 'Needs fixing',
-                                                  color: Colors.red.shade700,
-                                                  isSoft: true,
-                                                ),
-                                            ],
-                                          ),
-                                          const SizedBox(height: 8),
-                                          Text(
-                                            _stepName(step),
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: TextStyle(
-                                              fontWeight: FontWeight.w800,
-                                              fontSize: 16,
-                                              color: step.enabled
-                                                  ? AppTheme.textPrimary
-                                                  : AppTheme.textSecondary,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    IconButton(
-                                      tooltip:
-                                          'Change step name, department, who acts here, and deadline',
-                                      icon: const Icon(Icons.edit_rounded, size: 20),
-                                      onPressed: onEdit,
-                                    ),
-                                    IconButton(
-                                      tooltip: 'Remove this step from the route',
-                                      icon: Icon(
-                                        Icons.delete_outline_rounded,
-                                        size: 20,
-                                        color: Colors.red.shade700,
-                                      ),
-                                      onPressed: onDelete,
-                                    ),
-                                    ReorderableDragStartListener(
-                                      index: index,
-                                      child: Tooltip(
-                                        message:
-                                            'Drag to reorder: press and hold, then move the card up or down',
-                                        child: Padding(
-                                          padding: const EdgeInsets.all(8),
-                                          child: Icon(
-                                            Icons.drag_indicator_rounded,
-                                            color: AppTheme.textSecondary.withValues(alpha: 0.85),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 12),
-                                Wrap(
-                                  spacing: 10,
-                                  runSpacing: 10,
-                                  children: [
-                                    _StepInfoTile(
-                                      icon: Icons.apartment_rounded,
-                                      label: 'Department',
-                                      value: _departmentLabel(step, departmentNameById),
-                                    ),
-                                    _StepInfoTile(
-                                      icon: Icons.person_rounded,
-                                      label: 'Primary user',
-                                      value: _primaryUserLabel(step, assigneeSnapshot),
-                                    ),
-                                    _StepInfoTile(
-                                      icon: Icons.group_rounded,
-                                      label: 'Backup users',
-                                      value: backupUsers.isEmpty ? 'No backups' : backupUsers.join(', '),
-                                    ),
-                                    _StepInfoTile(
-                                      icon: Icons.schedule_rounded,
-                                      label: 'Deadline',
-                                      value: _deadlineLabel(step, defaultDeadlineHours),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 12),
                                 Text(
-                                  'Allowed actions',
+                                  _stepName(step),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    color: AppTheme.textSecondary,
-                                    fontSize: 11,
                                     fontWeight: FontWeight.w800,
+                                    fontSize: 16,
+                                    color: step.enabled
+                                        ? AppTheme.textPrimary
+                                        : AppTheme.textSecondary,
                                   ),
                                 ),
-                                const SizedBox(height: 6),
-                                Wrap(
-                                  spacing: 6,
-                                  runSpacing: 6,
-                                  children: [
-                                    for (final label in actionLabels)
-                                      _ActionChip(label: label, accent: accent),
-                                  ],
-                                ),
-                                const SizedBox(height: 10),
-                                Row(
-                                  children: [
-                                    _MiniChip(
-                                      icon: Icons.route_rounded,
-                                      label: _assigneeTypeLabel(step.assigneeType),
-                                      tint: accent,
-                                    ),
-                                    const Spacer(),
-                                    Tooltip(
-                                      message:
-                                          'Insert a new step after this one (before the next card)',
-                                      child: TextButton.icon(
-                                        onPressed: onAddAfter,
-                                        icon: const Icon(Icons.add_rounded, size: 18),
-                                        label: const Text('Add after'),
-                                      ),
-                                    ),
-                                  ],
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Deadline: ${_deadlineLabel(step, defaultDeadlineHours)}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppTheme.textSecondary,
+                                  ),
                                 ),
                               ],
                             ),
                           ),
+                          ReorderableDragStartListener(
+                            index: index,
+                            child: Tooltip(
+                              message:
+                                  'Drag to reorder: press and hold, then move the card up or down',
+                              child: Icon(
+                                Icons.drag_indicator_rounded,
+                                color: AppTheme.textSecondary.withValues(alpha: 0.85),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          _StepBadge(label: 'Step ${step.stepOrder}', color: accent),
+                          if (isSelected)
+                            _StepBadge(
+                              label: 'Highlighted',
+                              color: AppTheme.primaryNavy,
+                              isSoft: true,
+                            ),
+                          if (!step.enabled)
+                            _StepBadge(
+                              label: 'Disabled',
+                              color: Colors.grey.shade700,
+                              isSoft: true,
+                            ),
+                          if (hasBlockingIssue)
+                            _StepBadge(
+                              label: 'Needs fixing',
+                              color: Colors.red.shade700,
+                              isSoft: true,
+                            ),
+                          _ActionChip(
+                            label: _departmentLabel(step, departmentNameById),
+                            accent: accent,
+                          ),
+                          _ActionChip(
+                            label: 'Primary: ${_primaryUserLabel(step, assigneeSnapshot)}',
+                            accent: accent,
+                          ),
+                          _ActionChip(
+                            label: backupUsers.isEmpty
+                                ? 'Backups: none'
+                                : 'Backups: ${backupUsers.join(', ')}',
+                            accent: accent,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Allowed actions',
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          for (final label in actionLabels)
+                            _ActionChip(label: label, accent: accent),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: onEdit,
+                            icon: const Icon(Icons.edit_rounded, size: 18),
+                            label: const Text('Edit'),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: onAddAfter,
+                            icon: const Icon(Icons.add_rounded, size: 18),
+                            label: const Text('Add after'),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: onDelete,
+                            icon: Icon(
+                              Icons.delete_outline_rounded,
+                              size: 18,
+                              color: Colors.red.shade700,
+                            ),
+                            label: Text(
+                              'Delete',
+                              style: TextStyle(color: Colors.red.shade700),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -1730,59 +1707,6 @@ class _StepBadge extends StatelessWidget {
           fontSize: 10,
           fontWeight: FontWeight.w800,
         ),
-      ),
-    );
-  }
-}
-
-class _StepInfoTile extends StatelessWidget {
-  const _StepInfoTile({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 185, maxWidth: 300),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 18, color: AppTheme.textSecondary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  value,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                    height: 1.2,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }
