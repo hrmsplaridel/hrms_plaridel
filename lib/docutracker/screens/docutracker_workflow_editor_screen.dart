@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
+import '../../providers/auth_provider.dart';
 import '../docutracker_provider.dart';
 import '../docutracker_api_result.dart';
 import '../docutracker_repository.dart';
+import '../security/docutracker_roles.dart';
 import '../docutracker_styles.dart';
 import '../models/document_routing_config.dart';
 import '../models/document_type.dart';
@@ -41,17 +43,18 @@ class _DocuTrackerWorkflowEditorScreenState
   ];
 
   late List<WorkflowStep> _steps;
-  /// Stable keys for [ReorderableListView] across renumbering.
-  late List<String> _rowKeys;
-  /// One [GlobalKey] per row — kept in lockstep with [_rowKeys] for [Scrollable.ensureVisible].
-  late List<GlobalKey> _stepItemKeys;
+  /// Stable per-step IDs used for selection, reorder identity and preview mapping.
+  late List<String> _stepIds;
+  /// A [GlobalKey] per stable step ID for preview-chip jump scrolling.
+  final Map<String, GlobalKey> _stepItemKeyById = {};
   final ScrollController _listScrollController = ScrollController();
   List<DocuTrackerWorkflowValidationIssue> _issues = const [];
   bool _saving = false;
+  bool _hasUnsavedChanges = false;
   String? _error;
-  String? _selectedRowKey;
+  String? _selectedStepId;
   final Map<String, String> _departmentNameById = {};
-  final Map<String, _WorkflowStepAssigneeSnapshot> _assigneeSnapshotsByKey = {};
+  final Map<String, _WorkflowStepAssigneeSnapshot> _assigneeSnapshotsByStepId = {};
 
   @override
   void initState() {
@@ -72,9 +75,11 @@ class _DocuTrackerWorkflowEditorScreenState
       ..sort((a, b) => a.stepOrder.compareTo(b.stepOrder));
 
     final stamp = DateTime.now().microsecondsSinceEpoch;
-    _rowKeys = List.generate(_steps.length, (i) => 'wf-$stamp-$i');
-    _stepItemKeys = List.generate(_rowKeys.length, (_) => GlobalKey());
-    _selectedRowKey = _rowKeys.isEmpty ? null : _rowKeys.first;
+    _stepIds = List.generate(_steps.length, (i) => 'wf-$stamp-$i');
+    for (final id in _stepIds) {
+      _stepItemKeyById[id] = GlobalKey();
+    }
+    _selectedStepId = _stepIds.isEmpty ? null : _stepIds.first;
 
     _defaultDeadlineController.text =
         widget.initialConfig.reviewDeadlineHours.toString();
@@ -116,9 +121,9 @@ class _DocuTrackerWorkflowEditorScreenState
       for (final row in rows) {
         final order = (row['step_order'] as num?)?.toInt() ??
             int.tryParse(row['step_order']?.toString() ?? '');
-        if (order == null || order < 1 || order > _rowKeys.length) continue;
+        if (order == null || order < 1 || order > _stepIds.length) continue;
 
-        final key = _rowKeys[order - 1];
+        final key = _stepIds[order - 1];
         final rawAssignees = row['assignees'];
         final names = <String>[];
         final backupNames = <String>[];
@@ -163,7 +168,7 @@ class _DocuTrackerWorkflowEditorScreenState
 
       if (!mounted) return;
       setState(() {
-        _assigneeSnapshotsByKey
+        _assigneeSnapshotsByStepId
           ..clear()
           ..addAll(snapshots);
       });
@@ -179,17 +184,74 @@ class _DocuTrackerWorkflowEditorScreenState
     super.dispose();
   }
 
+  bool _isAdminUser() {
+    AuthProvider? auth;
+    try {
+      auth = context.read<AuthProvider>();
+    } catch (_) {
+      auth = null;
+    }
+    if (auth?.user == null) return true; // Allow tests and isolated previews.
+    return DocuTrackerRoles.normalize(auth!.user!.role) == DocuTrackerRoles.admin;
+  }
+
+  bool _ensureAdminAction() {
+    if (_isAdminUser()) return true;
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Access denied. Only admins can edit workflows.')),
+      );
+    }
+    return false;
+  }
+
+  Future<bool> _confirmDiscardUnsavedChanges() async {
+    if (!_hasUnsavedChanges || _saving) return true;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Discard unsaved changes?'),
+        content: const Text(
+          'You have unsaved workflow edits. Leaving now will discard all pending changes.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Stay'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Discard'),
+          ),
+        ],
+      ),
+    );
+    return confirm == true;
+  }
+
+  Future<void> _discardAndClose() async {
+    if (!await _confirmDiscardUnsavedChanges()) return;
+    if (!mounted) return;
+    Navigator.of(context).pop(false);
+  }
+
+  void _markUnsaved() {
+    if (_hasUnsavedChanges) return;
+    _hasUnsavedChanges = true;
+  }
+
   void _onPreviewSelectStep(int index) {
-    if (index < 0 || index >= _rowKeys.length) return;
-    setState(() => _selectedRowKey = _rowKeys[index]);
+    if (index < 0 || index >= _stepIds.length) return;
+    setState(() => _selectedStepId = _stepIds[index]);
     _scrollStepIntoView(index);
   }
 
   void _scrollStepIntoView(int index) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (index < 0 || index >= _stepItemKeys.length) return;
-      final ctx = _stepItemKeys[index].currentContext;
+      if (index < 0 || index >= _stepIds.length) return;
+      final stepId = _stepIds[index];
+      final ctx = _stepItemKeyById[stepId]?.currentContext;
       if (ctx == null) return;
       Scrollable.ensureVisible(
         ctx,
@@ -206,7 +268,156 @@ class _DocuTrackerWorkflowEditorScreenState
     });
   }
 
-  bool get _canSave => _issues.where((i) => !i.isWarning).isEmpty && !_saving;
+  List<String> _restrictionErrors() {
+    final errors = <String>[];
+    final blocking = _issues.where((i) => !i.isWarning).toList();
+    if (blocking.isNotEmpty) {
+      errors.addAll(blocking.map((e) => e.message));
+    }
+    if (_steps.isEmpty) {
+      errors.add('Workflow must contain at least one step.');
+      return errors;
+    }
+
+    final orders = _steps.map((s) => s.stepOrder).toList()..sort();
+    final expectedOrders = List<int>.generate(_steps.length, (i) => i + 1);
+    if (orders.length != orders.toSet().length) {
+      errors.add('Step order values must be unique.');
+    }
+    if (orders.isEmpty || orders.first != 1) {
+      errors.add('Step order must start at 1.');
+    }
+    if (orders.length == expectedOrders.length) {
+      for (var i = 0; i < orders.length; i++) {
+        if (orders[i] != expectedOrders[i]) {
+          errors.add('Step order must be continuous with no gaps.');
+          break;
+        }
+      }
+    }
+
+    const maxDeadlineHours = 720;
+    final activeCount = _steps.where((s) => s.enabled).length;
+    if (activeCount == 0) {
+      errors.add('Workflow must have at least one active step.');
+    }
+
+    const allowedActionsSet = {'approve', 'forward', 'reject', 'return'};
+    for (var i = 0; i < _steps.length; i++) {
+      final s = _steps[i];
+      final stepLabel = 'Step ${s.stepOrder}';
+      final label = (s.label ?? '').trim();
+      if (label.isEmpty) {
+        errors.add('$stepLabel must have a non-empty step name.');
+      }
+
+      if (s.deadlineHours != null) {
+        if (s.deadlineHours! <= 0) {
+          errors.add('$stepLabel deadline must be greater than 0 hours.');
+        } else if (s.deadlineHours! > maxDeadlineHours) {
+          errors.add('$stepLabel deadline cannot exceed $maxDeadlineHours hours.');
+        }
+      }
+
+      if (!s.enabled) continue;
+      final stepId = i < _stepIds.length ? _stepIds[i] : null;
+      final snapshot = stepId == null ? null : _assigneeSnapshotsByStepId[stepId];
+
+      if (s.assigneeType.trim().toLowerCase() == 'user') {
+        final userIds = (s.userIds ?? [])
+            .map((e) => e.trim())
+            .where((e) => e.isNotEmpty)
+            .toList();
+        if (userIds.isEmpty) {
+          errors.add('$stepLabel requires at least one assigned user.');
+        } else {
+          final primaryId = userIds.first;
+          final backups = userIds.skip(1).toList();
+          if (backups.contains(primaryId)) {
+            errors.add('$stepLabel backup users cannot include the primary user.');
+          }
+          if (backups.length != backups.toSet().length) {
+            errors.add('$stepLabel has duplicate backup users.');
+          }
+        }
+
+        if ((s.departmentId ?? '').trim().isEmpty) {
+          errors.add('$stepLabel must include a department scope for selected users.');
+        }
+      }
+
+      if (s.assigneeType.trim().toLowerCase() == 'department' &&
+          (s.departmentId ?? '').trim().isEmpty) {
+        errors.add('$stepLabel is department-based but no department is selected.');
+      }
+
+      final stepActions = snapshot?.allowedActions ?? _defaultWorkflowActions;
+      if (stepActions.isEmpty) {
+        errors.add('$stepLabel must include at least one allowed workflow action.');
+      } else {
+        final invalid = stepActions.where(
+          (a) => !allowedActionsSet.contains(a.trim().toLowerCase()),
+        );
+        if (invalid.isNotEmpty) {
+          errors.add('$stepLabel has invalid allowed actions: ${invalid.join(', ')}.');
+        }
+      }
+    }
+
+    return errors.toSet().toList();
+  }
+
+  bool get _canSave =>
+      _isAdminUser() &&
+      _restrictionErrors().isEmpty &&
+      !_saving;
+
+  bool get _canPublish =>
+      _isAdminUser() &&
+      _hasUnsavedChanges &&
+      _restrictionErrors().isEmpty &&
+      !_saving;
+
+  String? _validateStepDraft(WorkflowStep step) {
+    final label = (step.label ?? '').trim();
+    if (label.isEmpty) return 'Step name is required.';
+
+    if (step.deadlineHours != null) {
+      if (step.deadlineHours! <= 0) {
+        return 'Step deadline must be greater than 0.';
+      }
+      if (step.deadlineHours! > 720) {
+        return 'Step deadline cannot exceed 720 hours.';
+      }
+    }
+
+    if (!step.enabled) return null;
+
+    if (step.assigneeType.trim().toLowerCase() == 'department' &&
+        (step.departmentId ?? '').trim().isEmpty) {
+      return 'Department-based steps require a selected department.';
+    }
+
+    if (step.assigneeType.trim().toLowerCase() == 'user') {
+      final userIds = (step.userIds ?? [])
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+      if (userIds.isEmpty) return 'Active selected-user steps need at least one user.';
+      if ((step.departmentId ?? '').trim().isEmpty) {
+        return 'Selected-user steps require a department scope.';
+      }
+      final primary = userIds.first;
+      final backups = userIds.skip(1).toList();
+      if (backups.contains(primary)) {
+        return 'Backup users cannot include the primary user.';
+      }
+      if (backups.length != backups.toSet().length) {
+        return 'Duplicate backup users are not allowed.';
+      }
+    }
+    return null;
+  }
 
   /// Renumbers `stepOrder` to 1..n in **current list order** (required for drag-and-drop).
   void _renumberStepsContiguously() {
@@ -227,6 +438,7 @@ class _DocuTrackerWorkflowEditorScreenState
   }
 
   Future<void> _addStep({int? afterIndex}) async {
+    if (!_ensureAdminAction()) return;
     final nextOrder = _steps.isEmpty
         ? 1
         : (afterIndex == null ? _steps.length + 1 : afterIndex + 2);
@@ -240,51 +452,105 @@ class _DocuTrackerWorkflowEditorScreenState
       ),
     );
     if (created == null) return;
+    final draftIssue = _validateStepDraft(created);
+    if (draftIssue != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(draftIssue)),
+        );
+      }
+      return;
+    }
     setState(() {
       final insertAt = afterIndex == null ? _steps.length : afterIndex + 1;
-      final key = 'wf-${DateTime.now().microsecondsSinceEpoch}-${_rowKeys.length}';
+      final key = 'wf-${DateTime.now().microsecondsSinceEpoch}-${_stepIds.length}';
       _steps.insert(insertAt, created);
-      _rowKeys.insert(insertAt, key);
-      _stepItemKeys.insert(insertAt, GlobalKey());
-      _selectedRowKey = key;
+      _stepIds.insert(insertAt, key);
+      _stepItemKeyById[key] = GlobalKey();
+      _selectedStepId = key;
       _renumberStepsContiguously();
+      _markUnsaved();
       _revalidate();
     });
   }
 
   Future<void> _editStep(int index) async {
+    if (!_ensureAdminAction()) return;
     final edited = await showWorkflowStepEditor(
       context,
       title: 'Edit step ${_steps[index].stepOrder}',
       initial: _steps[index],
     );
     if (edited == null) return;
+    final draftIssue = _validateStepDraft(edited);
+    if (draftIssue != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(draftIssue)),
+        );
+      }
+      return;
+    }
     setState(() {
       _steps[index] = edited;
-      _selectedRowKey = _rowKeys[index];
+      _selectedStepId = _stepIds[index];
       _renumberStepsContiguously();
+      _markUnsaved();
       _revalidate();
     });
   }
 
-  void _removeStep(int index) {
+  Future<void> _removeStep(int index) async {
+    if (!_ensureAdminAction()) return;
+    final activeCount = _steps.where((s) => s.enabled).length;
+    if (_steps[index].enabled && activeCount <= 1) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('At least one active step is required.')),
+        );
+      }
+      return;
+    }
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete step?'),
+        content: Text(
+          'Remove step ${_steps[index].stepOrder} from this workflow?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (shouldDelete != true) return;
+
     setState(() {
-      final removedKey = _rowKeys.removeAt(index);
-      _stepItemKeys.removeAt(index);
-      _assigneeSnapshotsByKey.remove(removedKey);
+      final removedKey = _stepIds.removeAt(index);
+      _stepItemKeyById.remove(removedKey);
+      _assigneeSnapshotsByStepId.remove(removedKey);
       _steps.removeAt(index);
-      if (_selectedRowKey == removedKey) {
-        final nextIndex = index >= _rowKeys.length ? _rowKeys.length - 1 : index;
-        _selectedRowKey = _rowKeys.isEmpty
+      if (_selectedStepId == removedKey) {
+        final nextIndex = index >= _stepIds.length ? _stepIds.length - 1 : index;
+        _selectedStepId = _stepIds.isEmpty
             ? null
-            : _rowKeys[nextIndex];
+            : _stepIds[nextIndex];
       }
       _renumberStepsContiguously();
+      _markUnsaved();
       _revalidate();
     });
   }
 
   void _onReorderSteps(int oldIndex, int newIndex) {
+    if (!_ensureAdminAction()) return;
     if (oldIndex < 0 || oldIndex >= _steps.length) return;
     if (newIndex < 0 || newIndex > _steps.length) return;
 
@@ -295,18 +561,25 @@ class _DocuTrackerWorkflowEditorScreenState
       final movedStep = _steps.removeAt(oldIndex);
       _steps.insert(newIndex, movedStep);
 
-      final movedRowKey = _rowKeys.removeAt(oldIndex);
-      _rowKeys.insert(newIndex, movedRowKey);
-
-      final movedItemKey = _stepItemKeys.removeAt(oldIndex);
-      _stepItemKeys.insert(newIndex, movedItemKey);
+      final movedStepId = _stepIds.removeAt(oldIndex);
+      _stepIds.insert(newIndex, movedStepId);
 
       _renumberStepsContiguously();
+      _markUnsaved();
       _revalidate();
     });
   }
 
-  Future<void> _save() async {
+  Future<void> _save({required bool publish}) async {
+    if (!_ensureAdminAction()) return;
+    if (_saving) return;
+    final restrictionErrors = _restrictionErrors();
+    if (restrictionErrors.isNotEmpty) {
+      setState(() {
+        _error = restrictionErrors.first;
+      });
+      return;
+    }
     setState(() {
       _saving = true;
       _error = null;
@@ -318,15 +591,6 @@ class _DocuTrackerWorkflowEditorScreenState
         steps: _steps,
         reviewDeadlineHours: defaultDeadline < 1 ? 1 : defaultDeadline,
       );
-
-      final issues = _validator.validate(updated.steps);
-      if (issues.where((i) => !i.isWarning).isNotEmpty) {
-        setState(() {
-          _issues = issues;
-          _saving = false;
-        });
-        return;
-      }
 
       final repo = DocuTrackerRepository.instance;
       final saveResult = await repo.saveRoutingConfig(updated);
@@ -344,6 +608,12 @@ class _DocuTrackerWorkflowEditorScreenState
       if (!mounted) return;
       await context.read<DocuTrackerProvider>().loadRoutingConfigs();
       if (!mounted) return;
+      _hasUnsavedChanges = false;
+      if (publish) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Workflow version published.')),
+        );
+      }
       Navigator.of(context).pop(true);
     } catch (e) {
       setState(() {
@@ -355,12 +625,53 @@ class _DocuTrackerWorkflowEditorScreenState
 
   @override
   Widget build(BuildContext context) {
+    final isAdminUser = _isAdminUser();
     final blocking = _issues.where((i) => !i.isWarning).toList();
     final warnings = _issues.where((i) => i.isWarning).toList();
+    final restrictionErrors = _restrictionErrors();
     final selectedIndex =
-        _selectedRowKey == null ? -1 : _rowKeys.indexOf(_selectedRowKey!);
+        _selectedStepId == null ? -1 : _stepIds.indexOf(_selectedStepId!);
     final selectedStep =
         selectedIndex >= 0 && selectedIndex < _steps.length ? _steps[selectedIndex] : null;
+
+    if (!isAdminUser) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Workflow Editor')),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.lock_rounded, color: Colors.red.shade700, size: 44),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Access denied',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Only admins can edit, publish, or manage workflow rules.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 13,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
 
     Widget workflowHeaderBlock() {
       return Column(
@@ -373,7 +684,10 @@ class _DocuTrackerWorkflowEditorScreenState
           const SizedBox(height: 12),
           _DefaultDeadlineCard(
             controller: _defaultDeadlineController,
-            onChanged: _revalidate,
+            onChanged: () {
+              _markUnsaved();
+              _revalidate();
+            },
           ),
           const SizedBox(height: 12),
           _WorkflowBuilderOverview(
@@ -386,9 +700,9 @@ class _DocuTrackerWorkflowEditorScreenState
           const SizedBox(height: 10),
           _WorkflowPathPreviewStrip(
             steps: _steps,
-            rowKeys: _rowKeys,
+            rowKeys: _stepIds,
             departmentNameById: _departmentNameById,
-            assigneeSnapshotsByKey: _assigneeSnapshotsByKey,
+            assigneeSnapshotsByKey: _assigneeSnapshotsByStepId,
             selectedIndex: selectedIndex,
             onSelectIndex: _saving ? null : _onPreviewSelectStep,
           ),
@@ -419,7 +733,16 @@ class _DocuTrackerWorkflowEditorScreenState
       );
     }
 
-    return Scaffold(
+    return PopScope(
+      canPop: !_hasUnsavedChanges || _saving,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final navigator = Navigator.of(context);
+        if (!await _confirmDiscardUnsavedChanges()) return;
+        if (!navigator.mounted) return;
+        navigator.pop(false);
+      },
+      child: Scaffold(
       backgroundColor: DocuTrackerTokens.canvas,
       appBar: AppBar(
         backgroundColor: DocuTrackerTokens.surface,
@@ -487,25 +810,28 @@ class _DocuTrackerWorkflowEditorScreenState
                         itemBuilder: (ctx, idx) {
                           final s = _steps[idx];
                           final last = idx == _steps.length - 1;
+                          final stepId = _stepIds[idx];
+                          final activeCount = _steps.where((x) => x.enabled).length;
+                          final canDeleteStep = !(s.enabled && activeCount <= 1) && !_saving;
                           return _WorkflowStepFlowCard(
-                            key: _stepItemKeys[idx],
+                            key: _stepItemKeyById[stepId]!,
                             index: idx,
                             step: s,
                             departmentNameById: _departmentNameById,
-                            assigneeSnapshot: _assigneeSnapshotsByKey[_rowKeys[idx]],
+                            assigneeSnapshot: _assigneeSnapshotsByStepId[stepId],
                             defaultDeadlineHours:
                                 int.tryParse(_defaultDeadlineController.text.trim()) ?? 1,
                             showConnector: !last,
-                            isSelected: _selectedRowKey == _rowKeys[idx],
+                            isSelected: _selectedStepId == stepId,
                             hasBlockingIssue:
                                 blocking.any((i) => i.stepOrder == s.stepOrder),
                             hasWarning:
                                 warnings.any((i) => i.stepOrder == s.stepOrder),
                             onSelect: () => setState(() {
-                              _selectedRowKey = _rowKeys[idx];
+                              _selectedStepId = stepId;
                             }),
                             onEdit: () => _editStep(idx),
-                            onDelete: () => _removeStep(idx),
+                            onDelete: canDeleteStep ? () => _removeStep(idx) : null,
                             onAddAfter:
                                 _saving ? null : () => _addStep(afterIndex: idx),
                           );
@@ -516,43 +842,57 @@ class _DocuTrackerWorkflowEditorScreenState
               ),
             ),
             const SizedBox(height: 10),
-            Row(
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              alignment: WrapAlignment.spaceBetween,
               children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _saving ? null : _addStep,
-                    icon: const Icon(Icons.add_rounded),
-                    label: const Text('Add step'),
-                  ),
+                OutlinedButton.icon(
+                  onPressed: _saving ? null : _addStep,
+                  icon: const Icon(Icons.add_rounded),
+                  label: const Text('Add step'),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _canSave ? _save : null,
-                    icon: _saving
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.save_rounded),
-                    label: Text(_saving ? 'Saving…' : 'Save workflow'),
+                OutlinedButton.icon(
+                  onPressed: _hasUnsavedChanges && !_saving ? _discardAndClose : null,
+                  icon: const Icon(Icons.cancel_outlined),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red.shade700,
                   ),
+                  label: const Text('Cancel unsaved changes'),
+                ),
+                FilledButton.icon(
+                  onPressed: _canSave ? () => _save(publish: false) : null,
+                  icon: _saving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.save_rounded),
+                  label: Text(_saving ? 'Saving…' : 'Save workflow'),
+                ),
+                FilledButton.icon(
+                  onPressed: _canPublish ? () => _save(publish: true) : null,
+                  icon: const Icon(Icons.publish_rounded),
+                  label: const Text('Publish version'),
                 ),
               ],
             ),
-            if (!_canSave && !_saving) ...[
+            if ((restrictionErrors.isNotEmpty || !_canSave) && !_saving) ...[
+              const SizedBox(height: 6),
+              _RestrictionPanel(messages: restrictionErrors),
               const SizedBox(height: 6),
               Text(
-                blocking.isEmpty
-                    ? 'Fix validation errors above before saving.'
-                    : '${blocking.length} issue(s) must be resolved before saving.',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
-                textAlign: TextAlign.center,
+                restrictionErrors.isNotEmpty
+                    ? '${restrictionErrors.length} issue(s) block save/publish.'
+                    : 'Fix validation errors above before saving.',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 11.5),
+                textAlign: TextAlign.left,
               ),
             ],
           ],
         ),
+      ),
       ),
     );
   }
@@ -778,6 +1118,59 @@ class _ValidationLine extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _RestrictionPanel extends StatelessWidget {
+  const _RestrictionPanel({required this.messages});
+
+  final List<String> messages;
+
+  @override
+  Widget build(BuildContext context) {
+    if (messages.isEmpty) return const SizedBox.shrink();
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFEBEE),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.red.withValues(alpha: 0.24)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.gpp_bad_rounded, color: Colors.red.shade800, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  'Workflow restrictions',
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            for (final message in messages.take(8))
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(
+                  '• $message',
+                  style: TextStyle(
+                    color: Colors.red.shade900,
+                    fontSize: 12.5,
+                    height: 1.3,
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -1372,7 +1765,7 @@ class _WorkflowStepFlowCard extends StatelessWidget {
   final bool hasWarning;
   final VoidCallback onSelect;
   final VoidCallback onEdit;
-  final VoidCallback onDelete;
+  final VoidCallback? onDelete;
   final VoidCallback? onAddAfter;
 
   @override
@@ -1570,11 +1963,17 @@ class _WorkflowStepFlowCard extends StatelessWidget {
                             icon: Icon(
                               Icons.delete_outline_rounded,
                               size: 18,
-                              color: Colors.red.shade700,
+                              color: onDelete == null
+                                  ? AppTheme.textSecondary.withValues(alpha: 0.55)
+                                  : Colors.red.shade700,
                             ),
                             label: Text(
                               'Delete',
-                              style: TextStyle(color: Colors.red.shade700),
+                              style: TextStyle(
+                                color: onDelete == null
+                                    ? AppTheme.textSecondary.withValues(alpha: 0.65)
+                                    : Colors.red.shade700,
+                              ),
                             ),
                           ),
                         ],

@@ -20,6 +20,13 @@ void main() {
   }
 
   Future<void> pumpEditor(WidgetTester tester) async {
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.physicalSize = const Size(1440, 2400);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+
     await tester.pumpWidget(
       MaterialApp(
         home: DocuTrackerWorkflowEditorScreen(initialConfig: buildConfig()),
@@ -92,7 +99,7 @@ void main() {
     await scrollMainUntilVisible(tester, handles);
     expect(handles, findsWidgets);
     final handle = handles.first;
-    await tester.drag(handle, const Offset(0, 220));
+    await tester.drag(handle, const Offset(0, 80));
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
