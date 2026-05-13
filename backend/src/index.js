@@ -3,7 +3,9 @@ const express = require('express');
 const cors = require('cors');
 const { pool } = require('./config/db');
 const { initWebSocket } = require('./websockets/biometricStream');
+const { initAppEventsWebSocket } = require('./websockets/appEvents');
 const { scheduleLeaveMonthlyAccrualCron } = require('./jobs/leaveMonthlyAccrualScheduler');
+const { generalApiLimiter } = require('./middleware/rateLimiters');
 
 const authRoutes = require('./routes/auth');
 const departmentsRoutes = require('./routes/departments');
@@ -34,6 +36,12 @@ const notificationsRoutes = require('./routes/notifications');
 const locatorSlipsRoutes = require('./routes/locatorSlips');
 
 const app = express();
+
+// Behind nginx/Caddy on Kamatera (HTTPS) so req.ip / rate limits see real client IP
+if (process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true') {
+  app.set('trust proxy', 1);
+}
+
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0'; // 0.0.0.0 = accessible from LAN
 
@@ -47,11 +55,15 @@ if (!process.env.JWT_REFRESH_SECRET) {
 }
 
 // Middleware (large limit: RSP/L&D forms e.g. turn-around tables with many JSON rows)
-app.use(cors());
+const corsOrigins = process.env.CORS_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean);
+if (corsOrigins && corsOrigins.length > 0) {
+  app.use(cors({ origin: corsOrigins }));
+} else {
+  app.use(cors());
+}
 app.use(express.json({ limit: '15mb' }));
 
 // --- Routes ---
-
 // Health
 app.get('/health', (_req, res) => {
   res.json({ ok: true, message: 'HRMS API is running' });
@@ -86,6 +98,7 @@ app.get('/health/db', async (_req, res) => {
 });
 
 // API routes
+app.use('/api', generalApiLimiter);
 app.use('/auth', authRoutes);
 app.use('/api/departments', departmentsRoutes);
 app.use('/api/positions', positionsRoutes);
@@ -140,3 +153,6 @@ const server = app.listen(PORT, HOST, () => {
 
 // Initialize WebSocket server for Biometrics/DTR updates
 initWebSocket(server);
+
+// Initialize authenticated app-wide realtime events
+initAppEventsWebSocket(server);

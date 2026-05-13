@@ -1,7 +1,7 @@
+import 'dart:js_interop';
 import 'dart:typed_data';
 
-// ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html;
+import 'package:web/web.dart' as web;
 
 /// Share/download implementation for web (triggers file download).
 Future<void> shareOrDownloadPdf(Uint8List bytes, String filename) async {
@@ -17,14 +17,22 @@ Future<void> shareOrDownloadFile(
 }
 
 void _triggerDownload(Uint8List bytes, String filename, String mimeType) {
-  final blob = html.Blob([bytes], mimeType);
-  final url = html.Url.createObjectUrlFromBlob(blob);
-  final anchor = html.AnchorElement()
+  final jsBytes = JSUint8Array(
+    bytes.buffer.toJS,
+    bytes.offsetInBytes,
+    bytes.lengthInBytes,
+  );
+  final blob = web.Blob(
+    <JSAny>[jsBytes].toJS,
+    web.BlobPropertyBag(type: mimeType),
+  );
+  final url = web.URL.createObjectURL(blob);
+  final anchor = web.HTMLAnchorElement()
     ..href = url
     ..download = filename
     ..style.display = 'none';
-  html.document.body?.append(anchor);
+  web.document.body?.appendChild(anchor);
   anchor.click();
   anchor.remove();
-  html.Url.revokeObjectUrl(url);
+  web.URL.revokeObjectURL(url);
 }

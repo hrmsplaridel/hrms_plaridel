@@ -469,12 +469,12 @@ class _EmployeeSidebar extends StatelessWidget {
                 color: AppTheme.primaryNavy,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: Colors.white.withOpacity(0.1),
+                  color: Colors.white.withValues(alpha: 0.1),
                   width: 1,
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.3),
+                    color: Colors.black.withValues(alpha: 0.3),
                     blurRadius: 12,
                     offset: const Offset(0, 4),
                   ),
@@ -489,7 +489,7 @@ class _EmployeeSidebar extends StatelessWidget {
                       border: Border.all(color: Colors.white, width: 2),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.2),
+                          color: Colors.black.withValues(alpha: 0.2),
                           blurRadius: 6,
                           offset: const Offset(0, 2),
                         ),
@@ -541,7 +541,7 @@ class _EmployeeSidebar extends StatelessWidget {
                           child: Text(
                             'HUMAN RESOURCE MANAGEMENT SYSTEM',
                             style: TextStyle(
-                              color: Colors.white.withOpacity(0.95),
+                              color: Colors.white.withValues(alpha: 0.95),
                               fontSize: 10,
                               fontWeight: FontWeight.w600,
                               letterSpacing: 0.4,
@@ -608,7 +608,7 @@ class _EmployeeSidebar extends StatelessWidget {
                 UserAvatar(
                   avatarPath: avatarPath,
                   radius: 24,
-                  backgroundColor: Colors.white.withOpacity(0.25),
+                  backgroundColor: Colors.white.withValues(alpha: 0.25),
                   placeholderIconColor: Colors.white,
                 ),
                 const SizedBox(width: 12),
@@ -628,7 +628,7 @@ class _EmployeeSidebar extends StatelessWidget {
                       Text(
                         'Employee',
                         style: TextStyle(
-                          color: Colors.white.withOpacity(0.85),
+                          color: Colors.white.withValues(alpha: 0.85),
                           fontSize: 12,
                         ),
                       ),
@@ -646,7 +646,7 @@ class _EmployeeSidebar extends StatelessWidget {
                 Text(
                   '© 2026 HRMS',
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.6),
+                    color: Colors.white.withValues(alpha: 0.6),
                     fontSize: 11,
                   ),
                 ),
@@ -664,7 +664,7 @@ class _EmployeeSidebar extends StatelessWidget {
                         'Privacy Policy',
                         style: TextStyle(
                           fontSize: 11,
-                          color: Colors.white.withOpacity(0.7),
+                          color: Colors.white.withValues(alpha: 0.7),
                         ),
                       ),
                     ),
@@ -672,7 +672,7 @@ class _EmployeeSidebar extends StatelessWidget {
                       ' | ',
                       style: TextStyle(
                         fontSize: 11,
-                        color: Colors.white.withOpacity(0.6),
+                        color: Colors.white.withValues(alpha: 0.6),
                       ),
                     ),
                     TextButton(
@@ -685,7 +685,7 @@ class _EmployeeSidebar extends StatelessWidget {
                         'Terms',
                         style: TextStyle(
                           fontSize: 11,
-                          color: Colors.white.withOpacity(0.7),
+                          color: Colors.white.withValues(alpha: 0.7),
                         ),
                       ),
                     ),
@@ -717,7 +717,7 @@ class _EmployeeNavTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bgColor = selected
-        ? Colors.white.withOpacity(0.22)
+        ? Colors.white.withValues(alpha: 0.22)
         : Colors.transparent;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -783,7 +783,7 @@ class _EmployeeTopBar extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.lightGray,
         border: Border(
-          bottom: BorderSide(color: Colors.black.withOpacity(0.06)),
+          bottom: BorderSide(color: Colors.black.withValues(alpha: 0.06)),
         ),
       ),
       child: Row(
@@ -811,7 +811,9 @@ class _EmployeeTopBar extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.black.withOpacity(0.08)),
+                      border: Border.all(
+                        color: Colors.black.withValues(alpha: 0.08),
+                      ),
                     ),
                     child: Row(
                       children: [
@@ -919,7 +921,7 @@ class _EmployeeUserMenu extends StatelessWidget {
       padding: EdgeInsets.zero,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       elevation: 8,
-      shadowColor: Colors.black.withOpacity(0.15),
+      shadowColor: Colors.black.withValues(alpha: 0.15),
       child: Padding(
         padding: const EdgeInsets.only(left: 8),
         child: Row(
@@ -959,7 +961,9 @@ class _EmployeeUserMenu extends StatelessWidget {
                   UserAvatar(
                     avatarPath: avatarPath,
                     radius: 28,
-                    backgroundColor: AppTheme.primaryNavy.withOpacity(0.12),
+                    backgroundColor: AppTheme.primaryNavy.withValues(
+                      alpha: 0.12,
+                    ),
                     placeholderIconColor: AppTheme.primaryNavy,
                   ),
                   const SizedBox(width: 14),
@@ -1080,7 +1084,7 @@ class _EmployeeDashboardContent extends StatefulWidget {
 }
 
 class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
-  Timer? _pollingTimer;
+  StreamSubscription<DtrUpdateEvent>? _dtrUpdateSub;
 
   @override
   void initState() {
@@ -1097,20 +1101,20 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
       final start = DateTime(now.year, now.month, 1);
       final end = DateTime(now.year, now.month + 1, 0);
       dtr.loadTimeRecordsForUser(startDate: start, endDate: end);
-    });
-    _pollingTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (!mounted) return;
-      final dtr = context.read<DtrProvider>();
-      if (dtr.loading) return;
-      dtr.loadTodayRecord();
-      // Month list is loaded by [EmployeeAttendanceOverviewCard] / My Attendance;
-      // avoid overwriting the provider with a fixed "current month" every tick.
+      _dtrUpdateSub = dtr.onDtrEvent.listen((event) {
+        if (!mounted) return;
+        final userId = context.read<AuthProvider>().user?.id;
+        if (!event.affectsUser(userId)) return;
+        final currentDtr = context.read<DtrProvider>();
+        if (currentDtr.loading) return;
+        currentDtr.loadTodayRecord();
+      });
     });
   }
 
   @override
   void dispose() {
-    _pollingTimer?.cancel();
+    _dtrUpdateSub?.cancel();
     super.dispose();
   }
 
@@ -1170,15 +1174,15 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
           decoration: BoxDecoration(
             color: AppTheme.white,
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.06),
+                color: Colors.black.withValues(alpha: 0.06),
                 blurRadius: 20,
                 offset: const Offset(0, 4),
               ),
               BoxShadow(
-                color: Colors.black.withOpacity(0.02),
+                color: Colors.black.withValues(alpha: 0.02),
                 blurRadius: 16,
                 offset: const Offset(0, 2),
               ),
@@ -1345,10 +1349,10 @@ class _ClockInCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: AppTheme.white,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: Colors.black.withValues(alpha: 0.05),
                 blurRadius: 12,
                 offset: const Offset(0, 4),
               ),
@@ -1542,10 +1546,10 @@ class _AttendanceCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: AppTheme.white,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: Colors.black.withValues(alpha: 0.05),
                 blurRadius: 12,
                 offset: const Offset(0, 4),
               ),
@@ -1670,10 +1674,10 @@ class _LeaveBalanceCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: AppTheme.white,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: Colors.black.withValues(alpha: 0.05),
                 blurRadius: 12,
                 offset: const Offset(0, 4),
               ),
@@ -1843,10 +1847,10 @@ class _PayslipCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -1938,10 +1942,10 @@ class _EmployeeAnnouncementsCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: AppTheme.white,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: Colors.black.withValues(alpha: 0.05),
                 blurRadius: 16,
                 offset: const Offset(0, 4),
               ),
@@ -1987,7 +1991,9 @@ class _EmployeeAnnouncementsCard extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: AppTheme.offWhite,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.black.withOpacity(0.06)),
+                  border: Border.all(
+                    color: Colors.black.withValues(alpha: 0.06),
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2085,7 +2091,7 @@ class _EmployeeUpcomingLeaveCard extends StatelessWidget {
               decoration: BoxDecoration(
                 color: AppTheme.offWhite,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.black.withOpacity(0.06)),
+                border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
               ),
               child: Row(
                 children: [
@@ -2100,7 +2106,7 @@ class _EmployeeUpcomingLeaveCard extends StatelessWidget {
                   ),
                   Icon(
                     Icons.event_rounded,
-                    color: AppTheme.textSecondary.withOpacity(0.5),
+                    color: AppTheme.textSecondary.withValues(alpha: 0.5),
                     size: 40,
                   ),
                 ],
@@ -2118,10 +2124,10 @@ class _EmployeeUpcomingLeaveCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: AppTheme.white,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: Colors.black.withValues(alpha: 0.05),
                 blurRadius: 16,
                 offset: const Offset(0, 4),
               ),
@@ -2253,8 +2259,9 @@ class _EmployeeAttendanceContentState
     if (segs.any((s) => s.toUpperCase() == segment)) return 'On Field';
     if (segs.isEmpty &&
         segment == 'AM IN' &&
-        (r.status == 'on_field' || r.locatorSlipId != null))
+        (r.status == 'on_field' || r.locatorSlipId != null)) {
       return 'On Field';
+    }
     return '—';
   }
 
@@ -2321,7 +2328,7 @@ class _EmployeeAttendanceContentState
                 SizedBox(
                   width: isNarrow ? 150 : 130,
                   child: DropdownButtonFormField<int>(
-                    value: _selectedMonth,
+                    initialValue: _selectedMonth,
                     isExpanded: true,
                     decoration: InputDecoration(
                       isDense: true,
@@ -2372,7 +2379,7 @@ class _EmployeeAttendanceContentState
                 SizedBox(
                   width: isNarrow ? 95 : 85,
                   child: DropdownButtonFormField<int>(
-                    value: _selectedYear,
+                    initialValue: _selectedYear,
                     isExpanded: true,
                     decoration: InputDecoration(
                       isDense: true,
@@ -2417,7 +2424,7 @@ class _EmployeeAttendanceContentState
                 SizedBox(
                   width: isNarrow ? 115 : 105,
                   child: DropdownButtonFormField<int?>(
-                    value: _selectedDay,
+                    initialValue: _selectedDay,
                     isExpanded: true,
                     decoration: InputDecoration(
                       isDense: true,
@@ -2489,7 +2496,7 @@ class _EmployeeAttendanceContentState
                   ),
                   tooltip: 'Reset filters',
                   style: IconButton.styleFrom(
-                    backgroundColor: AppTheme.lightGray.withOpacity(0.5),
+                    backgroundColor: AppTheme.lightGray.withValues(alpha: 0.5),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10),
                     ),
@@ -2507,7 +2514,7 @@ class _EmployeeAttendanceContentState
             decoration: BoxDecoration(
               color: AppTheme.white,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.black.withOpacity(0.06)),
+              border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
             ),
             child: Center(
               child: Column(
@@ -2535,10 +2542,12 @@ class _EmployeeAttendanceContentState
                 decoration: BoxDecoration(
                   color: AppTheme.white,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.black.withOpacity(0.06)),
+                  border: Border.all(
+                    color: Colors.black.withValues(alpha: 0.06),
+                  ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
+                      color: Colors.black.withValues(alpha: 0.05),
                       blurRadius: 12,
                       offset: const Offset(0, 4),
                     ),
@@ -2558,7 +2567,7 @@ class _EmployeeAttendanceContentState
                             vertical: 12,
                           ),
                           decoration: BoxDecoration(
-                            color: AppTheme.lightGray.withOpacity(0.5),
+                            color: AppTheme.lightGray.withValues(alpha: 0.5),
                             borderRadius: const BorderRadius.vertical(
                               top: Radius.circular(12),
                             ),
@@ -2701,7 +2710,7 @@ class _EmployeeAttendanceContentState
                             decoration: BoxDecoration(
                               color: i % 2 == 0
                                   ? AppTheme.white
-                                  : AppTheme.lightGray.withOpacity(0.25),
+                                  : AppTheme.lightGray.withValues(alpha: 0.25),
                             ),
                             child: Row(
                               children: [
@@ -2862,12 +2871,12 @@ class _EmployeePlaceholderContent extends StatelessWidget {
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.06),
+              color: Colors.black.withValues(alpha: 0.06),
               blurRadius: 20,
               offset: const Offset(0, 8),
             ),
           ],
-          border: Border.all(color: Colors.black.withOpacity(0.06)),
+          border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -2875,13 +2884,13 @@ class _EmployeePlaceholderContent extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: AppTheme.primaryNavy.withOpacity(0.08),
+                color: AppTheme.primaryNavy.withValues(alpha: 0.08),
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 Icons.construction_rounded,
                 size: 56,
-                color: AppTheme.primaryNavy.withOpacity(0.7),
+                color: AppTheme.primaryNavy.withValues(alpha: 0.7),
               ),
             ),
             const SizedBox(height: 24),

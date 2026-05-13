@@ -16,6 +16,110 @@ import 'dtr_dashboard_analytics_models.dart';
 
 // Previously used Supabase for auth; now use setUserFromApi(userId) from AuthProvider.
 
+/// Payload sent by the backend when DTR data changes over websocket.
+class DtrUpdateEvent {
+  const DtrUpdateEvent({
+    required this.action,
+    this.userId,
+    this.date,
+    this.dateFrom,
+    this.dateTo,
+    this.userIds = const <String>{},
+    this.dates = const <String>{},
+    this.raw = const <String, dynamic>{},
+  });
+
+  final String action;
+  final String? userId;
+  final String? date;
+  final String? dateFrom;
+  final String? dateTo;
+  final Set<String> userIds;
+  final Set<String> dates;
+  final Map<String, dynamic> raw;
+
+  factory DtrUpdateEvent.fromJson(Map<String, dynamic> json) {
+    Set<String> stringSet(dynamic value) {
+      if (value is List) {
+        return value
+            .map((item) => item?.toString().trim() ?? '')
+            .where((item) => item.isNotEmpty)
+            .toSet();
+      }
+      final single = value?.toString().trim();
+      return single == null || single.isEmpty ? <String>{} : {single};
+    }
+
+    final directUserId =
+        json['userId']?.toString().trim() ?? json['user_id']?.toString().trim();
+    final directDate =
+        json['date']?.toString().trim() ??
+        json['attendance_date']?.toString().trim();
+    final userIds = {
+      ...stringSet(json['userIds'] ?? json['user_ids']),
+      if (directUserId != null && directUserId.isNotEmpty) directUserId,
+    };
+    final dates = {
+      ...stringSet(json['dates']),
+      if (directDate != null && directDate.isNotEmpty) directDate,
+    };
+
+    return DtrUpdateEvent(
+      action: json['action']?.toString() ?? 'dtr_refresh',
+      userId: directUserId?.isEmpty == true ? null : directUserId,
+      date: directDate?.isEmpty == true ? null : directDate,
+      dateFrom: json['dateFrom']?.toString() ?? json['date_from']?.toString(),
+      dateTo: json['dateTo']?.toString() ?? json['date_to']?.toString(),
+      userIds: userIds,
+      dates: dates,
+      raw: json,
+    );
+  }
+
+  bool affectsUser(String? id) {
+    final normalized = id?.trim();
+    if (userIds.isEmpty && (userId == null || userId!.isEmpty)) return true;
+    if (normalized == null || normalized.isEmpty) return false;
+    return userIds.contains(normalized) || userId == normalized;
+  }
+
+  bool affectsDateRange(DateTime start, DateTime end) {
+    final rangeStart = DateTime(start.year, start.month, start.day);
+    final rangeEnd = DateTime(end.year, end.month, end.day);
+
+    DateTime? parseDate(String? value) {
+      final text = value?.trim();
+      if (text == null || text.isEmpty) return null;
+      final normalized = text.length >= 10 ? text.substring(0, 10) : text;
+      final parsed = DateTime.tryParse(normalized);
+      return parsed == null
+          ? null
+          : DateTime(parsed.year, parsed.month, parsed.day);
+    }
+
+    bool overlaps(DateTime from, DateTime to) {
+      return !to.isBefore(rangeStart) && !from.isAfter(rangeEnd);
+    }
+
+    if (dates.isNotEmpty) {
+      return dates
+          .map((item) => parseDate(item))
+          .whereType<DateTime>()
+          .any((day) => overlaps(day, day));
+    }
+
+    final from = parseDate(dateFrom);
+    final to = parseDate(dateTo);
+    if (from != null || to != null) {
+      return overlaps(from ?? to!, to ?? from!);
+    }
+
+    final single = parseDate(date);
+    if (single != null) return overlaps(single, single);
+    return true;
+  }
+}
+
 /// Summary counts for DTR dashboard.
 class DtrSummary {
   const DtrSummary({
@@ -65,14 +169,20 @@ class DepartmentOption {
 /// Current user id is set via [setUserFromApi] (e.g. from AuthProvider after API login).
 class DtrProvider extends ChangeNotifier {
   WebSocketChannel? _wsChannel;
+  Timer? _wsReconnectTimer;
+  bool _disposed = false;
   final _dtrUpdateController = StreamController<void>.broadcast();
+  final _dtrEventController = StreamController<DtrUpdateEvent>.broadcast();
   Stream<void> get onDtrUpdate => _dtrUpdateController.stream;
+  Stream<DtrUpdateEvent> get onDtrEvent => _dtrEventController.stream;
 
   DtrProvider() {
     _initWebSocket();
   }
 
   void _initWebSocket() {
+    if (_disposed) return;
+    _wsReconnectTimer?.cancel();
     try {
       final wsUrl =
           '${ApiConfig.baseUrl.replaceFirst('http://', 'ws://').replaceFirst('https://', 'wss://')}/ws/biometrics';
@@ -81,25 +191,36 @@ class DtrProvider extends ChangeNotifier {
         (message) {
           try {
             final data = jsonDecode(message);
-            if (data['event'] == 'dtr_refresh') {
+            if (data is Map && data['event'] == 'dtr_refresh') {
+              final event = DtrUpdateEvent.fromJson(
+                Map<String, dynamic>.from(data),
+              );
+              _dtrEventController.add(event);
               _dtrUpdateController.add(null);
             }
           } catch (_) {}
         },
-        onDone: () {
-          Future.delayed(const Duration(seconds: 5), () => _initWebSocket());
-        },
-        onError: (_) {
-          Future.delayed(const Duration(seconds: 5), () => _initWebSocket());
-        },
+        onDone: _scheduleWebSocketReconnect,
+        onError: (_) => _scheduleWebSocketReconnect(),
       );
-    } catch (_) {}
+    } catch (_) {
+      _scheduleWebSocketReconnect();
+    }
+  }
+
+  void _scheduleWebSocketReconnect() {
+    if (_disposed) return;
+    _wsReconnectTimer?.cancel();
+    _wsReconnectTimer = Timer(const Duration(seconds: 5), _initWebSocket);
   }
 
   @override
   void dispose() {
+    _disposed = true;
+    _wsReconnectTimer?.cancel();
     _wsChannel?.sink.close();
     _dtrUpdateController.close();
+    _dtrEventController.close();
     super.dispose();
   }
 

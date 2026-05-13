@@ -16,23 +16,23 @@ class DtrDashboard extends StatefulWidget {
 }
 
 class _DtrDashboardState extends State<DtrDashboard> {
-  Timer? _pollingTimer;
+  StreamSubscription<DtrUpdateEvent>? _wsSub;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
-    _pollingTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (!mounted) return;
-      final dtr = context.read<DtrProvider>();
-      if (dtr.loading) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       _load();
+      if (!mounted) return;
+      _wsSub = context.read<DtrProvider>().onDtrEvent.listen((_) {
+        if (mounted) _load();
+      });
     });
   }
 
   @override
   void dispose() {
-    _pollingTimer?.cancel();
+    _wsSub?.cancel();
     super.dispose();
   }
 

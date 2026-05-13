@@ -8,6 +8,7 @@
 
 const cron = require('node-cron');
 const { runLeaveMonthlyAccrual } = require('../services/leaveMonthlyAccrual');
+const { broadcastAppEvent } = require('../websockets/appEvents');
 
 /** Stable key for pg_try_advisory_lock (must not collide with other app locks). */
 const ACCRUAL_CRON_ADVISORY_LOCK_KEY = 918273645;
@@ -32,6 +33,46 @@ function manilaYearMonthNow() {
     throw new Error('manilaYearMonthNow: could not resolve YYYY-MM');
   }
   return `${y}-${m}`;
+}
+
+function monthlyAccrualAffectedUserIds(result = {}) {
+  return [
+    ...new Set(
+      (Array.isArray(result.details) ? result.details : [])
+        .filter((item) => item.action === 'applied' || item.created_balance_row === true)
+        .map((item) => item.user_id)
+        .filter(Boolean)
+        .map((id) => String(id))
+    ),
+  ];
+}
+
+function broadcastMonthlyAccrualResult(result) {
+  if (!result || result.dryRun) return 0;
+  const rowsUpdated = Number(result.rowsUpdated || 0);
+  const missingBalanceRowsCreated = Number(result.missingBalanceRowsCreated || 0);
+  if (rowsUpdated <= 0 && missingBalanceRowsCreated <= 0) return 0;
+
+  const affectedUserIds = monthlyAccrualAffectedUserIds(result);
+  if (affectedUserIds.length === 0) return 0;
+
+  return broadcastAppEvent('leave_updated', {
+    action: 'monthly_accrual',
+    source: 'cron',
+    requestId: null,
+    leaveRequestId: null,
+    userId: affectedUserIds[0],
+    userIds: affectedUserIds,
+    user_ids: affectedUserIds,
+    status: null,
+    updatedAt: new Date().toISOString(),
+    targetYearMonth: result.targetYearMonth,
+    rowsUpdated: result.rowsUpdated,
+    rowsSkipped: result.rowsSkipped,
+    missingBalanceRowsCreated,
+    leaveTypes: result.leaveTypes,
+    balanceChanged: true,
+  });
 }
 
 /**
@@ -104,6 +145,12 @@ function scheduleLeaveMonthlyAccrualCron(pool) {
               leaveTypes: result.leaveTypes,
             }),
           );
+          const sent = broadcastMonthlyAccrualResult(result);
+          if (sent > 0) {
+            console.log(
+              `[leaveMonthlyAccrual][cron] broadcast leave_updated monthly_accrual clients=${sent}`,
+            );
+          }
         });
 
         if (lockResult && !lockResult.ran) {
@@ -133,6 +180,8 @@ module.exports = {
   scheduleLeaveMonthlyAccrualCron,
   /** @internal for tests */
   manilaYearMonthNow,
+  monthlyAccrualAffectedUserIds,
+  broadcastMonthlyAccrualResult,
   CRON_EXPRESSION,
   CRON_TIMEZONE,
 };

@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../data/time_record.dart';
 import '../../providers/auth_provider.dart';
-import '../dtr_provider.dart' show DtrProvider, EmployeeOption;
+import '../dtr_provider.dart' show DtrProvider, DtrUpdateEvent, EmployeeOption;
 import '../widgets/attendance_source_badge.dart';
 import '../widgets/import_biometric_attendance_logs_dialog.dart';
 
@@ -100,7 +100,7 @@ class _RemarksChip extends StatelessWidget {
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withOpacity(0.5), width: 1),
+        border: Border.all(color: color.withValues(alpha: 0.5), width: 1),
       ),
       child: Text(
         remark,
@@ -139,9 +139,13 @@ class _RemarksChip extends StatelessWidget {
       case 'Invalid Log':
         return (Colors.red.shade900, Colors.red.shade100);
       default:
-        if (r.toLowerCase().contains('leave'))
+        if (r.toLowerCase().contains('leave')) {
           return (Colors.blue.shade700, Colors.blue.shade50);
-        return (AppTheme.textPrimary, AppTheme.lightGray.withOpacity(0.5));
+        }
+        return (
+          AppTheme.textPrimary,
+          AppTheme.lightGray.withValues(alpha: 0.5),
+        );
     }
   }
 }
@@ -237,6 +241,15 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
         end.day == intendedEnd.day;
   }
 
+  bool _shouldRefreshForDtrEvent(DtrUpdateEvent event) {
+    final userId = _selectedUserId;
+    if (userId != null && userId.isNotEmpty && !event.affectsUser(userId)) {
+      return false;
+    }
+    final (start, end) = _getIntendedFilterRange();
+    return event.affectsDateRange(start, end);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -246,8 +259,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _load();
       if (mounted) {
-        _wsSub = context.read<DtrProvider>().onDtrUpdate.listen((_) {
-          if (mounted) _applyFilters(silent: true);
+        _wsSub = context.read<DtrProvider>().onDtrEvent.listen((event) {
+          if (mounted && _shouldRefreshForDtrEvent(event)) {
+            _applyFilters(silent: true);
+          }
         });
       }
     });
@@ -377,12 +392,15 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
   /// Fallback attendance remark when backend does not send attendanceRemark (e.g. hardcoded preview).
   /// Backend sends shift-aware attendance_remark; this is a simple fallback.
   static String getAttendanceRemark(TimeRecord r) {
-    if (r.attendanceRemark != null && r.attendanceRemark!.isNotEmpty)
+    if (r.attendanceRemark != null && r.attendanceRemark!.isNotEmpty) {
       return r.attendanceRemark!;
-    if (r.status == 'holiday' || r.holidayId != null)
+    }
+    if (r.status == 'holiday' || r.holidayId != null) {
       return r.holidayName ?? 'Holiday';
-    if (r.status == 'on_leave' || r.leaveRequestId != null)
+    }
+    if (r.status == 'on_leave' || r.leaveRequestId != null) {
       return r.leaveTypeName ?? 'Leave';
+    }
     final hasAnyLog =
         r.timeIn != null ||
         r.breakOut != null ||
@@ -815,10 +833,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: AppTheme.primaryNavy.withOpacity(0.08),
+                color: AppTheme.primaryNavy.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: AppTheme.primaryNavy.withOpacity(0.2),
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.2),
                 ),
               ),
               child: Row(
@@ -856,10 +874,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
               decoration: BoxDecoration(
                 color: AppTheme.white,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.black.withOpacity(0.08)),
+                border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.04),
+                    color: Colors.black.withValues(alpha: 0.04),
                     blurRadius: 12,
                     offset: const Offset(0, 4),
                   ),
@@ -872,7 +890,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                     Icon(
                       Icons.schedule_rounded,
                       size: 56,
-                      color: AppTheme.textSecondary.withOpacity(0.5),
+                      color: AppTheme.textSecondary.withValues(alpha: 0.5),
                     ),
                     const SizedBox(height: 16),
                     Text(
@@ -911,10 +929,12 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                   decoration: BoxDecoration(
                     color: AppTheme.white,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.black.withOpacity(0.08)),
+                    border: Border.all(
+                      color: Colors.black.withValues(alpha: 0.08),
+                    ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.04),
+                        color: Colors.black.withValues(alpha: 0.04),
                         blurRadius: 12,
                         offset: const Offset(0, 4),
                       ),
@@ -940,7 +960,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                                   10,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: AppTheme.lightGray.withOpacity(0.5),
+                                  color: AppTheme.lightGray.withValues(
+                                    alpha: 0.5,
+                                  ),
                                   borderRadius: const BorderRadius.vertical(
                                     top: Radius.circular(12),
                                   ),
@@ -1031,7 +1053,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                                   decoration: BoxDecoration(
                                     color: i % 2 == 0
                                         ? AppTheme.white
-                                        : AppTheme.lightGray.withOpacity(0.25),
+                                        : AppTheme.lightGray.withValues(
+                                            alpha: 0.25,
+                                          ),
                                   ),
                                   child: Row(
                                     children: [
@@ -1297,7 +1321,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                         fontWeight: FontWeight.w600,
                         color: value != null
                             ? AppTheme.textPrimary
-                            : AppTheme.textSecondary.withOpacity(0.75),
+                            : AppTheme.textSecondary.withValues(alpha: 0.75),
                       ),
                     ),
                   ],
@@ -1306,7 +1330,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
               Icon(
                 Icons.schedule_rounded,
                 size: 20,
-                color: AppTheme.textSecondary.withOpacity(0.65),
+                color: AppTheme.textSecondary.withValues(alpha: 0.65),
               ),
             ],
           ),
@@ -1397,7 +1421,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                             Container(
                               padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
-                                color: AppTheme.primaryNavy.withOpacity(0.12),
+                                color: AppTheme.primaryNavy.withValues(
+                                  alpha: 0.12,
+                                ),
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: const Icon(
@@ -1425,8 +1451,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                                     style: TextStyle(
                                       fontSize: 13,
                                       height: 1.35,
-                                      color: AppTheme.textSecondary.withOpacity(
-                                        0.95,
+                                      color: AppTheme.textSecondary.withValues(
+                                        alpha: 0.95,
                                       ),
                                     ),
                                   ),
@@ -1443,7 +1469,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               DropdownButtonFormField<String?>(
-                                value: addDeptId,
+                                initialValue: addDeptId,
                                 isExpanded: true,
                                 decoration: InputDecoration(
                                   labelText: 'Department',
@@ -1452,13 +1478,17 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(12),
                                     borderSide: BorderSide(
-                                      color: Colors.black.withOpacity(0.12),
+                                      color: Colors.black.withValues(
+                                        alpha: 0.12,
+                                      ),
                                     ),
                                   ),
                                   enabledBorder: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(12),
                                     borderSide: BorderSide(
-                                      color: Colors.black.withOpacity(0.12),
+                                      color: Colors.black.withValues(
+                                        alpha: 0.12,
+                                      ),
                                     ),
                                   ),
                                   contentPadding: const EdgeInsets.symmetric(
@@ -1517,7 +1547,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                                   ),
                                 ),
                               DropdownButtonFormField<String>(
-                                value: employeeDropdownValue,
+                                initialValue: employeeDropdownValue,
                                 isExpanded: true,
                                 decoration: InputDecoration(
                                   labelText: 'Employee',
@@ -1526,13 +1556,17 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(12),
                                     borderSide: BorderSide(
-                                      color: Colors.black.withOpacity(0.12),
+                                      color: Colors.black.withValues(
+                                        alpha: 0.12,
+                                      ),
                                     ),
                                   ),
                                   enabledBorder: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(12),
                                     borderSide: BorderSide(
-                                      color: Colors.black.withOpacity(0.12),
+                                      color: Colors.black.withValues(
+                                        alpha: 0.12,
+                                      ),
                                     ),
                                   ),
                                   contentPadding: const EdgeInsets.symmetric(
@@ -1571,8 +1605,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                                       firstDate: DateTime(2020),
                                       lastDate: DateTime(2030),
                                     );
-                                    if (d != null)
+                                    if (d != null) {
                                       setState(() => recordDate = d);
+                                    }
                                   },
                                   borderRadius: BorderRadius.circular(12),
                                   child: Padding(
@@ -1618,7 +1653,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                                         Icon(
                                           Icons.chevron_right_rounded,
                                           color: AppTheme.textSecondary
-                                              .withOpacity(0.7),
+                                              .withValues(alpha: 0.7),
                                         ),
                                       ],
                                     ),
@@ -1632,8 +1667,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
                                   letterSpacing: 0.4,
-                                  color: AppTheme.textSecondary.withOpacity(
-                                    0.9,
+                                  color: AppTheme.textSecondary.withValues(
+                                    alpha: 0.9,
                                   ),
                                 ),
                               ),
@@ -1670,8 +1705,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
                                   letterSpacing: 0.4,
-                                  color: AppTheme.textSecondary.withOpacity(
-                                    0.9,
+                                  color: AppTheme.textSecondary.withValues(
+                                    alpha: 0.9,
                                   ),
                                 ),
                               ),

@@ -155,8 +155,9 @@ class _ManageHolidayState extends State<ManageHoliday> {
     final y = int.tryParse(parts[0]);
     final m = int.tryParse(parts[1]);
     final day = int.tryParse(parts[2]);
-    if (y == null || m == null || day == null)
+    if (y == null || m == null || day == null) {
       return DateTime.tryParse(s) ?? DateTime.now();
+    }
     return DateTime(y, m, day); // Local date, no timezone
   }
 
@@ -381,12 +382,12 @@ class _ManageHolidayState extends State<ManageHoliday> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
         ],
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -397,13 +398,13 @@ class _ManageHolidayState extends State<ManageHoliday> {
             decoration: InputDecoration(
               hintText: 'Search by name or date',
               hintStyle: TextStyle(
-                color: AppTheme.textSecondary.withOpacity(0.8),
+                color: AppTheme.textSecondary.withValues(alpha: 0.8),
                 fontSize: 14,
               ),
               prefixIcon: Icon(
                 Icons.search_rounded,
                 size: 20,
-                color: AppTheme.textSecondary.withOpacity(0.7),
+                color: AppTheme.textSecondary.withValues(alpha: 0.7),
               ),
               isDense: true,
               contentPadding: const EdgeInsets.symmetric(
@@ -411,7 +412,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
                 vertical: 12,
               ),
               filled: true,
-              fillColor: AppTheme.lightGray.withOpacity(0.5),
+              fillColor: AppTheme.lightGray.withValues(alpha: 0.5),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide: BorderSide.none,
@@ -446,7 +447,9 @@ class _ManageHolidayState extends State<ManageHoliday> {
                 final isSelected = _selectedHoliday?.id == h.id;
                 return ListTile(
                   selected: isSelected,
-                  selectedTileColor: AppTheme.primaryNavy.withOpacity(0.08),
+                  selectedTileColor: AppTheme.primaryNavy.withValues(
+                    alpha: 0.08,
+                  ),
                   title: Text(
                     h.name,
                     style: TextStyle(
@@ -478,12 +481,12 @@ class _ManageHolidayState extends State<ManageHoliday> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
         ],
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -660,7 +663,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
           ),
           const SizedBox(height: 6),
           DropdownButtonFormField<String>(
-            value: _holidayType,
+            initialValue: _holidayType,
             decoration: InputDecoration(
               filled: true,
               contentPadding: const EdgeInsets.symmetric(
@@ -699,7 +702,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
             ),
             const SizedBox(height: 6),
             DropdownButtonFormField<String>(
-              value: _coverage,
+              initialValue: _coverage,
               decoration: InputDecoration(
                 filled: true,
                 contentPadding: const EdgeInsets.symmetric(

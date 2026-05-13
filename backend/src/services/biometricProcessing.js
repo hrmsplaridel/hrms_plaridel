@@ -593,7 +593,9 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
 
   let inserted = 0;
   let updated = 0;
+  let removed = 0;
   let skipped = 0;
+  const affected = [];
 
   for (const row of grouped.rows) {
     const { user_id, attendance_date, punches } = row;
@@ -639,6 +641,12 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
           [user_id, attendanceDateStr]
         );
         if (delRes.rowCount > 0) {
+          removed += delRes.rowCount;
+          affected.push({
+            action: 'biometric_removed',
+            userId: String(user_id),
+            date: attendanceDateStr,
+          });
           console.log('[biometricProcessing] Removed system DTR row (policy gate)', {
             user_id,
             attendance_date: attendanceDateStr,
@@ -777,6 +785,11 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
           ]
         );
         inserted++;
+        affected.push({
+          action: 'biometric_inserted',
+          userId: String(user_id),
+          date: attendanceDateStr,
+        });
         console.log('[biometricProcessing] INSERT', {
           employee_id: user_id,
           attendance_date: attendanceDateStr,
@@ -828,6 +841,11 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
           ]
         );
         updated++;
+        affected.push({
+          action: 'biometric_updated',
+          userId: String(user_id),
+          date: attendanceDateStr,
+        });
         console.log('[biometricProcessing] UPDATE', {
           employee_id: user_id,
           attendance_date: attendanceDateStr,
@@ -847,10 +865,23 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
     }
   }
 
-  console.log('[biometricProcessing] Done:', { inserted, updated, skipped });
+  console.log('[biometricProcessing] Done:', { inserted, updated, removed, skipped });
   
-  if (inserted > 0 || updated > 0) {
-    broadcastBiometricUpdate('dtr_refresh', { action: 'biometric_processed', inserted, updated });
+  if (affected.length > 0) {
+    const userIds = [...new Set(affected.map((item) => item.userId).filter(Boolean))];
+    const dates = [...new Set(affected.map((item) => item.date).filter(Boolean))];
+    broadcastBiometricUpdate('dtr_refresh', {
+      action: 'biometric_processed',
+      inserted,
+      updated,
+      removed,
+      skipped,
+      userIds,
+      dates,
+      dateFrom,
+      dateTo,
+      affected,
+    });
   }
 
   return { inserted, updated };

@@ -9,6 +9,7 @@ import '../utils/open_attachment_io.dart'
     if (dart.library.html) '../utils/open_attachment_web.dart'
     as open_attachment;
 import '../../providers/auth_provider.dart';
+import '../../realtime/app_realtime_provider.dart';
 import '../leave_provider.dart';
 import '../leave_repository.dart';
 import '../models/leave_balance.dart';
@@ -60,6 +61,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   DateTime? _startDateFrom;
   DateTime? _startDateTo;
   Timer? _autoRefreshTimer;
+  StreamSubscription<AppRealtimeEvent>? _leaveRealtimeSub;
 
   Future<({String name, String? title})> _loadReviewerSignatureInfo(
     AuthProvider auth,
@@ -133,12 +135,19 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadRequests());
     WidgetsBinding.instance.addObserver(this);
     _startAutoRefresh();
+    _leaveRealtimeSub ??= context.read<AppRealtimeProvider>().events.listen((
+      event,
+    ) {
+      if (event.name != 'leave_updated') return;
+      unawaited(_safeAutoRefresh());
+    });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _autoRefreshTimer?.cancel();
+    _leaveRealtimeSub?.cancel();
     super.dispose();
   }
 
@@ -275,6 +284,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
           onForcedLeaveDeduction: widget.isDepartmentHead
               ? null
               : _applyForcedLeaveDeduction,
+          onMonthlyAccrual: widget.isDepartmentHead ? null : _runMonthlyAccrual,
           onManualBalanceAdjustment: widget.isDepartmentHead
               ? null
               : _manualBalanceAdjustment,
@@ -701,6 +711,20 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     if (ok) await _loadRequests();
   }
 
+  Future<void> _runMonthlyAccrual() async {
+    final result = await showDialog<MonthlyLeaveAccrualResult>(
+      context: context,
+      builder: (_) => const _MonthlyAccrualDialog(),
+    );
+    if (!mounted || result == null) return;
+    _showMessage(
+      result.rowsUpdated > 0
+          ? 'Monthly accrual applied for ${result.targetYearMonth}: ${result.rowsUpdated} balance rows updated.'
+          : 'Monthly accrual completed. No balances changed.',
+    );
+    await _loadRequests();
+  }
+
   Future<void> _manualBalanceAdjustment() async {
     final saved = await showDialog<bool>(
       context: context,
@@ -845,6 +869,7 @@ class _AdminHeaderCard extends StatelessWidget {
     required this.reviewing,
     required this.onRefresh,
     this.onForcedLeaveDeduction,
+    this.onMonthlyAccrual,
     this.onManualBalanceAdjustment,
     this.onEmployeeLeaveCard,
     this.onLeaveLedger,
@@ -855,6 +880,7 @@ class _AdminHeaderCard extends StatelessWidget {
   final bool reviewing;
   final Future<void> Function() onRefresh;
   final Future<void> Function()? onForcedLeaveDeduction;
+  final Future<void> Function()? onMonthlyAccrual;
   final Future<void> Function()? onManualBalanceAdjustment;
   final Future<void> Function()? onEmployeeLeaveCard;
   final VoidCallback? onLeaveLedger;
@@ -863,6 +889,7 @@ class _AdminHeaderCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasHrActions =
         onForcedLeaveDeduction != null ||
+        onMonthlyAccrual != null ||
         onManualBalanceAdjustment != null ||
         onEmployeeLeaveCard != null ||
         onLeaveLedger != null;
@@ -945,6 +972,12 @@ class _AdminHeaderCard extends StatelessWidget {
                             'Apply Year-End Forced Leave Deduction',
                           ),
                         ),
+                      if (onMonthlyAccrual != null)
+                        OutlinedButton.icon(
+                          onPressed: reviewing ? null : onMonthlyAccrual,
+                          icon: const Icon(Icons.event_repeat_rounded),
+                          label: const Text('Run Monthly Accrual'),
+                        ),
                       if (onManualBalanceAdjustment != null)
                         OutlinedButton.icon(
                           onPressed: reviewing
@@ -1004,6 +1037,536 @@ class _EmployeeLeaveCardSelection {
 
   final String userId;
   final String name;
+}
+
+class _MonthlyAccrualDialog extends StatefulWidget {
+  const _MonthlyAccrualDialog();
+
+  @override
+  State<_MonthlyAccrualDialog> createState() => _MonthlyAccrualDialogState();
+}
+
+class _MonthlyAccrualDialogState extends State<_MonthlyAccrualDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _targetMonthController;
+  final _maxCatchUpController = TextEditingController(text: '1');
+
+  MonthlyLeaveAccrualResult? _preview;
+  bool _loadingPreview = false;
+  bool _applying = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _targetMonthController = TextEditingController(text: _defaultTargetMonth());
+    _targetMonthController.addListener(_clearPreviewAfterEdit);
+    _maxCatchUpController.addListener(_clearPreviewAfterEdit);
+  }
+
+  @override
+  void dispose() {
+    _targetMonthController.removeListener(_clearPreviewAfterEdit);
+    _maxCatchUpController.removeListener(_clearPreviewAfterEdit);
+    _targetMonthController.dispose();
+    _maxCatchUpController.dispose();
+    super.dispose();
+  }
+
+  String _defaultTargetMonth() {
+    final now = DateTime.now();
+    return '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}';
+  }
+
+  void _clearPreviewAfterEdit() {
+    if (_preview == null || _loadingPreview || _applying) return;
+    setState(() => _preview = null);
+  }
+
+  String? _validateTargetMonth(String? value) {
+    final text = (value ?? '').trim();
+    final match = RegExp(r'^(\d{4})-(\d{2})$').firstMatch(text);
+    if (match == null) return 'Use YYYY-MM';
+    final month = int.tryParse(match.group(2) ?? '');
+    if (month == null || month < 1 || month > 12) {
+      return 'Month must be 01 to 12';
+    }
+    return null;
+  }
+
+  String? _validateMaxCatchUp(String? value) {
+    final parsed = int.tryParse((value ?? '').trim());
+    if (parsed == null) return 'Enter a number';
+    if (parsed < 1 || parsed > 120) return 'Use 1 to 120';
+    return null;
+  }
+
+  MonthlyLeaveAccrualInput _input({required bool dryRun}) {
+    return MonthlyLeaveAccrualInput(
+      dryRun: dryRun,
+      targetMonth: _targetMonthController.text.trim(),
+      maxCatchUpMonths: int.parse(_maxCatchUpController.text.trim()),
+    );
+  }
+
+  Future<void> _previewAccrual() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    setState(() {
+      _loadingPreview = true;
+      _error = null;
+      _preview = null;
+    });
+    final result = await context.read<LeaveProvider>().runMonthlyAccrual(
+      _input(dryRun: true),
+    );
+    if (!mounted) return;
+    setState(() {
+      _loadingPreview = false;
+      _preview = result;
+      _error = result == null
+          ? context.read<LeaveProvider>().error ?? 'Preview failed.'
+          : null;
+    });
+  }
+
+  Future<void> _applyAccrual() async {
+    if (_preview == null || _preview!.rowsUpdated <= 0) return;
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    setState(() {
+      _applying = true;
+      _error = null;
+    });
+    final result = await context.read<LeaveProvider>().runMonthlyAccrual(
+      _input(dryRun: false),
+    );
+    if (!mounted) return;
+    if (result == null) {
+      setState(() {
+        _applying = false;
+        _error = context.read<LeaveProvider>().error ?? 'Apply failed.';
+      });
+      return;
+    }
+    Navigator.of(context).pop(result);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final busy = _loadingPreview || _applying;
+    final canApply = !busy && _preview != null && _preview!.rowsUpdated > 0;
+
+    return AlertDialog(
+      titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+      contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+      actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+      title: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.event_repeat_rounded,
+              color: AppTheme.primaryNavy,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Run Monthly Accrual'),
+                const SizedBox(height: 4),
+                Text(
+                  'Preview affected employees before adding monthly VL and SL credits.',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 780,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final fields = [
+                      TextFormField(
+                        controller: _targetMonthController,
+                        enabled: !busy,
+                        decoration: _inputDecoration('Target month').copyWith(
+                          prefixIcon: const Icon(Icons.calendar_month_outlined),
+                          hintText: 'YYYY-MM',
+                        ),
+                        validator: _validateTargetMonth,
+                      ),
+                      TextFormField(
+                        controller: _maxCatchUpController,
+                        enabled: !busy,
+                        keyboardType: TextInputType.number,
+                        decoration: _inputDecoration(
+                          'Max catch-up months',
+                        ).copyWith(prefixIcon: const Icon(Icons.history)),
+                        validator: _validateMaxCatchUp,
+                      ),
+                    ];
+                    if (constraints.maxWidth < 560) {
+                      return Column(
+                        children: [
+                          fields[0],
+                          const SizedBox(height: 12),
+                          fields[1],
+                        ],
+                      );
+                    }
+                    return Row(
+                      children: [
+                        Expanded(child: fields[0]),
+                        const SizedBox(width: 12),
+                        SizedBox(width: 220, child: fields[1]),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 12),
+                if (_error != null)
+                  _MonthlyAccrualStatusPanel(
+                    icon: Icons.error_outline_rounded,
+                    message: _error!,
+                    warning: true,
+                  )
+                else if (_loadingPreview)
+                  const LinearProgressIndicator(minHeight: 2)
+                else if (_preview == null)
+                  const _MonthlyAccrualStatusPanel(
+                    icon: Icons.search_rounded,
+                    message:
+                        'Run preview to see employees who will receive accrual before applying.',
+                  )
+                else
+                  _MonthlyAccrualPreview(result: _preview!),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: busy ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        OutlinedButton.icon(
+          onPressed: busy ? null : _previewAccrual,
+          icon: _loadingPreview
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.search_rounded),
+          label: Text(_loadingPreview ? 'Previewing...' : 'Preview'),
+        ),
+        FilledButton.icon(
+          onPressed: canApply ? _applyAccrual : null,
+          icon: _applying
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.check_circle_outline_rounded),
+          label: Text(_applying ? 'Applying...' : 'Apply Accrual'),
+        ),
+      ],
+    );
+  }
+}
+
+class _MonthlyAccrualPreview extends StatelessWidget {
+  const _MonthlyAccrualPreview({required this.result});
+
+  final MonthlyLeaveAccrualResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = result.details.where((row) => row.willChangeBalance).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _MonthlyAccrualSummaryChip(
+              label: 'Will update',
+              value: result.rowsUpdated.toString(),
+            ),
+            _MonthlyAccrualSummaryChip(
+              label: 'Skipped',
+              value: result.rowsSkipped.toString(),
+            ),
+            _MonthlyAccrualSummaryChip(
+              label: 'Missing rows',
+              value: result.missingBalanceRowsDetected.toString(),
+            ),
+            _MonthlyAccrualSummaryChip(
+              label: 'Month',
+              value: result.targetYearMonth,
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (rows.isEmpty)
+          const _MonthlyAccrualStatusPanel(
+            icon: Icons.check_circle_outline_rounded,
+            message:
+                'No employees will receive accrual for this target month. They may already be credited.',
+          )
+        else
+          Container(
+            width: double.infinity,
+            constraints: const BoxConstraints(maxHeight: 360),
+            decoration: BoxDecoration(
+              color: AppTheme.offWhite,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+            ),
+            child: Scrollbar(
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: rows.length,
+                separatorBuilder: (_, __) => Divider(
+                  height: 1,
+                  color: Colors.black.withValues(alpha: 0.06),
+                ),
+                itemBuilder: (context, index) =>
+                    _MonthlyAccrualDetailTile(detail: rows[index]),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _MonthlyAccrualSummaryChip extends StatelessWidget {
+  const _MonthlyAccrualSummaryChip({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: RichText(
+        text: TextSpan(
+          style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+          children: [
+            TextSpan(
+              text: '$label: ',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            TextSpan(text: value),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MonthlyAccrualDetailTile extends StatelessWidget {
+  const _MonthlyAccrualDetailTile({required this.detail});
+
+  final MonthlyLeaveAccrualDetail detail;
+
+  String _daysLabel() {
+    final days = detail.daysAdded ?? 0;
+    final fixed = days.toStringAsFixed(2);
+    final text = fixed.endsWith('.00')
+        ? fixed.substring(0, fixed.length - 3)
+        : fixed.endsWith('0')
+        ? fixed.substring(0, fixed.length - 1)
+        : fixed;
+    return '+$text days';
+  }
+
+  String _actionLabel() {
+    return switch (detail.action) {
+      'would_apply' => 'Will apply',
+      'applied' => 'Applied',
+      _ => detail.action.isEmpty ? 'Pending' : detail.action,
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tags = <String>[
+      _actionLabel(),
+      if (detail.createdBalanceRow) 'Creates balance row',
+      if (detail.hireProrated) 'Prorated',
+      if (detail.monthsCredited != null)
+        '${detail.monthsCredited} month${detail.monthsCredited == 1 ? '' : 's'}',
+    ];
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: const Color(0xFFE8F5E9),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.add_rounded,
+              color: Color(0xFF2E7D32),
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  detail.employeeName,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  detail.leaveType.displayName,
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 12.5,
+                  ),
+                ),
+                if (detail.lastAccrualDate != null) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    'Last accrual date: ${detail.lastAccrualDate}',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: tags
+                      .map(
+                        (tag) => Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: Colors.black.withValues(alpha: 0.06),
+                            ),
+                          ),
+                          child: Text(
+                            tag,
+                            style: TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: 11,
+                              height: 1,
+                            ),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            _daysLabel(),
+            style: const TextStyle(
+              color: Color(0xFF2E7D32),
+              fontWeight: FontWeight.w800,
+              fontSize: 14,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MonthlyAccrualStatusPanel extends StatelessWidget {
+  const _MonthlyAccrualStatusPanel({
+    required this.icon,
+    required this.message,
+    this.warning = false,
+  });
+
+  final IconData icon;
+  final String message;
+  final bool warning;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = warning ? Colors.red.shade700 : AppTheme.textSecondary;
+    final background = warning ? Colors.red.shade50 : AppTheme.offWhite;
+    final border = warning
+        ? Colors.red.shade100
+        : Colors.black.withValues(alpha: 0.06);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(color: color, fontSize: 12.5, height: 1.35),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _EmployeeLeaveCardPickerDialog extends StatefulWidget {
@@ -1361,9 +1924,47 @@ class _ForcedLeaveDeductionDialogState
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Apply Year-End Forced Leave Deduction'),
+      titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+      contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+      actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+      title: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: AppTheme.primaryNavy.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.assignment_turned_in_rounded,
+              color: AppTheme.primaryNavy,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Apply Year-End Forced Leave Deduction'),
+                const SizedBox(height: 4),
+                Text(
+                  'Deduct unused forced leave from vacation leave credits.',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
       content: SizedBox(
-        width: 520,
+        width: 640,
         child: Form(
           key: _formKey,
           child: SingleChildScrollView(
@@ -1383,7 +1984,11 @@ class _ForcedLeaveDeductionDialogState
                 else
                   DropdownButtonFormField<String>(
                     value: _selectedUserId,
-                    decoration: _inputDecoration('Employee'),
+                    isExpanded: true,
+                    menuMaxHeight: 360,
+                    decoration: _inputDecoration(
+                      'Employee',
+                    ).copyWith(prefixIcon: const Icon(Icons.person_outline)),
                     items: _employees
                         .map(
                           (e) => DropdownMenuItem<String>(
@@ -1397,31 +2002,56 @@ class _ForcedLeaveDeductionDialogState
                         (v == null || v.isEmpty) ? 'Select an employee' : null,
                   ),
                 const SizedBox(height: 12),
-                TextFormField(
-                  controller: _daysController,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  decoration: _inputDecoration('Days to Deduct'),
-                  validator: (value) {
-                    final parsed = _parseDouble(value ?? '');
-                    if (parsed == null) return 'Enter deduction days';
-                    if (parsed <= 0) return 'Days must be greater than 0';
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _yearController,
-                  keyboardType: TextInputType.number,
-                  decoration: _inputDecoration('Year'),
-                  validator: (value) {
-                    final parsed = int.tryParse((value ?? '').trim());
-                    if (parsed == null) return 'Enter a valid year';
-                    if (parsed < 2000 || parsed > 2100) {
-                      return 'Year must be between 2000 and 2100';
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final fields = [
+                      TextFormField(
+                        controller: _daysController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: _inputDecoration('Days to Deduct').copyWith(
+                          prefixIcon: const Icon(Icons.remove_circle_outline),
+                        ),
+                        validator: (value) {
+                          final parsed = _parseDouble(value ?? '');
+                          if (parsed == null) return 'Enter deduction days';
+                          if (parsed <= 0) return 'Days must be greater than 0';
+                          return null;
+                        },
+                      ),
+                      TextFormField(
+                        controller: _yearController,
+                        keyboardType: TextInputType.number,
+                        decoration: _inputDecoration('Year').copyWith(
+                          prefixIcon: const Icon(Icons.calendar_today_outlined),
+                        ),
+                        validator: (value) {
+                          final parsed = int.tryParse((value ?? '').trim());
+                          if (parsed == null) return 'Enter a valid year';
+                          if (parsed < 2000 || parsed > 2100) {
+                            return 'Year must be between 2000 and 2100';
+                          }
+                          return null;
+                        },
+                      ),
+                    ];
+                    if (constraints.maxWidth < 560) {
+                      return Column(
+                        children: [
+                          fields[0],
+                          const SizedBox(height: 12),
+                          fields[1],
+                        ],
+                      );
                     }
-                    return null;
+                    return Row(
+                      children: [
+                        Expanded(child: fields[0]),
+                        const SizedBox(width: 12),
+                        SizedBox(width: 190, child: fields[1]),
+                      ],
+                    );
                   },
                 ),
                 const SizedBox(height: 12),
@@ -1429,13 +2059,42 @@ class _ForcedLeaveDeductionDialogState
                   controller: _remarksController,
                   minLines: 2,
                   maxLines: null,
-                  decoration: _inputDecoration('Remarks (Optional)'),
+                  decoration: _inputDecoration('Remarks (Optional)').copyWith(
+                    alignLabelWithHint: true,
+                    prefixIcon: const Icon(Icons.notes_outlined),
+                  ),
                 ),
-                const SizedBox(height: 10),
-                Text(
-                  'Fallback action for unused forced leave. This deducts vacation leave credits directly '
-                  'and records an audit trail; it does not create a leave request.',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.offWhite,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.black.withOpacity(0.06)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.info_outline_rounded,
+                        size: 18,
+                        color: AppTheme.textSecondary,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Fallback action for unused forced leave. This deducts vacation leave credits directly '
+                          'and records an audit trail; it does not create a leave request.',
+                          style: TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 12.5,
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -1447,7 +2106,7 @@ class _ForcedLeaveDeductionDialogState
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
         ),
-        FilledButton(
+        FilledButton.icon(
           onPressed: () {
             if (!(_formKey.currentState?.validate() ?? false)) return;
             final days = _parseDouble(_daysController.text);
@@ -1463,7 +2122,8 @@ class _ForcedLeaveDeductionDialogState
               ),
             );
           },
-          child: const Text('Apply Deduction'),
+          icon: const Icon(Icons.check_circle_outline_rounded),
+          label: const Text('Apply Deduction'),
         ),
       ],
     );
@@ -1485,29 +2145,49 @@ class _ManualBalanceAdjustmentDialogState
   final _usedController = TextEditingController();
   final _pendingController = TextEditingController();
   final _adjustedController = TextEditingController();
+  final _remarksController = TextEditingController();
 
   bool _loadingEmployees = true;
   bool _loadingBalances = false;
   String? _employeesError;
   List<Map<String, String>> _employees = const [];
   String? _selectedUserId;
+  DateTime _asOfDate = DateTime.now();
 
   LeaveType _selectedLeaveType = LeaveType.vacationLeave;
   List<LeaveBalance> _balances = const [];
 
+  List<TextEditingController> get _balanceControllers => [
+    _earnedController,
+    _usedController,
+    _pendingController,
+    _adjustedController,
+  ];
+
   @override
   void dispose() {
+    for (final controller in _balanceControllers) {
+      controller.removeListener(_refreshPreview);
+    }
     _earnedController.dispose();
     _usedController.dispose();
     _pendingController.dispose();
     _adjustedController.dispose();
+    _remarksController.dispose();
     super.dispose();
   }
 
   @override
   void initState() {
     super.initState();
+    for (final controller in _balanceControllers) {
+      controller.addListener(_refreshPreview);
+    }
     _loadEmployees();
+  }
+
+  void _refreshPreview() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadEmployees() async {
@@ -1516,11 +2196,16 @@ class _ManualBalanceAdjustmentDialogState
       _employeesError = null;
     });
     try {
-      final res = await ApiClient.instance.get<List<dynamic>>(
-        '/api/employees?status=Active',
+      final res = await ApiClient.instance.get<dynamic>(
+        '/api/employees',
+        queryParameters: const {'status': 'Active', 'limit': 1000, 'offset': 0},
       );
+      final payload = res.data;
+      final employeeRows = payload is Map
+          ? (payload['employees'] as List<dynamic>? ?? const <dynamic>[])
+          : (payload is List ? payload : const <dynamic>[]);
       final rows =
-          (res.data ?? const [])
+          employeeRows
               .whereType<Map>()
               .map((e) => Map<String, dynamic>.from(e))
               .map(
@@ -1533,6 +2218,7 @@ class _ManualBalanceAdjustmentDialogState
               .toList()
             ..sort((a, b) => (a['name']!).compareTo(b['name']!));
       final firstId = rows.isNotEmpty ? rows.first['id'] : null;
+      if (!mounted) return;
       setState(() {
         _employees = rows;
         _selectedUserId = firstId;
@@ -1542,6 +2228,7 @@ class _ManualBalanceAdjustmentDialogState
         await _loadBalancesFor(firstId);
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _employeesError = e.toString();
         _loadingEmployees = false;
@@ -1550,19 +2237,22 @@ class _ManualBalanceAdjustmentDialogState
   }
 
   Future<void> _loadBalancesFor(String userId) async {
-    setState(() => _loadingBalances = true);
+    setState(() {
+      _loadingBalances = true;
+      _balances = const [];
+    });
     try {
       final list = await context.read<LeaveProvider>().fetchBalancesForUser(
         userId,
       );
-      if (!mounted) return;
+      if (!mounted || _selectedUserId != userId) return;
       setState(() {
         _balances = list;
         _loadingBalances = false;
       });
       _applyBalanceToFields();
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || _selectedUserId != userId) return;
       setState(() {
         _balances = const [];
         _loadingBalances = false;
@@ -1572,24 +2262,34 @@ class _ManualBalanceAdjustmentDialogState
   }
 
   void _applyBalanceToFields() {
-    LeaveBalance? row;
-    for (final b in _balances) {
-      if (b.leaveType == _selectedLeaveType) {
-        row = b;
-        break;
-      }
-    }
-    _earnedController.text = (row?.earnedDays ?? 0).toString();
-    _usedController.text = (row?.usedDays ?? 0).toString();
-    _pendingController.text = (row?.pendingDays ?? 0).toString();
-    _adjustedController.text = (row?.adjustedDays ?? 0).toString();
+    final row = _selectedBalance;
+    _earnedController.text = _formatDays(row?.earnedDays ?? 0);
+    _usedController.text = _formatDays(row?.usedDays ?? 0);
+    _pendingController.text = _formatDays(row?.pendingDays ?? 0);
+    _adjustedController.text = _formatDays(row?.adjustedDays ?? 0);
+    _asOfDate = row?.asOfDate ?? DateTime.now();
+    _refreshPreview();
   }
 
   Future<void> _onEmployeeChanged(String? id) async {
-    setState(() => _selectedUserId = id);
+    setState(() {
+      _selectedUserId = id;
+      _balances = const [];
+    });
     if (id != null && id.isNotEmpty) {
       await _loadBalancesFor(id);
     }
+  }
+
+  Future<void> _pickAsOfDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _asOfDate,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _asOfDate = picked);
   }
 
   Future<void> _onSave() async {
@@ -1604,9 +2304,13 @@ class _ManualBalanceAdjustmentDialogState
       usedDays: _parseDouble(_usedController.text) ?? 0,
       pendingDays: _parseDouble(_pendingController.text) ?? 0,
       adjustedDays: _parseDouble(_adjustedController.text) ?? 0,
+      asOfDate: _asOfDate,
     );
 
-    final saved = await context.read<LeaveProvider>().upsertBalance(balance);
+    final saved = await context.read<LeaveProvider>().upsertBalance(
+      balance,
+      remarks: _trimOrNull(_remarksController.text),
+    );
     if (!mounted) return;
     if (saved != null) {
       Navigator.of(context).pop(true);
@@ -1616,16 +2320,90 @@ class _ManualBalanceAdjustmentDialogState
     }
   }
 
+  LeaveBalance? get _selectedBalance {
+    for (final balance in _balances) {
+      if (balance.leaveType == _selectedLeaveType) return balance;
+    }
+    return null;
+  }
+
+  LeaveBalance get _draftBalance {
+    return LeaveBalance(
+      userId: _selectedUserId ?? '',
+      leaveType: _selectedLeaveType,
+      earnedDays: _parseDouble(_earnedController.text) ?? 0,
+      usedDays: _parseDouble(_usedController.text) ?? 0,
+      pendingDays: _parseDouble(_pendingController.text) ?? 0,
+      adjustedDays: _parseDouble(_adjustedController.text) ?? 0,
+      asOfDate: _asOfDate,
+    );
+  }
+
+  String get _selectedEmployeeName {
+    for (final employee in _employees) {
+      if (employee['id'] == _selectedUserId) {
+        return employee['name'] ?? 'Selected employee';
+      }
+    }
+    return 'Selected employee';
+  }
+
   @override
   Widget build(BuildContext context) {
     final saving = context.watch<LeaveProvider>().submitting;
+    final hasEmployees = _employees.isNotEmpty;
+    final canSave =
+        !saving &&
+        !_loadingEmployees &&
+        !_loadingBalances &&
+        _employeesError == null &&
+        hasEmployees;
 
     return AlertDialog(
-      title: const Text('Manual balance adjustment'),
+      titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+      contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+      actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+      title: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: AppTheme.primaryNavy.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.account_balance_wallet_outlined,
+              color: AppTheme.primaryNavy,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Manual Balance Adjustment'),
+                const SizedBox(height: 4),
+                Text(
+                  'Update leave credit buckets and record an audit note.',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
       content: SizedBox(
-        width: 520,
+        width: 640,
         child: Form(
           key: _formKey,
+          autovalidateMode: AutovalidateMode.onUserInteraction,
           child: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1640,10 +2418,25 @@ class _ManualBalanceAdjustmentDialogState
                     'Failed to load employees: $_employeesError',
                     style: TextStyle(color: Colors.red.shade700),
                   )
+                else if (!hasEmployees)
+                  _statusPanel(
+                    icon: Icons.person_off_outlined,
+                    message:
+                        'No active employees are available for adjustment.',
+                  )
                 else ...[
+                  _sectionHeader(
+                    icon: Icons.person_search_outlined,
+                    title: 'Employee and Leave Type',
+                  ),
+                  const SizedBox(height: 10),
                   DropdownButtonFormField<String>(
                     value: _selectedUserId,
-                    decoration: _inputDecoration('Employee'),
+                    isExpanded: true,
+                    menuMaxHeight: 360,
+                    decoration: _inputDecoration(
+                      'Employee',
+                    ).copyWith(prefixIcon: const Icon(Icons.person_outline)),
                     items: _employees
                         .map(
                           (e) => DropdownMenuItem<String>(
@@ -1661,101 +2454,108 @@ class _ManualBalanceAdjustmentDialogState
                         (v == null || v.isEmpty) ? 'Select an employee' : null,
                   ),
                   const SizedBox(height: 12),
-                  if (_loadingBalances)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 8),
-                      child: Center(
-                        child: SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final narrow = constraints.maxWidth < 560;
+                      final leaveTypeField = DropdownButtonFormField<LeaveType>(
+                        value: _selectedLeaveType,
+                        isExpanded: true,
+                        menuMaxHeight: 360,
+                        decoration: _inputDecoration('Leave type').copyWith(
+                          prefixIcon: const Icon(Icons.event_note_outlined),
                         ),
-                      ),
-                    ),
-                  DropdownButtonFormField<LeaveType>(
-                    value: _selectedLeaveType,
-                    decoration: _inputDecoration('Leave type'),
-                    items: LeaveType.values
-                        .map(
-                          (t) => DropdownMenuItem<LeaveType>(
-                            value: t,
-                            child: Text(t.displayName),
+                        items: LeaveType.values
+                            .map(
+                              (t) => DropdownMenuItem<LeaveType>(
+                                value: t,
+                                child: Text(t.displayName),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: saving || _loadingBalances
+                            ? null
+                            : (v) {
+                                if (v == null) return;
+                                setState(() => _selectedLeaveType = v);
+                                _applyBalanceToFields();
+                              },
+                      );
+                      final asOfField = _asOfDateField(saving);
+                      if (narrow) {
+                        return Column(
+                          children: [
+                            leaveTypeField,
+                            const SizedBox(height: 12),
+                            asOfField,
+                          ],
+                        );
+                      }
+                      return Row(
+                        children: [
+                          Expanded(child: leaveTypeField),
+                          const SizedBox(width: 12),
+                          SizedBox(width: 210, child: asOfField),
+                        ],
+                      );
+                    },
+                  ),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 180),
+                    child: _loadingBalances
+                        ? const Padding(
+                            key: ValueKey('balance-loading'),
+                            padding: EdgeInsets.only(top: 12),
+                            child: LinearProgressIndicator(minHeight: 2),
+                          )
+                        : const SizedBox(
+                            key: ValueKey('balance-idle'),
+                            height: 12,
                           ),
-                        )
-                        .toList(),
-                    onChanged: saving || _loadingBalances
-                        ? null
-                        : (v) {
-                            if (v == null) return;
-                            setState(() => _selectedLeaveType = v);
-                            _applyBalanceToFields();
-                          },
                   ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _earnedController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: _inputDecoration('Earned days'),
-                    validator: (value) {
-                      final parsed = _parseDouble(value ?? '');
-                      if (parsed == null) return 'Enter earned days';
-                      if (parsed < 0) return 'Must be ≥ 0';
-                      return null;
-                    },
+                  _balancePreviewPanel(
+                    current: _selectedBalance,
+                    draft: _draftBalance,
                   ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _usedController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
+                  const SizedBox(height: 18),
+                  _sectionHeader(
+                    icon: Icons.tune_outlined,
+                    title: 'Balance Buckets',
+                    trailing: IconButton(
+                      onPressed: saving || _loadingBalances
+                          ? null
+                          : _applyBalanceToFields,
+                      icon: const Icon(Icons.restore_rounded),
+                      tooltip: 'Reset loaded values',
                     ),
-                    decoration: _inputDecoration('Used days'),
-                    validator: (value) {
-                      final parsed = _parseDouble(value ?? '');
-                      if (parsed == null) return 'Enter used days';
-                      if (parsed < 0) return 'Must be ≥ 0';
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _pendingController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: _inputDecoration('Pending days'),
-                    validator: (value) {
-                      final parsed = _parseDouble(value ?? '');
-                      if (parsed == null) return 'Enter pending days';
-                      if (parsed < 0) return 'Must be ≥ 0';
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _adjustedController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                      signed: true,
-                    ),
-                    decoration: _inputDecoration('Adjusted days'),
-                    validator: (value) {
-                      final parsed = _parseDouble(value ?? '');
-                      if (parsed == null)
-                        return 'Enter adjusted days (use 0 if none)';
-                      return null;
-                    },
                   ),
                   const SizedBox(height: 10),
-                  Text(
-                    'Creates or overwrites the balance row for this employee and leave type. '
-                    'Use for HR corrections; normal approvals still update balances automatically.',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 12,
+                  _balanceFieldGrid(enabled: !saving && !_loadingBalances),
+                  const SizedBox(height: 16),
+                  _sectionHeader(
+                    icon: Icons.history_edu_outlined,
+                    title: 'Audit Note',
+                  ),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    controller: _remarksController,
+                    enabled: !saving,
+                    minLines: 2,
+                    maxLines: 4,
+                    decoration: _inputDecoration('Reason / remarks').copyWith(
+                      alignLabelWithHint: true,
+                      prefixIcon: const Icon(Icons.notes_outlined),
+                      hintText: 'Example: Corrected imported opening balance',
                     ),
+                  ),
+                  const SizedBox(height: 12),
+                  _statusPanel(
+                    icon: _draftBalance.availableDays < 0
+                        ? Icons.warning_amber_rounded
+                        : Icons.info_outline_rounded,
+                    message: _draftBalance.availableDays < 0
+                        ? 'Resulting available balance is negative. Save only if this reflects the intended HR correction.'
+                        : 'Approvals continue to update used and pending days automatically after this adjustment.',
+                    warning: _draftBalance.availableDays < 0,
                   ),
                 ],
               ],
@@ -1768,17 +2568,350 @@ class _ManualBalanceAdjustmentDialogState
           onPressed: saving ? null : () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
         ),
-        FilledButton(
-          onPressed:
-              saving ||
-                  _loadingEmployees ||
-                  _loadingBalances ||
-                  _employeesError != null
-              ? null
-              : _onSave,
-          child: Text(saving ? 'Saving…' : 'Save balance'),
+        FilledButton.icon(
+          onPressed: canSave ? _onSave : null,
+          icon: saving
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.save_outlined),
+          label: Text(saving ? 'Saving...' : 'Update balance'),
         ),
       ],
+    );
+  }
+
+  Widget _asOfDateField(bool saving) {
+    return InkWell(
+      onTap: saving ? null : _pickAsOfDate,
+      borderRadius: BorderRadius.circular(12),
+      child: InputDecorator(
+        decoration: _inputDecoration(
+          'As of date',
+        ).copyWith(prefixIcon: const Icon(Icons.calendar_month_outlined)),
+        child: Row(
+          children: [
+            Expanded(child: Text(_formatDate(_asOfDate))),
+            Icon(
+              Icons.expand_more_rounded,
+              color: saving ? Colors.black26 : AppTheme.textSecondary,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _balanceFieldGrid({required bool enabled}) {
+    final fields = [
+      _numberField(
+        controller: _earnedController,
+        label: 'Earned days',
+        icon: Icons.add_circle_outline,
+        helperText: 'Credits accrued or imported.',
+        enabled: enabled,
+        allowNegative: false,
+      ),
+      _numberField(
+        controller: _usedController,
+        label: 'Used days',
+        icon: Icons.remove_circle_outline,
+        helperText: 'Approved leave already consumed.',
+        enabled: enabled,
+        allowNegative: false,
+      ),
+      _numberField(
+        controller: _pendingController,
+        label: 'Pending days',
+        icon: Icons.hourglass_empty_rounded,
+        helperText: 'Filed requests awaiting final action.',
+        enabled: enabled,
+        allowNegative: false,
+      ),
+      _numberField(
+        controller: _adjustedController,
+        label: 'Adjusted days',
+        icon: Icons.exposure_outlined,
+        helperText: 'Use negative values to reduce credits.',
+        enabled: enabled,
+        allowNegative: true,
+      ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 560) {
+          return Column(
+            children: [
+              for (var i = 0; i < fields.length; i++) ...[
+                if (i > 0) const SizedBox(height: 12),
+                fields[i],
+              ],
+            ],
+          );
+        }
+        return Column(
+          children: [
+            Row(
+              children: [
+                Expanded(child: fields[0]),
+                const SizedBox(width: 12),
+                Expanded(child: fields[1]),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(child: fields[2]),
+                const SizedBox(width: 12),
+                Expanded(child: fields[3]),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _numberField({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    required String helperText,
+    required bool enabled,
+    required bool allowNegative,
+  }) {
+    return TextFormField(
+      controller: controller,
+      enabled: enabled,
+      keyboardType: TextInputType.numberWithOptions(
+        decimal: true,
+        signed: allowNegative,
+      ),
+      decoration: _inputDecoration(
+        label,
+      ).copyWith(prefixIcon: Icon(icon), helperText: helperText),
+      validator: (value) {
+        final parsed = _parseDouble(value ?? '');
+        if (parsed == null) return 'Enter $label';
+        if (!allowNegative && parsed < 0) return 'Must be 0 or more';
+        return null;
+      },
+    );
+  }
+
+  Widget _balancePreviewPanel({
+    required LeaveBalance? current,
+    required LeaveBalance draft,
+  }) {
+    final hasCurrent = current != null;
+    final availableColor = draft.availableDays < 0
+        ? Colors.red.shade700
+        : AppTheme.primaryNavy;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.black.withOpacity(0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  hasCurrent ? 'Editing existing balance' : 'Creating balance',
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: hasCurrent
+                      ? AppTheme.primaryNavy.withOpacity(0.1)
+                      : Colors.blueGrey.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  hasCurrent ? 'Loaded' : 'New row',
+                  style: TextStyle(
+                    color: hasCurrent
+                        ? AppTheme.primaryNavyDark
+                        : AppTheme.textSecondary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '$_selectedEmployeeName - ${_selectedLeaveType.displayName}',
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _BalanceMetric(
+                label: 'Current available',
+                value: current == null
+                    ? '--'
+                    : _formatDays(current.availableDays),
+                color: AppTheme.textSecondary,
+              ),
+              _BalanceMetric(
+                label: 'New remaining',
+                value: _formatDays(draft.remainingDays),
+                color: AppTheme.textPrimary,
+              ),
+              _BalanceMetric(
+                label: 'New available',
+                value: _formatDays(draft.availableDays),
+                color: availableColor,
+                emphasize: true,
+              ),
+              _BalanceMetric(
+                label: 'Pending reserve',
+                value: _formatDays(draft.pendingDays),
+                color: AppTheme.textPrimary,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Available = earned - used + adjusted - pending',
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionHeader({
+    required IconData icon,
+    required String title,
+    Widget? trailing,
+  }) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: AppTheme.primaryNavy),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            title,
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        if (trailing != null) trailing,
+      ],
+    );
+  }
+
+  Widget _statusPanel({
+    required IconData icon,
+    required String message,
+    bool warning = false,
+  }) {
+    final color = warning ? Colors.red.shade700 : AppTheme.textSecondary;
+    final background = warning ? Colors.red.shade50 : AppTheme.offWhite;
+    final border = warning
+        ? Colors.red.shade100
+        : Colors.black.withOpacity(0.06);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(color: color, fontSize: 12.5, height: 1.35),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDays(double value) {
+    final normalized = value.abs() < 0.005 ? 0.0 : value;
+    final fixed = normalized.toStringAsFixed(2);
+    if (fixed.endsWith('.00')) return fixed.substring(0, fixed.length - 3);
+    if (fixed.endsWith('0')) return fixed.substring(0, fixed.length - 1);
+    return fixed;
+  }
+}
+
+class _BalanceMetric extends StatelessWidget {
+  const _BalanceMetric({
+    required this.label,
+    required this.value,
+    required this.color,
+    this.emphasize = false,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+  final bool emphasize;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 136,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withOpacity(emphasize ? 0.1 : 0.06),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withOpacity(0.14)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: color,
+              fontSize: emphasize ? 20 : 18,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

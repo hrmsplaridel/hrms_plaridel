@@ -79,7 +79,7 @@ class _DtrMainState extends State<DtrMain> {
         final isSelected = _currentSection == section;
         return Material(
           color: isSelected
-              ? AppTheme.primaryNavy.withOpacity(0.12)
+              ? AppTheme.primaryNavy.withValues(alpha: 0.12)
               : AppTheme.lightGray,
           borderRadius: BorderRadius.circular(8),
           child: InkWell(

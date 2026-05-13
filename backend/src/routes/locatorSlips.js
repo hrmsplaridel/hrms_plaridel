@@ -8,6 +8,7 @@ const {
   isDepartmentHead,
 } = require('../services/departmentHeadService');
 const locatorNotifications = require('../services/locatorNotifications');
+const { broadcastAppEvent } = require('../websockets/appEvents');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -16,6 +17,23 @@ function notifySafe(fn) {
   Promise.resolve()
     .then(() => fn())
     .catch((e) => console.error('[locator notification]', e));
+}
+
+function broadcastLocatorUpdated(action, row = {}, extra = {}) {
+  try {
+    const slipId = row.id || extra.slipId || null;
+    broadcastAppEvent('locator_updated', {
+      action,
+      slipId,
+      locatorSlipId: slipId,
+      userId: row.employee_id || row.userId || extra.userId || null,
+      status: row.status || extra.status || null,
+      updatedAt: new Date().toISOString(),
+      ...extra,
+    });
+  } catch (e) {
+    console.error('[locator websocket]', e);
+  }
 }
 
 pool
@@ -221,7 +239,9 @@ router.post('/submit', protect, async (req, res) => {
       })
     );
 
-    res.status(201).json(mapLocatorRow(out.rows[0]));
+    const mapped = mapLocatorRow(out.rows[0]);
+    broadcastLocatorUpdated('submitted', mapped);
+    res.status(201).json(mapped);
   } catch (err) {
     try {
       await client.query('ROLLBACK');
@@ -278,7 +298,9 @@ router.patch('/:id/cancel', protect, async (req, res) => {
        WHERE ls.id = $1::uuid`,
       [id]
     );
-    res.json(mapLocatorRow(out.rows[0]));
+    const mapped = mapLocatorRow(out.rows[0]);
+    broadcastLocatorUpdated('cancelled', mapped, { previousStatus: status });
+    res.json(mapped);
   } catch (err) {
     try {
       await client.query('ROLLBACK');
@@ -393,6 +415,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
         slipDate: mapped.slip_date,
       })
     );
+    broadcastLocatorUpdated('department_head_approved', mapped);
     res.json(mapped);
   } catch (err) {
     try {
@@ -474,7 +497,9 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
        WHERE ls.id = $1::uuid`,
       [id]
     );
-    res.json(mapLocatorRow(out.rows[0]));
+    const mapped = mapLocatorRow(out.rows[0]);
+    broadcastLocatorUpdated('department_head_rejected', mapped);
+    res.json(mapped);
   } catch (err) {
     try {
       await client.query('ROLLBACK');
@@ -581,7 +606,9 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
        WHERE ls.id = $1::uuid`,
       [id]
     );
-    res.json(mapLocatorRow(out.rows[0]));
+    const mapped = mapLocatorRow(out.rows[0]);
+    broadcastLocatorUpdated('approved', mapped);
+    res.json(mapped);
   } catch (err) {
     try {
       await client.query('ROLLBACK');
@@ -658,7 +685,9 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
        WHERE ls.id = $1::uuid`,
       [id]
     );
-    res.json(mapLocatorRow(out.rows[0]));
+    const mapped = mapLocatorRow(out.rows[0]);
+    broadcastLocatorUpdated('rejected', mapped);
+    res.json(mapped);
   } catch (err) {
     try {
       await client.query('ROLLBACK');

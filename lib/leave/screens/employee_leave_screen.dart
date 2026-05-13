@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../landingpage/constants/app_theme.dart';
 import '../../providers/auth_provider.dart';
+import '../../realtime/app_realtime_provider.dart';
 import '../leave_provider.dart';
 import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
@@ -38,6 +39,7 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
     with WidgetsBindingObserver {
   bool _initialized = false;
   Timer? _autoRefreshTimer;
+  StreamSubscription<AppRealtimeEvent>? _leaveRealtimeSub;
 
   @override
   void didChangeDependencies() {
@@ -52,12 +54,20 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
     });
     WidgetsBinding.instance.addObserver(this);
     _startAutoRefresh();
+    _leaveRealtimeSub ??=
+        context.read<AppRealtimeProvider>().events.listen((event) {
+      if (event.name != 'leave_updated') return;
+      final userId = context.read<AuthProvider>().user?.id;
+      if (!event.affectsUser(userId)) return;
+      unawaited(_refreshMyLeaveData());
+    });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _autoRefreshTimer?.cancel();
+    _leaveRealtimeSub?.cancel();
     super.dispose();
   }
 

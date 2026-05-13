@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
+import '../../providers/auth_provider.dart';
+import '../../realtime/app_realtime_provider.dart';
 import '../leave_provider.dart';
 import '../models/leave_balance_ledger.dart';
 import '../models/leave_type.dart';
@@ -45,6 +49,8 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
   bool _employeesLoading = true;
   String? _employeesError;
   List<_EmployeeOption> _employees = const [];
+  StreamSubscription<AppRealtimeEvent>? _leaveRealtimeSub;
+  String? _currentUserId;
 
   @override
   void initState() {
@@ -61,6 +67,39 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
       }
       _load(resetOffset: true);
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _currentUserId = context.watch<AuthProvider>().user?.id;
+    _leaveRealtimeSub ??= context.read<AppRealtimeProvider>().events.listen((
+      event,
+    ) {
+      if (event.name != 'leave_updated') return;
+      if (widget.isAdmin) {
+        final filterUserId = _appliedEmployeeId;
+        if (filterUserId != null &&
+            filterUserId.isNotEmpty &&
+            !event.affectsUser(filterUserId)) {
+          return;
+        }
+      } else {
+        if (!event.affectsUser(_currentUserId)) return;
+      }
+      unawaited(_refreshFromRealtime());
+    });
+  }
+
+  @override
+  void dispose() {
+    _leaveRealtimeSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refreshFromRealtime() async {
+    if (!mounted || _loading) return;
+    await _load(resetOffset: true);
   }
 
   Future<void> _loadEmployees() async {

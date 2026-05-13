@@ -108,16 +108,18 @@ async function notifyForcedLeaveDeductionApplied(pool, {
   employeeUserId,
   deductedDays,
   remainingDays,
+  year,
   remarks,
 }) {
   if (!employeeUserId) return;
+  const yearText = year ? ` for ${year}` : '';
   await insertNotification(pool, {
     userId: employeeUserId,
     category: 'leave',
     type: 'leave_forced_deduction_applied',
     title: 'Forced leave deduction applied',
     body:
-      `HR applied a forced leave deduction of ${deductedDays} day(s) from your Vacation Leave balance.` +
+      `HR applied a forced leave deduction${yearText} of ${deductedDays} day(s) from your Vacation Leave balance.` +
       ` Available balance: ${remainingDays} day(s).` +
       (remarks ? ` Note: ${remarks}` : ''),
     referenceType: null,
@@ -125,6 +127,8 @@ async function notifyForcedLeaveDeductionApplied(pool, {
     metadata: {
       leave_type: 'vacationLeave',
       deducted_days: deductedDays,
+      year: year || null,
+      deduction_year: year || null,
       available_days: remainingDays,
       remarks: remarks || null,
     },

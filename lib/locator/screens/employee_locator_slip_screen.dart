@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../providers/auth_provider.dart';
+import '../../realtime/app_realtime_provider.dart';
 import '../utils/locator_slip_print.dart';
 
 class EmployeeLocatorSlipScreen extends StatefulWidget {
@@ -29,6 +32,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
   String _searchQuery = '';
   String? _selectedSlipId;
   String? _selectedApprovalSlipId;
+  StreamSubscription<AppRealtimeEvent>? _locatorRealtimeSub;
 
   @override
   void didChangeDependencies() {
@@ -37,6 +41,23 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
     if (!_loadingMy && _slips.isEmpty) {
       _loadMyRequests();
     }
+    _locatorRealtimeSub ??=
+        context.read<AppRealtimeProvider>().events.listen((event) {
+      if (event.name != 'locator_updated') return;
+      final userId = context.read<AuthProvider>().user?.id;
+      if (event.affectsUser(userId)) {
+        unawaited(_loadMyRequests());
+      }
+      if (_currentSection == _LocatorSection.approvals) {
+        unawaited(_loadDepartmentHeadRequests());
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _locatorRealtimeSub?.cancel();
+    super.dispose();
   }
 
   List<_LocatorSlipDraft> get _filteredSlips {

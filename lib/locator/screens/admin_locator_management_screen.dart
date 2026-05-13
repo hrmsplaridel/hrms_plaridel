@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
+import '../../realtime/app_realtime_provider.dart';
 
 enum _LocatorAdminQueue {
   pendingDeptHead('Pending Dept Head'),
@@ -29,11 +33,28 @@ class _AdminLocatorManagementScreenState
   String? _error;
   List<_LocatorAdminRecord> _items = [];
   String? _selectedItemId;
+  StreamSubscription<AppRealtimeEvent>? _locatorRealtimeSub;
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _locatorRealtimeSub ??=
+        context.read<AppRealtimeProvider>().events.listen((event) {
+      if (event.name != 'locator_updated') return;
+      unawaited(_load());
+    });
+  }
+
+  @override
+  void dispose() {
+    _locatorRealtimeSub?.cancel();
+    super.dispose();
   }
 
   @override

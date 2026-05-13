@@ -18,10 +18,8 @@ List<LeaveBalance> _filterDisplayBalances(List<LeaveBalance> raw) {
 /// The provider depends only on the [LeaveRepository] contract, so the UI can
 /// stay unchanged if the backend later switches from Supabase to a custom API.
 class LeaveProvider extends ChangeNotifier {
-  LeaveProvider({
-    required LeaveRepository repository,
-    this.onMutation,
-  }) : _repository = repository;
+  LeaveProvider({required LeaveRepository repository, this.onMutation})
+    : _repository = repository;
 
   final LeaveRepository _repository;
 
@@ -33,6 +31,7 @@ class LeaveProvider extends ChangeNotifier {
       onMutation?.call();
     } catch (_) {}
   }
+
   LeaveRepository get repository => _repository;
 
   List<LeaveRequest> _requests = [];
@@ -449,13 +448,37 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
+  Future<MonthlyLeaveAccrualResult?> runMonthlyAccrual(
+    MonthlyLeaveAccrualInput input,
+  ) async {
+    _reviewing = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final result = await _repository.runMonthlyAccrual(input);
+      if (!input.dryRun) _notifyMutation();
+      return result;
+    } catch (e) {
+      _error = e is Exception && e.toString().startsWith('Exception: ')
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
+      return null;
+    } finally {
+      _reviewing = false;
+      notifyListeners();
+    }
+  }
+
   /// Admin/HR: create or overwrite one [LeaveBalance] row for an employee.
-  Future<LeaveBalance?> upsertBalance(LeaveBalance balance) async {
+  Future<LeaveBalance?> upsertBalance(
+    LeaveBalance balance, {
+    String? remarks,
+  }) async {
     _submitting = true;
     _error = null;
     notifyListeners();
     try {
-      final saved = await _repository.upsertBalance(balance);
+      final saved = await _repository.upsertBalance(balance, remarks: remarks);
       _notifyMutation();
       return saved;
     } catch (e) {
@@ -565,7 +588,9 @@ class LeaveProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<LeaveRequest?> departmentHeadApprove(LeaveReviewDecisionInput input) async {
+  Future<LeaveRequest?> departmentHeadApprove(
+    LeaveReviewDecisionInput input,
+  ) async {
     _reviewing = true;
     _error = null;
     notifyListeners();
@@ -586,7 +611,9 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
-  Future<LeaveRequest?> departmentHeadReject(LeaveReviewDecisionInput input) async {
+  Future<LeaveRequest?> departmentHeadReject(
+    LeaveReviewDecisionInput input,
+  ) async {
     _reviewing = true;
     _error = null;
     notifyListeners();
@@ -607,7 +634,9 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
-  Future<LeaveRequest?> departmentHeadReturn(LeaveReviewDecisionInput input) async {
+  Future<LeaveRequest?> departmentHeadReturn(
+    LeaveReviewDecisionInput input,
+  ) async {
     _reviewing = true;
     _error = null;
     notifyListeners();

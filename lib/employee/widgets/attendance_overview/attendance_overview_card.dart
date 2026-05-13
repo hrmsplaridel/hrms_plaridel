@@ -39,7 +39,7 @@ class _EmployeeAttendanceOverviewCardState
     extends State<EmployeeAttendanceOverviewCard> {
   late int _year;
   late int _month;
-  Timer? _refreshTimer;
+  StreamSubscription<DtrUpdateEvent>? _dtrUpdateSub;
 
   /// True until the first awaited [loadTimeRecordsForUser] for this month
   /// finishes (also true while switching months). Without this, the first
@@ -59,23 +59,27 @@ class _EmployeeAttendanceOverviewCardState
     _month = n.month;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadMonth();
-      _scheduleRefreshTimer();
+      _subscribeToDtrUpdates();
     });
   }
 
   @override
   void dispose() {
-    _refreshTimer?.cancel();
+    _dtrUpdateSub?.cancel();
     super.dispose();
   }
 
-  void _scheduleRefreshTimer() {
-    _refreshTimer?.cancel();
-    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+  void _subscribeToDtrUpdates() {
+    _dtrUpdateSub?.cancel();
+    _dtrUpdateSub = context.read<DtrProvider>().onDtrEvent.listen((event) {
       if (!mounted) return;
       if (!_isViewingCurrentMonth) return;
       final dtr = context.read<DtrProvider>();
       if (dtr.loading) return;
+      if (!event.affectsUser(dtr.userId)) return;
+      final start = DateTime(_year, _month, 1);
+      final end = DateTime(_year, _month + 1, 0);
+      if (!event.affectsDateRange(start, end)) return;
       _loadMonth(showSkeleton: false);
     });
   }

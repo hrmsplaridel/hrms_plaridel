@@ -32,6 +32,8 @@ const {
 } = require('../services/holidayRangeUtils');
 const leaveNotifications = require('../services/leaveNotifications');
 const { runLeaveMonthlyAccrual } = require('../services/leaveMonthlyAccrual');
+const { broadcastAppEvent } = require('../websockets/appEvents');
+const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
 
 const router = express.Router();
 
@@ -40,6 +42,45 @@ function notifySafe(fn) {
   Promise.resolve()
     .then(() => fn())
     .catch((e) => console.error('[leave notification]', e));
+}
+
+function leaveRowUserId(row = {}) {
+  return row.user_id || row.employee_id || row.userId || row.employeeId || null;
+}
+
+function broadcastLeaveUpdated(action, row = {}, extra = {}) {
+  try {
+    const requestId = row.id || extra.requestId || extra.leaveRequestId || null;
+    broadcastAppEvent('leave_updated', {
+      action,
+      requestId,
+      leaveRequestId: requestId,
+      userId: leaveRowUserId(row) || extra.userId || null,
+      status: row.status || extra.status || null,
+      updatedAt: new Date().toISOString(),
+      ...extra,
+    });
+  } catch (e) {
+    console.error('[leave websocket]', e);
+  }
+}
+
+function broadcastDtrLeaveRefresh(action, { userId, leaveRequestId, dateFrom, dateTo } = {}) {
+  try {
+    if (!userId) return;
+    const normalizedUserId = String(userId);
+    broadcastBiometricUpdate('dtr_refresh', {
+      action,
+      userId: normalizedUserId,
+      userIds: [normalizedUserId],
+      requestId: leaveRequestId || null,
+      leaveRequestId: leaveRequestId || null,
+      dateFrom: dateFrom || null,
+      dateTo: dateTo || null,
+    });
+  } catch (e) {
+    console.error('[leave dtr websocket]', e);
+  }
 }
 const protect = [authMiddleware];
 
@@ -610,6 +651,7 @@ router.post('/draft', protect, async (req, res) => {
       await client.query('BEGIN');
       // #12: Recompute with holiday awareness now that we have a DB client.
       const daysHolidayAware = await computeNumberOfDays(startStr, endStr, client);
+      const effectiveDaysDraft = daysHolidayAware ?? days;
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
       if (!leaveTypeId) {
         await client.query('ROLLBACK');
@@ -624,7 +666,7 @@ router.post('/draft', protect, async (req, res) => {
         otherPurpose: otherPurpose || null,
         startDateStr: startStr,
         endDateStr: endStr,
-        numberOfDays: days,
+        numberOfDays: effectiveDaysDraft,
         hasAttachment: false,
       });
       if (!validation.valid) {
@@ -655,7 +697,7 @@ router.post('/draft', protect, async (req, res) => {
           )
           VALUES ($1::uuid, $1::uuid, $2::uuid, $3::date, $4::date, $5::numeric, $5::numeric, $6::text, $7::jsonb, 'draft', now(), now())
           RETURNING *`,
-        [userId, leaveTypeId, startStr, endStr, daysHolidayAware ?? days, reason || null, payloadDetails]
+        [userId, leaveTypeId, startStr, endStr, effectiveDaysDraft, reason || null, payloadDetails]
       );
 
       const row = q.rows[0];
@@ -671,12 +713,14 @@ router.post('/draft', protect, async (req, res) => {
           leave_type: leave_type || null,
           start_date: startStr,
           end_date: endStr,
-          number_of_days: daysHolidayAware ?? days,
+          number_of_days: effectiveDaysDraft,
         },
       });
       const typeName = leave_type ? String(leave_type) : null;
       await client.query('COMMIT');
-      res.status(201).json(mapLeaveRowToApi({ ...row, leave_type_name: typeName }));
+      const mapped = mapLeaveRowToApi({ ...row, leave_type_name: typeName });
+      broadcastLeaveUpdated('saved_draft', mapped);
+      res.status(201).json(mapped);
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
@@ -723,17 +767,11 @@ router.post('/submit', protect, async (req, res) => {
         : { ...rest, leave_type, start_date: startStr, end_date: endStr };
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
 
-      // FIX #7 (backend): Validate numberOfDays is positive and <= computed (holiday-aware) days.
+      // Validate the server-computed, holiday-aware working day count.
       const effectiveDaysSubmit = daysHolidayAwareSubmit ?? days;
       if (effectiveDaysSubmit == null || effectiveDaysSubmit <= 0) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Number of working days must be greater than 0.' });
-      }
-      if (effectiveDaysSubmit != null && days > effectiveDaysSubmit) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({
-          error: `Requested days (${days}) exceed the computed Mon–Fri working days for the selected range (${effectiveDaysSubmit}).`,
-        });
       }
 
       const validation = validateEmployeeLeaveRequest({
@@ -741,7 +779,7 @@ router.post('/submit', protect, async (req, res) => {
         otherPurpose: otherPurpose || null,
         startDateStr: startStr,
         endDateStr: endStr,
-        numberOfDays: days,
+        numberOfDays: effectiveDaysSubmit,
         hasAttachment: false,
       });
       if (!validation.valid) {
@@ -753,8 +791,7 @@ router.post('/submit', protect, async (req, res) => {
       // Block when a required attachment is missing (incl. sick leave ≥5 working days → medical certificate).
       const { mustBlockMissingAttachment, getRule: getLeaveRule } = require('./leaveTypeRules');
       const submitRule = getLeaveRule(leave_type);
-      const effectiveDays = daysHolidayAwareSubmit ?? days;
-      if (mustBlockMissingAttachment(submitRule, leave_type, effectiveDays, false)) {
+      if (mustBlockMissingAttachment(submitRule, leave_type, effectiveDaysSubmit, false)) {
         await client.query('ROLLBACK');
         return res.status(400).json({
           error: `${leave_type} requires a supporting document. Please save a draft, upload the document, then submit.`,
@@ -784,7 +821,7 @@ router.post('/submit', protect, async (req, res) => {
           )
           VALUES ($1::uuid, $1::uuid, $2::uuid, $3::date, $4::date, $5::numeric, $5::numeric, $6::text, $7::jsonb, 'draft', now(), now())
           RETURNING *`,
-        [userId, leaveTypeId, startStr, endStr, daysHolidayAwareSubmit ?? days, reason || null, payloadDetails]
+        [userId, leaveTypeId, startStr, endStr, effectiveDaysSubmit, reason || null, payloadDetails]
       );
 
       const row = q.rows[0];
@@ -810,7 +847,7 @@ router.post('/submit', protect, async (req, res) => {
           leave_type: leave_type || null,
           start_date: startStr,
           end_date: endStr,
-          number_of_days: days,
+          number_of_days: effectiveDaysSubmit,
           department_head: deptHeadInfo ? deptHeadInfo.departmentHeadUserId : null,
         },
       });
@@ -868,7 +905,9 @@ router.post('/submit', protect, async (req, res) => {
           departmentHeadUserId: deptHeadInfo?.departmentHeadUserId ?? null,
         })
       );
-      res.status(201).json(mapLeaveRowToApi({ ...row, leave_type_name: typeName }));
+      const mapped = mapLeaveRowToApi({ ...row, leave_type_name: typeName });
+      broadcastLeaveUpdated('submitted', mapped);
+      res.status(201).json(mapped);
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
@@ -909,6 +948,7 @@ router.put('/:id', protect, async (req, res) => {
     const startStr = toIsoDateStr(start_date);
     const endStr = toIsoDateStr(end_date);
     const days = await computeNumberOfDays(startStr, endStr);
+    let effectiveDays = days;
 
     const client = await pool.connect();
     try {
@@ -923,26 +963,25 @@ router.put('/:id', protect, async (req, res) => {
         ? details
         : { ...rest, leave_type, start_date: startStr, end_date: endStr };
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
-      if (leave_type && startStr && endStr && days != null) {
-        // FIX #7 (backend): Validate numberOfDays correctness on PUT.
-        if (days <= 0) {
+      if (startStr && endStr) {
+        const computedDays = await computeNumberOfDays(startStr, endStr, client);
+        effectiveDays = computedDays ?? days;
+
+        // Validate the server-computed, holiday-aware working day count.
+        if (effectiveDays == null || effectiveDays <= 0) {
           await client.query('ROLLBACK');
           return res.status(400).json({ error: 'Number of working days must be greater than 0.' });
         }
-        const computedDays = await computeNumberOfDays(startStr, endStr, client);
-        if (computedDays != null && days > computedDays) {
-          await client.query('ROLLBACK');
-          return res.status(400).json({
-            error: `Requested days (${days}) exceed the computed Mon–Fri working days for the selected range (${computedDays}).`,
-          });
-        }
+      }
+
+      if (leave_type && startStr && endStr) {
 
         const validation = validateEmployeeLeaveRequest({
           leaveType: leave_type,
           otherPurpose: otherPurpose || null,
           startDateStr: startStr,
           endDateStr: endStr,
-          numberOfDays: days,
+          numberOfDays: effectiveDays,
           hasAttachment: false,
         });
         if (!validation.valid) {
@@ -959,7 +998,7 @@ router.put('/:id', protect, async (req, res) => {
           const hasAttachment = !!(existingRow.rows[0]?.attachment_path);
           const { getRule, mustBlockMissingAttachment } = require('./leaveTypeRules');
           const rule = getRule(leave_type);
-          if (mustBlockMissingAttachment(rule, leave_type, days, hasAttachment)) {
+          if (mustBlockMissingAttachment(rule, leave_type, effectiveDays, hasAttachment)) {
             await client.query('ROLLBACK');
             return res.status(400).json({
               error: `${leave_type} requires a supporting document before submission. Please upload one first.`,
@@ -993,7 +1032,7 @@ router.put('/:id', protect, async (req, res) => {
              updated_at = now()
          WHERE id = $7 AND (user_id = $8 OR employee_id = $8)
          RETURNING *`,
-        [leaveTypeId, startStr, endStr, days, reason || null, payloadDetails, id, userId, nextStatus]
+        [leaveTypeId, startStr, endStr, effectiveDays, reason || null, payloadDetails, id, userId, nextStatus]
       );
       const row = q.rows[0];
       await insertLeaveRequestHistory(client, {
@@ -1007,17 +1046,17 @@ router.put('/:id', protect, async (req, res) => {
           leave_type: leave_type || null,
           start_date: startStr,
           end_date: endStr,
-          number_of_days: days,
+          number_of_days: effectiveDays,
         },
       });
       // FIX #5b: Update pending_days when status transitions to a pending status via PUT.
       const leaveTypeName = leave_type ? String(leave_type) : null;
       const isPendingTarget = nextStatus === 'pending' || nextStatus === 'pending_department_head' || nextStatus === 'pending_hr';
       const wasPending = status === 'pending' || status === 'pending_department_head' || status === 'pending_hr';
-      if (leaveTypeName && days != null && days > 0) {
+      if (leaveTypeName && effectiveDays != null && effectiveDays > 0) {
         if (isPendingTarget && !wasPending) {
           // Moving INTO a pending status: increment pending_days.
-          await assertEnoughAvailableForPendingReservation(client, userId, leaveTypeName, days);
+          await assertEnoughAvailableForPendingReservation(client, userId, leaveTypeName, effectiveDays);
           const ledgerType = balanceLedgerLeaveType(leaveTypeName);
           const beforePut = await fetchBalanceSnapshot(client, userId, ledgerType);
           await client.query(
@@ -1026,7 +1065,7 @@ router.put('/:id', protect, async (req, res) => {
              ON CONFLICT (user_id, leave_type)
              DO UPDATE SET pending_days = COALESCE(leave_balances.pending_days, 0) + EXCLUDED.pending_days,
                            updated_at = now()`,
-            [userId, ledgerType, days]
+            [userId, ledgerType, effectiveDays]
           );
           const afterPut = await fetchBalanceSnapshot(client, userId, ledgerType);
           const putAction =
@@ -1043,7 +1082,7 @@ router.put('/:id', protect, async (req, res) => {
             actorUserId: userId,
             actorKind: 'user',
             remarks: null,
-            metadataJson: { number_of_days: days, history_action: historyAction },
+            metadataJson: { number_of_days: effectiveDays, history_action: historyAction },
           });
         }
       }
@@ -1069,7 +1108,9 @@ router.put('/:id', protect, async (req, res) => {
           })
         );
       }
-      res.json(mapLeaveRowToApi({ ...row, leave_type_name: leaveTypeName }));
+      const mapped = mapLeaveRowToApi({ ...row, leave_type_name: leaveTypeName });
+      broadcastLeaveUpdated(historyAction || 'updated', mapped);
+      res.json(mapped);
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
@@ -1195,6 +1236,7 @@ router.patch('/:id/cancel', protect, async (req, res) => {
         });
       });
     }
+    broadcastLeaveUpdated('cancelled', mappedCancel, { previousStatus: status });
     res.json(mappedCancel);
   } catch (err) {
     try {
@@ -1248,11 +1290,18 @@ router.post('/admin/forced-leave-deduction', protect, requireAdminOrHr, async (r
   const userId = (req.body?.user_id || '').toString().trim();
   const daysRaw = req.body?.days_to_deduct ?? req.body?.daysToDeduct;
   const days = daysRaw != null && daysRaw !== '' ? parseFloat(daysRaw) : NaN;
+  const yearRaw = req.body?.year ?? req.body?.deduction_year ?? req.body?.deductionYear;
+  const yearText = yearRaw != null ? String(yearRaw).trim() : '';
+  const year = /^\d{4}$/.test(yearText) ? parseInt(yearText, 10) : NaN;
   const remarks = (req.body?.remarks || '').toString().trim() || null;
   const allowNegative = req.body?.allow_negative_balance === true;
   if (!userId) return res.status(400).json({ error: 'user_id is required' });
   if (!Number.isFinite(days) || days <= 0) {
     return res.status(400).json({ error: 'days_to_deduct must be greater than 0' });
+  }
+  const maxAllowedYear = new Date().getFullYear() + 1;
+  if (!Number.isInteger(year) || year < 1900 || year > maxAllowedYear) {
+    return res.status(400).json({ error: `year must be between 1900 and ${maxAllowedYear}` });
   }
 
   const client = await pool.connect();
@@ -1265,6 +1314,28 @@ router.post('/admin/forced-leave-deduction', protect, requireAdminOrHr, async (r
     if (userQ.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Target employee not found or inactive' });
+    }
+    const duplicateQ = await client.query(
+      `SELECT id, created_at
+       FROM leave_balance_ledger
+       WHERE user_id = $1::uuid
+         AND leave_type = 'vacationLeave'
+         AND action = 'forced_leave_deduction'
+         AND (
+           metadata_json->>'year' = $2::text
+           OR metadata_json->>'deduction_year' = $2::text
+         )
+       LIMIT 1`,
+      [userId, String(year)]
+    );
+    if (duplicateQ.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: `Year-end forced leave deduction for ${year} has already been applied for this employee.`,
+        year,
+        existing_ledger_id: duplicateQ.rows[0].id,
+        applied_at: duplicateQ.rows[0].created_at,
+      });
     }
     const remaining = await upsertLeaveBalanceDeduction(
       client,
@@ -1280,7 +1351,10 @@ router.post('/admin/forced-leave-deduction', protect, requireAdminOrHr, async (r
           remarks,
           metadataJson: {
             source: 'forced_leave_deduction',
+            year,
+            deduction_year: year,
             requested_leave_type: 'mandatoryForcedLeave',
+            deducted_days: days,
             allow_negative_balance: allowNegative,
           },
         },
@@ -1304,18 +1378,22 @@ router.post('/admin/forced-leave-deduction', protect, requireAdminOrHr, async (r
         employeeUserId: userId,
         deductedDays: days,
         remainingDays: availableAfter,
+        year,
         remarks,
       })
     );
-    res.status(201).json({
+    const response = {
       user_id: userId,
       leave_type: 'vacationLeave',
       deducted_days: days,
+      year,
       remaining_days: remainingAfter,
       available_days: availableAfter,
       remarks,
       applied_at: new Date().toISOString(),
-    });
+    };
+    broadcastLeaveUpdated('forced_leave_deduction', { user_id: userId }, response);
+    res.status(201).json(response);
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { }
     console.error('[leave POST /admin/forced-leave-deduction]', err);
@@ -1348,6 +1426,29 @@ router.post('/admin/monthly-accrual', protect, requireAdminOrHr, async (req, res
       maxCatchUpMonths: Number.isFinite(maxCatchUpMonths) ? maxCatchUpMonths : undefined,
       targetMonth: targetMonth ? String(targetMonth).trim() : undefined,
     });
+    if (!result.dryRun && (result.rowsUpdated > 0 || result.missingBalanceRowsCreated > 0)) {
+      const affectedUserIds = [
+        ...new Set(
+          (Array.isArray(result.details) ? result.details : [])
+            .filter((item) => item.action === 'applied' || item.created_balance_row === true)
+            .map((item) => item.user_id)
+            .filter(Boolean)
+            .map((id) => String(id))
+        ),
+      ];
+      if (affectedUserIds.length > 0) {
+        broadcastLeaveUpdated('monthly_accrual', { user_id: affectedUserIds[0] }, {
+          userIds: affectedUserIds,
+          user_ids: affectedUserIds,
+          targetYearMonth: result.targetYearMonth,
+          rowsUpdated: result.rowsUpdated,
+          rowsSkipped: result.rowsSkipped,
+          missingBalanceRowsCreated: result.missingBalanceRowsCreated || 0,
+          leaveTypes: result.leaveTypes,
+          balanceChanged: true,
+        });
+      }
+    }
     res.status(200).json(result);
   } catch (err) {
     console.error('[leave POST /admin/monthly-accrual]', err);
@@ -1538,6 +1639,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
         endDateStr: mappedDhApprove.end_date,
       })
     );
+    broadcastLeaveUpdated('department_head_approved', mappedDhApprove);
     res.json(mappedDhApprove);
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { }
@@ -1648,6 +1750,7 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
         metadata: { reviewer_remarks: remarks },
       })
     );
+    broadcastLeaveUpdated('department_head_rejected', mappedDhReject);
     res.json(mappedDhReject);
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { }
@@ -1758,6 +1861,7 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
         metadata: { reviewer_remarks: remarks },
       })
     );
+    broadcastLeaveUpdated('department_head_returned', mappedDhReturn);
     res.json(mappedDhReturn);
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { }
@@ -1907,7 +2011,15 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
           },
         })
       );
-      res.json(mapLeaveRowToApi({ ...row, leave_type_name: leaveTypeName }));
+      const mapped = mapLeaveRowToApi({ ...row, leave_type_name: leaveTypeName });
+      broadcastDtrLeaveRefresh('leave_approved_applied_to_dtr', {
+        userId: targetUserId,
+        leaveRequestId: id,
+        dateFrom: startStr,
+        dateTo: endStr,
+      });
+      broadcastLeaveUpdated('approved', mapped);
+      res.json(mapped);
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
@@ -2042,6 +2154,7 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
         metadata: { reviewer_remarks: remarks, disapproval_reason: disapprovalReason },
       })
     );
+    broadcastLeaveUpdated('rejected', mappedReject);
     res.json(mappedReject);
   } catch (err) {
     try {
@@ -2187,6 +2300,13 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
         metadata: { reviewer_remarks: remarks },
       })
     );
+    broadcastDtrLeaveRefresh('leave_revoked_removed_from_dtr', {
+      userId: targetUserId,
+      leaveRequestId: id,
+      dateFrom: startStr,
+      dateTo: endStr,
+    });
+    broadcastLeaveUpdated('revoked', mappedRevoke);
     res.json(mappedRevoke);
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { }
@@ -2304,6 +2424,7 @@ router.patch('/:id/return', protect, requireAdminOrHr, async (req, res) => {
         metadata: { reviewer_remarks: remarks },
       })
     );
+    broadcastLeaveUpdated('returned', mappedHrReturn);
     res.json(mappedHrReturn);
   } catch (err) {
     try {
@@ -2586,7 +2707,7 @@ router.put('/balances/:userId', protect, requireAdminOrHr, async (req, res) => {
 
     const nameRow = await pool.query('SELECT full_name FROM users WHERE id = $1::uuid', [targetId]);
     const employeeName = nameRow.rows[0]?.full_name || null;
-    res.json({
+    const response = {
       id: r.id,
       user_id: r.user_id,
       leave_type: r.leave_type,
@@ -2599,7 +2720,9 @@ router.put('/balances/:userId', protect, requireAdminOrHr, async (req, res) => {
       last_accrual_date: r.last_accrual_date ? String(r.last_accrual_date).slice(0, 10) : null,
       created_at: r.created_at,
       updated_at: r.updated_at,
-    });
+    };
+    broadcastLeaveUpdated('balance_updated', { user_id: targetId }, response);
+    res.json(response);
   } catch (err) {
     try {
       await client.query('ROLLBACK');
@@ -2654,7 +2777,9 @@ router.post('/:id/attachment', protect, uploadLeaveAttachmentMw, async (req, res
        WHERE lr.id = $1`,
       [id]
     );
-    res.json(mapLeaveRowToApi(out.rows[0]));
+    const mapped = mapLeaveRowToApi(out.rows[0]);
+    broadcastLeaveUpdated('attachment_uploaded', mapped);
+    res.json(mapped);
   } catch (err) {
     console.error('[leave POST /:id/attachment]', err);
     res.status(500).json({ error: 'Failed to upload attachment' });
@@ -2696,7 +2821,9 @@ router.delete('/:id/attachment', protect, async (req, res) => {
        WHERE lr.id = $1`,
       [id]
     );
-    res.json(mapLeaveRowToApi(out.rows[0]));
+    const mapped = mapLeaveRowToApi(out.rows[0]);
+    broadcastLeaveUpdated('attachment_removed', mapped);
+    res.json(mapped);
   } catch (err) {
     console.error('[leave DELETE /:id/attachment]', err);
     res.status(500).json({ error: 'Failed to remove attachment' });

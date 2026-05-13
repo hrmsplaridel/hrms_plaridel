@@ -14,6 +14,8 @@ import 'leave/leave_provider.dart';
 import 'leave/api_leave_repository.dart';
 import 'data/mis_occ_barangays_loader.dart';
 import 'notifications/notification_provider.dart';
+import 'realtime/app_realtime_bridge.dart';
+import 'realtime/app_realtime_provider.dart';
 import 'admin/screens/admin_dashboard.dart';
 import 'employee/screens/employee_dashboard.dart';
 
@@ -74,6 +76,11 @@ class MyApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider<AuthProvider>.value(value: auth),
+        ChangeNotifierProxyProvider<AuthProvider, AppRealtimeProvider>(
+          create: (_) => AppRealtimeProvider(),
+          update: (_, auth, realtime) =>
+              (realtime ?? AppRealtimeProvider())..setCurrentUser(auth.user?.id),
+        ),
         ChangeNotifierProvider(create: (_) => DtrProvider()),
         ChangeNotifierProvider(create: (_) => DocuTrackerProvider()),
         ChangeNotifierProvider(create: (_) => NotificationProvider()),
@@ -87,12 +94,14 @@ class MyApp extends StatelessWidget {
         ),
         ChangeNotifierProvider(create: (_) => RecruitmentHirePrefill()),
       ],
-      child: MaterialApp(
-        title: 'HRMS Plaridel',
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.lightTheme,
-        navigatorObservers: [routeObserver],
-        home: _initialHome(auth, storedLoginAs),
+      child: AppRealtimeBridge(
+        child: MaterialApp(
+          title: 'HRMS Plaridel',
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.lightTheme,
+          navigatorObservers: [routeObserver],
+          home: _initialHome(auth, storedLoginAs),
+        ),
       ),
     );
   }

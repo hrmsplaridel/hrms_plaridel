@@ -50,7 +50,10 @@ class _ScheduleCalendarState extends State<ScheduleCalendar> {
       final data = res.data ?? [];
       _employees = (data).map((e) {
         final m = e as Map<String, dynamic>;
-        return {'id': m['id'] as String, 'full_name': m['full_name'] as String? ?? '—'};
+        return {
+          'id': m['id'] as String,
+          'full_name': m['full_name'] as String? ?? '—',
+        };
       }).toList();
       if (_employees.isNotEmpty && _selectedEmployeeId == null) {
         setState(() => _selectedEmployeeId = _employees.first['id'] as String);
@@ -63,8 +66,10 @@ class _ScheduleCalendarState extends State<ScheduleCalendar> {
     setState(() => _loading = true);
     final start = DateTime(_month.year, _month.month, 1);
     final end = DateTime(_month.year, _month.month + 1, 0);
-    final startStr = '${start.year}-${start.month.toString().padLeft(2, '0')}-${start.day.toString().padLeft(2, '0')}';
-    final endStr = '${end.year}-${end.month.toString().padLeft(2, '0')}-${end.day.toString().padLeft(2, '0')}';
+    final startStr =
+        '${start.year}-${start.month.toString().padLeft(2, '0')}-${start.day.toString().padLeft(2, '0')}';
+    final endStr =
+        '${end.year}-${end.month.toString().padLeft(2, '0')}-${end.day.toString().padLeft(2, '0')}';
     try {
       final res = await ApiClient.instance.get<Map<String, dynamic>>(
         '/api/calendar/events',
@@ -86,7 +91,9 @@ class _ScheduleCalendarState extends State<ScheduleCalendar> {
         );
       }).toList();
     } on DioException catch (e) {
-      debugPrint('Load calendar events failed: ${e.response?.data ?? e.message}');
+      debugPrint(
+        'Load calendar events failed: ${e.response?.data ?? e.message}',
+      );
       _events = [];
     }
     if (mounted) setState(() => _loading = false);
@@ -100,8 +107,18 @@ class _ScheduleCalendarState extends State<ScheduleCalendar> {
   }
 
   static const _monthNames = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December',
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
   ];
 
   static const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -119,7 +136,11 @@ class _ScheduleCalendarState extends State<ScheduleCalendar> {
       children: [
         Text(
           'Schedule Calendar',
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: 24, fontWeight: FontWeight.w800),
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: 24,
+            fontWeight: FontWeight.w800,
+          ),
         ),
         const SizedBox(height: 8),
         Text(
@@ -132,8 +153,14 @@ class _ScheduleCalendarState extends State<ScheduleCalendar> {
           decoration: BoxDecoration(
             color: AppTheme.white,
             borderRadius: BorderRadius.circular(12),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 16, offset: const Offset(0, 4))],
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.06),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+            ],
+            border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -153,7 +180,11 @@ class _ScheduleCalendarState extends State<ScheduleCalendar> {
                     child: Center(
                       child: Text(
                         '${_month.year} · ${_monthNames[_month.month - 1]}',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppTheme.textPrimary),
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.textPrimary,
+                        ),
                       ),
                     ),
                   ),
@@ -172,17 +203,38 @@ class _ScheduleCalendarState extends State<ScheduleCalendar> {
                 const SizedBox(height: 12),
                 Row(
                   children: [
-                    Text('Employee:', style: TextStyle(fontSize: 14, color: AppTheme.textSecondary)),
+                    Text(
+                      'Employee:',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: DropdownButtonFormField<String>(
-                        value: _selectedEmployeeId,
+                        initialValue: _selectedEmployeeId,
                         decoration: InputDecoration(
                           isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                         ),
-                        items: _employees.map((e) => DropdownMenuItem(value: e['id'] as String, child: Text(e['full_name'] as String, overflow: TextOverflow.ellipsis))).toList(),
+                        items: _employees
+                            .map(
+                              (e) => DropdownMenuItem(
+                                value: e['id'] as String,
+                                child: Text(
+                                  e['full_name'] as String,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            )
+                            .toList(),
                         onChanged: (v) {
                           setState(() {
                             _selectedEmployeeId = v;
@@ -196,28 +248,67 @@ class _ScheduleCalendarState extends State<ScheduleCalendar> {
                 const SizedBox(height: 16),
               ],
               if (_loading)
-                const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()))
+                const Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Center(child: CircularProgressIndicator()),
+                )
               else ...[
                 Table(
-                  border: TableBorder.all(color: AppTheme.lightGray, width: 0.5),
-                  columnWidths: const {0: FlexColumnWidth(1), 1: FlexColumnWidth(1), 2: FlexColumnWidth(1), 3: FlexColumnWidth(1), 4: FlexColumnWidth(1), 5: FlexColumnWidth(1), 6: FlexColumnWidth(1)},
+                  border: TableBorder.all(
+                    color: AppTheme.lightGray,
+                    width: 0.5,
+                  ),
+                  columnWidths: const {
+                    0: FlexColumnWidth(1),
+                    1: FlexColumnWidth(1),
+                    2: FlexColumnWidth(1),
+                    3: FlexColumnWidth(1),
+                    4: FlexColumnWidth(1),
+                    5: FlexColumnWidth(1),
+                    6: FlexColumnWidth(1),
+                  },
                   children: [
                     TableRow(
-                      decoration: BoxDecoration(color: AppTheme.primaryNavy.withOpacity(0.08)),
-                      children: _weekdays.map((w) => Padding(padding: const EdgeInsets.symmetric(vertical: 10), child: Center(child: Text(w, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: AppTheme.textPrimary))))).toList(),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                      ),
+                      children: _weekdays
+                          .map(
+                            (w) => Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              child: Center(
+                                child: Text(
+                                  w,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 12,
+                                    color: AppTheme.textPrimary,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          )
+                          .toList(),
                     ),
                     ...List.generate(rows, (rowIndex) {
                       return TableRow(
                         children: List.generate(7, (colIndex) {
                           final cellIndex = rowIndex * 7 + colIndex;
                           if (cellIndex < leadingEmpty) {
-                            return Container(height: 72, color: AppTheme.lightGray.withOpacity(0.3));
+                            return Container(
+                              height: 72,
+                              color: AppTheme.lightGray.withValues(alpha: 0.3),
+                            );
                           }
                           final day = cellIndex - leadingEmpty + 1;
                           if (day > daysInMonth) {
-                            return Container(height: 72, color: AppTheme.lightGray.withOpacity(0.3));
+                            return Container(
+                              height: 72,
+                              color: AppTheme.lightGray.withValues(alpha: 0.3),
+                            );
                           }
-                          final dateStr = '${_month.year}-${_month.month.toString().padLeft(2, '0')}-${day.toString().padLeft(2, '0')}';
+                          final dateStr =
+                              '${_month.year}-${_month.month.toString().padLeft(2, '0')}-${day.toString().padLeft(2, '0')}';
                           final event = _eventFor(dateStr);
                           Color bg = Colors.white;
                           String subtitle = '';
@@ -228,30 +319,48 @@ class _ScheduleCalendarState extends State<ScheduleCalendar> {
                             } else if (event.type == 'shift') {
                               bg = const Color(0xFFC8E6C9);
                               subtitle = event.label;
-                              if (event.shiftStart != null && event.shiftEnd != null) {
-                                final s = event.shiftStart!.length >= 5 ? event.shiftStart!.substring(0, 5) : event.shiftStart;
-                                final e = event.shiftEnd!.length >= 5 ? event.shiftEnd!.substring(0, 5) : event.shiftEnd;
+                              if (event.shiftStart != null &&
+                                  event.shiftEnd != null) {
+                                final s = event.shiftStart!.length >= 5
+                                    ? event.shiftStart!.substring(0, 5)
+                                    : event.shiftStart;
+                                final e = event.shiftEnd!.length >= 5
+                                    ? event.shiftEnd!.substring(0, 5)
+                                    : event.shiftEnd;
                                 subtitle = '$subtitle $s–$e';
                               }
                             } else {
-                              bg = AppTheme.lightGray.withOpacity(0.4);
+                              bg = AppTheme.lightGray.withValues(alpha: 0.4);
                               subtitle = event.label;
                             }
                           }
                           return Container(
                             height: 72,
                             padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(color: bg, border: Border.all(color: AppTheme.lightGray)),
+                            decoration: BoxDecoration(
+                              color: bg,
+                              border: Border.all(color: AppTheme.lightGray),
+                            ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Text('$day', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.textPrimary)),
+                                Text(
+                                  '$day',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 14,
+                                    color: AppTheme.textPrimary,
+                                  ),
+                                ),
                                 if (subtitle.isNotEmpty)
                                   Flexible(
                                     child: Text(
                                       subtitle,
-                                      style: TextStyle(fontSize: 10, color: AppTheme.textSecondary),
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: AppTheme.textSecondary,
+                                      ),
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
                                     ),
@@ -271,7 +380,10 @@ class _ScheduleCalendarState extends State<ScheduleCalendar> {
                     const SizedBox(width: 16),
                     _legendItem(const Color(0xFFC8E6C9), 'Shift'),
                     const SizedBox(width: 16),
-                    _legendItem(AppTheme.lightGray.withOpacity(0.4), 'Rest day'),
+                    _legendItem(
+                      AppTheme.lightGray.withValues(alpha: 0.4),
+                      'Rest day',
+                    ),
                   ],
                 ),
               ],
@@ -286,9 +398,19 @@ class _ScheduleCalendarState extends State<ScheduleCalendar> {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(width: 16, height: 16, decoration: BoxDecoration(color: color, border: Border.all(color: AppTheme.lightGray))),
+        Container(
+          width: 16,
+          height: 16,
+          decoration: BoxDecoration(
+            color: color,
+            border: Border.all(color: AppTheme.lightGray),
+          ),
+        ),
         const SizedBox(width: 6),
-        Text(label, style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+        Text(
+          label,
+          style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+        ),
       ],
     );
   }
