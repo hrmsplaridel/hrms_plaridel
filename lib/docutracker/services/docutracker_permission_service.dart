@@ -60,8 +60,28 @@ class DocuTrackerPermissionService {
   }
 
   bool? _grantedForAction(List<DocumentPermission> perms, String action) {
+    String normalize(String raw) => raw
+        .replaceAllMapped(
+          RegExp(r'([a-z0-9])([A-Z])'),
+          (m) => '${m.group(1)}_${m.group(2)}',
+        )
+        .trim()
+        .toLowerCase()
+        .replaceAll('-', '_')
+        .replaceAll(' ', '_');
+    final wanted = normalize(action);
+    final aliases = <String>{
+      wanted,
+      if (wanted == 'create') 'create_draft',
+      if (wanted == 'create_draft') 'create',
+      if (wanted == 'returndoc') 'return',
+      if (wanted == 'return') 'returndoc',
+    };
     for (final p in perms) {
-      if (p.action.name == action) return p.granted;
+      final actionName = normalize(p.action.name);
+      if (aliases.contains(actionName)) {
+        return p.granted;
+      }
     }
     return null;
   }

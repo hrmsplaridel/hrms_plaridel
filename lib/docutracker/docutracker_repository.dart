@@ -379,7 +379,9 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
         },
       );
       _permissionService.clearCache();
-    } catch (_) {}
+    } catch (e) {
+      throw Exception(_apiErrorMessage(e));
+    }
   }
 
   Future<int> resetPermissions({
@@ -458,15 +460,16 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     String? documentId,
     bool isAdmin = false,
   }) async {
-    const workflowActions = {'approve', 'forward', 'reject', 'return'};
-    if (!isAdmin && workflowActions.contains(action)) {
+    // When a concrete document is provided, always delegate to backend explanation
+    // because document-level rules include creator/holder/step-assignee context.
+    if (!isAdmin && documentId != null && documentId.trim().isNotEmpty) {
       try {
         final res = await ApiClient.instance.get<Map<String, dynamic>>(
           '$_base/permission-explain',
           queryParameters: {
             'document_type': documentType,
             'action': action,
-            if (documentId != null && documentId.trim().isNotEmpty) 'document_id': documentId,
+            'document_id': documentId,
           },
         );
         final data = res.data ?? const <String, dynamic>{};

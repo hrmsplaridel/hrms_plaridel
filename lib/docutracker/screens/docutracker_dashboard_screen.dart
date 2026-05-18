@@ -69,7 +69,7 @@ class _DocuTrackerDashboardScreenState
       userId: userId,
       roleId: roleId,
       documentType: '*',
-      action: DocumentAction.create.name,
+      action: DocumentAction.createDraft.value,
     );
     if (!mounted) return;
     setState(() => _canCreateDocuments = canCreate);
@@ -125,7 +125,7 @@ class _DocuTrackerDashboardScreenState
                                 onCreated: _load,
                               ),
                         icon: const Icon(Icons.add_rounded, size: 18),
-                        label: const Text('New document'),
+                        label: const Text('Create Draft'),
                         style: DocuTrackerStyles.primaryButtonStyleNavy(),
                       )
                     : null,
@@ -164,7 +164,11 @@ class _DocuTrackerDashboardScreenState
   }
 
   Widget _buildEmployeeDashboard(DocuTrackerProvider provider, String userId) {
+    final myDocs = provider.documents
+        .where((d) => d.createdBy == userId || d.currentHolderId == userId)
+        .toList();
     final incoming = provider.incomingForUser(userId);
+    final pending = provider.pendingReviewsForUser(userId);
     final nearing = provider.nearingDeadlineForUser(userId);
     final overdue = provider.overdueDocuments
         .where((d) => d.currentHolderId == userId)
@@ -175,6 +179,12 @@ class _DocuTrackerDashboardScreenState
     final completed = provider.completedDocuments
         .where((d) => d.createdBy == userId || d.currentHolderId == userId)
         .toList();
+    final drafts = myDocs.where((d) {
+      return d.status == DocumentStatus.pending &&
+          (d.sentTime == null || (d.currentStep ?? 0) <= 0);
+    }).toList();
+    final inReview = myDocs.where((d) => d.status == DocumentStatus.inReview).toList();
+    final approved = myDocs.where((d) => d.status == DocumentStatus.approved).toList();
 
     final hasAnyDocs =
         overdue.isNotEmpty ||
@@ -187,13 +197,16 @@ class _DocuTrackerDashboardScreenState
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildSummaryCards(
-          incoming: incoming.length,
-          nearing: nearing.length,
+          drafts: drafts.length,
+          pending: pending.length,
+          inReview: inReview.length,
           overdue: overdue.length,
-          returned: returned.length,
-          completed: completed.length,
+          approved: approved.length,
         ),
         const SizedBox(height: 24),
+        _buildDocSection('Assigned to Me', incoming, false),
+        _buildRecentActivityPreview(provider),
+        const SizedBox(height: 20),
         if (hasAnyDocs) ...[
           if (overdue.isNotEmpty) _buildDocSection('Overdue', overdue, true),
           if (nearing.isNotEmpty)
@@ -267,31 +280,39 @@ class _DocuTrackerDashboardScreenState
   }
 
   Widget _buildSummaryCards({
-    required int incoming,
-    required int nearing,
+    required int drafts,
+    required int pending,
+    required int inReview,
     required int overdue,
-    required int returned,
-    required int completed,
+    required int approved,
   }) {
     final w = MediaQuery.of(context).size.width;
     final isNarrow = w < 500;
     final twoRows = w < 800 && !isNarrow;
 
     final cardIncoming = DocuTrackerSummaryCard(
-      title: 'Incoming',
-      subtitle: 'Documents assigned to you',
-      value: '$incoming',
-      icon: Icons.inbox_rounded,
-      backgroundColor: const Color(0xFFFFF3E0),
-      iconColor: const Color(0xFFE85D04),
+      title: 'Drafts',
+      subtitle: 'WIP, not submitted',
+      value: '$drafts',
+      icon: Icons.edit_note_rounded,
+      backgroundColor: const Color(0xFFFFFBEB),
+      iconColor: const Color(0xFFD97706),
     );
     final cardNearing = DocuTrackerSummaryCard(
-      title: 'Nearing Deadline',
-      subtitle: 'Due within 24 hours',
-      value: '$nearing',
-      icon: Icons.schedule_rounded,
-      backgroundColor: const Color(0xFFFFECB3),
-      iconColor: const Color(0xFFBF360C),
+      title: 'Pending',
+      subtitle: 'Waiting for action',
+      value: '$pending',
+      icon: Icons.hourglass_top_rounded,
+      backgroundColor: const Color(0xFFF3F4F6),
+      iconColor: const Color(0xFF4B5563),
+    );
+    final cardInReview = DocuTrackerSummaryCard(
+      title: 'In Review',
+      subtitle: 'Currently processing',
+      value: '$inReview',
+      icon: Icons.manage_search_rounded,
+      backgroundColor: const Color(0xFFEFF6FF),
+      iconColor: const Color(0xFF1D4ED8),
     );
     final cardOverdue = DocuTrackerSummaryCard(
       title: 'Overdue',
@@ -301,21 +322,13 @@ class _DocuTrackerDashboardScreenState
       backgroundColor: const Color(0xFFFFCDD2),
       iconColor: const Color(0xFFE53935),
     );
-    final cardReturned = DocuTrackerSummaryCard(
-      title: 'Returned',
-      subtitle: 'Sent back for revision',
-      value: '$returned',
-      icon: Icons.reply_rounded,
-      backgroundColor: const Color(0xFFFFE0B2),
-      iconColor: const Color(0xFFFF9800),
-    );
     final cardCompleted = DocuTrackerSummaryCard(
-      title: 'Completed',
-      subtitle: 'Approved or rejected',
-      value: '$completed',
+      title: 'Approved',
+      subtitle: 'Terminal success',
+      value: '$approved',
       icon: Icons.check_circle_rounded,
-      backgroundColor: AppTheme.white,
-      iconColor: AppTheme.primaryNavy,
+      backgroundColor: const Color(0xFFECFDF5),
+      iconColor: const Color(0xFF047857),
     );
 
     if (isNarrow) {
@@ -325,9 +338,9 @@ class _DocuTrackerDashboardScreenState
           const SizedBox(height: 16),
           cardNearing,
           const SizedBox(height: 16),
-          cardOverdue,
+          cardInReview,
           const SizedBox(height: 16),
-          cardReturned,
+          cardOverdue,
           const SizedBox(height: 16),
           cardCompleted,
         ],
@@ -346,9 +359,9 @@ class _DocuTrackerDashboardScreenState
           const SizedBox(height: 16),
           Row(
             children: [
-              Expanded(child: cardOverdue),
+              Expanded(child: cardInReview),
               const SizedBox(width: 16),
-              Expanded(child: cardReturned),
+              Expanded(child: cardOverdue),
             ],
           ),
           const SizedBox(height: 16),
@@ -362,12 +375,60 @@ class _DocuTrackerDashboardScreenState
         const SizedBox(width: 16),
         Expanded(child: cardNearing),
         const SizedBox(width: 16),
-        Expanded(child: cardOverdue),
+        Expanded(child: cardInReview),
         const SizedBox(width: 16),
-        Expanded(child: cardReturned),
+        Expanded(child: cardOverdue),
         const SizedBox(width: 16),
         Expanded(child: cardCompleted),
       ],
+    );
+  }
+
+  Widget _buildRecentActivityPreview(DocuTrackerProvider provider) {
+    final items = provider.notifications.take(4).toList();
+    return Container(
+      width: double.infinity,
+      decoration: DocuTrackerTokens.cardDecoration(),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Recent Activity',
+            style: DocuTrackerTokens.titleStyle(context),
+          ),
+          const SizedBox(height: 10),
+          if (items.isEmpty)
+            Text(
+              'No recent workflow activity yet.',
+              style: DocuTrackerTokens.subtitleStyle(),
+            )
+          else
+            for (final n in items)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.circle, size: 8, color: AppTheme.primaryNavy.withValues(alpha: 0.8)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        n.title?.trim().isNotEmpty == true
+                            ? n.title!
+                            : n.displayType,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: DocuTrackerTokens.subtitleStyle().copyWith(
+                          fontSize: 12.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+        ],
+      ),
     );
   }
 

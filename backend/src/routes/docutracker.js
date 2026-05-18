@@ -9,6 +9,9 @@ const {
   getEffectivePermissionExplanation,
   listDocuments,
 } = require('../services/docutrackerWorkflowService');
+const {
+  ACTIVE_WORKFLOW_STATUSES_FOR_OVERDUE,
+} = require('../services/docutrackerStatusSemantics');
 
 const { coalesceDocumentTitle } = require('../utils/docutrackerDisplayTitle');
 const { sameEntityId } = require('../utils/sameEntityId');
@@ -16,9 +19,30 @@ const { sameEntityId } = require('../utils/sameEntityId');
 const router = express.Router();
 const protect = [authMiddleware];
 
-// Role-based permissions are only for general access. Workflow actions
-// (approve/forward/reject/return) are enforced by workflow-step assignees.
-const GENERAL_PERMISSION_ACTIONS = new Set(['view', 'create', 'download']);
+// Role/user permission rows cover baseline access and draft-start capability.
+// Runtime workflow actions (approve/forward/reject/return) are enforced by
+// current holder / step-assignee logic.
+const GENERAL_PERMISSION_ACTIONS = new Set([
+  'view',
+  'create',
+  'create_draft',
+  'download',
+  'submit',
+]);
+
+function normalizeGeneralPermissionAction(action) {
+  const a = String(action || '').trim().toLowerCase();
+  if (!a) return a;
+  if (a === 'create' || a === 'createdraft') return 'create_draft';
+  return a;
+}
+
+function generalPermissionActionVariants(action) {
+  const normalized = normalizeGeneralPermissionAction(action);
+  if (!normalized) return [];
+  if (normalized === 'create_draft') return ['create_draft', 'create'];
+  return [normalized];
+}
 
 /** Fields that must not be changed via PUT by non-admins (use transitions or admin tools). */
 const DOCUTRACKER_PUT_WORKFLOW_FIELDS = [
@@ -228,8 +252,9 @@ router.get('/documents-overdue', protect, requireAdmin, async (_req, res) => {
        LEFT JOIN users creator ON creator.id = d.created_by
        WHERE d.deadline_time IS NOT NULL
          AND d.deadline_time < now()
-         AND d.status NOT IN ('approved', 'rejected', 'cancelled')
-       ORDER BY d.deadline_time ASC`
+         AND d.status = ANY($1::text[])
+       ORDER BY d.deadline_time ASC`,
+      [ACTIVE_WORKFLOW_STATUSES_FOR_OVERDUE]
     );
     res.json(result.rows.map(mapDocumentRow));
   } catch (err) {
@@ -1250,10 +1275,12 @@ router.put('/workflow-steps/:stepId/assignees', protect, requireAdmin, async (re
 router.get('/permissions', protect, requireAdmin, async (req, res) => {
   try {
     const { document_type, action = 'view', search } = req.query;
+    const normalizedAction = normalizeGeneralPermissionAction(action);
+    const actionVariants = generalPermissionActionVariants(normalizedAction);
     if (!document_type) {
       return res.status(400).json({ error: 'document_type is required' });
     }
-    if (!GENERAL_PERMISSION_ACTIONS.has(String(action))) {
+    if (!GENERAL_PERMISSION_ACTIONS.has(String(normalizedAction))) {
       return res.status(400).json({
         error: `Invalid action '${action}'. Role-based permissions only support: ${Array.from(
           GENERAL_PERMISSION_ACTIONS
@@ -1261,9 +1288,9 @@ router.get('/permissions', protect, requireAdmin, async (req, res) => {
       });
     }
 
-    const params = [document_type, action];
+    const params = [document_type, actionVariants, normalizedAction];
     const where = [];
-    let i = 3;
+    let i = 4;
 
     // only active employees by default
     where.push('(u.is_active IS NULL OR u.is_active = true)');
@@ -1284,12 +1311,21 @@ router.get('/permissions', protect, requireAdmin, async (req, res) => {
          u.role,
          COALESCE(u.is_active, true) AS is_active,
          p.id AS permission_id,
+        p.action AS permission_action,
          COALESCE(p.granted, false) AS granted
        FROM users u
-       LEFT JOIN docutracker_permissions p
-         ON p.user_id = u.id
-        AND p.document_type = $1
-        AND p.action = $2
+       LEFT JOIN LATERAL (
+         SELECT pp.id, pp.action, pp.granted
+         FROM docutracker_permissions pp
+         WHERE pp.user_id = u.id
+           AND pp.document_type = $1
+           AND pp.action = ANY($2::text[])
+         ORDER BY
+           CASE WHEN pp.action = $3 THEN 0 ELSE 1 END,
+           pp.updated_at DESC NULLS LAST,
+           pp.created_at DESC NULLS LAST
+         LIMIT 1
+       ) p ON true
        ${whereSql}
        ORDER BY u.full_name`,
       params
@@ -1303,6 +1339,7 @@ router.get('/permissions', protect, requireAdmin, async (req, res) => {
         role: r.role ?? 'employee',
         is_active: r.is_active,
         permission_id: r.permission_id,
+        permission_action: r.permission_action,
         granted: r.granted,
       }))
     );
@@ -1335,7 +1372,9 @@ router.post('/permissions', protect, requireAdmin, async (req, res) => {
         error: 'document_type and action are required, plus user_id or role_id',
       });
     }
-    if (!GENERAL_PERMISSION_ACTIONS.has(String(action))) {
+    const normalizedAction = normalizeGeneralPermissionAction(action);
+    const actionVariants = generalPermissionActionVariants(normalizedAction);
+    if (!GENERAL_PERMISSION_ACTIONS.has(String(normalizedAction))) {
       return res.status(400).json({
         error: `Invalid action '${action}'. Role-based permissions only support: ${Array.from(
           GENERAL_PERMISSION_ACTIONS
@@ -1348,10 +1387,10 @@ router.post('/permissions', protect, requireAdmin, async (req, res) => {
     const existing = await pool.query(
       user_id
         ? `SELECT id FROM docutracker_permissions
-           WHERE user_id = $1 AND document_type = $2 AND action = $3`
+           WHERE user_id = $1 AND document_type = $2 AND action = ANY($3::text[])`
         : `SELECT id FROM docutracker_permissions
-           WHERE role_id = $1 AND user_id IS NULL AND document_type = $2 AND action = $3`,
-      user_id ? [user_id, document_type, action] : [role_id, document_type, action]
+           WHERE role_id = $1 AND user_id IS NULL AND document_type = $2 AND action = ANY($3::text[])`,
+      user_id ? [user_id, document_type, actionVariants] : [role_id, document_type, actionVariants]
     );
 
     let row;
@@ -1360,10 +1399,11 @@ router.post('/permissions', protect, requireAdmin, async (req, res) => {
       const update = await pool.query(
         `UPDATE docutracker_permissions
          SET granted = $1,
+             action = $3,
              updated_at = now()
          WHERE id = $2
          RETURNING *`,
-        [grantedBool, permId]
+        [grantedBool, permId, normalizedAction]
       );
       row = update.rows[0];
     } else {
@@ -1372,7 +1412,7 @@ router.post('/permissions', protect, requireAdmin, async (req, res) => {
            (user_id, role_id, document_type, action, granted)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING *`,
-        [user_id || null, role_id || null, document_type, action, grantedBool]
+        [user_id || null, role_id || null, document_type, normalizedAction, grantedBool]
       );
       row = insert.rows[0];
     }
@@ -1436,7 +1476,8 @@ router.delete('/permissions', protect, requireAdmin, async (req, res) => {
     params.push(document_type);
 
     if (action) {
-      if (!GENERAL_PERMISSION_ACTIONS.has(String(action))) {
+      const normalizedAction = normalizeGeneralPermissionAction(action);
+      if (!GENERAL_PERMISSION_ACTIONS.has(String(normalizedAction))) {
         return res.status(400).json({
           error: `Invalid action '${action}'. Role-based permissions only support: ${Array.from(
             GENERAL_PERMISSION_ACTIONS
@@ -1444,7 +1485,7 @@ router.delete('/permissions', protect, requireAdmin, async (req, res) => {
         });
       }
       where.push(`action = $${i++}`);
-      params.push(action);
+      params.push(normalizedAction);
     }
 
     const sql = `DELETE FROM docutracker_permissions WHERE ${where.join(' AND ')}`;

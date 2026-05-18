@@ -6,6 +6,7 @@ const {
   ensureValidWorkflowConfig,
   permissionPriority,
   resolvePermissionDecisionFromRows,
+  hasPermission,
   transitionDocument,
   getEffectivePermissionExplanation,
 } = require('../src/services/docutrackerWorkflowService');
@@ -58,7 +59,7 @@ test('ensureValidWorkflowConfig rejects incorrect step order', () => {
 });
 
 test('permissionPriority favors user-specific over role and wildcard', () => {
-  const ctx = { userId: 'u1', role: 'hr', documentType: 'memo' };
+  const ctx = { userId: 'u1', roleIds: ['hr', 'hr_staff'], documentType: 'memo' };
   const userSpecific = permissionPriority(
     { user_id: 'u1', role_id: null, document_type: 'memo' },
     ctx
@@ -82,10 +83,47 @@ test('resolvePermissionDecisionFromRows applies conflict precedence', () => {
   ];
   const decision = resolvePermissionDecisionFromRows(rows, {
     userId: 'u1',
-    role: 'hr',
+    roleIds: ['hr', 'hr_staff'],
     documentType: 'memo',
   });
   assert.equal(decision, false);
+});
+
+test('permissionPriority honors role aliases via roleIds', () => {
+  const ctx = { userId: 'u9', roleIds: ['hr', 'hr_staff'], documentType: 'memo' };
+  const aliasSpecific = permissionPriority(
+    { user_id: null, role_id: 'hr_staff', document_type: 'memo' },
+    ctx
+  );
+  assert.equal(aliasSpecific > 0, true);
+});
+
+test('hasPermission accepts legacy create rows for create_draft checks', async () => {
+  let capturedParams = null;
+  const mockClient = {
+    query: async (_sql, params) => {
+      capturedParams = params;
+      return {
+        rowCount: 1,
+        rows: [
+          {
+            user_id: null,
+            role_id: 'employee',
+            document_type: 'memo',
+            granted: true,
+          },
+        ],
+      };
+    },
+  };
+  const granted = await hasPermission(mockClient, {
+    role: 'employee',
+    userId: 'user-1',
+    documentType: 'memo',
+    action: 'create_draft',
+  });
+  assert.equal(granted, true);
+  assert.deepEqual(capturedParams?.[0], ['create_draft', 'create']);
 });
 
 function createMockPool(handler) {
@@ -218,6 +256,48 @@ test('getEffectivePermissionExplanation shows explicit deny precedence', async (
   assert.equal(result.final_decision, false);
   assert.equal(result.reason, 'explicit_permission');
   assert.equal(result.explicit_matches.length > 0, true);
+});
+
+test('getEffectivePermissionExplanation denies assigned user when allowed_actions excludes action', async () => {
+  const mockClient = {
+    query: async (sql) => {
+      if (sql.includes('FROM docutracker_routing_records rr') && sql.includes('routing_record_assignees')) {
+        return { rowCount: 1, rows: [{ ok: 1 }] };
+      }
+      if (sql.includes('FROM docutracker_workflow_steps s') && sql.includes('docutracker_workflow_step_assignees')) {
+        return {
+          rowCount: 1,
+          rows: [
+            {
+              is_enabled: true,
+              allowed_actions: ['forward'],
+              is_primary: false,
+              backup_rank: 1,
+            },
+          ],
+        };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+  };
+
+  const result = await getEffectivePermissionExplanation(mockClient, {
+    user: { id: 'backup-1', role: 'employee' },
+    action: 'approve',
+    documentType: 'memo',
+    document: {
+      id: 'doc-77',
+      document_type: 'memo',
+      status: 'in_review',
+      current_step: 1,
+      current_holder_id: 'holder-1',
+      workflow_version: 2,
+      created_by: 'creator-1',
+    },
+  });
+
+  assert.equal(result.final_decision, false);
+  assert.equal(result.reason, 'assigned_but_action_not_allowed');
 });
 
 test('transitionDocument blocks non-holder even with explicit approve grant', async () => {

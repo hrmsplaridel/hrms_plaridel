@@ -127,6 +127,8 @@ class DocuTrackerProvider extends ChangeNotifier {
         }
         if (result is DocuTrackerSuccess<DocuTrackerDocument>) {
           _upsertLocalDocument(result.value);
+          await refreshDocument(documentId, reloadHistory: true);
+          await loadNotifications(forceRefresh: true);
           return true;
         }
         _error = failureMessage;
@@ -209,7 +211,8 @@ class DocuTrackerProvider extends ChangeNotifier {
               d.deadlineTime!.isAfter(now) &&
               d.deadlineTime!.isBefore(threshold) &&
               d.status != DocumentStatus.approved &&
-              d.status != DocumentStatus.rejected,
+              d.status != DocumentStatus.rejected &&
+              d.status != DocumentStatus.cancelled,
         )
         .toList();
   }
@@ -222,7 +225,8 @@ class DocuTrackerProvider extends ChangeNotifier {
             (d.deadlineTime != null &&
                 DateTime.now().isAfter(d.deadlineTime!) &&
                 d.status != DocumentStatus.approved &&
-                d.status != DocumentStatus.rejected),
+                d.status != DocumentStatus.rejected &&
+                d.status != DocumentStatus.cancelled),
       )
       .toList();
 

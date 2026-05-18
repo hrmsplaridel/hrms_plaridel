@@ -47,7 +47,7 @@ Color _permissionActionColor(DocumentAction action) {
       return const Color(0xFF2196F3);
     case DocumentAction.returnDoc:
       return Colors.orange.shade600;
-    case DocumentAction.create:
+    case DocumentAction.createDraft:
       return const Color(0xFF9C27B0);
     case DocumentAction.view:
       return const Color(0xFF607D8B);
@@ -1170,8 +1170,8 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
 
   static const _restrictionItems = <_RestrictionItem>[
     _RestrictionItem(
-      action: DocumentAction.create,
-      title: 'Create documents',
+      action: DocumentAction.createDraft,
+      title: 'Create drafts',
       icon: Icons.add_circle_outline_rounded,
     ),
     _RestrictionItem(

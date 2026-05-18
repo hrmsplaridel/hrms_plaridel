@@ -41,8 +41,8 @@ class _DocuTrackerSetupPermissionsScreenState
       icon: Icons.send_and_archive_rounded,
     ),
     _RestrictionItem(
-      action: DocumentAction.create,
-      title: 'Create documents',
+      action: DocumentAction.createDraft,
+      title: 'Create drafts',
       icon: Icons.add_circle_outline_rounded,
     ),
     _RestrictionItem(

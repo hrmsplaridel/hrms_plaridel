@@ -18,6 +18,9 @@ const TERMINAL_STATUSES = new Set(['approved', 'rejected', 'cancelled']);
 const DOC_ACTIONS = new Set([
   'view',
   'create',
+  'create_draft',
+  'edit_own_draft',
+  'delete_own_draft',
   'edit',
   'download',
   'delete',
@@ -412,6 +415,19 @@ function ensureActionAllowedFromStatus(action, status) {
   }
 }
 
+function isDraftOrWipDocument(document, normalizedStatus = null) {
+  if (!document) return false;
+  const status = normalizedStatus || normalizeStatus(document.status);
+  if (status === 'draft') return true;
+  // Pending with no active assignment behaves as a WIP/draft.
+  return (
+    status === 'pending' &&
+    !document.current_holder_id &&
+    (document.current_step == null || Number(document.current_step) <= 0) &&
+    !document.sent_time
+  );
+}
+
 function ensureValidWorkflowConfig(config, documentType) {
   if (!config) {
     throw validationError(`Missing workflow config for document_type '${documentType}'`);
@@ -622,19 +638,22 @@ function getRoleVariants(role) {
 
 async function fetchPermissionRows(client, { role, userId, documentType, action }) {
   const roleIds = getRoleVariants(role);
+  const actionVariants = canonicalPermissionAction(action) === 'create_draft'
+    ? ['create_draft', 'create']
+    : [canonicalPermissionAction(action)];
   const permRes = await client.query(
     `SELECT user_id::text AS user_id,
             role_id,
             document_type,
             granted
      FROM docutracker_permissions
-     WHERE action = $1
+     WHERE action = ANY($1::text[])
        AND (document_type = $2 OR document_type = '*')
        AND (
          user_id = $3
         OR role_id = ANY($4::text[])
        )`,
-    [action, documentType, userId, roleIds]
+    [actionVariants, documentType, userId, roleIds]
   );
   return permRes.rows;
 }
@@ -642,18 +661,21 @@ async function fetchPermissionRows(client, { role, userId, documentType, action 
 /** All permission rows for an action for this user (any document_type). Used to batch list visibility. */
 async function fetchAllPermissionRowsForAction(client, { role, userId, action }) {
   const roleIds = getRoleVariants(role);
+  const actionVariants = canonicalPermissionAction(action) === 'create_draft'
+    ? ['create_draft', 'create']
+    : [canonicalPermissionAction(action)];
   const permRes = await client.query(
     `SELECT user_id::text AS user_id,
             role_id,
             document_type,
             granted
      FROM docutracker_permissions
-     WHERE action = $1
+     WHERE action = ANY($1::text[])
        AND (
          user_id = $2
         OR role_id = ANY($3::text[])
        )`,
-    [action, userId, roleIds]
+    [actionVariants, userId, roleIds]
   );
   return permRes.rows;
 }
@@ -666,6 +688,7 @@ async function filterDocumentsViewableByUser(pool, user, rows) {
   if (!rows?.length || user?.role === 'admin') return rows || [];
   const uid = user.id;
   const role = user.role;
+  const roleIds = getRoleVariants(role);
 
   const ids = rows.map((r) => r.id).filter(Boolean);
   const allPermRows = await fetchAllPermissionRowsForAction(pool, {
@@ -695,7 +718,7 @@ async function filterDocumentsViewableByUser(pool, user, rows) {
     const rowsForType = allPermRows.filter((r) => r.document_type === dt || r.document_type === '*');
     const decision = resolvePermissionDecisionFromRows(rowsForType, {
       userId: uid,
-      role,
+      roleIds,
       documentType: dt,
     });
     viewAllowedByType.set(dt, decision === true);
@@ -735,9 +758,10 @@ async function filterDocumentsViewableByUser(pool, user, rows) {
   return out;
 }
 
-function permissionPriority(row, { userId, role, documentType }) {
+function permissionPriority(row, { userId, roleIds, documentType }) {
   const isUser = row.user_id && row.user_id === userId;
-  const isRole = row.role_id && row.role_id === role;
+  const roleSet = new Set((roleIds || []).map((r) => String(r)));
+  const isRole = row.role_id && roleSet.has(String(row.role_id));
   const isSpecificType = row.document_type === documentType;
   const isWildcardType = row.document_type === '*';
   if (!isSpecificType && !isWildcardType) return -1;
@@ -760,16 +784,17 @@ function resolvePermissionDecisionFromRows(rows, context) {
 
 async function hasPermission(client, { role, userId, documentType, action }) {
   if (role === 'admin') return true;
-  if (!DOC_ACTIONS.has(action)) return false;
+  const canonicalAction = canonicalPermissionAction(action);
+  if (!DOC_ACTIONS.has(canonicalAction)) return false;
   const rows = await fetchPermissionRows(client, {
     role,
     userId,
     documentType,
-    action,
+    action: canonicalAction,
   });
   return resolvePermissionDecisionFromRows(rows, {
     userId,
-    role,
+    roleIds: getRoleVariants(role),
     documentType,
   });
 }
@@ -788,7 +813,17 @@ function getRelationshipFlags(document, user) {
 }
 
 const WORKFLOW_STEP_ACTIONS = new Set(['forward', 'approve', 'reject', 'return']);
-const GENERAL_PERMISSION_ACTIONS = new Set(['view', 'create', 'download']);
+const GENERAL_PERMISSION_ACTIONS = new Set(['view', 'create', 'create_draft', 'download']);
+
+function canonicalPermissionAction(action) {
+  const a = String(action || '').trim().toLowerCase();
+  if (!a) return '';
+  if (a === 'create' || a === 'create_draft' || a === 'createdraft') {
+    return 'create_draft';
+  }
+  if (a === 'return_doc' || a === 'returndoc') return 'return';
+  return a;
+}
 
 function isCurrentHolder(document, userId) {
   return !!document && !!userId && sameEntityId(document.current_holder_id, userId);
@@ -856,6 +891,7 @@ function assigneeAllowsAction(assigneeRow, action) {
 async function canUserPerformWorkflowAction(client, { user, document, action }) {
   if (!WORKFLOW_STEP_ACTIONS.has(action)) return false;
   if (user?.role === 'admin') return true;
+  if (isCurrentHolder(document, user.id)) return true;
 
   // Prefer normalized table restrictions when available.
   const row = await getWorkflowStepAssigneeRecord(client, { document, userId: user.id });
@@ -864,18 +900,18 @@ async function canUserPerformWorkflowAction(client, { user, document, action }) 
   if (allowedByRow === false) return false;
 
   // Fallback to legacy behavior (no per-action assignments): holder or step assignee.
-  if (isCurrentHolder(document, user.id)) return true;
   return isUserAssignedToCurrentStep(client, { document, userId: user.id });
 }
 
 async function canUserPerformGeneralAction(client, { user, documentType, action }) {
   if (user?.role === 'admin') return true;
-  if (!GENERAL_PERMISSION_ACTIONS.has(action)) return false;
+  const canonicalAction = canonicalPermissionAction(action);
+  if (!GENERAL_PERMISSION_ACTIONS.has(canonicalAction)) return false;
   const explicit = await hasPermission(client, {
     role: user.role,
     userId: user.id,
     documentType,
-    action,
+    action: canonicalAction,
   });
   return explicit === true;
 }
@@ -1026,9 +1062,10 @@ async function canUserPerformDocumentAction(client, { user, document, action }) 
   if (relationship.isAdmin) return true;
 
   const status = normalizeStatus(document.status);
+  const isWip = isDraftOrWipDocument(document, status);
 
-  // WIP (Draft) Logic:
-  if (status === 'draft') {
+  // WIP (Draft) logic:
+  if (isWip) {
     // Creator can view, edit, or delete their own draft.
     if (action === 'view' || action === 'edit' || action === 'delete') {
       return relationship.isCreator;
@@ -1086,12 +1123,13 @@ async function canUserPerformTypeAction(client, { user, documentType, action }) 
 }
 
 async function getEffectivePermissionExplanation(client, { user, action, documentType, document = null }) {
+  const canonicalAction = canonicalPermissionAction(action);
   const relationship = getRelationshipFlags(document, user);
   const scopeType = document ? 'document' : 'type';
   if (relationship.isAdmin) {
     return {
       scope: scopeType,
-      action,
+      action: canonicalAction,
       document_type: documentType,
       explicit_matches: [],
       explicit_decision: true,
@@ -1102,11 +1140,11 @@ async function getEffectivePermissionExplanation(client, { user, action, documen
   }
 
   // Workflow actions: explained via selected-person workflow rules.
-  if (WORKFLOW_STEP_ACTIONS.has(action)) {
+  if (WORKFLOW_STEP_ACTIONS.has(canonicalAction)) {
     if (!document) {
       return {
         scope: scopeType,
-        action,
+        action: canonicalAction,
         document_type: documentType,
         explicit_matches: [],
         explicit_decision: null,
@@ -1118,17 +1156,35 @@ async function getEffectivePermissionExplanation(client, { user, action, documen
     }
     const isHolder = isCurrentHolder(document, user.id);
     const isAssigned = await isUserAssignedToCurrentStep(client, { document, userId: user.id });
-    const allowed = isHolder || isAssigned;
+    const stepAssigneeRow = await getWorkflowStepAssigneeRecord(client, {
+      document,
+      userId: user.id,
+    });
+    const allowedByAssignedRule = assigneeAllowsAction(stepAssigneeRow, canonicalAction);
+    const allowed = await canUserPerformWorkflowAction(client, {
+      user,
+      document,
+      action: canonicalAction,
+    });
+    const reason = allowed
+      ? (isHolder
+          ? 'current_holder'
+          : allowedByAssignedRule === false
+              ? 'assigned_but_action_not_allowed'
+              : 'step_assignee')
+      : (allowedByAssignedRule === false
+          ? 'assigned_but_action_not_allowed'
+          : 'not_assigned_to_step');
     return {
       scope: scopeType,
-      action,
+      action: canonicalAction,
       document_type: documentType,
       explicit_matches: [],
       explicit_decision: null,
       fallback_decision: allowed,
       final_decision: allowed,
       relationship: { ...relationship, isCurrentHolder: isHolder, isStepAssignee: isAssigned },
-      reason: allowed ? (isHolder ? 'current_holder' : 'step_assignee') : 'not_assigned_to_step',
+      reason,
     };
   }
 
@@ -1136,22 +1192,29 @@ async function getEffectivePermissionExplanation(client, { user, action, documen
     role: user.role,
     userId: user.id,
     documentType,
-    action,
+    action: canonicalAction,
   });
   const ranked = rows
-    .map((row) => ({ row, score: permissionPriority(row, { userId: user.id, role: user.role, documentType }) }))
+    .map((row) => ({
+      row,
+      score: permissionPriority(row, {
+        userId: user.id,
+        roleIds: getRoleVariants(user.role),
+        documentType,
+      }),
+    }))
     .filter((entry) => entry.score >= 0)
     .sort((a, b) => b.score - a.score);
 
   const explicitDecision = ranked.length ? ranked[0].row.granted === true : null;
   const fallbackDecision = scopeType === 'document'
-    ? (action === 'view' && (relationship.isCreator || relationship.isReviewer))
+    ? (canonicalAction === 'view' && (relationship.isCreator || relationship.isReviewer))
     : false;
   const finalDecision = explicitDecision !== null ? explicitDecision : fallbackDecision;
 
   return {
     scope: scopeType,
-    action,
+    action: canonicalAction,
     document_type: documentType,
     explicit_matches: ranked.map((entry) => ({
       score: entry.score,
@@ -1404,7 +1467,7 @@ async function createDocument(pool, user, input) {
     const canCreate = await canUserPerformTypeAction(client, {
       user,
       documentType: input.document_type,
-      action: 'create',
+      action: 'create_draft',
     });
     if (!canCreate) {
       throw forbiddenError('You do not have permission to create this document type');
@@ -1412,12 +1475,7 @@ async function createDocument(pool, user, input) {
 
     const routingConfig = await getRoutingConfig(client, input.document_type);
     const steps = ensureValidWorkflowConfig(routingConfig, input.document_type);
-    const reviewHours = routingConfig?.review_deadline_hours || 1;
     const workflowVersion = routingConfig?.version || 1;
-    const now = new Date();
-    const deadline = input.deadline_time
-      ? new Date(input.deadline_time)
-      : new Date(now.getTime() + reviewHours * 60 * 60 * 1000);
     if (input.document_number) {
       const duplicateCheck = await client.query(
         `SELECT id
@@ -1431,29 +1489,22 @@ async function createDocument(pool, user, input) {
       }
     }
 
+    // WIP/draft is represented as status='pending' with no active holder or step.
+    // Workflow starts only after an explicit submit transition.
     const stepOne = getStepByOrder(steps, 1);
-    const wfVer = workflowVersion;
-    const sanitizedExplicit = await sanitizeExplicitAssigneeId(client, user, input.current_holder_id, {
-      stepConfig: stepOne,
-      currentHolderId: user.id,
-      documentType: input.document_type,
-      workflowVersion: wfVer,
-    });
-    // 'draft' is not allowed by the DB check constraint (prod_v2).
-    // Documents immediately enter a workflow on creation, so we treat
-    // 'draft' as 'pending' — the initial step-1 holding state.
-    const rawStatus = normalizeStatus(input.status || 'pending');
-    const initialStatus = rawStatus === 'draft' ? 'pending' : rawStatus;
-    if (!VALID_STATUSES.has(initialStatus)) {
-      throw new Error('Invalid status');
+    if (!stepOne) {
+      throw validationError(`Workflow config for '${input.document_type}' must include step 1`);
     }
-
-    // Resolve step-1 assignee as the initial current holder.
-    const currentHolder = await resolveStepAssignee(client, {
-      explicitAssigneeId: sanitizedExplicit,
-      stepConfig: stepOne,
-      currentHolderId: user.id,
-    });
+    const rawStatus = normalizeStatus(input.status || 'pending');
+    if (rawStatus !== 'draft' && rawStatus !== 'pending') {
+      throw validationError('Only draft/WIP creation is allowed');
+    }
+    const initialStatus = rawStatus === 'draft' ? 'pending' : rawStatus;
+    if (initialStatus !== 'pending' || !VALID_STATUSES.has(initialStatus)) {
+      throw validationError(
+        'New documents are created as WIP (pending) and must be submitted to start workflow'
+      );
+    }
 
     const docRes = await client.query(
       `INSERT INTO docutracker_documents
@@ -1463,8 +1514,8 @@ async function createDocument(pool, user, input) {
         status, sent_time, deadline_time, workflow_version)
        VALUES ($1, $2, $3, $4,
                $5, $6, $7, $8,
-               $9, $10, $11, $12, 1,
-               $13, now(), $14, $15)
+               $9, $10, $11, NULL, NULL,
+               $12, NULL, NULL, $13)
        RETURNING *`,
       [
         input.document_number || null,
@@ -1478,46 +1529,20 @@ async function createDocument(pool, user, input) {
         input.file_path || null,
         input.file_name || null,
         user.id,
-        currentHolder,
         initialStatus,
-        deadline,
         workflowVersion,
       ]
     );
 
     const doc = docRes.rows[0];
 
-    await client.query(
-      `INSERT INTO docutracker_routing_records
-       (document_id, step_order, assignee_id, sent_time, deadline_time, status, remarks)
-       VALUES ($1, 1, $2, now(), $3, $4, $5)
-       ON CONFLICT (document_id, step_order)
-       DO UPDATE SET assignee_id = EXCLUDED.assignee_id,
-                     sent_time = EXCLUDED.sent_time,
-                     deadline_time = EXCLUDED.deadline_time,
-                     status = EXCLUDED.status,
-                     remarks = EXCLUDED.remarks,
-                     updated_at = now()`,
-      [doc.id, currentHolder, deadline, initialStatus, 'Initial assignment']
-    );
-
     await insertHistory(client, {
       document_id: doc.id,
       action: 'created',
       actor_id: user.id,
-      to_step: 1,
+      to_step: null,
       to_status: initialStatus,
       remarks: input.description || null,
-    });
-
-    await insertNotificationIfNotRecent(client, {
-      document_id: doc.id,
-      user_id: currentHolder,
-      type: 'assigned',
-      event_key: `assigned:doc:${doc.id}:step:1:init`,
-      step_order: 1,
-      title: 'New document assigned',
-      body: `${doc.title} requires your review.`,
     });
 
     await client.query('COMMIT');
@@ -1656,6 +1681,7 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
     let nextStatus = status;
     let nextStep = step;
     let nextHolder = doc.current_holder_id;
+    let nextStepAssignees = [];
     let historyAction = action;
     let notificationType = null;
     let transitionExplicitSanitized = null;
@@ -1684,6 +1710,7 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
         workflowVersion: doc.workflow_version || (config?.version ?? null),
       });
       nextHolder = stepOneAssignees[0] || null;
+      nextStepAssignees = stepOneAssignees;
       if (!nextHolder) {
         throw validationError('No valid next assignee exists for step 1');
       }
@@ -1715,6 +1742,7 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
         workflowVersion: doc.workflow_version || (config?.version ?? null),
       });
       nextHolder = nextAssignees[0] || null;
+      nextStepAssignees = nextAssignees;
       if (!nextHolder) {
         throw validationError(`No valid next assignee exists for step ${nextStep}`);
       }
@@ -1751,6 +1779,7 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
           workflowVersion: doc.workflow_version || (config?.version ?? null),
         });
         nextHolder = nextAssignees[0] || null;
+        nextStepAssignees = nextAssignees;
         if (!nextHolder) {
           throw validationError(`No valid next assignee exists for step ${nextStep}`);
         }
@@ -1801,6 +1830,7 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
           workflowVersion: doc.workflow_version || (config?.version ?? null),
         });
         previousAssignee = previousAssignees[0] || null;
+        nextStepAssignees = previousAssignees;
         if (!previousAssignee) {
           throw validationError(`No valid previous assignee exists for return step ${previousStep}`);
         }
@@ -1830,8 +1860,10 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
            sent_time = $4,
            reviewed_time = CASE WHEN $5 THEN now() ELSE reviewed_time END,
            deadline_time = $6,
+           escalation_level = CASE WHEN $7 THEN 0 ELSE escalation_level END,
+           needs_admin_intervention = CASE WHEN $8 THEN false ELSE needs_admin_intervention END,
            updated_at = now()
-       WHERE id = $7
+       WHERE id = $9
        RETURNING *`,
       [
         nextStatus,
@@ -1839,7 +1871,9 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
         nextHolder,
         now,
         action !== 'submit',
-        nextStatus === 'approved' || nextStatus === 'rejected' ? doc.deadline_time : nextDeadline,
+        nextStatus === 'approved' || nextStatus === 'rejected' ? null : nextDeadline,
+        nextStatus === 'approved' || nextStatus === 'rejected',
+        nextStatus !== 'overdue',
         documentId,
       ]
     );
@@ -1871,7 +1905,7 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
     if (nextHolder) {
       // Snapshot the assignee list for this step (allows multiple reviewers).
       const nextStepCfg = getStepByOrder(steps, nextStep);
-      const nextAssignees = nextStepCfg
+      const resolvedAssignees = nextStepCfg
         ? await resolveStepAssignees(client, {
             explicitAssigneeId: transitionExplicitSanitized,
             stepConfig: nextStepCfg,
@@ -1880,6 +1914,7 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
             workflowVersion: doc.workflow_version || (config?.version ?? null),
           })
         : [nextHolder];
+      nextStepAssignees = resolvedAssignees;
 
       const routingUpsert = await client.query(
         `INSERT INTO docutracker_routing_records
@@ -1910,7 +1945,7 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
         await client.query(`DELETE FROM docutracker_routing_record_assignees WHERE routing_record_id = $1`, [
           routingRecordId,
         ]);
-        for (const uid of Array.from(new Set(nextAssignees)).filter(Boolean)) {
+        for (const uid of Array.from(new Set(resolvedAssignees)).filter(Boolean)) {
           // eslint-disable-next-line no-await-in-loop
           await client.query(
             `INSERT INTO docutracker_routing_record_assignees (routing_record_id, user_id)
@@ -1952,7 +1987,7 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
       if (notificationType === 'assigned') {
         // Notify ALL assignees for the next step (primary + backups).
         const allNextAssignees = Array.from(new Set(
-          [...(typeof nextAssignees !== 'undefined' ? nextAssignees : []), nextHolder].filter(Boolean)
+          [...nextStepAssignees, nextHolder].filter(Boolean)
         ));
         for (const uid of allNextAssignees) {
           // eslint-disable-next-line no-await-in-loop

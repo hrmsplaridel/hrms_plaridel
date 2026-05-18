@@ -117,7 +117,10 @@ class _DocuTrackerNotificationPanelState
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 12, 8),
-            child: Row(
+            child: Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 Container(
                   padding: const EdgeInsets.all(8),
@@ -132,7 +135,8 @@ class _DocuTrackerNotificationPanelState
                   ),
                 ),
                 const SizedBox(width: 12),
-                Expanded(
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 560),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -398,7 +402,7 @@ class _NotificationGroup extends StatelessWidget {
   }
 }
 
-class _NotificationTile extends StatelessWidget {
+class _NotificationTile extends StatefulWidget {
   const _NotificationTile({required this.notification, required this.onTap});
 
   final DocumentNotification notification;
@@ -442,10 +446,31 @@ class _NotificationTile extends StatelessWidget {
   }
 
   @override
+  State<_NotificationTile> createState() => _NotificationTileState();
+}
+
+class _NotificationTileState extends State<_NotificationTile> {
+  bool _hovered = false;
+  bool _focused = false;
+  bool _opening = false;
+
+  Future<void> _open() async {
+    if (_opening) return;
+    setState(() => _opening = true);
+    try {
+      await widget.onTap(widget.notification);
+    } finally {
+      if (mounted) {
+        setState(() => _opening = false);
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final n = notification;
+    final n = widget.notification;
     final read = n.read;
-    final accent = _accent(n.type, read);
+    final accent = _NotificationTile._accent(n.type, read);
     final headline = (n.title != null && n.title!.trim().isNotEmpty)
         ? n.title!
         : n.displayType;
@@ -455,145 +480,253 @@ class _NotificationTile extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: read
-            ? AppTheme.offWhite.withValues(alpha: 0.35)
-            : AppTheme.primaryNavy.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(10),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(10),
-          onTap: () => onTap(n),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      border: Border.all(
-                        color: Colors.black.withValues(alpha: 0.06),
-                      ),
-                    ),
+      child: FocusableActionDetector(
+        onShowFocusHighlight: (value) => setState(() => _focused = value),
+        child: MouseRegion(
+          onEnter: (_) => setState(() => _hovered = true),
+          onExit: (_) => setState(() => _hovered = false),
+          cursor: _opening
+              ? SystemMouseCursors.basic
+              : SystemMouseCursors.click,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            curve: Curves.easeOutCubic,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              boxShadow: [
+                if (_hovered || _focused)
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.06),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
                   ),
-                ),
-                Positioned(
-                  left: 0,
-                  top: 0,
-                  bottom: 0,
-                  width: read ? 1 : 3,
-                  child: ColoredBox(color: accent),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+              ],
+            ),
+            child: Material(
+              color: read
+                  ? AppTheme.offWhite.withValues(alpha: 0.35)
+                  : AppTheme.primaryNavy.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(10),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: _opening ? null : _open,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Stack(
                     children: [
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: read ? AppTheme.lightGray.withValues(alpha: 0.5) : accent.withValues(alpha: 0.12),
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: read ? Colors.transparent : accent.withValues(alpha: 0.2),
+                      Positioned.fill(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                              color: _focused
+                                  ? accent.withValues(alpha: 0.5)
+                                  : Colors.black.withValues(alpha: 0.06),
+                              width: _focused ? 1.3 : 1,
+                            ),
                           ),
                         ),
-                        child: Icon(
-                          _icon(n.type),
-                          size: 20,
-                          color: read ? AppTheme.textSecondary.withValues(alpha: 0.8) : accent,
-                        ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
+                      Positioned(
+                        left: 0,
+                        top: 0,
+                        bottom: 0,
+                        width: read ? 1 : 3,
+                        child: ColoredBox(color: accent),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+                        child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    headline,
-                                    style: TextStyle(
-                                      fontWeight: read ? FontWeight.w500 : FontWeight.w700,
-                                      fontSize: 14,
-                                      color: read ? AppTheme.textSecondary : AppTheme.textPrimary,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  _relativeTime(n.createdAt),
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: read ? AppTheme.textSecondary.withValues(alpha: 0.6) : accent,
-                                    fontWeight: read ? FontWeight.normal : FontWeight.w600,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            if (body != null) ...[
-                              const SizedBox(height: 4),
-                              Text(
-                                body,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  height: 1.3,
-                                  color: read ? AppTheme.textSecondary.withValues(alpha: 0.7) : AppTheme.textSecondary,
+                            Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: read
+                                    ? AppTheme.lightGray.withValues(alpha: 0.5)
+                                    : accent.withValues(alpha: 0.12),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: read
+                                      ? Colors.transparent
+                                      : accent.withValues(alpha: 0.2),
                                 ),
                               ),
-                            ],
-                            const SizedBox(height: 8),
-                            Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.lightGray,
-                                    borderRadius: BorderRadius.circular(4),
+                              child: Icon(
+                                _NotificationTile._icon(n.type),
+                                size: 20,
+                                color: read
+                                    ? AppTheme.textSecondary.withValues(alpha: 0.8)
+                                    : accent,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  LayoutBuilder(
+                                    builder: (context, constraints) {
+                                      if (constraints.maxWidth < 220) {
+                                        return Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              headline,
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                fontWeight: read
+                                                    ? FontWeight.w500
+                                                    : FontWeight.w700,
+                                                fontSize: 14,
+                                                color: read
+                                                    ? AppTheme.textSecondary
+                                                    : AppTheme.textPrimary,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 3),
+                                            Text(
+                                              _NotificationTile._relativeTime(
+                                                n.createdAt,
+                                              ),
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                color: read
+                                                    ? AppTheme.textSecondary
+                                                        .withValues(alpha: 0.6)
+                                                    : accent,
+                                                fontWeight: read
+                                                    ? FontWeight.normal
+                                                    : FontWeight.w600,
+                                              ),
+                                            ),
+                                          ],
+                                        );
+                                      }
+                                      return Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              headline,
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                fontWeight: read
+                                                    ? FontWeight.w500
+                                                    : FontWeight.w700,
+                                                fontSize: 14,
+                                                color: read
+                                                    ? AppTheme.textSecondary
+                                                    : AppTheme.textPrimary,
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            _NotificationTile._relativeTime(
+                                              n.createdAt,
+                                            ),
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: read
+                                                  ? AppTheme.textSecondary
+                                                      .withValues(alpha: 0.6)
+                                                  : accent,
+                                              fontWeight: read
+                                                  ? FontWeight.normal
+                                                  : FontWeight.w600,
+                                            ),
+                                          ),
+                                        ],
+                                      );
+                                    },
                                   ),
-                                  child: Text(
-                                    n.displayType.toUpperCase(),
-                                    style: TextStyle(
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: 0.5,
-                                      color: AppTheme.textSecondary,
+                                  if (body != null) ...[
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      body,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        height: 1.3,
+                                        color: read
+                                            ? AppTheme.textSecondary.withValues(
+                                                alpha: 0.7,
+                                              )
+                                            : AppTheme.textSecondary,
+                                      ),
                                     ),
-                                  ),
-                                ),
-                                if (!read) ...[
-                                  const SizedBox(width: 8),
-                                  Container(
-                                    width: 6,
-                                    height: 6,
-                                    decoration: const BoxDecoration(
-                                      color: AppTheme.primaryNavy,
-                                      shape: BoxShape.circle,
-                                    ),
+                                  ],
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                          vertical: 3,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.lightGray,
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: Text(
+                                          n.displayType.toUpperCase(),
+                                          style: TextStyle(
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.w800,
+                                            letterSpacing: 0.5,
+                                            color: AppTheme.textSecondary,
+                                          ),
+                                        ),
+                                      ),
+                                      if (!read) ...[
+                                        const SizedBox(width: 8),
+                                        Container(
+                                          width: 6,
+                                          height: 6,
+                                          decoration: const BoxDecoration(
+                                            color: AppTheme.primaryNavy,
+                                            shape: BoxShape.circle,
+                                          ),
+                                        ),
+                                      ],
+                                    ],
                                   ),
                                 ],
-                              ],
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: _opening
+                                  ? SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: accent,
+                                      ),
+                                    )
+                                  : Icon(
+                                      Icons.chevron_right_rounded,
+                                      color: AppTheme.textSecondary.withValues(
+                                        alpha: 0.4,
+                                      ),
+                                      size: 22,
+                                    ),
                             ),
                           ],
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Icon(
-                          Icons.chevron_right_rounded,
-                          color: AppTheme.textSecondary.withValues(alpha: 0.4),
-                          size: 22,
                         ),
                       ),
                     ],
                   ),
                 ),
-              ],
+              ),
             ),
           ),
         ),

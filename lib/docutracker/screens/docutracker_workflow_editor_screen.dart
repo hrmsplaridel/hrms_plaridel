@@ -437,14 +437,20 @@ class _DocuTrackerWorkflowEditorScreenState
     ];
   }
 
-  Future<void> _addStep({int? afterIndex}) async {
+  Future<void> _addStep({String? afterStepId}) async {
     if (!_ensureAdminAction()) return;
+    final afterIndex =
+        afterStepId == null ? null : _stepIds.indexWhere((id) => id == afterStepId);
+    final resolvedAfterIndex =
+        (afterIndex == null || afterIndex < 0) ? null : afterIndex;
     final nextOrder = _steps.isEmpty
         ? 1
-        : (afterIndex == null ? _steps.length + 1 : afterIndex + 2);
+        : (resolvedAfterIndex == null ? _steps.length + 1 : resolvedAfterIndex + 2);
     final created = await showWorkflowStepEditor(
       context,
-      title: afterIndex == null ? 'Add step' : 'Add step after ${afterIndex + 1}',
+      title: resolvedAfterIndex == null
+          ? 'Add step'
+          : 'Add step after ${resolvedAfterIndex + 1}',
       initial: WorkflowStep(
         stepOrder: nextOrder,
         assigneeType: 'user',
@@ -462,7 +468,8 @@ class _DocuTrackerWorkflowEditorScreenState
       return;
     }
     setState(() {
-      final insertAt = afterIndex == null ? _steps.length : afterIndex + 1;
+      final insertAt =
+          resolvedAfterIndex == null ? _steps.length : resolvedAfterIndex + 1;
       final key = 'wf-${DateTime.now().microsecondsSinceEpoch}-${_stepIds.length}';
       _steps.insert(insertAt, created);
       _stepIds.insert(insertAt, key);
@@ -472,6 +479,14 @@ class _DocuTrackerWorkflowEditorScreenState
       _markUnsaved();
       _revalidate();
     });
+  }
+
+  Future<void> _addStepAfterSelected() async {
+    if (_selectedStepId == null) {
+      await _addStep();
+      return;
+    }
+    await _addStep(afterStepId: _selectedStepId);
   }
 
   Future<void> _editStep(int index) async {
@@ -573,6 +588,28 @@ class _DocuTrackerWorkflowEditorScreenState
   Future<void> _save({required bool publish}) async {
     if (!_ensureAdminAction()) return;
     if (_saving) return;
+    if (publish) {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Publish workflow version?'),
+          content: const Text(
+            'Publishing will make this workflow active for new document routing.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Publish'),
+            ),
+          ],
+        ),
+      );
+      if (confirm != true) return;
+    }
     final restrictionErrors = _restrictionErrors();
     if (restrictionErrors.isNotEmpty) {
       setState(() {
@@ -782,8 +819,8 @@ class _DocuTrackerWorkflowEditorScreenState
                   SliverToBoxAdapter(child: workflowHeaderBlock()),
                   if (_steps.isEmpty)
                     SliverFillRemaining(
-                      hasScrollBody: false,
-                      child: _EmptySteps(onAdd: _saving ? null : _addStep),
+                      hasScrollBody: true,
+                      child: _EmptySteps(onAdd: _saving ? null : () => _addStep()),
                     )
                   else
                     SliverPadding(
@@ -833,7 +870,7 @@ class _DocuTrackerWorkflowEditorScreenState
                             onEdit: () => _editStep(idx),
                             onDelete: canDeleteStep ? () => _removeStep(idx) : null,
                             onAddAfter:
-                                _saving ? null : () => _addStep(afterIndex: idx),
+                                _saving ? null : () => _addStep(afterStepId: stepId),
                           );
                         },
                       ),
@@ -841,57 +878,21 @@ class _DocuTrackerWorkflowEditorScreenState
                 ],
               ),
             ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              alignment: WrapAlignment.spaceBetween,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: _saving ? null : _addStep,
-                  icon: const Icon(Icons.add_rounded),
-                  label: const Text('Add step'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: _hasUnsavedChanges && !_saving ? _discardAndClose : null,
-                  icon: const Icon(Icons.cancel_outlined),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.red.shade700,
-                  ),
-                  label: const Text('Cancel unsaved changes'),
-                ),
-                FilledButton.icon(
-                  onPressed: _canSave ? () => _save(publish: false) : null,
-                  icon: _saving
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.save_rounded),
-                  label: Text(_saving ? 'Saving…' : 'Save workflow'),
-                ),
-                FilledButton.icon(
-                  onPressed: _canPublish ? () => _save(publish: true) : null,
-                  icon: const Icon(Icons.publish_rounded),
-                  label: const Text('Publish version'),
-                ),
-              ],
-            ),
-            if ((restrictionErrors.isNotEmpty || !_canSave) && !_saving) ...[
-              const SizedBox(height: 6),
-              _RestrictionPanel(messages: restrictionErrors),
-              const SizedBox(height: 6),
-              Text(
-                restrictionErrors.isNotEmpty
-                    ? '${restrictionErrors.length} issue(s) block save/publish.'
-                    : 'Fix validation errors above before saving.',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 11.5),
-                textAlign: TextAlign.left,
-              ),
-            ],
+            const SizedBox(height: 8),
           ],
         ),
+      ),
+      bottomNavigationBar: _WorkflowEditorBottomActions(
+        saving: _saving,
+        canSave: _canSave,
+        canPublish: _canPublish,
+        hasUnsavedChanges: _hasUnsavedChanges,
+        restrictionErrors: restrictionErrors,
+        onAddStep: () => _addStep(),
+        onAddAfter: () => _addStepAfterSelected(),
+        onDiscard: () => _discardAndClose(),
+        onSave: () => _save(publish: false),
+        onPublish: () => _save(publish: true),
       ),
       ),
     );
@@ -899,6 +900,108 @@ class _DocuTrackerWorkflowEditorScreenState
 }
 
 // --- Layout pieces ---
+
+class _WorkflowEditorBottomActions extends StatelessWidget {
+  const _WorkflowEditorBottomActions({
+    required this.saving,
+    required this.canSave,
+    required this.canPublish,
+    required this.hasUnsavedChanges,
+    required this.restrictionErrors,
+    required this.onAddStep,
+    required this.onAddAfter,
+    required this.onDiscard,
+    required this.onSave,
+    required this.onPublish,
+  });
+
+  final bool saving;
+  final bool canSave;
+  final bool canPublish;
+  final bool hasUnsavedChanges;
+  final List<String> restrictionErrors;
+  final VoidCallback onAddStep;
+  final VoidCallback onAddAfter;
+  final VoidCallback onDiscard;
+  final VoidCallback onSave;
+  final VoidCallback onPublish;
+
+  @override
+  Widget build(BuildContext context) {
+    final helperText = restrictionErrors.isNotEmpty
+        ? '${restrictionErrors.length} issue(s) block save/publish.'
+        : (!canSave && !saving ? 'Fix validation errors above before saving.' : null);
+
+    return SafeArea(
+      top: false,
+      child: Material(
+        color: DocuTrackerTokens.surface,
+        elevation: 10,
+        shadowColor: Colors.black.withValues(alpha: 0.08),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: saving ? null : onAddStep,
+                    icon: const Icon(Icons.add_rounded),
+                    label: const Text('Add step'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: saving ? null : onAddAfter,
+                    icon: const Icon(Icons.playlist_add_rounded),
+                    label: const Text('Add after selected'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: hasUnsavedChanges && !saving ? onDiscard : null,
+                    icon: const Icon(Icons.cancel_outlined),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red.shade700,
+                    ),
+                    label: const Text('Cancel unsaved changes'),
+                  ),
+                  FilledButton.icon(
+                    onPressed: canSave ? onSave : null,
+                    icon: saving
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.save_rounded),
+                    label: Text(saving ? 'Saving…' : 'Save workflow'),
+                  ),
+                  FilledButton.icon(
+                    onPressed: canPublish ? onPublish : null,
+                    icon: const Icon(Icons.publish_rounded),
+                    label: const Text('Publish version'),
+                  ),
+                ],
+              ),
+              if (helperText != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  helperText,
+                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 11.5),
+                ),
+              ],
+              if (restrictionErrors.isNotEmpty && !saving) ...[
+                const SizedBox(height: 8),
+                _RestrictionPanel(messages: restrictionErrors),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class _InfoBanner extends StatelessWidget {
   const _InfoBanner({required this.version});
@@ -1183,41 +1286,63 @@ class _EmptySteps extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 360),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.account_tree_rounded, size: 48, color: AppTheme.textSecondary.withValues(alpha: 0.4)),
-            const SizedBox(height: 12),
-            Text(
-              'Start your route',
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 16,
-                color: AppTheme.textPrimary,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final minHeight =
+            (constraints.maxHeight - 16).clamp(0.0, double.infinity).toDouble();
+        return SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: minHeight),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 360),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.account_tree_rounded,
+                      size: 48,
+                      color: AppTheme.textSecondary.withValues(alpha: 0.4),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Start your route',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Each step is one stop where someone reviews or acts on the document. '
+                      'Add the first step—you can drag cards into the right order any time before saving.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 13,
+                        height: 1.3,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Tooltip(
+                      message:
+                          'Opens the step editor so you can name this step and choose who is involved.',
+                      child: FilledButton.icon(
+                        onPressed: onAdd,
+                        icon: const Icon(Icons.add_rounded),
+                        label: const Text('Add first step'),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-            const SizedBox(height: 6),
-            Text(
-              'Each step is one stop where someone reviews or acts on the document. '
-              'Add the first step—you can drag cards into the right order any time before saving.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.3),
-            ),
-            const SizedBox(height: 16),
-            Tooltip(
-              message: 'Opens the step editor so you can name this step and choose who is involved.',
-              child: FilledButton.icon(
-                onPressed: onAdd,
-                icon: const Icon(Icons.add_rounded),
-                label: const Text('Add first step'),
-              ),
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

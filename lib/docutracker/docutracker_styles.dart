@@ -8,6 +8,8 @@ class DocuTrackerStyles {
 
   static const Color primaryGreen = Color(0xFF4CAF50);
   static const Color destructiveRed = Color(0xFFE53935);
+  static const Color warningOrange = Color(0xFFF59E0B);
+  static const Color secondaryBlue = Color(0xFF3B82F6);
 
   static InputDecoration inputDecoration(String hint, [IconData? icon]) {
     return InputDecoration(
@@ -105,6 +107,24 @@ class DocuTrackerStyles {
         elevation: 0,
       );
 
+  static ButtonStyle warningButtonStyle() => OutlinedButton.styleFrom(
+        foregroundColor: warningOrange,
+        side: const BorderSide(color: warningOrange),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+      );
+
+  static ButtonStyle secondaryButtonStyle() => OutlinedButton.styleFrom(
+        foregroundColor: secondaryBlue,
+        side: BorderSide(color: secondaryBlue.withValues(alpha: 0.8)),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+      );
+
   static ButtonStyle approveButtonStyle() => FilledButton.styleFrom(
         backgroundColor: primaryGreen,
         foregroundColor: Colors.white,
@@ -115,7 +135,7 @@ class DocuTrackerStyles {
 
   // Blue filled — Forward action
   static ButtonStyle forwardButtonStyle() => FilledButton.styleFrom(
-        backgroundColor: const Color(0xFF3B5BDB),
+        backgroundColor: secondaryBlue,
         foregroundColor: Colors.white,
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -146,4 +166,35 @@ class DocuTrackerStyles {
   static BoxDecoration cardDecoration() => DocuTrackerTokens.cardDecoration();
 
   static BoxDecoration listCardDecoration() => DocuTrackerTokens.cardDecoration();
+
+  static Widget stateMessage({
+    required IconData icon,
+    required Color color,
+    required String message,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                color: color.withValues(alpha: 0.95),
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

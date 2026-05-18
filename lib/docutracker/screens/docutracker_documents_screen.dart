@@ -62,7 +62,7 @@ class _DocuTrackerDocumentsScreenState
       userId: userId,
       roleId: roleId,
       documentType: '*',
-      action: DocumentAction.create.name,
+      action: DocumentAction.createDraft.value,
     );
 
     if (!mounted) return;
@@ -148,95 +148,87 @@ class _DocuTrackerDocumentsScreenState
                 ),
                 const SizedBox(height: 12),
                 // Filter Chips & Sort
-                Row(
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Expanded(
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          children: [
-                            const Icon(
-                              Icons.filter_list_rounded,
-                              size: 16,
-                              color: Color(0xFF6B7280),
+                    const Icon(
+                      Icons.filter_list_rounded,
+                      size: 16,
+                      color: Color(0xFF6B7280),
+                    ),
+                    DocuTrackerStyles.filterDropdownWrapper(
+                      DropdownButton<String?>(
+                        value: _filterType,
+                        hint: const Text('Type'),
+                        underline: const SizedBox.shrink(),
+                        isDense: true,
+                        iconSize: 18,
+                        items: [
+                          const DropdownMenuItem(
+                            value: null,
+                            child: Text('All types'),
+                          ),
+                          ...DocumentType.values.map(
+                            (t) => DropdownMenuItem(
+                              value: t.value,
+                              child: Text(t.displayName),
                             ),
-                            const SizedBox(width: 8),
-                            DocuTrackerStyles.filterDropdownWrapper(
-                              DropdownButton<String?>(
-                                value: _filterType,
-                                hint: const Text('Type'),
-                                underline: const SizedBox.shrink(),
-                                isDense: true,
-                                iconSize: 18,
-                                items: [
-                                  const DropdownMenuItem(
-                                    value: null,
-                                    child: Text('All types'),
-                                  ),
-                                  ...DocumentType.values.map(
-                                    (t) => DropdownMenuItem(
-                                      value: t.value,
-                                      child: Text(t.displayName),
-                                    ),
-                                  ),
-                                ],
-                                onChanged: (v) {
-                                  setState(() => _filterType = v);
-                                  _load();
-                                },
-                              ),
+                          ),
+                        ],
+                        onChanged: (v) {
+                          setState(() => _filterType = v);
+                          _load();
+                        },
+                      ),
+                    ),
+                    DocuTrackerStyles.filterDropdownWrapper(
+                      DropdownButton<DocumentStatus?>(
+                        value: _filterStatus,
+                        hint: const Text('Status'),
+                        underline: const SizedBox.shrink(),
+                        isDense: true,
+                        iconSize: 18,
+                        items: [
+                          const DropdownMenuItem(
+                            value: null,
+                            child: Text('All statuses'),
+                          ),
+                          ...DocumentStatus.values.map(
+                            (s) => DropdownMenuItem(
+                              value: s,
+                              child: Text(s.displayName),
                             ),
-                            const SizedBox(width: 8),
-                            DocuTrackerStyles.filterDropdownWrapper(
-                              DropdownButton<DocumentStatus?>(
-                                value: _filterStatus,
-                                hint: const Text('Status'),
-                                underline: const SizedBox.shrink(),
-                                isDense: true,
-                                iconSize: 18,
-                                items: [
-                                  const DropdownMenuItem(
-                                    value: null,
-                                    child: Text('All statuses'),
-                                  ),
-                                  ...DocumentStatus.values.map(
-                                    (s) => DropdownMenuItem(
-                                      value: s,
-                                      child: Text(s.displayName),
-                                    ),
-                                  ),
-                                ],
-                                onChanged: (v) {
-                                  setState(() => _filterStatus = v);
-                                  _load();
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            DocuTrackerStyles.filterDropdownWrapper(
-                              DropdownButton<bool>(
-                                value: _sortByDeadline,
-                                underline: const SizedBox.shrink(),
-                                isDense: true,
-                                iconSize: 18,
-                                items: const [
-                                  DropdownMenuItem(
-                                    value: false,
-                                    child: Text('Sort by newest'),
-                                  ),
-                                  DropdownMenuItem(
-                                    value: true,
-                                    child: Text('Sort by deadline'),
-                                  ),
-                                ],
-                                onChanged: (v) {
-                                  if (v != null)
-                                    setState(() => _sortByDeadline = v);
-                                },
-                              ),
-                            ),
-                          ],
-                        ),
+                          ),
+                        ],
+                        onChanged: (v) {
+                          setState(() => _filterStatus = v);
+                          _load();
+                        },
+                      ),
+                    ),
+                    DocuTrackerStyles.filterDropdownWrapper(
+                      DropdownButton<bool>(
+                        value: _sortByDeadline,
+                        underline: const SizedBox.shrink(),
+                        isDense: true,
+                        iconSize: 18,
+                        items: const [
+                          DropdownMenuItem(
+                            value: false,
+                            child: Text('Sort by newest'),
+                          ),
+                          DropdownMenuItem(
+                            value: true,
+                            child: Text('Sort by deadline'),
+                          ),
+                        ],
+                        onChanged: (v) {
+                          if (v != null) {
+                            setState(() => _sortByDeadline = v);
+                          }
+                        },
                       ),
                     ),
                     IconButton(
@@ -249,6 +241,49 @@ class _DocuTrackerDocumentsScreenState
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _QuickStatusChip(
+                      label: 'Overdue',
+                      selected: _filterStatus == DocumentStatus.overdue,
+                      onTap: () {
+                        setState(() {
+                          _filterStatus = _filterStatus == DocumentStatus.overdue
+                              ? null
+                              : DocumentStatus.overdue;
+                        });
+                        _load();
+                      },
+                    ),
+                    _QuickStatusChip(
+                      label: 'Escalated',
+                      selected: _filterStatus == DocumentStatus.escalated,
+                      onTap: () {
+                        setState(() {
+                          _filterStatus = _filterStatus == DocumentStatus.escalated
+                              ? null
+                              : DocumentStatus.escalated;
+                        });
+                        _load();
+                      },
+                    ),
+                    _QuickStatusChip(
+                      label: 'In Review',
+                      selected: _filterStatus == DocumentStatus.inReview,
+                      onTap: () {
+                        setState(() {
+                          _filterStatus = _filterStatus == DocumentStatus.inReview
+                              ? null
+                              : DocumentStatus.inReview;
+                        });
+                        _load();
+                      },
                     ),
                   ],
                 ),
@@ -343,7 +378,7 @@ class _EmptyState extends StatelessWidget {
         border: Border.all(color: const Color(0xFFE5E7EB)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
+            color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -444,7 +479,7 @@ class _EmptyState extends StatelessWidget {
                 FilledButton.icon(
                   onPressed: onCreateTap,
                   icon: const Icon(Icons.add_rounded, size: 18),
-                  label: const Text('Create Document'),
+                  label: const Text('Create Draft'),
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF3B5BDB),
                     foregroundColor: Colors.white,
@@ -554,21 +589,153 @@ class _DocumentList extends StatelessWidget {
       );
     }
 
-    return Column(
-      children: filtered.map((doc) {
-        final isOverdue =
-            doc.status == DocumentStatus.overdue ||
-            (doc.deadlineTime != null &&
-                DateTime.now().isAfter(doc.deadlineTime!));
-        final statusForUi = isOverdue ? DocumentStatus.overdue : doc.status;
-        return _DocumentRowCard(
-          doc: doc,
-          statusForUi: statusForUi,
-          isOverdue: isOverdue,
-          isAdmin: isAdmin,
-          onRefresh: onRefresh,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth >= 1020) {
+          return _DocumentDataTable(
+            documents: filtered,
+            isAdmin: isAdmin,
+            onRefresh: onRefresh,
+          );
+        }
+        return Column(
+          children: filtered.map((doc) {
+            final isOverdue =
+                doc.status == DocumentStatus.overdue ||
+                (doc.deadlineTime != null &&
+                    DateTime.now().isAfter(doc.deadlineTime!));
+            final statusForUi = isOverdue ? DocumentStatus.overdue : doc.status;
+            return _DocumentRowCard(
+              doc: doc,
+              statusForUi: statusForUi,
+              isOverdue: isOverdue,
+              isAdmin: isAdmin,
+              onRefresh: onRefresh,
+            );
+          }).toList(),
         );
-      }).toList(),
+      },
+    );
+  }
+}
+
+class _QuickStatusChip extends StatelessWidget {
+  const _QuickStatusChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (_) => onTap(),
+      selectedColor: AppTheme.primaryNavy.withValues(alpha: 0.14),
+      side: BorderSide(
+        color: selected
+            ? AppTheme.primaryNavy.withValues(alpha: 0.5)
+            : const Color(0xFFE5E7EB),
+      ),
+      labelStyle: TextStyle(
+        color: selected ? AppTheme.primaryNavy : const Color(0xFF4B5563),
+        fontWeight: FontWeight.w600,
+      ),
+    );
+  }
+}
+
+class _DocumentDataTable extends StatelessWidget {
+  const _DocumentDataTable({
+    required this.documents,
+    required this.isAdmin,
+    required this.onRefresh,
+  });
+
+  final List<DocuTrackerDocument> documents;
+  final bool isAdmin;
+  final VoidCallback onRefresh;
+
+  String _deadlineLabel(DateTime? date) {
+    if (date == null) return '—';
+    final local = date.toLocal();
+    return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 980),
+        child: DataTable(
+          columnSpacing: 18,
+          headingRowHeight: 44,
+          dataRowMinHeight: 56,
+          columns: const [
+            DataColumn(label: Text('Document')),
+            DataColumn(label: Text('Type')),
+            DataColumn(label: Text('Status')),
+            DataColumn(label: Text('Deadline')),
+            DataColumn(label: Text('Holder')),
+          ],
+          rows: documents.map((doc) {
+            final isOverdue = doc.status == DocumentStatus.overdue ||
+                (doc.deadlineTime != null && DateTime.now().isAfter(doc.deadlineTime!));
+            final statusForUi = isOverdue ? DocumentStatus.overdue : doc.status;
+            final title = doc.title;
+            return DataRow(
+              onSelectChanged: (_) async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => DocuTrackerDocumentDetailScreen(
+                      document: doc,
+                      isAdmin: isAdmin,
+                    ),
+                  ),
+                );
+                onRefresh();
+              },
+              color: WidgetStateProperty.resolveWith<Color?>((states) {
+                if (isOverdue) return const Color(0xFFFEF2F2);
+                if (doc.status == DocumentStatus.escalated) return const Color(0xFFF5F3FF);
+                return null;
+              }),
+              cells: [
+                DataCell(
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 260),
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+                DataCell(Text(documentTypeFromString(doc.documentType).displayName)),
+                DataCell(DocuTrackerStatusBadge(status: statusForUi, compact: true)),
+                DataCell(Text(_deadlineLabel(doc.deadlineTime))),
+                DataCell(
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 220),
+                    child: Text(
+                      doc.assigneeName ?? '—',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }).toList(),
+        ),
+      ),
     );
   }
 }
@@ -696,11 +863,107 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
               );
               widget.onRefresh();
             },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxWidth < 760;
+                if (compact) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(9),
+                              decoration: BoxDecoration(
+                                color: typeColor.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Icon(typeIcon, color: typeColor, size: 20),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                doc.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: isOverdue
+                                      ? const Color(0xFF991B1B)
+                                      : const Color(0xFF111827),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            DocuTrackerStatusBadge(
+                              status: widget.statusForUi,
+                              compact: true,
+                              showIcon: false,
+                              dotStyle: true,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 8,
+                          children: [
+                            if (doc.documentNumber != null)
+                              Text(
+                                doc.documentNumber!,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Color(0xFF6B7280),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            Text(
+                              docTypeName,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: typeColor,
+                              ),
+                            ),
+                            if (deadlineLabel.isNotEmpty && !isTerminal)
+                              Text(
+                                deadlineLabel,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: _isUrgent || isOverdue
+                                      ? const Color(0xFFDC2626)
+                                      : const Color(0xFF4B5563),
+                                ),
+                              ),
+                          ],
+                        ),
+                        if (doc.assigneeName != null || doc.creatorName != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            doc.assigneeName != null
+                                ? 'Holder: ${doc.assigneeName}'
+                                : 'From ${doc.creatorName}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              color: Color(0xFF4B5563),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                }
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
                   // 1. Icon & Core Details (Left)
                   Container(
                     padding: const EdgeInsets.all(10),
@@ -911,8 +1174,10 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                       ],
                     ),
                   ),
-                ],
-              ),
+                    ],
+                  ),
+                );
+              },
             ),
           ),
         ),

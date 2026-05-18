@@ -57,6 +57,67 @@ class _DocuTrackerDocumentDetailScreenState
   bool _permissionsLoading = true;
   bool _canViewAuditTrail = false;
   bool _canEdit = false; // Candidate documents / remark ability
+  bool _canSubmitAction = false;
+  bool _canApproveAction = false;
+  bool _canForwardAction = false;
+  bool _canRejectAction = false;
+  bool _canReturnAction = false;
+
+  Future<void> _refreshEffectivePermissions({
+    required DocuTrackerDocument doc,
+    required AuthProvider auth,
+    required bool isAdmin,
+  }) async {
+    final repo = DocuTrackerRepository.instance;
+    final userId = auth.user?.id ?? '';
+    final roleId = auth.user?.role;
+    final documentId = doc.id;
+    if (documentId == null || documentId.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _canViewAuditTrail = false;
+        _canEdit = false;
+        _canSubmitAction = false;
+        _canApproveAction = false;
+        _canForwardAction = false;
+        _canRejectAction = false;
+        _canReturnAction = false;
+      });
+      return;
+    }
+
+    final actions = <String>[
+      DocumentAction.view.value,
+      DocumentAction.submit.value,
+      DocumentAction.approve.value,
+      DocumentAction.forward.value,
+      DocumentAction.reject.value,
+      DocumentAction.returnDoc.value,
+    ];
+    final explanations = <String, bool>{};
+    for (final action in actions) {
+      final exp = await repo.explainPermission(
+        userId: userId,
+        roleId: roleId,
+        documentType: doc.documentType,
+        action: action,
+        documentId: documentId,
+        isAdmin: isAdmin,
+      );
+      explanations[action] = exp.granted;
+    }
+    if (!mounted) return;
+    setState(() {
+      _canViewAuditTrail = explanations[DocumentAction.view.value] == true;
+      _canEdit = isAdmin;
+      _canSubmitAction = explanations[DocumentAction.submit.value] == true;
+      _canApproveAction = explanations[DocumentAction.approve.value] == true;
+      _canForwardAction = explanations[DocumentAction.forward.value] == true;
+      _canRejectAction = explanations[DocumentAction.reject.value] == true;
+      _canReturnAction = explanations[DocumentAction.returnDoc.value] == true;
+      _permissionsLoading = false;
+    });
+  }
 
   @override
   void initState() {
@@ -90,27 +151,12 @@ class _DocuTrackerDocumentDetailScreenState
       if (mounted) setState(() => _routingLoading = false);
       // Keep shared notification badges in sync while this screen is open.
       await provider.loadNotifications();
-
-      final userId = auth.user?.id ?? '';
-      final roleId = auth.user?.role;
-      final docType = widget.document.documentType;
-
-      // Role-based permissions are only for general access.
-      final results = await Future.wait<bool>([
-        repo.hasPermission(
-          userId: userId,
-          roleId: roleId,
-          documentType: docType,
-          action: DocumentAction.view.name,
-        ),
-      ]);
-
-      if (!mounted) return;
-      setState(() {
-        _canViewAuditTrail = results[0];
-        _canEdit = widget.isAdmin;
-        _permissionsLoading = false;
-      });
+      final effectiveDoc = _resolveDocForView(provider);
+      await _refreshEffectivePermissions(
+        doc: effectiveDoc,
+        auth: auth,
+        isAdmin: widget.isAdmin,
+      );
 
       // Poll for server-side workflow changes (escalation, overdue transitions).
       _pollTimer?.cancel();
@@ -118,8 +164,6 @@ class _DocuTrackerDocumentDetailScreenState
         if (!mounted) return;
         final provider = context.read<DocuTrackerProvider>();
         final auth = context.read<AuthProvider>();
-        final userId = auth.user?.id ?? '';
-        final roleId = auth.user?.role;
         final docId = widget.document.id!;
 
         await provider.refreshDocument(docId, reloadHistory: true);
@@ -135,19 +179,11 @@ class _DocuTrackerDocumentDetailScreenState
         if (!mounted) return;
         if (updatedDoc == null) return;
 
-        final results2 = await Future.wait<bool>([
-          repo.hasPermission(
-            userId: userId,
-            roleId: roleId,
-            documentType: updatedDoc.documentType,
-            action: DocumentAction.view.name,
-          ),
-        ]);
-
-        setState(() {
-          _canViewAuditTrail = results2[0];
-          _canEdit = widget.isAdmin;
-        });
+        await _refreshEffectivePermissions(
+          doc: updatedDoc,
+          auth: auth,
+          isAdmin: widget.isAdmin,
+        );
       });
     });
   }
@@ -167,8 +203,6 @@ class _DocuTrackerDocumentDetailScreenState
     final doc = docId != null ? _resolveDocForView(provider) : widget.document;
     final userId = auth.user?.id ?? '';
     final isPending = doc.status == DocumentStatus.pending;
-    final isReturned = doc.status == DocumentStatus.returned;
-    final isCreator = doc.createdBy == userId;
     final canAct =
         doc.status != DocumentStatus.approved &&
         doc.status != DocumentStatus.rejected &&
@@ -194,20 +228,13 @@ class _DocuTrackerDocumentDetailScreenState
           (currentRouting == null && doc.currentHolderId == userId)
         );
 
-    // WIP Logic: Can only submit if pending or returned
-    final canSubmit =
-        (isPending || isReturned) && (isCreator || _canEdit);
+    final canSubmit = canAct && _canSubmitAction;
 
     // Review actions only valid if NOT pending.
-    // While routing is still loading, preserve prior state (don't flip to false).
-    final canApprove =
-        !isPending && (isAssignedReviewer || _canEdit);
-    final canForward =
-        !isPending && (isAssignedReviewer || _canEdit);
-    final canReject =
-        !isPending && (isAssignedReviewer || _canEdit);
-    final canReturn =
-        !isPending && (isAssignedReviewer || _canEdit);
+    final canApprove = !isPending && canAct && _canApproveAction;
+    final canForward = !isPending && canAct && _canForwardAction;
+    final canReject = !isPending && canAct && _canRejectAction;
+    final canReturn = !isPending && canAct && _canReturnAction;
 
     final showYourTurn =
         canAct &&
@@ -379,15 +406,20 @@ class _DocuTrackerDocumentDetailScreenState
           ),
         ),
         const SizedBox(height: 20),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          crossAxisAlignment: CrossAxisAlignment.start,
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          runSpacing: 12,
+          spacing: 16,
           children: [
-            Expanded(
+            SizedBox(
+              width: min(MediaQuery.sizeOf(context).width * 0.6, 760),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -407,8 +439,7 @@ class _DocuTrackerDocumentDetailScreenState
                           ),
                         ),
                       ),
-                      if (doc.documentNumber != null) ...[
-                        const SizedBox(width: 12),
+                      if (doc.documentNumber != null)
                         Text(
                           doc.documentNumber!,
                           style: const TextStyle(
@@ -417,7 +448,6 @@ class _DocuTrackerDocumentDetailScreenState
                             color: Color(0xFF9CA3AF),
                           ),
                         ),
-                      ],
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -434,7 +464,6 @@ class _DocuTrackerDocumentDetailScreenState
                 ],
               ),
             ),
-            const SizedBox(width: 24),
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -474,6 +503,21 @@ class _DocuTrackerDocumentDetailScreenState
             ),
           ],
         ),
+        if (doc.status == DocumentStatus.approved ||
+            doc.status == DocumentStatus.rejected) ...[
+          const SizedBox(height: 16),
+          DocuTrackerStyles.stateMessage(
+            icon: doc.status == DocumentStatus.approved
+                ? Icons.verified_rounded
+                : Icons.gpp_bad_rounded,
+            color: doc.status == DocumentStatus.approved
+                ? const Color(0xFF047857)
+                : const Color(0xFFB91C1C),
+            message: doc.status == DocumentStatus.approved
+                ? 'Terminal state: approved. No further workflow actions are available.'
+                : 'Terminal state: rejected. No further workflow actions are available.',
+          ),
+        ],
         if (showYourTurn) ...[
           const SizedBox(height: 24),
           Container(
@@ -713,9 +757,9 @@ class _DocuTrackerDocumentDetailScreenState
             icon: const Icon(Icons.send_rounded, size: 18),
             label: const Text('Submit'),
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF3B5BDB), // Navy/Blue
+              backgroundColor: AppTheme.primaryNavy,
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 16),
+              padding: const EdgeInsets.symmetric(vertical: 14),
             ),
           ),
         ),
@@ -744,14 +788,17 @@ class _DocuTrackerDocumentDetailScreenState
             style: FilledButton.styleFrom(
               backgroundColor: const Color(0xFF10B981), // Green
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 16),
+              padding: const EdgeInsets.symmetric(vertical: 14),
             ),
           ),
         ),
+    ];
+
+    final secondaryActions = <Widget>[
       if (canAct && canForward)
         Tooltip(
           message: 'Send document to the next recipient',
-          child: FilledButton.icon(
+          child: OutlinedButton.icon(
             onPressed: provider.loading
                 ? null
                 : () async {
@@ -772,16 +819,9 @@ class _DocuTrackerDocumentDetailScreenState
                   },
             icon: const Icon(Icons.arrow_forward_rounded, size: 18),
             label: const Text('Forward'),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF3B82F6), // Blue
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-            ),
+            style: DocuTrackerStyles.secondaryButtonStyle(),
           ),
         ),
-    ];
-
-    final secondaryActions = <Widget>[
       if (canAct && canReturn)
         Tooltip(
           message: 'Send back to sender for corrections',
@@ -840,17 +880,13 @@ class _DocuTrackerDocumentDetailScreenState
                   },
             icon: const Icon(Icons.undo_rounded, size: 18),
             label: const Text('Return'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFFF59E0B), // Orange
-              side: const BorderSide(color: Color(0xFFF59E0B)),
-              padding: const EdgeInsets.symmetric(vertical: 16),
-            ),
+            style: DocuTrackerStyles.warningButtonStyle(),
           ),
         ),
       if (canAct && canReject)
         Tooltip(
           message: 'Terminate document workflow permanently',
-          child: OutlinedButton.icon(
+          child: FilledButton.icon(
             onPressed: provider.loading
                 ? null
                 : () async {
@@ -907,11 +943,7 @@ class _DocuTrackerDocumentDetailScreenState
                   },
             icon: const Icon(Icons.cancel_rounded, size: 18),
             label: const Text('Reject'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFFEF4444), // Red
-              side: const BorderSide(color: Color(0xFFEF4444)),
-              padding: const EdgeInsets.symmetric(vertical: 16),
-            ),
+            style: DocuTrackerStyles.destructiveButtonStyle(),
           ),
         ),
     ];
@@ -1009,6 +1041,14 @@ class _DocuTrackerDocumentDetailScreenState
               ),
             ),
             const SizedBox(height: 16),
+            if (provider.loading) ...[
+              DocuTrackerStyles.stateMessage(
+                icon: Icons.hourglass_top_rounded,
+                color: AppTheme.primaryNavy,
+                message: 'Processing action... please wait.',
+              ),
+              const SizedBox(height: 12),
+            ],
             if (canAct && (canApprove || canForward)) ...[
               TextField(
                 controller: _remarkController,
@@ -1046,7 +1086,7 @@ class _DocuTrackerDocumentDetailScreenState
             ],
             if (secondaryActions.isNotEmpty) ...[
               const Text(
-                'SECONDARY',
+                'SECONDARY / WARNING / DANGER',
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,

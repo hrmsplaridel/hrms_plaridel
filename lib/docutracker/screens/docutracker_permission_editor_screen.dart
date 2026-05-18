@@ -111,11 +111,27 @@ class _DocuTrackerPermissionEditorScreenState
 
   bool _loading = true;
   String? _error;
+  String _userSearchQuery = '';
+  List<_EffectiveRow> _effectiveRows = const [];
+  bool _effectiveLoading = false;
 
-  static const _actions = <DocumentAction>[
+  static const _editableActions = <DocumentAction>[
     DocumentAction.view,
-    DocumentAction.create,
+    DocumentAction.createDraft,
     DocumentAction.download,
+    DocumentAction.submit,
+  ];
+
+  static const _draftOwnerActions = <DocumentAction>[
+    DocumentAction.edit,
+    DocumentAction.delete,
+  ];
+
+  static const _workflowActions = <DocumentAction>[
+    DocumentAction.forward,
+    DocumentAction.approve,
+    DocumentAction.reject,
+    DocumentAction.returnDoc,
   ];
 
   @override
@@ -123,7 +139,7 @@ class _DocuTrackerPermissionEditorScreenState
     super.initState();
     _documentType = widget.initialDocumentType ?? '*';
     _tabs = TabController(
-      length: 2,
+      length: 3,
       vsync: this,
       initialIndex: widget.initialTabIsUserOverride ? 1 : 0,
     );
@@ -148,6 +164,7 @@ class _DocuTrackerPermissionEditorScreenState
     }
     await _loadBaselineMatrices();
     await _loadOverrides();
+    await _loadEffectiveRows();
     if (!mounted) return;
     setState(() => _loading = false);
   }
@@ -215,6 +232,16 @@ class _DocuTrackerPermissionEditorScreenState
     _userRoleId = first.roleId;
   }
 
+  List<_EmployeeOption> _filteredEmployees() {
+    final q = _userSearchQuery.trim().toLowerCase();
+    if (q.isEmpty) return _employees;
+    return _employees.where((e) {
+      final line = (_employeeDirectory[e.id]?.nameAndDepartment ?? e.fullName)
+          .toLowerCase();
+      return line.contains(q) || e.id.toLowerCase().contains(q);
+    }).toList();
+  }
+
   Future<void> _loadBaselineMatrices() async {
     Future<
       (
@@ -239,7 +266,7 @@ class _DocuTrackerPermissionEditorScreenState
         }
         existing[label] = byAction;
         draft[label] = {
-          for (final a in _actions)
+          for (final a in _editableActions)
             a.name: (byAction[a.name]?.granted ?? false),
         };
       }
@@ -257,7 +284,7 @@ class _DocuTrackerPermissionEditorScreenState
 
   Future<void> _loadUserRoleBaseline() async {
     if (_userId == null || _userRoleId == null) {
-      _userRoleBaselineGranted = {for (final a in _actions) a.name: false};
+      _userRoleBaselineGranted = {for (final a in _editableActions) a.name: false};
       return;
     }
     final label = DocuTrackerRoles.normalize(_userRoleId);
@@ -272,17 +299,17 @@ class _DocuTrackerPermissionEditorScreenState
       byAction[p.action.name] = p;
     }
     _userRoleBaselineGranted = {
-      for (final a in _actions) a.name: (byAction[a.name]?.granted ?? false),
+      for (final a in _editableActions) a.name: (byAction[a.name]?.granted ?? false),
     };
   }
 
   Future<void> _loadOverrides() async {
     if (_userId == null) {
       _overrideSpecificByAction = const {};
-      _overrideSpecificDraft = {for (final a in _actions) a.name: false};
+      _overrideSpecificDraft = {for (final a in _editableActions) a.name: false};
       _overrideWildcardByAction = const {};
-      _overrideWildcardDraft = {for (final a in _actions) a.name: false};
-      _userRoleBaselineGranted = {for (final a in _actions) a.name: false};
+      _overrideWildcardDraft = {for (final a in _editableActions) a.name: false};
+      _userRoleBaselineGranted = {for (final a in _editableActions) a.name: false};
       return;
     }
 
@@ -301,7 +328,7 @@ class _DocuTrackerPermissionEditorScreenState
         byAction[p.action.name] = p;
       }
       final draft = <String, bool>{};
-      for (final a in _actions) {
+      for (final a in _editableActions) {
         if (byAction.containsKey(a.name)) {
           draft[a.name] = byAction[a.name]!.granted;
         } else {
@@ -329,11 +356,53 @@ class _DocuTrackerPermissionEditorScreenState
     try {
       await _loadBaselineMatrices();
       await _loadOverrides();
+      await _loadEffectiveRows();
     } catch (e) {
       _error = e.toString();
     }
     if (!mounted) return;
     setState(() => _loading = false);
+  }
+
+  Future<void> _loadEffectiveRows() async {
+    if (_userId == null || _userRoleId == null) {
+      if (!mounted) return;
+      setState(() {
+        _effectiveRows = const [];
+        _effectiveLoading = false;
+      });
+      return;
+    }
+    if (mounted) {
+      setState(() => _effectiveLoading = true);
+    }
+    try {
+      final rows = <_EffectiveRow>[];
+      for (final action in [
+        ..._editableActions,
+        ..._draftOwnerActions,
+        ..._workflowActions,
+      ]) {
+        final exp = await _repo.explainPermission(
+          userId: _userId!,
+          roleId: _userRoleId,
+          documentType: _documentType,
+          action: action.value,
+        );
+        rows.add(_EffectiveRow(action: action, explanation: exp));
+      }
+      if (!mounted) return;
+      setState(() {
+        _effectiveRows = rows;
+        _effectiveLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _effectiveRows = const [];
+        _effectiveLoading = false;
+      });
+    }
   }
 
   List<_PermissionChange> _diffChanges({
@@ -343,7 +412,7 @@ class _DocuTrackerPermissionEditorScreenState
     required Map<String, DocumentPermission> existingByAction,
   }) {
     final changes = <_PermissionChange>[];
-    for (final a in _actions) {
+    for (final a in _editableActions) {
       final desired = desiredByAction[a.name] ?? false;
       final existing = existingByAction[a.name]?.granted;
       final before = existing ?? false;
@@ -375,6 +444,9 @@ class _DocuTrackerPermissionEditorScreenState
       builder: (ctx) {
         final shown = changes.take(12).toList();
         final remaining = changes.length - shown.length;
+        final submitRemovals = changes.where(
+          (c) => c.action == DocumentAction.submit && c.before && !c.after,
+        );
         return AlertDialog(
           title: const Text('Confirm bulk update'),
           content: SingleChildScrollView(
@@ -402,6 +474,17 @@ class _DocuTrackerPermissionEditorScreenState
                     style: TextStyle(
                       color: AppTheme.textSecondary,
                       fontSize: 12,
+                    ),
+                  ),
+                ],
+                if (submitRemovals.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    'Warning: this removes submit access from ${submitRemovals.length} rule(s).',
+                    style: TextStyle(
+                      color: Colors.red.shade800,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ],
@@ -458,41 +541,25 @@ class _DocuTrackerPermissionEditorScreenState
 
     setState(() => _loading = true);
     try {
-      for (final role in _baselineRoleIds) {
-        final label = DocuTrackerRoles.normalize(role);
-        for (final a in _actions) {
-          final desired = _baselineSpecificMatrixDraft[label]?[a.name] ?? false;
-          final existing = _baselineSpecificMatrixExisting[label]?[a.name];
-          if ((existing?.granted ?? false) == desired) continue;
-          await _repo.savePermission(
-            DocumentPermission(
-              id: existing?.id,
-              roleId: label,
-              userId: null,
-              documentType: _documentType,
-              action: a,
-              granted: desired,
-            ),
-          );
-        }
-        if (_editWildcardToo && _documentType != '*') {
-          for (final a in _actions) {
-            final desired =
-                _baselineWildcardMatrixDraft[label]?[a.name] ?? false;
-            final existing = _baselineWildcardMatrixExisting[label]?[a.name];
-            if ((existing?.granted ?? false) == desired) continue;
-            await _repo.savePermission(
-              DocumentPermission(
-                id: existing?.id,
-                roleId: label,
-                userId: null,
-                documentType: '*',
-                action: a,
-                granted: desired,
-              ),
-            );
-          }
-        }
+      for (final change in changes) {
+        final roleLabel = change.scopeLabel
+            .replaceFirst('Role baseline (', '')
+            .replaceFirst(')', '');
+        final wildcardRow = _baselineWildcardMatrixExisting[roleLabel];
+        final specificRow = _baselineSpecificMatrixExisting[roleLabel];
+        final existing = change.documentType == '*'
+            ? (wildcardRow == null ? null : wildcardRow[change.action.name])
+            : (specificRow == null ? null : specificRow[change.action.name]);
+        await _repo.savePermission(
+          DocumentPermission(
+            id: existing?.id,
+            roleId: roleLabel,
+            userId: null,
+            documentType: change.documentType,
+            action: change.action,
+            granted: change.after,
+          ),
+        );
       }
 
       await _refresh();
@@ -526,36 +593,20 @@ class _DocuTrackerPermissionEditorScreenState
 
     setState(() => _loading = true);
     try {
-      for (final a in _actions) {
-        final desired = _overrideSpecificDraft[a.name] ?? false;
-        final existing = _overrideSpecificByAction[a.name];
+      for (final change in changes) {
+        final existing = change.documentType == '*'
+            ? _overrideWildcardByAction[change.action.name]
+            : _overrideSpecificByAction[change.action.name];
         await _repo.savePermission(
           DocumentPermission(
             id: existing?.id,
             roleId: null,
             userId: _userId,
-            documentType: _documentType,
-            action: a,
-            granted: desired,
+            documentType: change.documentType,
+            action: change.action,
+            granted: change.after,
           ),
         );
-      }
-
-      if (_editWildcardToo && _documentType != '*') {
-        for (final a in _actions) {
-          final desired = _overrideWildcardDraft[a.name] ?? false;
-          final existing = _overrideWildcardByAction[a.name];
-          await _repo.savePermission(
-            DocumentPermission(
-              id: existing?.id,
-              roleId: null,
-              userId: _userId,
-              documentType: '*',
-              action: a,
-              granted: desired,
-            ),
-          );
-        }
       }
 
       await _refresh();
@@ -675,7 +726,7 @@ class _DocuTrackerPermissionEditorScreenState
           ? _baselineWildcardMatrixDraft
           : _baselineSpecificMatrixDraft;
       final row = Map<String, bool>.from(
-        map[roleLabel] ?? {for (final a in _actions) a.name: false},
+        map[roleLabel] ?? {for (final a in _editableActions) a.name: false},
       );
       row[action.name] = value;
       map[roleLabel] = row;
@@ -751,9 +802,13 @@ class _DocuTrackerPermissionEditorScreenState
             ),
             if (_documentType != '*') ...[
               const SizedBox(height: 12),
-              Row(
+              Wrap(
+                spacing: 10,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  Expanded(
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 420),
                     child: Text(
                       'Also edit wildcard (*) rows in this tab when saving',
                       style: TextStyle(
@@ -824,7 +879,7 @@ class _DocuTrackerPermissionEditorScreenState
           child: _PermissionRoleMatrix(
             roleIds: _baselineRoleIds.map(DocuTrackerRoles.normalize).toList(),
             roleTitle: _roleRowTitle,
-            actions: _actions,
+            actions: _editableActions,
             draftByRole: draft,
             enabled: !_loading,
             onToggle: (roleLabel, action, v) =>
@@ -842,7 +897,7 @@ class _DocuTrackerPermissionEditorScreenState
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: _UserBaselineOverrideMatrix(
-        actions: _actions,
+        actions: _editableActions,
         roleTitle: _roleRowTitle(roleLabel),
         userOverrideSubtitle: _userDisplayLabel(),
         baselineGranted: _userRoleBaselineGranted,
@@ -880,7 +935,7 @@ class _DocuTrackerPermissionEditorScreenState
             dataRowMaxHeight: 48,
             columns: [
               const DataColumn(label: Text('Scope')),
-              ..._actions.map(
+              ..._editableActions.map(
                 (a) => DataColumn(
                   label: Text(
                     a.displayName,
@@ -902,7 +957,7 @@ class _DocuTrackerPermissionEditorScreenState
                       style: TextStyle(fontSize: 12),
                     ),
                   ),
-                  ..._actions.map(
+                  ..._editableActions.map(
                     (a) => DataCell(
                       Center(
                         child: Checkbox(
@@ -930,91 +985,104 @@ class _DocuTrackerPermissionEditorScreenState
     if (_userId == null || _userRoleId == null) {
       return const SizedBox.shrink();
     }
-    return FutureBuilder<List<_EffectiveRow>>(
-      future: () async {
-        final rows = <_EffectiveRow>[];
-        for (final a in _actions) {
-          final exp = await _repo.explainPermission(
-            userId: _userId!,
-            roleId: _userRoleId,
-            documentType: _documentType,
-            action: a.name,
-          );
-          rows.add(_EffectiveRow(action: a, explanation: exp));
-        }
-        return rows;
-      }(),
-      builder: (ctx, snap) {
-        final data = snap.data ?? const <_EffectiveRow>[];
-        if (data.isEmpty) return const SizedBox.shrink();
-        return Material(
-          color: const Color(0xFFE8EAF6),
-          borderRadius: BorderRadius.circular(12),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    if (_effectiveLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_effectiveRows.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    Widget chipsFor(String title, List<DocumentAction> actions) {
+      final rows = _effectiveRows
+          .where((row) => actions.any((a) => a == row.action))
+          .toList();
+      if (rows.isEmpty) return const SizedBox.shrink();
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
               children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.visibility_rounded,
-                      size: 18,
-                      color: AppTheme.primaryNavy,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Effective result (${_userDisplayLabel()} • ${_docTypeLabel(_documentType)})',
-                        style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 13,
+                for (final r in rows)
+                  Tooltip(
+                    message: _permissionExplanationChipTooltip(r.explanation),
+                    waitDuration: const Duration(milliseconds: 400),
+                    child: Chip(
+                      avatar: Icon(
+                        r.explanation.granted ? Icons.check_circle : Icons.cancel,
+                        size: 16,
+                        color: r.explanation.granted
+                            ? Colors.green.shade800
+                            : Colors.red.shade800,
+                      ),
+                      label: Text(
+                        r.action == DocumentAction.edit
+                            ? 'Edit Own Draft'
+                            : r.action == DocumentAction.delete
+                                ? 'Delete Own Draft'
+                                : r.action.displayName,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
+                      visualDensity: VisualDensity.compact,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
-                  ],
+                  ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Material(
+      color: const Color(0xFFE8EAF6),
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.visibility_rounded,
+                  size: 18,
+                  color: AppTheme.primaryNavy,
                 ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    for (final r in data)
-                      Tooltip(
-                        message: _permissionExplanationChipTooltip(
-                          r.explanation,
-                        ),
-                        waitDuration: const Duration(milliseconds: 400),
-                        child: Chip(
-                          avatar: Icon(
-                            r.explanation.granted
-                                ? Icons.check_circle
-                                : Icons.cancel,
-                            size: 16,
-                            color: r.explanation.granted
-                                ? Colors.green.shade800
-                                : Colors.red.shade800,
-                          ),
-                          label: Text(
-                            r.action.displayName,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          visualDensity: VisualDensity.compact,
-                          materialTapTargetSize:
-                              MaterialTapTargetSize.shrinkWrap,
-                        ),
-                      ),
-                  ],
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Effective result (${_userDisplayLabel()} • ${_docTypeLabel(_documentType)})',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                    ),
+                  ),
                 ),
               ],
             ),
-          ),
-        );
-      },
+            const SizedBox(height: 10),
+            chipsFor('General access + Draft submit', _editableActions),
+            chipsFor('Draft / WIP owner rules', _draftOwnerActions),
+            chipsFor('Workflow-step actions', _workflowActions),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1028,6 +1096,7 @@ class _DocuTrackerPermissionEditorScreenState
           tabs: const [
             Tab(text: 'Role baseline'),
             Tab(text: 'User override'),
+            Tab(text: 'Effective preview'),
           ],
         ),
       ),
@@ -1047,8 +1116,6 @@ class _DocuTrackerPermissionEditorScreenState
             const SizedBox(height: 12),
             _buildFilterCard(),
             const SizedBox(height: 12),
-            _buildEffectivePreview(),
-            const SizedBox(height: 8),
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -1066,6 +1133,14 @@ class _DocuTrackerPermissionEditorScreenState
                         child: ListView(
                           padding: const EdgeInsets.only(bottom: 12),
                           children: [
+                            const _PermissionInfoCard(
+                              title: 'Permission groups in this editor',
+                              body:
+                                  'General Access: View, Create Draft, Download.\n'
+                                  'Draft / WIP: Submit.\n'
+                                  'Workflow actions (Forward/Approve/Reject/Return) are runtime rules based on step assignment and allowed_actions.',
+                            ),
+                            const SizedBox(height: 12),
                             if (_editWildcardToo && _documentType != '*')
                               _buildRoleMatrixSection(
                                 title: 'Wildcard (*) — all document types',
@@ -1085,22 +1160,26 @@ class _DocuTrackerPermissionEditorScreenState
                           ],
                         ),
                       ),
-                      Row(
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 8,
                         children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: _loading ? null : _resetBaseline,
-                              icon: const Icon(Icons.restart_alt_rounded),
-                              label: const Text('Reset all roles'),
-                            ),
+                          OutlinedButton.icon(
+                            onPressed: _loading ? null : _resetBaseline,
+                            icon: const Icon(Icons.restart_alt_rounded),
+                            label: const Text('Reset'),
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: FilledButton.icon(
-                              onPressed: _loading ? null : _saveBaseline,
-                              icon: const Icon(Icons.save_rounded),
-                              label: const Text('Save'),
-                            ),
+                          FilledButton.icon(
+                            onPressed: _loading ? null : _saveBaseline,
+                            icon: const Icon(Icons.save_rounded),
+                            label: const Text('Save changes'),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: _loading
+                                ? null
+                                : () => Navigator.of(context).pop(),
+                            icon: const Icon(Icons.close_rounded),
+                            label: const Text('Cancel'),
                           ),
                         ],
                       ),
@@ -1110,12 +1189,30 @@ class _DocuTrackerPermissionEditorScreenState
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      const _PermissionInfoCard(
+                        title: 'Override behavior',
+                        body:
+                            'This panel edits user-specific overrides. Any explicit user override beats role baseline. '
+                            'If no override exists, effective permission inherits from role baseline; otherwise it defaults to deny.',
+                      ),
+                      const SizedBox(height: 8),
                       if (_employeesLoading)
                         const Padding(
                           padding: EdgeInsets.all(24),
                           child: Center(child: CircularProgressIndicator()),
                         )
-                      else
+                      else ...[
+                        TextField(
+                          enabled: !_loading,
+                          decoration: const InputDecoration(
+                            labelText: 'Search user (name, department, id)',
+                            prefixIcon: Icon(Icons.search_rounded),
+                          ),
+                          onChanged: (value) {
+                            setState(() => _userSearchQuery = value);
+                          },
+                        ),
+                        const SizedBox(height: 8),
                         DropdownButtonFormField<String?>(
                           key: ValueKey(_userId ?? ''),
                           initialValue:
@@ -1126,18 +1223,44 @@ class _DocuTrackerPermissionEditorScreenState
                           decoration: DocuTrackerStyles.dropdownDecoration(
                             'Employee',
                           ),
-                          items: _employees.map((e) {
-                            final line =
-                                _employeeDirectory[e.id]?.nameAndDepartment ??
-                                e.fullName;
-                            return DropdownMenuItem<String?>(
-                              value: e.id,
-                              child: Text(
-                                line,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            );
-                          }).toList(),
+                          items: () {
+                            final rows = _filteredEmployees();
+                            final selected = _userId;
+                            if (selected != null &&
+                                selected.isNotEmpty &&
+                                rows.every((e) => e.id != selected)) {
+                              final fromAll = _employees.where((e) => e.id == selected);
+                              if (fromAll.isNotEmpty) {
+                                return [
+                                  ...fromAll,
+                                  ...rows,
+                                ].map((e) {
+                                  final line =
+                                      _employeeDirectory[e.id]?.nameAndDepartment ??
+                                          e.fullName;
+                                  return DropdownMenuItem<String?>(
+                                    value: e.id,
+                                    child: Text(
+                                      line,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  );
+                                }).toList();
+                              }
+                            }
+                            return rows.map((e) {
+                              final line =
+                                  _employeeDirectory[e.id]?.nameAndDepartment ??
+                                      e.fullName;
+                              return DropdownMenuItem<String?>(
+                                value: e.id,
+                                child: Text(
+                                  line,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              );
+                            }).toList();
+                          }(),
                           onChanged: _loading
                               ? null
                               : (v) async {
@@ -1151,9 +1274,10 @@ class _DocuTrackerPermissionEditorScreenState
                                   });
                                   await _employeeDirectory.ensureIds({pick.id});
                                   await _loadOverrides();
-                                  if (mounted) setState(() {});
+                                  await _loadEffectiveRows();
                                 },
                         ),
+                      ],
                       const SizedBox(height: 8),
                       Text(
                         'Top row = inherited role baseline (read-only). Bottom row = this user’s overrides (editable).',
@@ -1171,28 +1295,53 @@ class _DocuTrackerPermissionEditorScreenState
                           ],
                         ),
                       ),
-                      Row(
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 8,
                         children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: (_loading || _userId == null)
-                                  ? null
-                                  : _resetOverrides,
-                              icon: const Icon(Icons.restart_alt_rounded),
-                              label: const Text('Reset overrides'),
-                            ),
+                          OutlinedButton.icon(
+                            onPressed: (_loading || _userId == null)
+                                ? null
+                                : _resetOverrides,
+                            icon: const Icon(Icons.restart_alt_rounded),
+                            label: const Text('Reset'),
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: FilledButton.icon(
-                              onPressed: (_loading || _userId == null)
-                                  ? null
-                                  : _saveOverrides,
-                              icon: const Icon(Icons.save_rounded),
-                              label: const Text('Save'),
-                            ),
+                          FilledButton.icon(
+                            onPressed: (_loading || _userId == null)
+                                ? null
+                                : _saveOverrides,
+                            icon: const Icon(Icons.save_rounded),
+                            label: const Text('Save changes'),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: _loading
+                                ? null
+                                : () => Navigator.of(context).pop(),
+                            icon: const Icon(Icons.close_rounded),
+                            label: const Text('Cancel'),
                           ),
                         ],
+                      ),
+                    ],
+                  ),
+                  // Effective preview
+                  ListView(
+                    children: [
+                      _buildEffectivePreview(),
+                      const SizedBox(height: 12),
+                      _PermissionInfoCard(
+                        title: 'Rules reference',
+                        body:
+                            'User-specific override wins over role baseline. '
+                            'Role baseline wins over default deny. '
+                            'Workflow actions (approve/forward/reject/return) are enforced by current holder and assigned primary/backup assignees with allowed_actions.',
+                      ),
+                      const SizedBox(height: 8),
+                      _PermissionInfoCard(
+                        title: 'Draft behavior',
+                        body:
+                            'Create Draft creates WIP only. Submit starts official routing. '
+                            'Edit Own Draft and Delete Own Draft apply to the document creator while still in draft/WIP.',
                       ),
                     ],
                   ),
@@ -1500,6 +1649,46 @@ class _UserBaselineOverrideMatrix extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+class _PermissionInfoCard extends StatelessWidget {
+  const _PermissionInfoCard({required this.title, required this.body});
+
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontWeight: FontWeight.w800,
+                fontSize: 13,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              body,
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 12,
+                height: 1.35,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

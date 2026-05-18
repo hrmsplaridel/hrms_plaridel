@@ -1,4 +1,7 @@
 const { pool } = require('../config/db');
+const {
+  ESCALATION_ELIGIBLE_WORKFLOW_STATUSES,
+} = require('./docutrackerStatusSemantics');
 
 let timer = null;
 let running = false;
@@ -254,8 +257,9 @@ async function processEscalationsOnce() {
        ) c ON true
        WHERE d.deadline_time IS NOT NULL
          AND d.deadline_time < now()
-         AND d.status IN ('pending', 'in_review', 'escalated')
-       FOR UPDATE OF d SKIP LOCKED`
+         AND d.status = ANY($1::text[])
+       FOR UPDATE OF d SKIP LOCKED`,
+      [ESCALATION_ELIGIBLE_WORKFLOW_STATUSES]
     );
 
     for (const doc of docsRes.rows) {
