@@ -100,6 +100,7 @@ class AppRealtimeProvider extends ChangeNotifier {
     if (_disposed || _connecting || _currentUserId == null) return;
     _connecting = true;
     _reconnectTimer?.cancel();
+    WebSocketChannel? openedChannel;
 
     try {
       final token = await TokenStorage.instance.getToken();
@@ -111,17 +112,23 @@ class AppRealtimeProvider extends ChangeNotifier {
 
       _closeSocket();
       final wsUrl = _buildWsUrl(token);
-      _channel = WebSocketChannel.connect(wsUrl);
-      _socketSub = _channel!.stream.listen(
+      final channel = WebSocketChannel.connect(wsUrl);
+      openedChannel = channel;
+      _channel = channel;
+      _socketSub = channel.stream.listen(
         _handleMessage,
         onDone: _handleDisconnected,
         onError: (_) => _handleDisconnected(),
         cancelOnError: true,
       );
+      await channel.ready;
+      if (_disposed || !identical(_channel, channel)) return;
       _connected = true;
       notifyListeners();
     } catch (_) {
-      _handleDisconnected();
+      if (openedChannel == null || identical(_channel, openedChannel)) {
+        _handleDisconnected();
+      }
     } finally {
       _connecting = false;
     }
