@@ -322,6 +322,10 @@ router.get('/department-head', protect, async (req, res) => {
     if (!deptInfo.isDeptHead || !deptInfo.departmentId) {
       return res.status(403).json({ error: 'You are not a department head' });
     }
+    const status = (req.query?.status || '').toString().trim() || null;
+    if (status && !isValidStatus(status)) {
+      return res.status(400).json({ error: 'Invalid status filter' });
+    }
     const rows = await client.query(
       `SELECT ls.*,
               u.full_name AS employee_name,
@@ -333,11 +337,15 @@ router.get('/department-head', protect, async (req, res) => {
        LEFT JOIN departments d ON d.id = ls.department_id
        LEFT JOIN users dh ON dh.id = ls.dept_head_reviewer_id
        LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
-       WHERE ls.status = 'pending_department_head'
-         AND ls.department_id = $1::uuid
+       WHERE ls.department_id = $1::uuid
+         AND (
+           ls.status = 'pending_department_head'
+           OR ls.dept_head_reviewer_id = $2::uuid
+         )
+         AND ($3::text IS NULL OR ls.status = $3::text)
        ORDER BY ls.updated_at DESC, ls.created_at DESC
        LIMIT 500`,
-      [deptInfo.departmentId]
+      [deptInfo.departmentId, userId, status]
     );
     res.json(rows.rows.map(mapLocatorRow));
   } catch (err) {

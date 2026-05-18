@@ -22,10 +22,10 @@ function parseUserFromRequest(req) {
   }
 }
 
-function initAppEventsWebSocket(server) {
+function initAppEventsWebSocket() {
   if (wss) return wss;
 
-  wss = new WebSocket.Server({ server, path: '/ws/app' });
+  wss = new WebSocket.Server({ noServer: true });
 
   wss.on('connection', (ws, req) => {
     const user = parseUserFromRequest(req);

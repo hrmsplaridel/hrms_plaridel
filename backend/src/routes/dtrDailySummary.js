@@ -815,7 +815,7 @@ router.get('/', protect, async (req, res) => {
               d.created_at, d.updated_at,
               u.full_name AS employee_name,
               ${joinCols},
-              lt.description AS leave_type_name
+              COALESCE(NULLIF(lt.display_name, ''), NULLIF(lt.description, ''), lt.name) AS leave_type_name
        FROM dtr_daily_summary d
        LEFT JOIN users u ON u.id = d.employee_id
        LEFT JOIN holidays h ON h.id = d.holiday_id

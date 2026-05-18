@@ -151,8 +151,33 @@ const server = app.listen(PORT, HOST, () => {
   scheduleLeaveMonthlyAccrualCron(pool);
 });
 
-// Initialize WebSocket server for Biometrics/DTR updates
-initWebSocket(server);
+// Initialize WebSocket servers and route upgrade requests by path.
+const biometricWss = initWebSocket();
+const appEventsWss = initAppEventsWebSocket();
 
-// Initialize authenticated app-wide realtime events
-initAppEventsWebSocket(server);
+server.on('upgrade', (req, socket, head) => {
+  let pathname;
+  try {
+    pathname = new URL(req.url, `http://${req.headers.host || 'localhost'}`)
+      .pathname;
+  } catch (_) {
+    socket.destroy();
+    return;
+  }
+
+  const targetWss =
+    pathname === '/ws/biometrics'
+      ? biometricWss
+      : pathname === '/ws/app'
+        ? appEventsWss
+        : null;
+
+  if (!targetWss) {
+    socket.destroy();
+    return;
+  }
+
+  targetWss.handleUpgrade(req, socket, head, (ws) => {
+    targetWss.emit('connection', ws, req);
+  });
+});
