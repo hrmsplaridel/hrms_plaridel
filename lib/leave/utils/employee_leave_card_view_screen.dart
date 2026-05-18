@@ -672,7 +672,7 @@ class _LeaveCardEntry {
 
     return _LeaveCardEntry(
       period: period,
-      particulars: request.leaveType.displayName,
+      particulars: request.leaveTypeLabel,
       vacEarned: _fmtNum(vacationEarnedDays),
       vacAbsWithPay: isVacation ? _fmtNum(withPay) : '',
       vacAbsWithoutPay: isVacation ? _fmtNum(withoutPay) : '',

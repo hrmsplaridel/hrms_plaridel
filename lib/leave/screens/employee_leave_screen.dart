@@ -9,7 +9,6 @@ import '../../realtime/app_realtime_provider.dart';
 import '../leave_provider.dart';
 import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
-import '../models/leave_type.dart';
 import 'leave_balance_history_screen.dart';
 import 'leave_request_form_screen.dart';
 import '../utils/leave_request_pdf.dart';
@@ -157,7 +156,7 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
                     const SizedBox(height: 16),
                     _SummaryCard(
                       title: 'Next Approved Leave',
-                      value: nextApproved?.leaveType.displayName ?? 'None',
+                      value: nextApproved?.leaveTypeLabel ?? 'None',
                       subtitle: _approvedLeaveSubtitle(nextApproved),
                       icon: Icons.event_available_rounded,
                     ),
@@ -187,7 +186,7 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
                     Expanded(
                       child: _SummaryCard(
                         title: 'Next Approved Leave',
-                        value: nextApproved?.leaveType.displayName ?? 'None',
+                        value: nextApproved?.leaveTypeLabel ?? 'None',
                         subtitle: _approvedLeaveSubtitle(nextApproved),
                         icon: Icons.event_available_rounded,
                       ),
@@ -767,7 +766,7 @@ class _RequestsPanelState extends State<_RequestsPanel> {
       if (_searchQuery.trim().isNotEmpty) {
         final q = _searchQuery.trim().toLowerCase();
         final text =
-            '${request.leaveType.displayName} ${request.reason ?? ''} ${request.status.displayName} ${request.employeeName ?? ''}'
+            '${request.leaveTypeLabel} ${request.reason ?? ''} ${request.status.displayName} ${request.employeeName ?? ''}'
                 .toLowerCase();
         if (!text.contains(q)) return false;
       }
@@ -802,7 +801,7 @@ class _RequestsPanelState extends State<_RequestsPanel> {
 
   String _requestKey(LeaveRequest request) {
     return request.id ??
-        '${request.createdAt?.toIso8601String() ?? ''}-${request.startDate?.toIso8601String() ?? ''}-${request.endDate?.toIso8601String() ?? ''}-${request.leaveType.displayName}';
+        '${request.createdAt?.toIso8601String() ?? ''}-${request.startDate?.toIso8601String() ?? ''}-${request.endDate?.toIso8601String() ?? ''}-${request.leaveTypeLabel}';
   }
 
   DateTime _dateOnly(DateTime value) =>
@@ -1199,13 +1198,7 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
   final VoidCallback onPrint;
 
   String get _leaveTypeText {
-    if (request.leaveType == LeaveType.others) {
-      final custom = request.customLeaveTypeText?.trim();
-      if (custom != null && custom.isNotEmpty) {
-        return '${request.leaveType.displayName} · $custom';
-      }
-    }
-    return request.leaveType.displayName;
+    return request.leaveTypeLabel;
   }
 
   @override

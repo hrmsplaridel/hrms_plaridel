@@ -328,8 +328,15 @@ class MockLeaveRepository implements LeaveRepository {
   };
 
   @override
-  Future<List<LeaveRequest>> listDepartmentHeadRequests() async =>
-      const <LeaveRequest>[];
+  Future<List<LeaveRequest>> listDepartmentHeadRequests({
+    LeaveRequestQuery query = const LeaveRequestQuery(),
+  }) async =>
+      _requests.where((request) {
+        final statusOk = query.status == null || request.status == query.status;
+        final leaveTypeOk =
+            query.leaveType == null || request.leaveType == query.leaveType;
+        return statusOk && leaveTypeOk;
+      }).toList();
 
   @override
   Future<LeaveRequest> departmentHeadApprove(

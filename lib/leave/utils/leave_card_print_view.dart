@@ -424,7 +424,7 @@ class LeaveCardPrintView {
           request.leaveType == LeaveType.mandatoryForcedLeave;
       return _LeaveCardRow(
         period: period,
-        particulars: request.leaveType.displayName,
+        particulars: request.leaveTypeLabel,
         vacEarned: vacEarnedStr,
         vacWithPay: isVacation ? _fmtNum(withPay) : '',
         vacWithoutPay: isVacation ? _fmtNum(withoutPay) : '',

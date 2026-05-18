@@ -62,7 +62,7 @@ class LeaveCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          request.leaveType.displayName,
+                          request.leaveTypeLabel,
                           style: TextStyle(
                             color: AppTheme.textPrimary,
                             fontSize: 16,

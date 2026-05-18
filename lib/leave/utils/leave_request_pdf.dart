@@ -321,10 +321,7 @@ class LeaveRequestPdf {
               ? request.hrRemarks!.trim()
               : '____________________________________________________________');
 
-    final leaveTypeText = switch (request.leaveType) {
-      LeaveType.others => _s(request.customLeaveTypeText),
-      _ => request.leaveType.displayName,
-    };
+    final leaveTypeText = request.leaveTypeLabel;
 
     final pageFormat = PdfPageFormat(612, 1008, marginAll: 18); // Legal-like.
     final doc = pw.Document();

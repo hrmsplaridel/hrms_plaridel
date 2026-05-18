@@ -370,8 +370,11 @@ abstract class LeaveRepository {
   /// Check if the current authenticated user is a department head.
   Future<Map<String, dynamic>> checkIsDepartmentHead();
 
-  /// List leave requests pending department head approval for the user's department.
-  Future<List<LeaveRequest>> listDepartmentHeadRequests();
+  /// List leave requests pending department head approval plus requests already
+  /// handled by the current department head.
+  Future<List<LeaveRequest>> listDepartmentHeadRequests({
+    LeaveRequestQuery query = const LeaveRequestQuery(),
+  });
 
   /// Department head approves a request (moves to pending_hr).
   Future<LeaveRequest> departmentHeadApprove(LeaveReviewDecisionInput input);

@@ -25,7 +25,7 @@ class ApiLeaveRepository implements LeaveRepository {
   static Map<String, dynamic> _toApiPayload(LeaveRequest request) {
     final json = request.toJson();
     // Backend expects leave_type as text name, and start/end dates in date-only string.
-    json['leave_type'] = request.leaveType.value;
+    json['leave_type'] = request.effectiveLeaveTypeName;
     return json;
   }
 
@@ -344,10 +344,13 @@ class ApiLeaveRepository implements LeaveRepository {
   }
 
   @override
-  Future<List<LeaveRequest>> listDepartmentHeadRequests() async {
+  Future<List<LeaveRequest>> listDepartmentHeadRequests({
+    LeaveRequestQuery query = const LeaveRequestQuery(),
+  }) async {
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/leave/department-head',
+        queryParameters: query.toQueryParams(),
       );
       return (res.data ?? [])
           .map((j) => LeaveRequest.fromJson(j as Map<String, dynamic>))

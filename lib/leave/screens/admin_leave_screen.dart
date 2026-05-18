@@ -17,6 +17,7 @@ import '../models/leave_request.dart';
 import '../models/leave_type.dart';
 import '../utils/employee_leave_card_view_screen.dart';
 import 'leave_balance_history_screen.dart';
+import 'leave_type_management_screen.dart';
 import '../utils/leave_request_pdf.dart';
 import '../../utils/responsive_right_side_panel.dart';
 import '../widgets/admin_row.dart';
@@ -277,7 +278,11 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         _AdminHeaderCard(
           totalRequests: filteredRequests.length,
           pendingCount: filteredRequests
-              .where((r) => r.status.isPending)
+              .where(
+                (r) => widget.isDepartmentHead
+                    ? r.status == LeaveRequestStatus.pendingDepartmentHead
+                    : r.status.isPending,
+              )
               .length,
           reviewing: provider.reviewing,
           onRefresh: _loadRequests,
@@ -292,6 +297,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
               ? null
               : _openEmployeeLeaveCard,
           onLeaveLedger: widget.isDepartmentHead ? null : _openLeaveLedger,
+          onLeaveTypeRules: widget.isDepartmentHead
+              ? null
+              : _openLeaveTypeRules,
         ),
         if (provider.error != null) ...[
           const SizedBox(height: 16),
@@ -364,18 +372,17 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   Future<void> _loadRequests() async {
     if (!mounted) return;
     final provider = context.read<LeaveProvider>();
+    final query = LeaveRequestQuery(
+      status: _statusFilter,
+      leaveType: _leaveTypeFilter,
+      startDateFrom: _startDateFrom,
+      startDateTo: _startDateTo,
+      limit: 200,
+    );
     if (widget.isDepartmentHead) {
-      await provider.loadDepartmentHeadRequests();
+      await provider.loadDepartmentHeadRequests(query: query);
     } else {
-      await provider.loadRequests(
-        query: LeaveRequestQuery(
-          status: _statusFilter,
-          leaveType: _leaveTypeFilter,
-          startDateFrom: _startDateFrom,
-          startDateTo: _startDateTo,
-          limit: 200,
-        ),
-      );
+      await provider.loadRequests(query: query);
     }
     if (!mounted) return;
   }
@@ -400,7 +407,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
           onApprove: widget.isDepartmentHead ? _deptHeadApprove : _approve,
           onReturn: widget.isDepartmentHead ? _deptHeadReturn : _returnRequest,
           onReject: widget.isDepartmentHead ? _deptHeadReject : _rejectRequest,
-          onRevoke: _revokeApproval,
+          onRevoke: widget.isDepartmentHead ? null : _revokeApproval,
           onPrint: _printLeaveForm,
         ),
       );
@@ -860,6 +867,30 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     _showMessage(ok ? 'Request returned.' : 'Return action failed.');
     if (ok) await _loadRequests();
   }
+
+  Future<void> _openLeaveTypeRules() async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => Dialog(
+        insetPadding: const EdgeInsets.all(24),
+        child: const LeaveTypeManagementScreen(),
+      ),
+    );
+  }
+}
+
+class _HeaderMenuAction {
+  const _HeaderMenuAction({
+    required this.label,
+    required this.icon,
+    required this.onSelected,
+    this.separatedBefore = false,
+  });
+
+  final String label;
+  final IconData icon;
+  final FutureOr<void> Function() onSelected;
+  final bool separatedBefore;
 }
 
 class _AdminHeaderCard extends StatelessWidget {
@@ -873,6 +904,7 @@ class _AdminHeaderCard extends StatelessWidget {
     this.onManualBalanceAdjustment,
     this.onEmployeeLeaveCard,
     this.onLeaveLedger,
+    this.onLeaveTypeRules,
   });
 
   final int totalRequests;
@@ -884,15 +916,49 @@ class _AdminHeaderCard extends StatelessWidget {
   final Future<void> Function()? onManualBalanceAdjustment;
   final Future<void> Function()? onEmployeeLeaveCard;
   final VoidCallback? onLeaveLedger;
+  final Future<void> Function()? onLeaveTypeRules;
 
   @override
   Widget build(BuildContext context) {
-    final hasHrActions =
-        onForcedLeaveDeduction != null ||
-        onMonthlyAccrual != null ||
-        onManualBalanceAdjustment != null ||
-        onEmployeeLeaveCard != null ||
-        onLeaveLedger != null;
+    final menuActions = <_HeaderMenuAction>[
+      if (onLeaveTypeRules != null)
+        _HeaderMenuAction(
+          label: 'Leave Type Rules',
+          icon: Icons.rule_rounded,
+          onSelected: onLeaveTypeRules!,
+        ),
+      if (onLeaveLedger != null)
+        _HeaderMenuAction(
+          label: 'Leave Ledger',
+          icon: Icons.receipt_long_outlined,
+          onSelected: onLeaveLedger!,
+        ),
+      if (onEmployeeLeaveCard != null)
+        _HeaderMenuAction(
+          label: "Employee's Leave Card",
+          icon: Icons.badge_outlined,
+          onSelected: onEmployeeLeaveCard!,
+        ),
+      if (onManualBalanceAdjustment != null)
+        _HeaderMenuAction(
+          label: 'Manual balance adjustment',
+          icon: Icons.account_balance_wallet_outlined,
+          onSelected: onManualBalanceAdjustment!,
+        ),
+      if (onMonthlyAccrual != null)
+        _HeaderMenuAction(
+          label: 'Run Monthly Accrual',
+          icon: Icons.event_repeat_rounded,
+          onSelected: onMonthlyAccrual!,
+        ),
+      if (onForcedLeaveDeduction != null)
+        _HeaderMenuAction(
+          label: 'Apply Year-End Forced Leave Deduction',
+          icon: Icons.assignment_turned_in_rounded,
+          onSelected: onForcedLeaveDeduction!,
+          separatedBefore: true,
+        ),
+    ];
 
     return Container(
       width: double.infinity,
@@ -957,60 +1023,51 @@ class _AdminHeaderCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (hasHrActions) ...[
-                  const SizedBox(height: 14),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      if (onForcedLeaveDeduction != null)
-                        OutlinedButton.icon(
-                          onPressed: reviewing ? null : onForcedLeaveDeduction,
-                          icon: const Icon(Icons.assignment_turned_in_rounded),
-                          label: const Text(
-                            'Apply Year-End Forced Leave Deduction',
-                          ),
-                        ),
-                      if (onMonthlyAccrual != null)
-                        OutlinedButton.icon(
-                          onPressed: reviewing ? null : onMonthlyAccrual,
-                          icon: const Icon(Icons.event_repeat_rounded),
-                          label: const Text('Run Monthly Accrual'),
-                        ),
-                      if (onManualBalanceAdjustment != null)
-                        OutlinedButton.icon(
-                          onPressed: reviewing
-                              ? null
-                              : onManualBalanceAdjustment,
-                          icon: const Icon(
-                            Icons.account_balance_wallet_outlined,
-                          ),
-                          label: const Text('Manual balance adjustment'),
-                        ),
-                      if (onEmployeeLeaveCard != null)
-                        OutlinedButton.icon(
-                          onPressed: reviewing ? null : onEmployeeLeaveCard,
-                          icon: const Icon(Icons.badge_outlined),
-                          label: const Text("Employee's Leave Card"),
-                        ),
-                      if (onLeaveLedger != null)
-                        OutlinedButton.icon(
-                          onPressed: reviewing ? null : onLeaveLedger,
-                          icon: const Icon(Icons.receipt_long_outlined),
-                          label: const Text('Leave Ledger'),
-                        ),
-                    ],
-                  ),
-                ],
               ],
             ),
           ),
           const SizedBox(width: 16),
-          FilledButton.icon(
-            onPressed: reviewing ? null : onRefresh,
-            icon: const Icon(Icons.refresh_rounded),
-            label: Text(reviewing ? 'Reviewing...' : 'Refresh'),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FilledButton.icon(
+                onPressed: reviewing ? null : onRefresh,
+                icon: const Icon(Icons.refresh_rounded),
+                label: Text(reviewing ? 'Reviewing...' : 'Refresh'),
+              ),
+              if (menuActions.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                PopupMenuButton<_HeaderMenuAction>(
+                  tooltip: 'More actions',
+                  enabled: !reviewing,
+                  icon: const Icon(Icons.more_vert_rounded),
+                  onSelected: (action) {
+                    action.onSelected();
+                  },
+                  itemBuilder: (context) {
+                    final entries = <PopupMenuEntry<_HeaderMenuAction>>[];
+                    for (final action in menuActions) {
+                      if (action.separatedBefore) {
+                        entries.add(const PopupMenuDivider());
+                      }
+                      entries.add(
+                        PopupMenuItem<_HeaderMenuAction>(
+                          value: action,
+                          child: Row(
+                            children: [
+                              Icon(action.icon, size: 18),
+                              const SizedBox(width: 10),
+                              Expanded(child: Text(action.label)),
+                            ],
+                          ),
+                        ),
+                      );
+                    }
+                    return entries;
+                  },
+                ),
+              ],
+            ],
           ),
         ],
       ),
@@ -1298,14 +1355,29 @@ class _MonthlyAccrualDialogState extends State<_MonthlyAccrualDialog> {
   }
 }
 
-class _MonthlyAccrualPreview extends StatelessWidget {
+class _MonthlyAccrualPreview extends StatefulWidget {
   const _MonthlyAccrualPreview({required this.result});
 
   final MonthlyLeaveAccrualResult result;
 
   @override
+  State<_MonthlyAccrualPreview> createState() => _MonthlyAccrualPreviewState();
+}
+
+class _MonthlyAccrualPreviewState extends State<_MonthlyAccrualPreview> {
+  final ScrollController _detailsScrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _detailsScrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final rows = result.details.where((row) => row.willChangeBalance).toList();
+    final rows = widget.result.details
+        .where((row) => row.willChangeBalance)
+        .toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1315,19 +1387,19 @@ class _MonthlyAccrualPreview extends StatelessWidget {
           children: [
             _MonthlyAccrualSummaryChip(
               label: 'Will update',
-              value: result.rowsUpdated.toString(),
+              value: widget.result.rowsUpdated.toString(),
             ),
             _MonthlyAccrualSummaryChip(
               label: 'Skipped',
-              value: result.rowsSkipped.toString(),
+              value: widget.result.rowsSkipped.toString(),
             ),
             _MonthlyAccrualSummaryChip(
               label: 'Missing rows',
-              value: result.missingBalanceRowsDetected.toString(),
+              value: widget.result.missingBalanceRowsDetected.toString(),
             ),
             _MonthlyAccrualSummaryChip(
               label: 'Month',
-              value: result.targetYearMonth,
+              value: widget.result.targetYearMonth,
             ),
           ],
         ),
@@ -1348,7 +1420,10 @@ class _MonthlyAccrualPreview extends StatelessWidget {
               border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
             ),
             child: Scrollbar(
+              controller: _detailsScrollController,
               child: ListView.separated(
+                controller: _detailsScrollController,
+                primary: false,
                 shrinkWrap: true,
                 itemCount: rows.length,
                 separatorBuilder: (_, __) => Divider(
@@ -2960,8 +3035,12 @@ class _FilterBar extends StatelessWidget {
         ? const <LeaveRequestStatus?>[
             null,
             LeaveRequestStatus.pendingDepartmentHead,
+            LeaveRequestStatus.pendingHr,
+            LeaveRequestStatus.approved,
             LeaveRequestStatus.returned,
             LeaveRequestStatus.rejectedByDepartmentHead,
+            LeaveRequestStatus.rejectedByHr,
+            LeaveRequestStatus.cancelled,
           ]
         : const <LeaveRequestStatus?>[
             null,
@@ -3106,8 +3185,12 @@ class _FilterBar extends StatelessWidget {
     if (!isDepartmentHead) return value.displayName;
     return switch (value) {
       LeaveRequestStatus.pendingDepartmentHead => 'Pending',
+      LeaveRequestStatus.pendingHr => 'Forwarded to HR',
+      LeaveRequestStatus.approved => 'Approved by HR',
       LeaveRequestStatus.rejectedByDepartmentHead => 'Rejected',
+      LeaveRequestStatus.rejectedByHr => 'Rejected by HR',
       LeaveRequestStatus.returned => 'Returned',
+      LeaveRequestStatus.cancelled => 'Cancelled',
       _ => value.displayName,
     };
   }
@@ -3160,7 +3243,7 @@ class _DateFilterChip extends StatelessWidget {
   }
 }
 
-class _RequestQueuePanel extends StatelessWidget {
+class _RequestQueuePanel extends StatefulWidget {
   const _RequestQueuePanel({
     required this.requests,
     required this.isDepartmentHead,
@@ -3178,6 +3261,19 @@ class _RequestQueuePanel extends StatelessWidget {
   final ValueChanged<LeaveRequest> onSelect;
 
   @override
+  State<_RequestQueuePanel> createState() => _RequestQueuePanelState();
+}
+
+class _RequestQueuePanelState extends State<_RequestQueuePanel> {
+  final ScrollController _queueScrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _queueScrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.sizeOf(context).height;
     final screenWidth = MediaQuery.sizeOf(context).width;
@@ -3188,70 +3284,75 @@ class _RequestQueuePanel extends StatelessWidget {
         : (screenHeight * 0.6).clamp(380.0, 760.0);
 
     return _SectionCard(
-      title: 'Request Queue',
-      subtitle:
-          'Tap a row to open details (side panel on wide screens, full screen on small).',
-      child: loading && requests.isEmpty
-          ? const _CenteredState(message: 'Loading leave requests...')
-          : requests.isEmpty
-          ? const _CenteredState(
+      title: widget.isDepartmentHead ? 'Requests & History' : 'Request Queue',
+      subtitle: widget.isDepartmentHead
+          ? 'Review pending requests and revisit items you forwarded, returned, or rejected.'
+          : 'Tap a row to open details (side panel on wide screens, full screen on small).',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          widget.filterBar,
+          const SizedBox(height: 14),
+          if (widget.loading && widget.requests.isEmpty)
+            const _CenteredState(message: 'Loading leave requests...')
+          else if (widget.requests.isEmpty)
+            const _CenteredState(
               message: 'No leave requests matched the filters.',
             )
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                filterBar,
-                const SizedBox(height: 14),
-                Container(
-                  width: double.infinity,
-                  constraints: BoxConstraints(maxHeight: maxQueueHeight),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.black.withOpacity(0.08)),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final maxW = constraints.maxWidth;
-                      final tableWidth = !maxW.isFinite || maxW <= 0
-                          ? kAdminTableMinWidth
-                          : (maxW < kAdminTableMinWidth
-                                ? kAdminTableMinWidth
-                                : maxW);
-                      return Scrollbar(
-                        thumbVisibility: true,
-                        child: SingleChildScrollView(
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: SizedBox(
-                              width: tableWidth,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  const AdminTableHeader(),
-                                  ...requests.map(
-                                    (request) => AdminRow(
-                                      request: request,
-                                      statusLabel: _statusLabel(
-                                        request.status,
-                                        isDepartmentHead: isDepartmentHead,
-                                      ),
-                                      highlighted:
-                                          request.id == selectedRequest?.id,
-                                      onView: () => onSelect(request),
-                                    ),
+          else
+            Container(
+              width: double.infinity,
+              constraints: BoxConstraints(maxHeight: maxQueueHeight),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.black.withOpacity(0.08)),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final maxW = constraints.maxWidth;
+                  final tableWidth = !maxW.isFinite || maxW <= 0
+                      ? kAdminTableMinWidth
+                      : (maxW < kAdminTableMinWidth
+                            ? kAdminTableMinWidth
+                            : maxW);
+                  return Scrollbar(
+                    controller: _queueScrollController,
+                    thumbVisibility: true,
+                    child: SingleChildScrollView(
+                      controller: _queueScrollController,
+                      primary: false,
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: SizedBox(
+                          width: tableWidth,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const AdminTableHeader(),
+                              ...widget.requests.map(
+                                (request) => AdminRow(
+                                  request: request,
+                                  statusLabel: _statusLabel(
+                                    request.status,
+                                    isDepartmentHead: widget.isDepartmentHead,
                                   ),
-                                ],
+                                  highlighted:
+                                      request.id == widget.selectedRequest?.id,
+                                  onView: () => widget.onSelect(request),
+                                ),
                               ),
-                            ),
+                            ],
                           ),
                         ),
-                      );
-                    },
-                  ),
-                ),
-              ],
+                      ),
+                    ),
+                  );
+                },
+              ),
             ),
+        ],
+      ),
     );
   }
 }
@@ -3264,8 +3365,8 @@ class _AdminLeaveDetailsSideSheet extends StatelessWidget {
     required this.onApprove,
     required this.onReturn,
     required this.onReject,
-    required this.onRevoke,
     required this.onPrint,
+    this.onRevoke,
   });
 
   final LeaveRequest initial;
@@ -3273,7 +3374,7 @@ class _AdminLeaveDetailsSideSheet extends StatelessWidget {
   final Future<void> Function(LeaveRequest) onApprove;
   final Future<void> Function(LeaveRequest) onReturn;
   final Future<void> Function(LeaveRequest) onReject;
-  final Future<void> Function(LeaveRequest) onRevoke;
+  final Future<void> Function(LeaveRequest)? onRevoke;
   final Future<void> Function(LeaveRequest) onPrint;
 
   @override
@@ -3319,7 +3420,9 @@ class _AdminLeaveDetailsSideSheet extends StatelessWidget {
                       .toList();
                   if (hit.isNotEmpty) req = hit.first;
                 }
-                final pending = req.status.isPending;
+                final canReview = isDepartmentHead
+                    ? req.status == LeaveRequestStatus.pendingDepartmentHead
+                    : req.status.isPending;
                 final approved = req.status == LeaveRequestStatus.approved;
                 return SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
@@ -3327,10 +3430,12 @@ class _AdminLeaveDetailsSideSheet extends StatelessWidget {
                     request: req,
                     isDepartmentHead: isDepartmentHead,
                     reviewing: provider.reviewing,
-                    onApprove: pending ? () => onApprove(req) : null,
-                    onReturn: pending ? () => onReturn(req) : null,
-                    onReject: pending ? () => onReject(req) : null,
-                    onRevoke: approved ? () => onRevoke(req) : null,
+                    onApprove: canReview ? () => onApprove(req) : null,
+                    onReturn: canReview ? () => onReturn(req) : null,
+                    onReject: canReview ? () => onReject(req) : null,
+                    onRevoke: approved && onRevoke != null
+                        ? () => onRevoke!(req)
+                        : null,
                     onPrint: () => onPrint(req),
                   ),
                 );
@@ -3397,7 +3502,7 @@ class _RequestDetailsPanel extends StatelessWidget {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      request!.leaveType.displayName,
+                      request!.leaveTypeLabel,
                       style: TextStyle(
                         color: AppTheme.primaryNavyDark,
                         fontSize: 14,
@@ -3514,22 +3619,49 @@ class _RequestDetailsPanel extends StatelessWidget {
     final reviewer = (request.reviewerName ?? '').trim().isNotEmpty
         ? request.reviewerName!.trim()
         : 'Approver';
+    final departmentHeadReviewer =
+        (request.departmentHeadReviewerName ?? '').trim().isNotEmpty
+        ? request.departmentHeadReviewerName!.trim()
+        : (request.departmentHeadReviewerId != null
+              ? 'Department Head'
+              : reviewer);
+    final departmentHeadReviewedAt =
+        request.departmentHeadReviewedAt ??
+        (request.status == LeaveRequestStatus.pendingHr ||
+                request.status == LeaveRequestStatus.approved ||
+                request.status == LeaveRequestStatus.rejected ||
+                request.status == LeaveRequestStatus.rejectedByHr ||
+                request.status == LeaveRequestStatus.rejectedByDepartmentHead
+            ? request.reviewedAt
+            : null);
+    final departmentHeadRemarks =
+        (request.departmentHeadRemarks ?? '').trim().isNotEmpty
+        ? request.departmentHeadRemarks
+        : null;
     final submittedAt = request.dateFiled ?? request.createdAt;
     final reviewedAt = request.reviewedAt;
     final status = request.status;
+    final departmentHeadAction = request.departmentHeadAction;
 
     final deptHeadApprovedStage =
+        departmentHeadAction == 'department_head_approved' ||
         status == LeaveRequestStatus.pendingHr ||
         status == LeaveRequestStatus.approved ||
         status == LeaveRequestStatus.rejected ||
         status == LeaveRequestStatus.rejectedByHr;
 
     final deptHeadRejected =
+        departmentHeadAction == 'department_head_rejected' ||
         status == LeaveRequestStatus.rejectedByDepartmentHead;
+    final deptHeadReturned =
+        departmentHeadAction == 'department_head_returned' &&
+        status == LeaveRequestStatus.returned;
     final hrApproved = status == LeaveRequestStatus.approved;
     final hrRejected =
         status == LeaveRequestStatus.rejected ||
         status == LeaveRequestStatus.rejectedByHr;
+    final hrReturned =
+        status == LeaveRequestStatus.returned && !deptHeadReturned;
 
     return [
       LeaveHistoryEvent(
@@ -3541,41 +3673,62 @@ class _RequestDetailsPanel extends StatelessWidget {
       if (deptHeadApprovedStage)
         LeaveHistoryEvent(
           label: 'Approved by Department Head',
-          dateTime: reviewedAt,
-          actor: reviewer,
+          dateTime: departmentHeadReviewedAt,
+          actor: departmentHeadReviewer,
+          remarks: departmentHeadRemarks,
           completed: true,
         ),
       if (deptHeadApprovedStage)
         LeaveHistoryEvent(
           label: 'Forwarded to HR',
-          dateTime: reviewedAt,
-          actor: reviewer,
+          dateTime: departmentHeadReviewedAt,
+          actor: departmentHeadReviewer,
           completed: true,
         ),
       if (deptHeadRejected)
         LeaveHistoryEvent(
           label: 'Rejected by Department Head',
-          dateTime: reviewedAt,
-          actor: reviewer,
+          dateTime: departmentHeadReviewedAt,
+          actor: departmentHeadReviewer,
           remarks:
-              (request.disapprovalReason ?? request.hrRemarks)
+              (departmentHeadRemarks ??
+                          request.disapprovalReason ??
+                          request.hrRemarks)
                       ?.trim()
                       .isNotEmpty ==
                   true
-              ? (request.disapprovalReason ?? request.hrRemarks)
+              ? (departmentHeadRemarks ??
+                    request.disapprovalReason ??
+                    request.hrRemarks)
               : null,
+          completed: true,
+        ),
+      if (deptHeadReturned)
+        LeaveHistoryEvent(
+          label: 'Returned by Department Head',
+          dateTime: departmentHeadReviewedAt,
+          actor: departmentHeadReviewer,
+          remarks: departmentHeadRemarks,
           completed: true,
         ),
       if (status == LeaveRequestStatus.pendingHr)
         LeaveHistoryEvent(
-          label: 'Approved by HR',
+          label: 'HR Final Review',
           dateTime: null,
-          actor: reviewer,
+          actor: 'HR',
           completed: false,
         ),
       if (hrApproved)
         LeaveHistoryEvent(
           label: 'Approved by HR',
+          dateTime: reviewedAt,
+          actor: reviewer,
+          remarks: request.hrRemarks,
+          completed: true,
+        ),
+      if (hrReturned)
+        LeaveHistoryEvent(
+          label: 'Returned by HR',
           dateTime: reviewedAt,
           actor: reviewer,
           remarks: request.hrRemarks,
@@ -4411,7 +4564,12 @@ String _statusLabel(
   if (!isDepartmentHead) return status.displayName;
   return switch (status) {
     LeaveRequestStatus.pendingDepartmentHead => 'Pending',
+    LeaveRequestStatus.pendingHr => 'Forwarded to HR',
+    LeaveRequestStatus.approved => 'Approved by HR',
     LeaveRequestStatus.rejectedByDepartmentHead => 'Rejected',
+    LeaveRequestStatus.rejectedByHr => 'Rejected by HR',
+    LeaveRequestStatus.returned => 'Returned',
+    LeaveRequestStatus.cancelled => 'Cancelled',
     _ => status.displayName,
   };
 }

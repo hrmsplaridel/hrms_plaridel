@@ -573,13 +573,17 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
-  /// Load leave requests pending department head approval.
-  Future<void> loadDepartmentHeadRequests() async {
+  /// Load leave requests pending department head approval plus handled history.
+  Future<void> loadDepartmentHeadRequests({
+    LeaveRequestQuery query = const LeaveRequestQuery(),
+  }) async {
     _loading = true;
     _error = null;
     notifyListeners();
     try {
-      _requests = await _repository.listDepartmentHeadRequests();
+      _filterStatus = query.status;
+      _filterLeaveType = query.leaveType;
+      _requests = await _repository.listDepartmentHeadRequests(query: query);
     } catch (e) {
       _requests = [];
       _error = e.toString();
