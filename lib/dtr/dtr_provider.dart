@@ -10,7 +10,6 @@ import '../data/time_record.dart';
 import '../leave/api_leave_repository.dart';
 import '../leave/leave_repository.dart';
 import '../leave/models/leave_request.dart';
-import '../leave/models/leave_type.dart';
 import 'dtr_dashboard_analytics_logic.dart';
 import 'dtr_dashboard_analytics_models.dart';
 
@@ -169,6 +168,7 @@ class DepartmentOption {
 /// Current user id is set via [setUserFromApi] (e.g. from AuthProvider after API login).
 class DtrProvider extends ChangeNotifier {
   WebSocketChannel? _wsChannel;
+  StreamSubscription<dynamic>? _wsSubscription;
   Timer? _wsReconnectTimer;
   bool _disposed = false;
   final _dtrUpdateController = StreamController<void>.broadcast();
@@ -186,8 +186,10 @@ class DtrProvider extends ChangeNotifier {
     try {
       final wsUrl =
           '${ApiConfig.baseUrl.replaceFirst('http://', 'ws://').replaceFirst('https://', 'wss://')}/ws/biometrics';
-      _wsChannel = WebSocketChannel.connect(Uri.parse(wsUrl));
-      _wsChannel?.stream.listen(
+      _closeWebSocket();
+      final channel = WebSocketChannel.connect(Uri.parse(wsUrl));
+      _wsChannel = channel;
+      _wsSubscription = channel.stream.listen(
         (message) {
           try {
             final data = jsonDecode(message);
@@ -202,6 +204,13 @@ class DtrProvider extends ChangeNotifier {
         },
         onDone: _scheduleWebSocketReconnect,
         onError: (_) => _scheduleWebSocketReconnect(),
+      );
+      unawaited(
+        channel.ready.catchError((_) {
+          if (!_disposed && identical(_wsChannel, channel)) {
+            _scheduleWebSocketReconnect();
+          }
+        }),
       );
     } catch (_) {
       _scheduleWebSocketReconnect();
@@ -218,10 +227,19 @@ class DtrProvider extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _wsReconnectTimer?.cancel();
-    _wsChannel?.sink.close();
+    _closeWebSocket();
     _dtrUpdateController.close();
     _dtrEventController.close();
     super.dispose();
+  }
+
+  void _closeWebSocket() {
+    _wsSubscription?.cancel();
+    _wsSubscription = null;
+    try {
+      _wsChannel?.sink.close();
+    } catch (_) {}
+    _wsChannel = null;
   }
 
   /// Current user id (from API auth). Set via setUserFromApi(auth.user?.id) when using API login.
@@ -504,7 +522,7 @@ class DtrProvider extends ChangeNotifier {
         r.endDate!.day,
       );
       if (re.isBefore(start) || rs.isAfter(end)) continue;
-      final label = r.leaveType.displayName;
+      final label = r.leaveTypeLabel;
       final days = r.workingDaysApplied ?? 1.0;
       map[label] = (map[label] ?? 0) + days;
     }

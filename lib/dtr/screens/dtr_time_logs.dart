@@ -923,7 +923,11 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                   double.infinity,
                 );
                 final contentHeight = (displayRecords.length + 1) * 56.0 + 30;
-                final maxHeight = tableConstraints.maxHeight;
+                final viewportCap = (MediaQuery.sizeOf(context).height * 0.68)
+                    .clamp(320.0, 720.0);
+                final maxHeight = tableConstraints.maxHeight.isFinite
+                    ? tableConstraints.maxHeight
+                    : viewportCap;
                 final constrainedHeight = contentHeight.clamp(100.0, maxHeight);
                 return Container(
                   decoration: BoxDecoration(
@@ -947,336 +951,294 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                       scrollDirection: Axis.horizontal,
                       child: SizedBox(
                         width: tableWidth,
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.vertical,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.fromLTRB(
-                                  16,
-                                  10,
-                                  24,
-                                  10,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.fromLTRB(
+                                16,
+                                10,
+                                24,
+                                10,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppTheme.lightGray.withValues(
+                                  alpha: 0.5,
                                 ),
-                                decoration: BoxDecoration(
-                                  color: AppTheme.lightGray.withValues(
-                                    alpha: 0.5,
-                                  ),
-                                  borderRadius: const BorderRadius.vertical(
-                                    top: Radius.circular(12),
-                                  ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      flex: 3,
-                                      child: _headerLabel('Employee'),
-                                    ),
-                                    Expanded(
-                                      flex: 2,
-                                      child: _headerLabel('Date'),
-                                    ),
-                                    Expanded(
-                                      flex: 1,
-                                      child: Center(
-                                        child: _headerLabel('AM In'),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      flex: 1,
-                                      child: Center(
-                                        child: _headerLabel('AM Out'),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      flex: 1,
-                                      child: Center(
-                                        child: _headerLabel('PM In'),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      flex: 1,
-                                      child: Center(
-                                        child: _headerLabel('PM Out'),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      flex: 1,
-                                      child: Center(
-                                        child: _headerLabel('Late'),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      flex: 1,
-                                      child: Center(
-                                        child: _headerLabel('Undertime'),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      flex: 2,
-                                      child: Center(
-                                        child: _headerLabel('Remarks'),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      flex: 1,
-                                      child: Center(
-                                        child: _headerLabel('Source'),
-                                      ),
-                                    ),
-                                    if (!isHardcodedPreview)
-                                      const Expanded(
-                                        flex: 1,
-                                        child: SizedBox.shrink(),
-                                      ),
-                                  ],
+                                borderRadius: const BorderRadius.vertical(
+                                  top: Radius.circular(12),
                                 ),
                               ),
-                              ...displayRecords.asMap().entries.map((entry) {
-                                final i = entry.key;
-                                final r = entry.value;
-                                final timeIn = r.timeIn?.toLocal();
-                                final breakOut = r.breakOut?.toLocal();
-                                final breakIn = r.breakIn?.toLocal();
-                                final timeOut = r.timeOut?.toLocal();
-                                final remark = getAttendanceRemark(r);
-                                final lateStr = formatLateMinutes(r);
-                                final underStr = formatUndertimeMinutes(r);
-                                return Container(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    16,
-                                    12,
-                                    24,
-                                    12,
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    flex: 3,
+                                    child: _headerLabel('Employee'),
                                   ),
-                                  decoration: BoxDecoration(
-                                    color: i % 2 == 0
-                                        ? AppTheme.white
-                                        : AppTheme.lightGray.withValues(
-                                            alpha: 0.25,
-                                          ),
+                                  Expanded(
+                                    flex: 2,
+                                    child: _headerLabel('Date'),
                                   ),
-                                  child: Row(
-                                    children: [
-                                      Expanded(
-                                        flex: 3,
-                                        child: Text(
-                                          r.employeeName ?? r.userId,
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            color: AppTheme.textPrimary,
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                      Expanded(
-                                        flex: 2,
-                                        child: Text(
-                                          _formatDate(r.recordDate),
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            color: AppTheme.textPrimary,
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                      Expanded(
-                                        flex: 1,
-                                        child: Center(
-                                          child: Text(
-                                            _cellDisplayForSegment(
-                                              record: r,
-                                              timeValue: timeIn,
-                                              segment: 'AM IN',
-                                            ),
-                                            style: TextStyle(
-                                              fontSize: 13,
-                                              color: AppTheme.textPrimary,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                      ),
-                                      Expanded(
-                                        flex: 1,
-                                        child: Center(
-                                          child: Text(
-                                            _cellDisplayForSegment(
-                                              record: r,
-                                              timeValue: breakOut,
-                                              segment: 'AM OUT',
-                                            ),
-                                            style: TextStyle(
-                                              fontSize: 13,
-                                              color: AppTheme.textPrimary,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                      ),
-                                      Expanded(
-                                        flex: 1,
-                                        child: Center(
-                                          child: Text(
-                                            _cellDisplayForSegment(
-                                              record: r,
-                                              timeValue: breakIn,
-                                              segment: 'PM IN',
-                                            ),
-                                            style: TextStyle(
-                                              fontSize: 13,
-                                              color: AppTheme.textPrimary,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                      ),
-                                      Expanded(
-                                        flex: 1,
-                                        child: Center(
-                                          child: Text(
-                                            _cellDisplayForSegment(
-                                              record: r,
-                                              timeValue: timeOut,
-                                              segment: 'PM OUT',
-                                            ),
-                                            style: TextStyle(
-                                              fontSize: 13,
-                                              color: AppTheme.textPrimary,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                      ),
-                                      Expanded(
-                                        flex: 1,
-                                        child: Center(
-                                          child: Text(
-                                            lateStr,
-                                            style: TextStyle(
-                                              fontSize: 13,
-                                              color: AppTheme.textPrimary,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                      ),
-                                      Expanded(
-                                        flex: 1,
-                                        child: Center(
-                                          child: Text(
-                                            underStr,
-                                            style: TextStyle(
-                                              fontSize: 13,
-                                              color: AppTheme.textPrimary,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                      ),
-                                      Expanded(
-                                        flex: 2,
-                                        child: Center(
-                                          child: _RemarksChip(
-                                            remark: remark,
-                                            isHoliday:
-                                                r.status == 'holiday' ||
-                                                r.holidayId != null,
-                                          ),
-                                        ),
-                                      ),
-                                      Expanded(
-                                        flex: 1,
-                                        child: Center(
-                                          child: AttendanceSourceBadge(
-                                            source: r.source,
-                                            compact: true,
-                                          ),
-                                        ),
-                                      ),
-                                      if (!isHardcodedPreview)
-                                        Expanded(
-                                          flex: 1,
-                                          child: Center(
-                                            child: PopupMenuButton<String>(
-                                              icon: const Icon(
-                                                Icons.more_vert,
-                                                size: 22,
-                                              ),
-                                              padding: EdgeInsets.zero,
-                                              constraints:
-                                                  const BoxConstraints(),
-                                              tooltip: 'Actions',
-                                              onSelected: (value) {
-                                                if (value == 'edit') {
-                                                  _showEditDialog(
-                                                    context,
-                                                    dtr,
-                                                    r,
-                                                  );
-                                                } else if (value == 'delete') {
-                                                  _confirmDelete(
-                                                    context,
-                                                    dtr,
-                                                    r,
-                                                  );
-                                                }
-                                              },
-                                              itemBuilder: (context) => [
-                                                const PopupMenuItem<String>(
-                                                  value: 'edit',
-                                                  child: Row(
-                                                    children: [
-                                                      Icon(
-                                                        Icons.edit_rounded,
-                                                        size: 20,
-                                                        color: AppTheme
-                                                            .textPrimary,
-                                                      ),
-                                                      SizedBox(width: 12),
-                                                      Text('Edit'),
-                                                    ],
-                                                  ),
-                                                ),
-                                                PopupMenuItem<String>(
-                                                  value: 'delete',
-                                                  child: Row(
-                                                    children: [
-                                                      Icon(
-                                                        Icons.delete_rounded,
-                                                        size: 20,
-                                                        color:
-                                                            Colors.red.shade700,
-                                                      ),
-                                                      const SizedBox(width: 12),
-                                                      Text(
-                                                        'Delete',
-                                                        style: TextStyle(
-                                                          color: Colors
-                                                              .red
-                                                              .shade700,
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                    ],
+                                  Expanded(
+                                    flex: 1,
+                                    child: Center(child: _headerLabel('AM In')),
                                   ),
-                                );
-                              }),
-                            ],
-                          ),
+                                  Expanded(
+                                    flex: 1,
+                                    child: Center(
+                                      child: _headerLabel('AM Out'),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    flex: 1,
+                                    child: Center(child: _headerLabel('PM In')),
+                                  ),
+                                  Expanded(
+                                    flex: 1,
+                                    child: Center(
+                                      child: _headerLabel('PM Out'),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    flex: 1,
+                                    child: Center(child: _headerLabel('Late')),
+                                  ),
+                                  Expanded(
+                                    flex: 1,
+                                    child: Center(
+                                      child: _headerLabel('Undertime'),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    flex: 2,
+                                    child: Center(
+                                      child: _headerLabel('Remarks'),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    flex: 1,
+                                    child: Center(
+                                      child: _headerLabel('Source'),
+                                    ),
+                                  ),
+                                  if (!isHardcodedPreview)
+                                    const Expanded(
+                                      flex: 1,
+                                      child: SizedBox.shrink(),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            Expanded(
+                              child: ListView.builder(
+                                itemCount: displayRecords.length,
+                                itemBuilder: (context, index) =>
+                                    _buildTimeLogRow(
+                                      index: index,
+                                      record: displayRecords[index],
+                                      dtr: dtr,
+                                      isHardcodedPreview: isHardcodedPreview,
+                                    ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
                   ),
                 );
               },
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTimeLogRow({
+    required int index,
+    required TimeRecord record,
+    required DtrProvider dtr,
+    required bool isHardcodedPreview,
+  }) {
+    final timeIn = record.timeIn?.toLocal();
+    final breakOut = record.breakOut?.toLocal();
+    final breakIn = record.breakIn?.toLocal();
+    final timeOut = record.timeOut?.toLocal();
+    final remark = getAttendanceRemark(record);
+    final lateStr = formatLateMinutes(record);
+    final underStr = formatUndertimeMinutes(record);
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 24, 12),
+      decoration: BoxDecoration(
+        color: index % 2 == 0
+            ? AppTheme.white
+            : AppTheme.lightGray.withValues(alpha: 0.25),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 3,
+            child: Text(
+              record.employeeName ?? record.userId,
+              style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              _formatDate(record.recordDate),
+              style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Expanded(
+            flex: 1,
+            child: Center(
+              child: Text(
+                _cellDisplayForSegment(
+                  record: record,
+                  timeValue: timeIn,
+                  segment: 'AM IN',
+                ),
+                style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 1,
+            child: Center(
+              child: Text(
+                _cellDisplayForSegment(
+                  record: record,
+                  timeValue: breakOut,
+                  segment: 'AM OUT',
+                ),
+                style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 1,
+            child: Center(
+              child: Text(
+                _cellDisplayForSegment(
+                  record: record,
+                  timeValue: breakIn,
+                  segment: 'PM IN',
+                ),
+                style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 1,
+            child: Center(
+              child: Text(
+                _cellDisplayForSegment(
+                  record: record,
+                  timeValue: timeOut,
+                  segment: 'PM OUT',
+                ),
+                style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 1,
+            child: Center(
+              child: Text(
+                lateStr,
+                style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 1,
+            child: Center(
+              child: Text(
+                underStr,
+                style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Center(
+              child: _RemarksChip(
+                remark: remark,
+                isHoliday:
+                    record.status == 'holiday' || record.holidayId != null,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 1,
+            child: Center(
+              child: AttendanceSourceBadge(
+                source: record.source,
+                compact: true,
+              ),
+            ),
+          ),
+          if (!isHardcodedPreview)
+            Expanded(
+              flex: 1,
+              child: Center(
+                child: PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert, size: 22),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  tooltip: 'Actions',
+                  onSelected: (value) {
+                    if (value == 'edit') {
+                      _showEditDialog(context, dtr, record);
+                    } else if (value == 'delete') {
+                      _confirmDelete(context, dtr, record);
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem<String>(
+                      value: 'edit',
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.edit_rounded,
+                            size: 20,
+                            color: AppTheme.textPrimary,
+                          ),
+                          SizedBox(width: 12),
+                          Text('Edit'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem<String>(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.delete_rounded,
+                            size: 20,
+                            color: Colors.red.shade700,
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            'Delete',
+                            style: TextStyle(color: Colors.red.shade700),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
         ],
       ),
