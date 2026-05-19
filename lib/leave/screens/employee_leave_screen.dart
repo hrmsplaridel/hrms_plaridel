@@ -49,27 +49,30 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
   bool _initialized = false;
   Timer? _autoRefreshTimer;
   StreamSubscription<AppRealtimeEvent>? _leaveRealtimeSub;
+  String? _currentUserId;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _currentUserId = context.read<AuthProvider>().user?.id;
     if (_initialized) return;
     _initialized = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final userId = context.read<AuthProvider>().user?.id;
+      final userId = _currentUserId;
       if (userId == null || userId.isEmpty) return;
       context.read<LeaveProvider>().loadMyLeaveData(userId);
     });
     WidgetsBinding.instance.addObserver(this);
     _startAutoRefresh();
+    final leaveProvider = context.read<LeaveProvider>();
     _leaveRealtimeSub ??= context.read<AppRealtimeProvider>().events.listen((
       event,
     ) {
       if (event.name != 'leave_updated') return;
-      final userId = context.read<AuthProvider>().user?.id;
-      if (!event.affectsUser(userId)) return;
-      context.read<LeaveProvider>().invalidateCachedLeaveData();
+      if (!event.affectsUser(_currentUserId)) return;
+      if (!mounted) return;
+      leaveProvider.invalidateCachedLeaveData();
       unawaited(_refreshMyLeaveData(forceRefresh: true));
     });
   }
@@ -249,6 +252,7 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
 
   Future<void> _editRequest(BuildContext context, LeaveRequest request) async {
     final provider = context.read<LeaveProvider>();
+    final userId = context.read<AuthProvider>().user?.id;
     final result = await openResponsiveLeaveFormHost<String?>(
       context: context,
       builder: (_) =>
@@ -259,12 +263,11 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
         result != kLeaveFormResultSubmitted) {
       return;
     }
-    final userId = context.read<AuthProvider>().user?.id;
     if (userId != null && userId.isNotEmpty) {
-      await context.read<LeaveProvider>().loadMyLeaveData(userId);
+      await provider.loadMyLeaveData(userId);
     }
     if (!mounted) return;
-    showLeaveFormSuccessSnackBar(context, result);
+    showLeaveFormSuccessSnackBar(this.context, result);
   }
 
   Widget _buildEditLeaveRequestForm({
@@ -338,8 +341,8 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
     BuildContext context,
     LeaveRequest request,
   ) async {
-    final auth = context.read<AuthProvider>();
-    final userId = auth.user?.id;
+    final provider = context.read<LeaveProvider>();
+    final userId = context.read<AuthProvider>().user?.id;
     if (userId == null || userId.isEmpty) return;
     final requestId = request.id;
     if (requestId == null || requestId.isEmpty) return;
@@ -365,13 +368,12 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
     );
     if (ok != true) return;
 
-    final updated = await context.read<LeaveProvider>().cancelRequest(
+    final updated = await provider.cancelRequest(
       requestId: requestId,
       userId: userId,
     );
     if (!mounted) return;
-    final provider = context.read<LeaveProvider>();
-    ScaffoldMessenger.of(context).showSnackBar(
+    ScaffoldMessenger.of(this.context).showSnackBar(
       SnackBar(
         content: Text(
           updated != null
@@ -403,10 +405,10 @@ class _LeavePageHeader extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
@@ -485,10 +487,10 @@ class _SummaryCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
@@ -1363,10 +1365,10 @@ class _SectionCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
@@ -1439,7 +1441,7 @@ class _CenteredState extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.offWhite,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Text(
         message,
