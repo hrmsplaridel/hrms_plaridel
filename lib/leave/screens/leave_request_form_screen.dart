@@ -634,13 +634,6 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 12),
-
-                    // C. Full guidelines button (below Card 1)
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: const ViewFullGuidelinesButton(),
-                    ),
                     const SizedBox(height: 16),
 
                     // Card 2: Dates

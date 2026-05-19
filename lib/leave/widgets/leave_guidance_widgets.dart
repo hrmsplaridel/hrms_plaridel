@@ -235,27 +235,6 @@ class _FullGuidelinesTextButton extends StatelessWidget {
   }
 }
 
-/// A prominently styled outlined button for "View Full Leave Guidelines".
-/// Suitable for placement anywhere in the form (e.g. below the guidance card).
-class ViewFullGuidelinesButton extends StatelessWidget {
-  const ViewFullGuidelinesButton({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return OutlinedButton.icon(
-      onPressed: () => LeaveFullGuidelinesSheet.show(context),
-      icon: const Icon(Icons.menu_book_rounded, size: 18),
-      label: const Text('View Full Leave Guidelines'),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: AppTheme.primaryNavy,
-        side: BorderSide(color: AppTheme.primaryNavy.withOpacity(0.5)),
-        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      ),
-    );
-  }
-}
-
 /// A modal bottom sheet that displays the complete leave filing guidelines,
 /// organized into collapsible sections.
 class LeaveFullGuidelinesSheet extends StatelessWidget {

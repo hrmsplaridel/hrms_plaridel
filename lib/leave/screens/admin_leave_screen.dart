@@ -23,6 +23,7 @@ import '../utils/leave_request_pdf.dart';
 import '../../utils/responsive_right_side_panel.dart';
 import '../widgets/admin_row.dart';
 import '../widgets/history_timeline.dart';
+import '../../widgets/request_filters_bar.dart';
 import '../widgets/leave_status_chip.dart';
 
 typedef LeaveApproveAction = Future<bool> Function(LeaveApprovalInput input);
@@ -3105,158 +3106,282 @@ class _FilterBar extends StatelessWidget {
   final ValueChanged<DateTime?>? onStartDateFromChanged;
   final ValueChanged<DateTime?>? onStartDateToChanged;
 
+  static const double _mobileBreakpoint = 600;
+
+  List<LeaveRequestStatus?> get _statusOptions => isDepartmentHead
+      ? const <LeaveRequestStatus?>[
+          null,
+          LeaveRequestStatus.pendingDepartmentHead,
+          LeaveRequestStatus.pendingHr,
+          LeaveRequestStatus.approved,
+          LeaveRequestStatus.returned,
+          LeaveRequestStatus.rejectedByDepartmentHead,
+          LeaveRequestStatus.rejectedByHr,
+          LeaveRequestStatus.cancelled,
+        ]
+      : const <LeaveRequestStatus?>[
+          null,
+          LeaveRequestStatus.pendingHr,
+          LeaveRequestStatus.returned,
+          LeaveRequestStatus.approved,
+          LeaveRequestStatus.rejectedByHr,
+          LeaveRequestStatus.cancelled,
+        ];
+
   @override
   Widget build(BuildContext context) {
-    final statusOptions = isDepartmentHead
-        ? const <LeaveRequestStatus?>[
-            null,
-            LeaveRequestStatus.pendingDepartmentHead,
-            LeaveRequestStatus.pendingHr,
-            LeaveRequestStatus.approved,
-            LeaveRequestStatus.returned,
-            LeaveRequestStatus.rejectedByDepartmentHead,
-            LeaveRequestStatus.rejectedByHr,
-            LeaveRequestStatus.cancelled,
-          ]
-        : const <LeaveRequestStatus?>[
-            null,
-            LeaveRequestStatus.pendingHr,
-            LeaveRequestStatus.returned,
-            LeaveRequestStatus.approved,
-            LeaveRequestStatus.rejectedByHr,
-            LeaveRequestStatus.cancelled,
-          ];
+    final isMobile = MediaQuery.sizeOf(context).width < _mobileBreakpoint;
+    final statusOptions = _statusOptions;
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(isMobile ? 12 : 16),
       decoration: BoxDecoration(
         color: AppTheme.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.black.withOpacity(0.06)),
       ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          return ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: constraints.maxWidth),
-            child: Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                SizedBox(
-                  width: 160,
-                  child: DropdownButtonFormField<LeaveRequestStatus?>(
-                    isExpanded: true,
-                    initialValue: status,
-                    decoration: _inputDecoration('Status'),
-                    items: [
-                      ...statusOptions.map(
-                        (value) => DropdownMenuItem<LeaveRequestStatus?>(
-                          value: value,
-                          child: Text(_statusLabel(value)),
-                        ),
-                      ),
-                    ],
-                    onChanged: onStatusChanged,
-                  ),
-                ),
-                SizedBox(
-                  width: 180,
-                  child: DropdownButtonFormField<String?>(
-                    isExpanded: true,
-                    initialValue: _safeLeaveTypeValue(
-                      leaveType,
-                      leaveTypeOptions,
-                    ),
-                    decoration: _inputDecoration('Leave Type'),
-                    items: [
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('All leave types'),
-                      ),
-                      ...leaveTypeOptions.map(
-                        (option) => DropdownMenuItem<String?>(
-                          value: option.value,
-                          child: Text(option.label),
-                        ),
-                      ),
-                    ],
-                    onChanged: onLeaveTypeChanged,
-                  ),
-                ),
-                if (!isDepartmentHead)
-                  SizedBox(
-                    width: 180,
-                    child: DropdownButtonFormField<String?>(
-                      isExpanded: true,
-                      initialValue: department,
-                      decoration: _inputDecoration('Department'),
-                      items: [
-                        const DropdownMenuItem<String?>(
-                          value: null,
-                          child: Text('All departments'),
-                        ),
-                        ...departments.map(
-                          (value) => DropdownMenuItem<String?>(
-                            value: value,
-                            child: Text(value),
-                          ),
-                        ),
-                      ],
-                      onChanged: onDepartmentChanged,
-                    ),
-                  ),
-                SizedBox(
-                  width: 220,
-                  child: DropdownButtonFormField<String?>(
-                    isExpanded: true,
-                    initialValue: employee,
-                    decoration: _inputDecoration(
-                      isDepartmentHead ? 'Employee' : 'Employee',
-                    ),
-                    items: [
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('All employees'),
-                      ),
-                      ...employees.map(
-                        (e) => DropdownMenuItem<String?>(
-                          value: e.id,
-                          child: Text(e.name),
-                        ),
-                      ),
-                    ],
-                    onChanged: (!isDepartmentHead && department == null)
-                        ? null
-                        : onEmployeeChanged,
-                    hint: (!isDepartmentHead && department == null)
-                        ? const Text('Select department first')
-                        : null,
-                  ),
-                ),
-                // #11: Date range pickers.
-                _DateFilterChip(
-                  label: 'From',
-                  date: startDateFrom,
-                  onChanged: onStartDateFromChanged,
-                ),
-                _DateFilterChip(
-                  label: 'To',
-                  date: startDateTo,
-                  onChanged: onStartDateToChanged,
-                ),
-                TextButton.icon(
-                  onPressed: onReset,
-                  icon: const Icon(Icons.filter_alt_off_rounded),
-                  label: const Text('Reset Filters'),
-                ),
-              ],
+      child: isMobile
+          ? _buildMobileFilters(context, statusOptions)
+          : _buildDesktopFilters(statusOptions),
+    );
+  }
+
+  Widget _buildMobileFilters(
+    BuildContext context,
+    List<LeaveRequestStatus?> statusOptions,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        HorizontalFilterChips<LeaveRequestStatus?>(
+          options: [
+            for (final value in statusOptions)
+              RequestFilterOption(
+                value: value,
+                label: _statusLabel(value),
+              ),
+          ],
+          selectedValue: status,
+          onSelected: onStatusChanged,
+        ),
+        const SizedBox(height: 10),
+        if (isDepartmentHead)
+          Row(
+            children: [
+              Expanded(child: _leaveTypeDropdown(compact: true)),
+              const SizedBox(width: 8),
+              Expanded(child: _employeeDropdown(compact: true)),
+            ],
+          )
+        else ...[
+          _leaveTypeDropdown(compact: true),
+          const SizedBox(height: 8),
+          _departmentDropdown(compact: true),
+          const SizedBox(height: 8),
+          _employeeDropdown(compact: true),
+        ],
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: CompactFilterDateButton(
+                label: startDateFrom == null
+                    ? 'From'
+                    : RequestFiltersBar.defaultFormatDate(startDateFrom!),
+                onPressed: () => _pickDate(context, isFrom: true),
+              ),
             ),
-          );
-        },
+            const SizedBox(width: 8),
+            Expanded(
+              child: CompactFilterDateButton(
+                label: startDateTo == null
+                    ? 'To'
+                    : RequestFiltersBar.defaultFormatDate(startDateTo!),
+                onPressed: () => _pickDate(context, isFrom: false),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            onPressed: onReset,
+            icon: const Icon(Icons.filter_alt_off_rounded, size: 18),
+            label: const Text('Reset Filters'),
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.primaryNavy,
+              textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              minimumSize: const Size(0, 36),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDesktopFilters(List<LeaveRequestStatus?> statusOptions) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: constraints.maxWidth),
+          child: Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              SizedBox(
+                width: 160,
+                child: DropdownButtonFormField<LeaveRequestStatus?>(
+                  isExpanded: true,
+                  initialValue: status,
+                  decoration: _inputDecoration('Status'),
+                  items: [
+                    ...statusOptions.map(
+                      (value) => DropdownMenuItem<LeaveRequestStatus?>(
+                        value: value,
+                        child: Text(_statusLabel(value)),
+                      ),
+                    ),
+                  ],
+                  onChanged: onStatusChanged,
+                ),
+              ),
+              SizedBox(width: 180, child: _leaveTypeDropdown(compact: false)),
+              if (!isDepartmentHead)
+                SizedBox(width: 180, child: _departmentDropdown(compact: false)),
+              SizedBox(
+                width: 220,
+                child: _employeeDropdown(compact: false),
+              ),
+              _DateFilterChip(
+                label: 'From',
+                date: startDateFrom,
+                onChanged: onStartDateFromChanged,
+              ),
+              _DateFilterChip(
+                label: 'To',
+                date: startDateTo,
+                onChanged: onStartDateToChanged,
+              ),
+              TextButton.icon(
+                onPressed: onReset,
+                icon: const Icon(Icons.filter_alt_off_rounded),
+                label: const Text('Reset Filters'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _leaveTypeDropdown({required bool compact}) {
+    return DropdownButtonFormField<String?>(
+      isExpanded: true,
+      isDense: compact,
+      initialValue: _safeLeaveTypeValue(leaveType, leaveTypeOptions),
+      decoration: _queueFilterDecoration('Leave Type', compact: compact),
+      style: TextStyle(fontSize: compact ? 13 : 14, color: AppTheme.textPrimary),
+      items: [
+        const DropdownMenuItem<String?>(
+          value: null,
+          child: Text('All leave types'),
+        ),
+        ...leaveTypeOptions.map(
+          (option) => DropdownMenuItem<String?>(
+            value: option.value,
+            child: Text(option.label, overflow: TextOverflow.ellipsis),
+          ),
+        ),
+      ],
+      onChanged: onLeaveTypeChanged,
+    );
+  }
+
+  Widget _departmentDropdown({required bool compact}) {
+    return DropdownButtonFormField<String?>(
+      isExpanded: true,
+      isDense: compact,
+      initialValue: department,
+      decoration: _queueFilterDecoration('Department', compact: compact),
+      style: TextStyle(fontSize: compact ? 13 : 14, color: AppTheme.textPrimary),
+      items: [
+        const DropdownMenuItem<String?>(
+          value: null,
+          child: Text('All departments'),
+        ),
+        ...departments.map(
+          (value) => DropdownMenuItem<String?>(
+            value: value,
+            child: Text(value, overflow: TextOverflow.ellipsis),
+          ),
+        ),
+      ],
+      onChanged: onDepartmentChanged,
+    );
+  }
+
+  Widget _employeeDropdown({required bool compact}) {
+    return DropdownButtonFormField<String?>(
+      isExpanded: true,
+      isDense: compact,
+      initialValue: employee,
+      decoration: _queueFilterDecoration('Employee', compact: compact),
+      style: TextStyle(fontSize: compact ? 13 : 14, color: AppTheme.textPrimary),
+      items: [
+        const DropdownMenuItem<String?>(
+          value: null,
+          child: Text('All employees'),
+        ),
+        ...employees.map(
+          (e) => DropdownMenuItem<String?>(
+            value: e.id,
+            child: Text(e.name, overflow: TextOverflow.ellipsis),
+          ),
+        ),
+      ],
+      onChanged: (!isDepartmentHead && department == null)
+          ? null
+          : onEmployeeChanged,
+      hint: (!isDepartmentHead && department == null)
+          ? const Text('Select department first')
+          : null,
+    );
+  }
+
+  InputDecoration _queueFilterDecoration(String label, {required bool compact}) {
+    return _inputDecoration(label).copyWith(
+      isDense: compact,
+      contentPadding: EdgeInsets.symmetric(
+        horizontal: compact ? 10 : 12,
+        vertical: compact ? 8 : 12,
+      ),
+      labelStyle: TextStyle(
+        fontSize: compact ? 12 : 14,
+        fontWeight: FontWeight.w600,
       ),
     );
+  }
+
+  Future<void> _pickDate(BuildContext context, {required bool isFrom}) async {
+    final current = isFrom ? startDateFrom : startDateTo;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: current ?? DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+      helpText: isFrom ? 'Select start date' : 'Select end date',
+    );
+    if (picked == null) return;
+    if (isFrom) {
+      onStartDateFromChanged?.call(picked);
+    } else {
+      onStartDateToChanged?.call(picked);
+    }
   }
 
   String? _safeLeaveTypeValue(

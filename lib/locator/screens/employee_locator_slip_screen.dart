@@ -8,6 +8,25 @@ import '../../landingpage/constants/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../realtime/app_realtime_provider.dart';
 import '../utils/locator_slip_print.dart';
+import '../../widgets/request_filters_bar.dart';
+import '../../widgets/section_header_actions.dart';
+
+const _locatorSlipFilterOptions = <RequestFilterOption<String>>[
+  RequestFilterOption(label: 'All'),
+  RequestFilterOption(value: 'pending', label: 'Pending'),
+  RequestFilterOption(value: 'approved', label: 'Approved'),
+  RequestFilterOption(value: 'rejected', label: 'Rejected'),
+  RequestFilterOption(value: 'cancelled', label: 'Cancelled'),
+];
+
+const _locatorApprovalFilterOptions = <RequestFilterOption<String>>[
+  RequestFilterOption(label: 'All'),
+  RequestFilterOption(value: 'pending', label: 'Pending'),
+  RequestFilterOption(value: 'forwarded', label: 'Forwarded to HR'),
+  RequestFilterOption(value: 'approved', label: 'Approved by HR'),
+  RequestFilterOption(value: 'rejected', label: 'Rejected'),
+  RequestFilterOption(value: 'cancelled', label: 'Cancelled'),
+];
 
 class EmployeeLocatorSlipScreen extends StatefulWidget {
   const EmployeeLocatorSlipScreen({super.key});
@@ -42,8 +61,9 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
     if (!_loadingMy && _slips.isEmpty) {
       _loadMyRequests();
     }
-    _locatorRealtimeSub ??=
-        context.read<AppRealtimeProvider>().events.listen((event) {
+    _locatorRealtimeSub ??= context.read<AppRealtimeProvider>().events.listen((
+      event,
+    ) {
       if (event.name != 'locator_updated') return;
       final userId = context.read<AuthProvider>().user?.id;
       if (event.affectsUser(userId)) {
@@ -188,29 +208,30 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
       subtitle:
           'Use filters to quickly find slips by status, date, office, or reason.',
       icon: Icons.receipt_long_rounded,
-      headerTrailing: Wrap(
-        spacing: 8,
-        runSpacing: 8,
+      headerTrailing: SectionHeaderActions(
         children: [
-          OutlinedButton(
+          SectionHeaderActionButton.outlined(
+            context: context,
             onPressed: selectedSlip == null
                 ? null
                 : () => _showSlipDetails(context, selectedSlip!),
-            child: const Text('View Details'),
+            label: 'View Details',
           ),
-          OutlinedButton(
+          SectionHeaderActionButton.outlined(
+            context: context,
             onPressed: selectedSlip == null
                 ? null
                 : () => _showSlipHistory(context, selectedSlip!),
-            child: const Text('View History'),
+            label: 'View History',
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _LocatorFiltersCard(
-            selectedStatusFilter: _selectedStatusFilter,
+          RequestFiltersBar<String>(
+            options: _locatorSlipFilterOptions,
+            selectedValue: _selectedStatusFilter,
             fromDate: _fromDate,
             toDate: _toDate,
             searchQuery: _searchQuery,
@@ -222,6 +243,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
             onPickFromDate: () => _pickFilterDate(isFrom: true),
             onPickToDate: () => _pickFilterDate(isFrom: false),
             onClearFilters: _clearFilters,
+            formatDate: _formatDate,
           ),
           const SizedBox(height: 16),
           if (_error != null)
@@ -306,75 +328,79 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
   void _showSlipHistory(BuildContext context, _LocatorSlipDraft item) {
     final rawStatus = item.rawStatus;
     final history =
-        <({
-          String title,
-          String? actor,
-          DateTime? date,
-          String? remarks,
-          bool completed,
-        })>[
-      (
-        title: item.status == _LocatorSlipStatus.draft ? 'Draft' : 'Submitted',
-        actor: item.employeeName,
-        date: item.createdAt ?? item.date,
-        remarks: null,
-        completed: true,
-      ),
-      if (item.status == _LocatorSlipStatus.pendingDepartmentHead)
-        (
-          title: 'Pending Department Head',
-          actor: item.departmentHeadName,
-          date: null,
-          remarks: null,
-          completed: false,
-        ),
-      if (item.departmentHeadReviewedAt != null ||
-          rawStatus == 'pending_hr' ||
-          rawStatus == 'approved' ||
-          rawStatus == 'rejected_by_hr' ||
-          rawStatus == 'rejected_by_department_head')
-        (
-          title: rawStatus == 'rejected_by_department_head'
-              ? 'Rejected by Department Head'
-              : 'Reviewed by Department Head',
-          actor: item.departmentHeadName,
-          date: item.departmentHeadReviewedAt,
-          remarks: item.departmentHeadRemarks,
-          completed: true,
-        ),
-      if (item.status == _LocatorSlipStatus.pendingHr)
-        (
-          title: 'Pending HR Admin',
-          actor: item.hrReviewerName,
-          date: null,
-          remarks: null,
-          completed: false,
-        ),
-      if (rawStatus == 'approved')
-        (
-          title: 'Approved by HR',
-          actor: item.hrReviewerName,
-          date: item.hrReviewedAt,
-          remarks: item.hrRemarks,
-          completed: true,
-        ),
-      if (rawStatus == 'rejected_by_hr')
-        (
-          title: 'Rejected by HR',
-          actor: item.hrReviewerName,
-          date: item.hrReviewedAt,
-          remarks: item.hrRemarks,
-          completed: true,
-        ),
-      if (rawStatus == 'cancelled')
-        (
-          title: 'Cancelled',
-          actor: null,
-          date: item.updatedAt,
-          remarks: null,
-          completed: true,
-        ),
-    ];
+        <
+          ({
+            String title,
+            String? actor,
+            DateTime? date,
+            String? remarks,
+            bool completed,
+          })
+        >[
+          (
+            title: item.status == _LocatorSlipStatus.draft
+                ? 'Draft'
+                : 'Submitted',
+            actor: item.employeeName,
+            date: item.createdAt ?? item.date,
+            remarks: null,
+            completed: true,
+          ),
+          if (item.status == _LocatorSlipStatus.pendingDepartmentHead)
+            (
+              title: 'Pending Department Head',
+              actor: item.departmentHeadName,
+              date: null,
+              remarks: null,
+              completed: false,
+            ),
+          if (item.departmentHeadReviewedAt != null ||
+              rawStatus == 'pending_hr' ||
+              rawStatus == 'approved' ||
+              rawStatus == 'rejected_by_hr' ||
+              rawStatus == 'rejected_by_department_head')
+            (
+              title: rawStatus == 'rejected_by_department_head'
+                  ? 'Rejected by Department Head'
+                  : 'Reviewed by Department Head',
+              actor: item.departmentHeadName,
+              date: item.departmentHeadReviewedAt,
+              remarks: item.departmentHeadRemarks,
+              completed: true,
+            ),
+          if (item.status == _LocatorSlipStatus.pendingHr)
+            (
+              title: 'Pending HR Admin',
+              actor: item.hrReviewerName,
+              date: null,
+              remarks: null,
+              completed: false,
+            ),
+          if (rawStatus == 'approved')
+            (
+              title: 'Approved by HR',
+              actor: item.hrReviewerName,
+              date: item.hrReviewedAt,
+              remarks: item.hrRemarks,
+              completed: true,
+            ),
+          if (rawStatus == 'rejected_by_hr')
+            (
+              title: 'Rejected by HR',
+              actor: item.hrReviewerName,
+              date: item.hrReviewedAt,
+              remarks: item.hrRemarks,
+              completed: true,
+            ),
+          if (rawStatus == 'cancelled')
+            (
+              title: 'Cancelled',
+              actor: null,
+              date: item.updatedAt,
+              remarks: null,
+              completed: true,
+            ),
+        ];
     final accent = AppTheme.primaryNavy;
 
     showDialog<void>(
@@ -563,37 +589,39 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
       subtitle:
           'Review pending locator slips and revisit items you forwarded or rejected.',
       icon: Icons.fact_check_rounded,
-      headerTrailing: Wrap(
-        spacing: 8,
-        runSpacing: 8,
+      headerTrailing: SectionHeaderActions(
         children: [
-          OutlinedButton.icon(
+          SectionHeaderActionButton.outlined(
+            context: context,
             onPressed: selectedApproval == null
                 ? null
                 : () => _showSlipDetails(context, selectedApproval!),
-            icon: const Icon(Icons.visibility_rounded, size: 18),
-            label: const Text('View'),
+            icon: Icons.visibility_rounded,
+            label: 'View',
           ),
-          OutlinedButton.icon(
+          SectionHeaderActionButton.outlined(
+            context: context,
             onPressed: selectedApproval == null
                 ? null
                 : () => _showSlipHistory(context, selectedApproval!),
-            icon: const Icon(Icons.history_rounded, size: 18),
-            label: const Text('History'),
+            icon: Icons.history_rounded,
+            label: 'History',
           ),
-          OutlinedButton.icon(
+          SectionHeaderActionButton.outlined(
+            context: context,
             onPressed: !canReviewSelected
                 ? null
                 : () => _departmentHeadReject(selectedApproval!),
-            icon: const Icon(Icons.close_rounded, size: 18),
-            label: const Text('Reject'),
+            icon: Icons.close_rounded,
+            label: 'Reject',
           ),
-          FilledButton.icon(
+          SectionHeaderActionButton.filled(
+            context: context,
             onPressed: !canReviewSelected
                 ? null
                 : () => _departmentHeadApprove(selectedApproval!),
-            icon: const Icon(Icons.check_rounded, size: 18),
-            label: const Text('Approve'),
+            icon: Icons.check_rounded,
+            label: 'Approve',
           ),
         ],
       ),
@@ -602,10 +630,13 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _LocatorApprovalFilters(
-                  selectedStatusFilter: _selectedApprovalStatusFilter,
+                RequestFiltersBar<String>(
+                  options: _locatorApprovalFilterOptions,
+                  selectedValue: _selectedApprovalStatusFilter,
                   visibleCount: visibleItems.length,
                   totalCount: _deptHeadQueue.length,
+                  showSearch: false,
+                  showDateRange: false,
                   onStatusChanged: (value) {
                     setState(() {
                       _selectedApprovalStatusFilter = value;
@@ -1608,7 +1639,8 @@ class _LocatorSlipDraft {
       departmentHeadName: departmentHeadName ?? this.departmentHeadName,
       departmentHeadReviewedAt:
           departmentHeadReviewedAt ?? this.departmentHeadReviewedAt,
-      departmentHeadRemarks: departmentHeadRemarks ?? this.departmentHeadRemarks,
+      departmentHeadRemarks:
+          departmentHeadRemarks ?? this.departmentHeadRemarks,
       hrReviewerName: hrReviewerName ?? this.hrReviewerName,
       hrReviewedAt: hrReviewedAt ?? this.hrReviewedAt,
       hrRemarks: hrRemarks ?? this.hrRemarks,
@@ -2017,322 +2049,6 @@ class _LocatorSectionTabs extends StatelessWidget {
   }
 }
 
-class _LocatorApprovalFilters extends StatelessWidget {
-  const _LocatorApprovalFilters({
-    required this.selectedStatusFilter,
-    required this.visibleCount,
-    required this.totalCount,
-    required this.onStatusChanged,
-  });
-
-  final String? selectedStatusFilter;
-  final int visibleCount;
-  final int totalCount;
-  final ValueChanged<String?> onStatusChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    const activePill = Color(0xFF123B6D);
-    const inactiveText = Color(0xFF2D3640);
-    final filters = const <({String? key, String label})>[
-      (key: null, label: 'All'),
-      (key: 'pending', label: 'Pending'),
-      (key: 'forwarded', label: 'Forwarded to HR'),
-      (key: 'approved', label: 'Approved by HR'),
-      (key: 'rejected', label: 'Rejected'),
-      (key: 'cancelled', label: 'Cancelled'),
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: filters
-              .map(
-                (filter) => _filterChip(
-                  label: filter.label,
-                  selected: selectedStatusFilter == filter.key,
-                  onTap: () => onStatusChanged(filter.key),
-                  selectedColor: activePill,
-                  unselectedTextColor: inactiveText,
-                ),
-              )
-              .toList(),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          '$visibleCount of $totalCount',
-          style: TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _filterChip({
-    required String label,
-    required bool selected,
-    required VoidCallback onTap,
-    required Color selectedColor,
-    required Color unselectedTextColor,
-  }) {
-    return SizedBox(
-      height: 36,
-      child: TextButton(
-        onPressed: onTap,
-        style: TextButton.styleFrom(
-          backgroundColor: selected ? selectedColor : const Color(0xFFF7F8FA),
-          foregroundColor: selected ? Colors.white : unselectedTextColor,
-          side: const BorderSide(color: Color(0xFFDDE2E8)),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          minimumSize: const Size(0, 36),
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-        ),
-        child: Text(label),
-      ),
-    );
-  }
-}
-
-class _LocatorFiltersCard extends StatelessWidget {
-  const _LocatorFiltersCard({
-    required this.selectedStatusFilter,
-    required this.fromDate,
-    required this.toDate,
-    required this.searchQuery,
-    required this.visibleCount,
-    required this.totalCount,
-    required this.onStatusChanged,
-    required this.onSearchChanged,
-    required this.onPickFromDate,
-    required this.onPickToDate,
-    required this.onClearFilters,
-  });
-
-  final String? selectedStatusFilter;
-  final DateTime? fromDate;
-  final DateTime? toDate;
-  final String searchQuery;
-  final int visibleCount;
-  final int totalCount;
-  final ValueChanged<String?> onStatusChanged;
-  final ValueChanged<String> onSearchChanged;
-  final VoidCallback onPickFromDate;
-  final VoidCallback onPickToDate;
-  final VoidCallback onClearFilters;
-
-  @override
-  Widget build(BuildContext context) {
-    const border = Color(0xFFD7DCE2);
-    const activePill = Color(0xFF123B6D);
-    const inactiveText = Color(0xFF2D3640);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            SizedBox(
-              width: 240,
-              height: 36,
-              child: TextFormField(
-                key: ValueKey(searchQuery),
-                initialValue: searchQuery,
-                onChanged: onSearchChanged,
-                style: const TextStyle(
-                  color: Color(0xFF2D3640),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-                decoration: _filterDecoration(
-                  hintText: 'Search',
-                  borderColor: border,
-                  suffixIcon: const Icon(
-                    Icons.search_rounded,
-                    size: 20,
-                    color: Color(0xFF8792A0),
-                  ),
-                ),
-              ),
-            ),
-            _dateButton(
-              label: fromDate == null ? 'From' : _formatDate(fromDate!),
-              onPressed: onPickFromDate,
-              borderColor: border,
-            ),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 2),
-              child: Text(
-                '-',
-                style: TextStyle(
-                  color: Color(0xFF7F8895),
-                  fontWeight: FontWeight.w600,
-                  fontSize: 15,
-                ),
-              ),
-            ),
-            _dateButton(
-              label: toDate == null ? 'To' : _formatDate(toDate!),
-              onPressed: onPickToDate,
-              borderColor: border,
-            ),
-            _statusChip(
-              label: 'All',
-              selected: selectedStatusFilter == null,
-              onTap: () => onStatusChanged(null),
-              selectedColor: activePill,
-              unselectedTextColor: inactiveText,
-            ),
-            ...const ['pending', 'approved', 'rejected', 'cancelled'].map(
-              (statusKey) => _statusChip(
-                label: _statusFilterLabel(statusKey),
-                selected: selectedStatusFilter == statusKey,
-                onTap: () => onStatusChanged(statusKey),
-                selectedColor: activePill,
-                unselectedTextColor: inactiveText,
-              ),
-            ),
-            TextButton(
-              onPressed: onClearFilters,
-              style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF1A568B),
-                textStyle: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                minimumSize: const Size(0, 36),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              child: const Text('Clear'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Text(
-          '$visibleCount of $totalCount',
-          style: TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _dateButton({
-    required String label,
-    required VoidCallback onPressed,
-    required Color borderColor,
-  }) {
-    return SizedBox(
-      height: 36,
-      child: OutlinedButton.icon(
-        onPressed: onPressed,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: const Color(0xFF556070),
-          side: BorderSide(color: borderColor),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-        ),
-        icon: const Icon(
-          Icons.calendar_today_rounded,
-          size: 16,
-          color: Color(0xFF8A95A3),
-        ),
-        label: Text(label),
-      ),
-    );
-  }
-
-  Widget _statusChip({
-    required String label,
-    required bool selected,
-    required VoidCallback onTap,
-    required Color selectedColor,
-    required Color unselectedTextColor,
-  }) {
-    return SizedBox(
-      height: 36,
-      child: TextButton(
-        onPressed: onTap,
-        style: TextButton.styleFrom(
-          backgroundColor: selected ? selectedColor : const Color(0xFFF7F8FA),
-          foregroundColor: selected ? Colors.white : unselectedTextColor,
-          side: const BorderSide(color: Color(0xFFDDE2E8)),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          minimumSize: const Size(0, 36),
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-        ),
-        child: Text(label),
-      ),
-    );
-  }
-
-  static String _statusFilterLabel(String key) {
-    switch (key) {
-      case 'pending':
-        return 'Pending';
-      case 'approved':
-        return 'Approved';
-      case 'rejected':
-        return 'Rejected';
-      case 'cancelled':
-        return 'Cancelled';
-      default:
-        return key;
-    }
-  }
-
-  InputDecoration _filterDecoration({
-    required String hintText,
-    required Color borderColor,
-    Widget? suffixIcon,
-  }) {
-    return InputDecoration(
-      hintText: hintText,
-      hintStyle: const TextStyle(
-        color: Color(0xFF8D96A3),
-        fontSize: 14,
-        fontWeight: FontWeight.w600,
-      ),
-      suffixIcon: suffixIcon,
-      isDense: true,
-      filled: true,
-      fillColor: Colors.white,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: BorderSide(color: borderColor),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: const BorderSide(color: Color(0xFF123B6D), width: 1.2),
-      ),
-    );
-  }
-}
-
 class _InfoCard extends StatelessWidget {
   const _InfoCard({required this.child});
 
@@ -2375,8 +2091,12 @@ class _SectionCard extends StatelessWidget {
   final Widget child;
   final Widget? headerTrailing;
 
+  static const double _mobileBreakpoint = 600;
+
   @override
   Widget build(BuildContext context) {
+    final isMobile = MediaQuery.sizeOf(context).width < _mobileBreakpoint;
+
     return _InfoCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2409,7 +2129,7 @@ class _SectionCard extends StatelessWidget {
                   ],
                 ),
               ),
-              if (headerTrailing != null) ...[
+              if (!isMobile && headerTrailing != null) ...[
                 const SizedBox(width: 12),
                 Flexible(
                   child: Align(
@@ -2420,6 +2140,10 @@ class _SectionCard extends StatelessWidget {
               ],
             ],
           ),
+          if (isMobile && headerTrailing != null) ...[
+            const SizedBox(height: 12),
+            SizedBox(width: double.infinity, child: headerTrailing!),
+          ],
           const SizedBox(height: 18),
           child,
         ],
