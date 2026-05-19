@@ -103,10 +103,17 @@ router.put('/', protect, requireAdminOrSupervisor, async (req, res) => {
 
     const list = Array.isArray(vacancies) ? vacancies : [];
     // Expected: [{ headline: '...', body: '...' }, ...]
+    const optStr = (x) =>
+      typeof x === 'string' && x.trim().length ? x.trim() : null;
+
     const normalizedVacancies = list
       .filter((v) => v && typeof v === 'object')
       .map((v) => {
         const max = parseMaxApplicants(v.max_applicants);
+        const education = optStr(v.education);
+        const experience = optStr(v.experience);
+        const training = optStr(v.training);
+        const closing_date = optStr(v.closing_date);
         return {
           headline:
             typeof v.headline === 'string' && v.headline.trim().length
@@ -116,6 +123,10 @@ router.put('/', protect, requireAdminOrSupervisor, async (req, res) => {
             typeof v.body === 'string' && v.body.trim().length
               ? v.body.trim()
               : null,
+          ...(education != null ? { education } : {}),
+          ...(experience != null ? { experience } : {}),
+          ...(training != null ? { training } : {}),
+          ...(closing_date != null ? { closing_date } : {}),
           ...(max != null ? { max_applicants: max } : {}),
         };
       });

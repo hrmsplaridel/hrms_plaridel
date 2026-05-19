@@ -12,7 +12,7 @@ import '../../providers/recruitment_hire_prefill.dart';
 class RspFinalInterviewScheduler extends StatefulWidget {
   const RspFinalInterviewScheduler({super.key, this.onGoToCreateAccount});
 
-  /// Opens admin sidebar tab Create Account (index 5, below DocuTracker).
+  /// Opens the admin **Create Account** screen (sidebar); parent supplies navigation.
   final VoidCallback? onGoToCreateAccount;
 
   @override
@@ -26,6 +26,8 @@ class _RspFinalInterviewSchedulerState
   Map<String, RecruitmentExamResult> _examResults = {};
   bool _loading = true;
   final Set<String> _savingIds = {};
+  /// Any applicant can be collapsed to a compact, name-only row until expanded.
+  final Set<String> _expandedHiredApplicantIds = {};
 
   static const _kSectionGap = 28.0;
   static const _kCardPadding = 24.0;
@@ -63,6 +65,103 @@ class _RspFinalInterviewSchedulerState
   static bool _isRegistered(RecruitmentApplication a) {
     return a.status == 'registered' ||
         (a.hiredUserId != null && a.hiredUserId!.trim().isNotEmpty);
+  }
+
+  ({String label, IconData icon, Color fg, Color bg, Color border})
+      _statusSpec(
+    RecruitmentApplication app,
+  ) {
+    final registered = _isRegistered(app);
+    final scheduled = app.finalInterviewAt;
+    final outcome = app.finalInterviewPassed;
+    final hrDone = app.hrAccountSetupDone == true;
+
+    if (registered) {
+      return (
+        label: 'Hired · Account linked',
+        icon: Icons.verified_rounded,
+        fg: const Color(0xFF1B5E20),
+        bg: const Color(0xFFE8F5E9),
+        border: const Color(0xFF2E7D32).withValues(alpha: 0.35),
+      );
+    }
+    if (outcome == true && hrDone) {
+      return (
+        label: 'Final passed · Step 8 done',
+        icon: Icons.task_alt_rounded,
+        fg: const Color(0xFF1B5E20),
+        bg: const Color(0xFFE8F5E9),
+        border: const Color(0xFF2E7D32).withValues(alpha: 0.35),
+      );
+    }
+    if (outcome == true) {
+      return (
+        label: 'Final interview passed · Pending account',
+        icon: Icons.hourglass_bottom_rounded,
+        fg: const Color(0xFF0D47A1),
+        bg: const Color(0xFFE3F2FD),
+        border: const Color(0xFF1565C0).withValues(alpha: 0.35),
+      );
+    }
+    if (outcome == false) {
+      return (
+        label: 'Final interview: Not passed',
+        icon: Icons.cancel_rounded,
+        fg: const Color(0xFFB71C1C),
+        bg: const Color(0xFFFFEBEE),
+        border: const Color(0xFFC62828).withValues(alpha: 0.35),
+      );
+    }
+    if (scheduled != null) {
+      return (
+        label: 'Final interview scheduled',
+        icon: Icons.event_available_rounded,
+        fg: const Color(0xFF7A3E00),
+        bg: const Color(0xFFFFF3E0),
+        border: const Color(0xFFEF6C00).withValues(alpha: 0.35),
+      );
+    }
+    return (
+      label: 'Waiting for final interview schedule',
+      icon: Icons.schedule_rounded,
+      fg: AppTheme.textSecondary.withValues(alpha: 0.95),
+      bg: const Color(0xFFF5F7FA),
+      border: Colors.black.withValues(alpha: 0.08),
+    );
+  }
+
+  Widget _statusBadge(
+    RecruitmentApplication app, {
+    EdgeInsets padding = const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    double fontSize = 12,
+  }) {
+    final s = _statusSpec(app);
+    return Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: s.bg,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: s.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(s.icon, size: 16, color: s.fg),
+          const SizedBox(width: 8),
+          Text(
+            s.label,
+            style: TextStyle(
+              fontFamily: 'NotoSans',
+              color: s.fg,
+              fontSize: fontSize,
+              fontWeight: FontWeight.w800,
+              height: 1.15,
+              letterSpacing: -0.1,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   String _formatSchedule(DateTime d, BuildContext context) {
@@ -172,9 +271,7 @@ class _RspFinalInterviewSchedulerState
     if (to.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('This applicant has no email on file.'),
-        ),
+        const SnackBar(content: Text('This applicant has no email on file.')),
       );
       return;
     }
@@ -186,12 +283,8 @@ class _RspFinalInterviewSchedulerState
         applicantName: app.fullName.trim().isEmpty
             ? 'Applicant'
             : app.fullName.trim(),
-        sendHireEmail: (username, password) =>
-            RecruitmentRepo.instance.sendHireCredentialEmail(
-          app.id,
-          username,
-          password,
-        ),
+        sendHireEmail: (username, password) => RecruitmentRepo.instance
+            .sendHireCredentialEmail(app.id, username, password),
       ),
     );
     if (sent == true && mounted) {
@@ -201,9 +294,15 @@ class _RspFinalInterviewSchedulerState
     }
   }
 
-  Future<void> _setHrAccountMonitoring(RecruitmentApplication app, bool done) async {
+  Future<void> _setHrAccountMonitoring(
+    RecruitmentApplication app,
+    bool done,
+  ) async {
     await _withSaveLock(app.id, () async {
-      await RecruitmentRepo.instance.updateHrAccountSetupMonitoring(app.id, done);
+      await RecruitmentRepo.instance.updateHrAccountSetupMonitoring(
+        app.id,
+        done,
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -358,15 +457,16 @@ class _RspFinalInterviewSchedulerState
           icon: Icon(Icons.swap_horiz_rounded, size: 20, color: navy),
           label: Text(
             'Change to not passed',
-            style: TextStyle(
-              color: navy,
-              fontWeight: FontWeight.w600,
-            ),
+            style: TextStyle(color: navy, fontWeight: FontWeight.w600),
           ),
         ),
         TextButton.icon(
           onPressed: busy ? null : () => _setOutcome(app, null),
-          icon: Icon(Icons.restart_alt_rounded, size: 20, color: AppTheme.textSecondary),
+          icon: Icon(
+            Icons.restart_alt_rounded,
+            size: 20,
+            color: AppTheme.textSecondary,
+          ),
           label: Text(
             'Clear and set pending',
             style: TextStyle(color: AppTheme.textSecondary),
@@ -387,7 +487,11 @@ class _RspFinalInterviewSchedulerState
       ),
       TextButton.icon(
         onPressed: busy ? null : () => _setOutcome(app, null),
-        icon: Icon(Icons.restart_alt_rounded, size: 20, color: AppTheme.textSecondary),
+        icon: Icon(
+          Icons.restart_alt_rounded,
+          size: 20,
+          color: AppTheme.textSecondary,
+        ),
         label: Text(
           'Clear and set pending',
           style: TextStyle(color: AppTheme.textSecondary),
@@ -395,7 +499,6 @@ class _RspFinalInterviewSchedulerState
       ),
     ];
   }
-
 
   Widget _accountSetupStep({
     required RecruitmentApplication app,
@@ -588,13 +691,9 @@ class _RspFinalInterviewSchedulerState
       ),
       style: OutlinedButton.styleFrom(
         foregroundColor: AppTheme.primaryNavy,
-        side: BorderSide(
-          color: AppTheme.primaryNavy.withValues(alpha: 0.45),
-        ),
+        side: BorderSide(color: AppTheme.primaryNavy.withValues(alpha: 0.45)),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
 
@@ -690,12 +789,130 @@ class _RspFinalInterviewSchedulerState
               final step2Summary = outcome == null
                   ? 'Pending — record result'
                   : (outcome == true ? 'Passed' : 'Not passed');
-              const step3Summary =
-                  'Employee login & Step 8 applicant message';
+              const step3Summary = 'Employee login & Step 8 applicant message';
               final expandStep1 = scheduled == null;
               final expandStep2 = !expandStep1 && outcome == null;
-              final expandStep3 =
-                  showStep3 && !expandStep1 && !expandStep2;
+              final expandStep3 = showStep3 && !expandStep1 && !expandStep2;
+              final useMinimalApplicantRow =
+                  !_expandedHiredApplicantIds.contains(app.id);
+
+              if (useMinimalApplicantRow) {
+                return Container(
+                  decoration: BoxDecoration(
+                    color: AppTheme.white,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: Colors.black.withValues(alpha: 0.07),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                        blurRadius: 26,
+                        offset: const Offset(0, 11),
+                      ),
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.065),
+                        blurRadius: 18,
+                        offset: const Offset(0, 6),
+                      ),
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.035),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        height: 4,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              AppTheme.primaryNavy,
+                              AppTheme.primaryNavyLight,
+                            ],
+                          ),
+                        ),
+                      ),
+                      Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () => setState(
+                            () => _expandedHiredApplicantIds.add(app.id),
+                          ),
+                          borderRadius: const BorderRadius.vertical(
+                            bottom: Radius.circular(20),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 14,
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        app.fullName,
+                                        style: const TextStyle(
+                                          fontFamily: 'NotoSans',
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 17,
+                                          letterSpacing: -0.2,
+                                          color: AppTheme.textPrimary,
+                                          height: 1.2,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      _statusBadge(
+                                        app,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 6,
+                                        ),
+                                        fontSize: 11,
+                                      ),
+                                      if (exam != null) ...[
+                                        const SizedBox(height: 10),
+                                        Text(
+                                          'Exam: ${exam.scorePercent.toStringAsFixed(0)}%',
+                                          style: TextStyle(
+                                            fontFamily: 'NotoSans',
+                                            color: AppTheme.textSecondary
+                                                .withValues(alpha: 0.92),
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w700,
+                                            height: 1.2,
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                                Icon(
+                                  Icons.keyboard_arrow_down_rounded,
+                                  color: AppTheme.textSecondary.withValues(
+                                    alpha: 0.78,
+                                  ),
+                                  size: 26,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }
 
               return Container(
                 decoration: BoxDecoration(
@@ -743,405 +960,466 @@ class _RspFinalInterviewSchedulerState
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                      Text(
-                        'Applicant',
-                        style: TextStyle(
-                          fontFamily: 'NotoSans',
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 1.1,
-                          color: AppTheme.textSecondary.withValues(alpha: 0.85),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: AppTheme.offWhite,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: const Color(0xFFE2E6EA),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton.icon(
+                              onPressed: () => setState(
+                                () => _expandedHiredApplicantIds.remove(
+                                  app.id,
+                                ),
+                              ),
+                              icon: Icon(
+                                Icons.unfold_less_rounded,
+                                size: 20,
+                                color: AppTheme.primaryNavy.withValues(
+                                  alpha: 0.9,
+                                ),
+                              ),
+                              label: Text(
+                                'Show less',
+                                style: TextStyle(
+                                  fontFamily: 'NotoSans',
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.primaryNavy.withValues(
+                                    alpha: 0.92,
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.045),
-                              blurRadius: 12,
-                              offset: const Offset(0, 4),
-                            ),
-                            BoxShadow(
-                              color: AppTheme.primaryNavy.withValues(alpha: 0.04),
-                              blurRadius: 10,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    app.fullName,
-                                    style: const TextStyle(
-                                      fontFamily: 'NotoSans',
-                                      fontWeight: FontWeight.w800,
-                                      fontSize: 18,
-                                      letterSpacing: -0.25,
-                                      color: AppTheme.textPrimary,
-                                      height: 1.2,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    app.email,
-                                    style: const TextStyle(
-                                      fontFamily: 'NotoSans',
-                                      color: AppTheme.textSecondary,
-                                      fontSize: 14,
-                                      height: 1.35,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                  if (app.positionAppliedFor != null &&
-                                      app.positionAppliedFor!.trim().isNotEmpty) ...[
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      'Position: ${app.positionAppliedFor!.trim()}',
-                                      style: TextStyle(
-                                        fontFamily: 'NotoSans',
-                                        color: AppTheme.primaryNavy.withValues(
-                                          alpha: 0.95,
-                                        ),
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        height: 1.3,
-                                      ),
-                                    ),
-                                  ],
-                                  const SizedBox(height: 10),
-                                  Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 10,
-                                        vertical: 6,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        borderRadius: BorderRadius.circular(10),
-                                        border: Border.all(
-                                          color: AppTheme.primaryNavy.withValues(
-                                            alpha: 0.22,
-                                          ),
-                                        ),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: AppTheme.primaryNavy
-                                                .withValues(alpha: 0.08),
-                                            blurRadius: 8,
-                                            offset: const Offset(0, 2),
-                                          ),
-                                        ],
-                                      ),
-                                      child: Text(
-                                        exam != null
-                                            ? 'Screening exam: ${exam.scorePercent.toStringAsFixed(0)}% · ${app.status}'
-                                            : 'Status: ${app.status}',
-                                        style: TextStyle(
-                                          fontFamily: 'NotoSans',
-                                          color: AppTheme.primaryNavy.withValues(
-                                            alpha: 0.92,
-                                          ),
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
+                          const SizedBox(height: 4),
+                          Text(
+                            'Applicant',
+                            style: TextStyle(
+                              fontFamily: 'NotoSans',
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1.1,
+                              color: AppTheme.textSecondary.withValues(
+                                alpha: 0.85,
                               ),
                             ),
-                            if (registered) ...[
-                              const SizedBox(width: 12),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 10,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: AppTheme.primaryNavy.withValues(
-                                      alpha: 0.28,
-                                    ),
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: AppTheme.primaryNavy.withValues(
-                                        alpha: 0.1,
-                                      ),
-                                      blurRadius: 10,
-                                      offset: const Offset(0, 3),
-                                    ),
-                                  ],
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.badge_rounded,
-                                      size: 20,
-                                      color: AppTheme.primaryNavy,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      'Account ready',
-                                      style: TextStyle(
-                                        fontFamily: 'NotoSans',
-                                        fontWeight: FontWeight.w800,
-                                        fontSize: 12,
-                                        color: AppTheme.primaryNavy,
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                          ),
+                          const SizedBox(height: 10),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: AppTheme.offWhite,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: const Color(0xFFE2E6EA),
                               ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 22),
-                      Text(
-                        'Workflow',
-                        style: TextStyle(
-                          fontFamily: 'NotoSans',
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 1.1,
-                          color: AppTheme.textSecondary.withValues(alpha: 0.85),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      _CollapsibleWorkflowStep(
-                        key: ValueKey('${app.id}-wf1'),
-                        number: 1,
-                        title: 'Interview appointment',
-                        subtitle:
-                            'Applicants see this date when they continue their application with the same email.',
-                        collapsedSummary: step1Summary,
-                        initiallyExpanded: expandStep1,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Container(
-                              width: double.infinity,
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: const Color(0xFFE2E6EA),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.045),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 4),
                                 ),
-                              ),
-                              child: IntrinsicHeight(
-                                child: Row(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    Container(
-                                      width: 4,
-                                      margin: const EdgeInsets.only(
-                                        left: 12,
-                                        top: 12,
-                                        bottom: 12,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: AppTheme.primaryNavy,
-                                        borderRadius: BorderRadius.circular(3),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: Padding(
-                                        padding: const EdgeInsets.fromLTRB(
-                                          14,
-                                          14,
-                                          16,
-                                          14,
-                                        ),
-                                        child: Row(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Icon(
-                                              Icons.event_note_rounded,
-                                              size: 22,
-                                              color: AppTheme.primaryNavy
-                                                  .withValues(alpha: 0.88),
-                                            ),
-                                            const SizedBox(width: 12),
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    scheduled == null
-                                                        ? 'No date set'
-                                                        : _formatSchedule(
-                                                            scheduled,
-                                                            context,
-                                                          ),
-                                                    style: TextStyle(
-                                                      fontFamily: 'NotoSans',
-                                                      fontSize: 15,
-                                                      fontWeight:
-                                                          FontWeight.w700,
-                                                      color: scheduled == null
-                                                          ? AppTheme
-                                                              .textSecondary
-                                                          : AppTheme
-                                                              .primaryNavy,
-                                                      height: 1.3,
-                                                    ),
-                                                  ),
-                                                  if (scheduled == null)
-                                                    Padding(
-                                                      padding:
-                                                          const EdgeInsets.only(
-                                                        top: 4,
-                                                      ),
-                                                      child: Text(
-                                                        'Pick a date and time for the in-person final interview.',
-                                                        style:
-                                                            const TextStyle(
-                                                          fontFamily:
-                                                              'NotoSans',
-                                                          fontSize: 12,
-                                                          color: AppTheme
-                                                              .textSecondary,
-                                                          height: 1.4,
-                                                          fontWeight:
-                                                              FontWeight.w500,
-                                                        ),
-                                                      ),
-                                                    ),
-                                                ],
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 14),
-                            Wrap(
-                              spacing: 10,
-                              runSpacing: 10,
-                              children: [
-                                FilledButton.icon(
-                                  onPressed: busy
-                                      ? null
-                                      : () => _pickDateTime(app),
-                                  icon: const Icon(Icons.edit_calendar_rounded),
-                                  label: Text(
-                                    scheduled == null
-                                        ? 'Set date & time'
-                                        : 'Change date & time',
+                                BoxShadow(
+                                  color: AppTheme.primaryNavy.withValues(
+                                    alpha: 0.04,
                                   ),
-                                  style: FilledButton.styleFrom(
-                                    backgroundColor: AppTheme.primaryNavy,
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 18,
-                                      vertical: 12,
-                                    ),
-                                  ),
-                                ),
-                                TextButton.icon(
-                                  onPressed: busy || scheduled == null
-                                      ? null
-                                      : () => _clearSchedule(app),
-                                  icon: Icon(
-                                    Icons.event_busy_rounded,
-                                    size: 20,
-                                    color: AppTheme.textSecondary,
-                                  ),
-                                  label: Text(
-                                    'Clear',
-                                    style: TextStyle(
-                                      color: AppTheme.textSecondary,
-                                    ),
-                                  ),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 2),
                                 ),
                               ],
                             ),
-                          ],
-                        ),
-                      ),
-                      SizedBox(height: _kSectionGap + 4),
-                      _CollapsibleWorkflowStep(
-                        key: ValueKey('${app.id}-wf2'),
-                        number: 2,
-                        title: 'Final interview result',
-                        subtitle:
-                            'After the interview, record whether the applicant passed.',
-                        collapsedSummary: step2Summary,
-                        initiallyExpanded: expandStep2,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            _outcomeStatusStrip(outcome),
-                            if (actions.isNotEmpty) ...[
-                              const SizedBox(height: 14),
-                              Wrap(
-                                spacing: 10,
-                                runSpacing: 10,
-                                crossAxisAlignment: WrapCrossAlignment.center,
-                                children: actions,
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      if (outcome == true && !registered) ...[
-                        SizedBox(height: _kSectionGap + 4),
-                        _CollapsibleWorkflowStep(
-                          key: ValueKey('${app.id}-wf3'),
-                          number: 3,
-                          title: 'Employee account',
-                          subtitle:
-                              'Create their login from the sidebar, then update what they see on Step 8.',
-                          collapsedSummary: step3Summary,
-                          initiallyExpanded: expandStep3,
-                          child: _accountSetupStep(
-                            app: app,
-                            busy: busy,
-                            canNavigate: canNavigate,
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        app.fullName,
+                                        style: const TextStyle(
+                                          fontFamily: 'NotoSans',
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 18,
+                                          letterSpacing: -0.25,
+                                          color: AppTheme.textPrimary,
+                                          height: 1.2,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        app.email,
+                                        style: const TextStyle(
+                                          fontFamily: 'NotoSans',
+                                          color: AppTheme.textSecondary,
+                                          fontSize: 14,
+                                          height: 1.35,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                      if (app.positionAppliedFor != null &&
+                                          app.positionAppliedFor!
+                                              .trim()
+                                              .isNotEmpty) ...[
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          'Position: ${app.positionAppliedFor!.trim()}',
+                                          style: TextStyle(
+                                            fontFamily: 'NotoSans',
+                                            color: AppTheme.primaryNavy
+                                                .withValues(alpha: 0.95),
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w700,
+                                            height: 1.3,
+                                          ),
+                                        ),
+                                      ],
+                                      const SizedBox(height: 10),
+                                      Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: Wrap(
+                                          spacing: 10,
+                                          runSpacing: 10,
+                                          crossAxisAlignment:
+                                              WrapCrossAlignment.center,
+                                          children: [
+                                            if (exam != null)
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 10,
+                                                  vertical: 6,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.white,
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                    999,
+                                                  ),
+                                                  border: Border.all(
+                                                    color: AppTheme.primaryNavy
+                                                        .withValues(
+                                                      alpha: 0.22,
+                                                    ),
+                                                  ),
+                                                  boxShadow: [
+                                                    BoxShadow(
+                                                      color: AppTheme
+                                                          .primaryNavy
+                                                          .withValues(
+                                                        alpha: 0.08,
+                                                      ),
+                                                      blurRadius: 8,
+                                                      offset:
+                                                          const Offset(0, 2),
+                                                    ),
+                                                  ],
+                                                ),
+                                                child: Text(
+                                                  'Exam: ${exam.scorePercent.toStringAsFixed(0)}%',
+                                                  style: TextStyle(
+                                                    fontFamily: 'NotoSans',
+                                                    color: AppTheme.primaryNavy
+                                                        .withValues(
+                                                      alpha: 0.92,
+                                                    ),
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.w800,
+                                                  ),
+                                                ),
+                                              ),
+                                            _statusBadge(app),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                if (registered) ...[
+                                  const SizedBox(width: 12),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 10,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: AppTheme.primaryNavy.withValues(
+                                          alpha: 0.28,
+                                        ),
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: AppTheme.primaryNavy
+                                              .withValues(alpha: 0.1),
+                                          blurRadius: 10,
+                                          offset: const Offset(0, 3),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.badge_rounded,
+                                          size: 20,
+                                          color: AppTheme.primaryNavy,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          'Account ready',
+                                          style: TextStyle(
+                                            fontFamily: 'NotoSans',
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 12,
+                                            color: AppTheme.primaryNavy,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
                           ),
-                        ),
-                        if (!canNavigate)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 12),
-                            child: Text(
-                              'Create Account shortcut is not available here. Use the full admin sidebar.',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: AppTheme.textSecondary,
+                          const SizedBox(height: 22),
+                          Text(
+                            'Workflow',
+                            style: TextStyle(
+                              fontFamily: 'NotoSans',
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1.1,
+                              color: AppTheme.textSecondary.withValues(
+                                alpha: 0.85,
                               ),
                             ),
                           ),
-                      ],
-                    ],
-                  ),
+                          const SizedBox(height: 14),
+                          _CollapsibleWorkflowStep(
+                            key: ValueKey('${app.id}-wf1'),
+                            number: 1,
+                            title: 'Interview appointment',
+                            subtitle:
+                                'Applicants see this date when they continue their application with the same email.',
+                            collapsedSummary: step1Summary,
+                            initiallyExpanded: expandStep1,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Container(
+                                  width: double.infinity,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: const Color(0xFFE2E6EA),
+                                    ),
+                                  ),
+                                  child: IntrinsicHeight(
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        Container(
+                                          width: 4,
+                                          margin: const EdgeInsets.only(
+                                            left: 12,
+                                            top: 12,
+                                            bottom: 12,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: AppTheme.primaryNavy,
+                                            borderRadius: BorderRadius.circular(
+                                              3,
+                                            ),
+                                          ),
+                                        ),
+                                        Expanded(
+                                          child: Padding(
+                                            padding: const EdgeInsets.fromLTRB(
+                                              14,
+                                              14,
+                                              16,
+                                              14,
+                                            ),
+                                            child: Row(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Icon(
+                                                  Icons.event_note_rounded,
+                                                  size: 22,
+                                                  color: AppTheme.primaryNavy
+                                                      .withValues(alpha: 0.88),
+                                                ),
+                                                const SizedBox(width: 12),
+                                                Expanded(
+                                                  child: Column(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      Text(
+                                                        scheduled == null
+                                                            ? 'No date set'
+                                                            : _formatSchedule(
+                                                                scheduled,
+                                                                context,
+                                                              ),
+                                                        style: TextStyle(
+                                                          fontFamily:
+                                                              'NotoSans',
+                                                          fontSize: 15,
+                                                          fontWeight:
+                                                              FontWeight.w700,
+                                                          color:
+                                                              scheduled == null
+                                                              ? AppTheme
+                                                                    .textSecondary
+                                                              : AppTheme
+                                                                    .primaryNavy,
+                                                          height: 1.3,
+                                                        ),
+                                                      ),
+                                                      if (scheduled == null)
+                                                        Padding(
+                                                          padding:
+                                                              const EdgeInsets.only(
+                                                                top: 4,
+                                                              ),
+                                                          child: Text(
+                                                            'Pick a date and time for the in-person final interview.',
+                                                            style: const TextStyle(
+                                                              fontFamily:
+                                                                  'NotoSans',
+                                                              fontSize: 12,
+                                                              color: AppTheme
+                                                                  .textSecondary,
+                                                              height: 1.4,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w500,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 14),
+                                Wrap(
+                                  spacing: 10,
+                                  runSpacing: 10,
+                                  children: [
+                                    FilledButton.icon(
+                                      onPressed: busy
+                                          ? null
+                                          : () => _pickDateTime(app),
+                                      icon: const Icon(
+                                        Icons.edit_calendar_rounded,
+                                      ),
+                                      label: Text(
+                                        scheduled == null
+                                            ? 'Set date & time'
+                                            : 'Change date & time',
+                                      ),
+                                      style: FilledButton.styleFrom(
+                                        backgroundColor: AppTheme.primaryNavy,
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 18,
+                                          vertical: 12,
+                                        ),
+                                      ),
+                                    ),
+                                    TextButton.icon(
+                                      onPressed: busy || scheduled == null
+                                          ? null
+                                          : () => _clearSchedule(app),
+                                      icon: Icon(
+                                        Icons.event_busy_rounded,
+                                        size: 20,
+                                        color: AppTheme.textSecondary,
+                                      ),
+                                      label: Text(
+                                        'Clear',
+                                        style: TextStyle(
+                                          color: AppTheme.textSecondary,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          SizedBox(height: _kSectionGap + 4),
+                          _CollapsibleWorkflowStep(
+                            key: ValueKey('${app.id}-wf2'),
+                            number: 2,
+                            title: 'Final interview result',
+                            subtitle:
+                                'After the interview, record whether the applicant passed.',
+                            collapsedSummary: step2Summary,
+                            initiallyExpanded: expandStep2,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                _outcomeStatusStrip(outcome),
+                                if (actions.isNotEmpty) ...[
+                                  const SizedBox(height: 14),
+                                  Wrap(
+                                    spacing: 10,
+                                    runSpacing: 10,
+                                    crossAxisAlignment:
+                                        WrapCrossAlignment.center,
+                                    children: actions,
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          if (outcome == true && !registered) ...[
+                            SizedBox(height: _kSectionGap + 4),
+                            _CollapsibleWorkflowStep(
+                              key: ValueKey('${app.id}-wf3'),
+                              number: 3,
+                              title: 'Employee account',
+                              subtitle:
+                                  'Create their login from the sidebar, then update what they see on Step 8.',
+                              collapsedSummary: step3Summary,
+                              initiallyExpanded: expandStep3,
+                              child: _accountSetupStep(
+                                app: app,
+                                busy: busy,
+                                canNavigate: canNavigate,
+                              ),
+                            ),
+                            if (!canNavigate)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 12),
+                                child: Text(
+                                  'Create Account shortcut is not available here. Use the full admin sidebar.',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppTheme.textSecondary,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                ],
-              ),
               );
             },
           ),
@@ -1343,31 +1621,33 @@ class _HireApplicantEmailDialogState extends State<_HireApplicantEmailDialog> {
       Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
       setState(() => _sending = false);
     }
   }
 
   InputDecoration _credentialFieldDecoration({
-    required String label,
-    required Color navy,
+    required String hint,
+    required Color accent,
     Widget? suffixIcon,
   }) {
     final base = OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.1)),
+      borderRadius: BorderRadius.circular(14),
+      borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.08)),
     );
     return InputDecoration(
-      labelText: label,
+      hintText: hint,
+      hintStyle: TextStyle(
+        color: AppTheme.textSecondary.withValues(alpha: 0.65),
+        fontWeight: FontWeight.w500,
+      ),
       filled: true,
-      fillColor: AppTheme.offWhite,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      fillColor: AppTheme.lightGray.withValues(alpha: 0.55),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       border: base,
       enabledBorder: base,
       focusedBorder: base.copyWith(
-        borderSide: BorderSide(color: navy, width: 2),
+        borderSide: BorderSide(color: accent, width: 2),
       ),
       errorBorder: base.copyWith(
         borderSide: BorderSide(color: Theme.of(context).colorScheme.error),
@@ -1384,256 +1664,345 @@ class _HireApplicantEmailDialogState extends State<_HireApplicantEmailDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final navy = AppTheme.primaryNavy;
+    final accent = AppTheme.primaryNavy;
     final mq = MediaQuery.sizeOf(context);
-    final contentW = min(mq.width - 40, 420.0);
+    final maxW = min(mq.width - 40, 448.0);
+    final maxH = mq.height - 40;
 
-    return AlertDialog(
+    return Dialog(
       backgroundColor: AppTheme.white,
       surfaceTintColor: Colors.transparent,
-      elevation: 8,
-      shadowColor: Colors.black.withValues(alpha: 0.12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-      titlePadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
-      contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
-      actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      icon: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: navy.withValues(alpha: 0.12),
-          shape: BoxShape.circle,
-        ),
-        child: Icon(Icons.mark_email_read_outlined, color: navy, size: 28),
-      ),
-      title: Text(
-        'Email applicant',
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          fontSize: 20,
-          fontWeight: FontWeight.w800,
-          letterSpacing: -0.35,
-          color: AppTheme.textPrimary,
-        ),
-      ),
-      content: SizedBox(
-        width: contentW,
-        child: SingleChildScrollView(
-          child: Form(
-            key: _formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Hired — credentials go to the applicant by email.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 13,
-                    height: 1.4,
-                    color: AppTheme.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: AppTheme.sectionAlt,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: Colors.black.withValues(alpha: 0.06),
-                    ),
-                  ),
+      elevation: 14,
+      shadowColor: Colors.black.withValues(alpha: 0.16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxW, maxHeight: maxH),
+        child: Column(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(28, 28, 28, 8),
+                child: Form(
+                  key: _formKey,
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Row(
-                        children: [
-                          Icon(Icons.alternate_email_rounded, size: 18, color: navy),
-                          const SizedBox(width: 8),
-                          Text(
-                            'RECIPIENT',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 1.1,
-                              color: AppTheme.textSecondary,
+                      Center(
+                        child: Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: accent.withValues(alpha: 0.1),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: accent.withValues(alpha: 0.45),
+                              width: 1.5,
                             ),
                           ),
-                        ],
+                          child: Icon(
+                            Icons.mark_email_read_outlined,
+                            color: accent,
+                            size: 30,
+                          ),
+                        ),
                       ),
-                      const SizedBox(height: 10),
-                      SelectableText(
-                        widget.applicantEmail,
+                      const SizedBox(height: 20),
+                      Text(
+                        'Email applicant',
+                        textAlign: TextAlign.center,
                         style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          height: 1.35,
+                          fontSize: 21,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.4,
+                          height: 1.2,
                           color: AppTheme.textPrimary,
                         ),
                       ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Container(
-                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                  decoration: BoxDecoration(
-                    color: navy.withValues(alpha: 0.06),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border(
-                      left: BorderSide(color: navy, width: 4),
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
+                      const SizedBox(height: 10),
                       Text(
-                        'Message preview',
+                        'Hired — credentials go to the applicant by email.',
+                        textAlign: TextAlign.center,
                         style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.9,
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Dear ${widget.applicantName}, …',
-                        style: TextStyle(
-                          fontSize: 14,
+                          fontSize: 13,
                           height: 1.45,
-                          fontStyle: FontStyle.italic,
-                          color: AppTheme.textPrimary.withValues(alpha: 0.88),
+                          color: AppTheme.textSecondary.withValues(alpha: 0.92),
                         ),
                       ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 22),
-                Text(
-                  'Login details',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextFormField(
-                  controller: _userCtrl,
-                  textInputAction: TextInputAction.next,
-                  autofillHints: const [AutofillHints.username],
-                  decoration: _credentialFieldDecoration(label: 'Username', navy: navy),
-                  validator: (v) {
-                    if (v == null || v.trim().isEmpty) {
-                      return 'Enter the username';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 14),
-                TextFormField(
-                  controller: _passCtrl,
-                  obscureText: _obscurePass,
-                  autofillHints: const [AutofillHints.password],
-                  decoration: _credentialFieldDecoration(
-                    label: 'Password',
-                    navy: navy,
-                    suffixIcon: IconButton(
-                      tooltip: _obscurePass ? 'Show password' : 'Hide password',
-                      onPressed: () =>
-                          setState(() => _obscurePass = !_obscurePass),
-                      icon: Icon(
-                        _obscurePass
-                            ? Icons.visibility_outlined
-                            : Icons.visibility_off_outlined,
-                        color: AppTheme.textSecondary,
+                      const SizedBox(height: 24),
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: AppTheme.sectionAlt,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: Colors.black.withValues(alpha: 0.05),
+                          ),
+                          boxShadow: AppTheme.cardShadow,
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.alternate_email_rounded,
+                                    size: 18,
+                                    color: accent,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'RECIPIENT',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 1.15,
+                                      color: AppTheme.textSecondary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              SelectableText(
+                                widget.applicantEmail,
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  height: 1.35,
+                                  color: AppTheme.textPrimary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-                  validator: (v) {
-                    if (v == null || v.isEmpty) {
-                      return 'Enter the password';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 18),
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFF8E1),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: const Color(0xFFFFB74D).withValues(alpha: 0.45),
-                    ),
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(
-                        Icons.privacy_tip_outlined,
-                        size: 22,
-                        color: navy.withValues(alpha: 0.95),
+                      const SizedBox(height: 16),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: IntrinsicHeight(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Container(
+                                width: 5,
+                                color: accent,
+                              ),
+                              Expanded(
+                                child: ColoredBox(
+                                  color: accent.withValues(alpha: 0.07),
+                                  child: Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      16,
+                                      14,
+                                      16,
+                                      14,
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'MESSAGE PREVIEW',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w800,
+                                            letterSpacing: 1.05,
+                                            color: AppTheme.textSecondary,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 10),
+                                        Text(
+                                          'Dear ${widget.applicantName}, …',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            height: 1.5,
+                                            fontStyle: FontStyle.italic,
+                                            color: AppTheme.textPrimary
+                                                .withValues(alpha: 0.88),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Standard email is not encrypted. Send only credentials '
-                          'you intend them to use. Ask them to change the password '
-                          'after first login if your system allows it.',
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            height: 1.5,
-                            color: AppTheme.textPrimary.withValues(alpha: 0.9),
+                      const SizedBox(height: 26),
+                      Text(
+                        'Login details',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.2,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: _userCtrl,
+                        textInputAction: TextInputAction.next,
+                        autofillHints: const [AutofillHints.username],
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
+                        ),
+                        decoration: _credentialFieldDecoration(
+                          hint: 'Username',
+                          accent: accent,
+                        ),
+                        validator: (v) {
+                          if (v == null || v.trim().isEmpty) {
+                            return 'Enter the username';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: _passCtrl,
+                        obscureText: _obscurePass,
+                        autofillHints: const [AutofillHints.password],
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
+                        ),
+                        decoration: _credentialFieldDecoration(
+                          hint: 'Password',
+                          accent: accent,
+                          suffixIcon: IconButton(
+                            tooltip: _obscurePass
+                                ? 'Show password'
+                                : 'Hide password',
+                            onPressed: () =>
+                                setState(() => _obscurePass = !_obscurePass),
+                            icon: Icon(
+                              _obscurePass
+                                  ? Icons.visibility_outlined
+                                  : Icons.visibility_off_outlined,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ),
+                        validator: (v) {
+                          if (v == null || v.isEmpty) {
+                            return 'Enter the password';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 20),
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF8E6),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: accent.withValues(alpha: 0.35),
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(
+                                Icons.shield_outlined,
+                                size: 24,
+                                color: accent,
+                              ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Text(
+                                  'Standard email is not encrypted. Send only '
+                                  'credentials you intend them to use. Ask them '
+                                  'to change the password after first login if '
+                                  'your system allows it.',
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    height: 1.55,
+                                    color: AppTheme.textPrimary
+                                        .withValues(alpha: 0.9),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
                     ],
                   ),
                 ),
-              ],
+              ),
             ),
-          ),
+            Divider(
+              height: 1,
+              thickness: 1,
+              color: Colors.black.withValues(alpha: 0.06),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 20, 18),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed:
+                        _sending ? null : () => Navigator.of(context).pop(),
+                    style: TextButton.styleFrom(
+                      foregroundColor: accent,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                    ),
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  FilledButton(
+                    onPressed: _sending ? null : _submit,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: accent,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 22,
+                        vertical: 14,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: _sending
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.send_rounded, size: 20),
+                              SizedBox(width: 8),
+                              Text(
+                                'Send email',
+                                style: TextStyle(fontWeight: FontWeight.w700),
+                              ),
+                            ],
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
-      actionsAlignment: MainAxisAlignment.end,
-      actions: [
-        TextButton(
-          onPressed: _sending ? null : () => Navigator.of(context).pop(),
-          style: TextButton.styleFrom(foregroundColor: navy),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: _sending ? null : _submit,
-          style: FilledButton.styleFrom(
-            backgroundColor: navy,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-          child: _sending
-              ? const SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
-                )
-              : const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.send_rounded, size: 20),
-                    SizedBox(width: 8),
-                    Text('Send email'),
-                  ],
-                ),
-        ),
-      ],
     );
   }
 }

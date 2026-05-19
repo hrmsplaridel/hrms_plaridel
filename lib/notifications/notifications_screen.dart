@@ -1,11 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-
 import '../landingpage/constants/app_theme.dart';
-import '../providers/auth_provider.dart';
 import 'app_notification.dart';
-import 'notification_provider.dart';
-import 'notification_tap_result.dart';
 
 /// In-app notifications (leave, future DTR, etc.) with HR-themed cards and clear read/unread states.
 class NotificationsScreen extends StatefulWidget {
@@ -17,24 +12,12 @@ class NotificationsScreen extends StatefulWidget {
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
   @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      context.read<NotificationProvider>().loadNotifications();
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final np = context.watch<NotificationProvider>();
-    final scheme = Theme.of(context).colorScheme;
-
     return Scaffold(
-      backgroundColor: AppTheme.sectionAlt,
+      backgroundColor: AppTheme.sectionAltOf(context),
       appBar: AppBar(
-        backgroundColor: AppTheme.white,
-        foregroundColor: AppTheme.textPrimary,
+        backgroundColor: AppTheme.dashPanelOf(context),
+        foregroundColor: AppTheme.dashTextPrimaryOf(context),
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         shadowColor: Colors.black.withValues(alpha: 0.08),
@@ -58,19 +41,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             letterSpacing: -0.2,
           ),
         ),
-        actions: [
-          if (np.unreadCount > 0)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: TextButton(
-                onPressed: () => np.markAllRead(),
-                style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.primaryNavy,
-                ),
-                child: const Text('Mark all read'),
-              ),
-            ),
-        ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
           child: Container(
@@ -79,150 +49,68 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           ),
         ),
       ),
-      body: np.loading && np.items.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(
-                    width: 32,
-                    height: 32,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 3,
-                      color: scheme.primary,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Loading notifications…',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 14,
-                    ),
+      body: const _ComingSoonState(),
+    );
+  }
+}
+
+class _ComingSoonState extends StatelessWidget {
+  const _ComingSoonState();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: AppTheme.white,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.06),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
                   ),
                 ],
               ),
-            )
-          : np.loadError != null && np.items.isEmpty
-          ? _ErrorState(message: np.loadError!)
-          : np.items.isEmpty
-          ? const _EmptyState()
-          : RefreshIndicator(
-              color: AppTheme.primaryNavy,
-              onRefresh: () => np.loadNotifications(),
-              child: Builder(
-                builder: (context) {
-                  final nowLocal = DateTime.now().toLocal();
-                  final todayDay = DateTime(
-                    nowLocal.year,
-                    nowLocal.month,
-                    nowLocal.day,
-                  );
-
-                  String groupLabel(DateTime createdAt) {
-                    final d = createdAt.toLocal();
-                    final itemDay = DateTime(d.year, d.month, d.day);
-                    final daysAgo = todayDay.difference(itemDay).inDays;
-                    if (daysAgo == 0) return 'Today';
-                    if (daysAgo == 1) return 'Yesterday';
-                    return 'Earlier';
-                  }
-
-                  // Flatten list into: [header, card, card, header, card...]
-                  final rows = <_NotificationListRow>[];
-                  String? lastLabel;
-                  for (final n in np.items) {
-                    final label = groupLabel(n.createdAt);
-                    if (lastLabel != label) {
-                      rows.add(_NotificationListRow.header(label));
-                      lastLabel = label;
-                    }
-                    rows.add(_NotificationListRow.item(n));
-                  }
-
-                  return ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                    itemCount: rows.length,
-                    itemBuilder: (context, index) {
-                      final row = rows[index];
-                      if (row.isHeader) {
-                        return Padding(
-                          padding: const EdgeInsets.only(top: 10, bottom: 8),
-                          child: Text(
-                            row.header!,
-                            style: TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 13,
-                              letterSpacing: 0.5,
-                              color: AppTheme.primaryNavy,
-                            ),
-                          ),
-                        );
-                      }
-
-                      final n = row.notification!;
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _NotificationCard(
-                          notification: n,
-                          onTap: () {
-                            _handleNotificationTap(context, n, np);
-                          },
-                        ),
-                      );
-                    },
-                  );
-                },
+              child: Icon(
+                Icons.construction_outlined,
+                size: 48,
+                color: AppTheme.textSecondary.withValues(alpha: 0.5),
               ),
             ),
-    );
-  }
-
-  Future<void> _handleNotificationTap(
-    BuildContext context,
-    AppNotification n,
-    NotificationProvider np,
-  ) async {
-    if (n.isUnread) {
-      await np.markRead(n.id);
-    }
-    if (!context.mounted) return;
-    final role = context.read<AuthProvider>().user?.role;
-    final result = NotificationTapResult.fromNotification(n, role: role);
-    Navigator.of(context).pop(result);
-  }
-}
-
-class _NotificationListRow {
-  const _NotificationListRow._({
-    required this.kind,
-    this.header,
-    this.notification,
-  });
-
-  final _NotificationListRowKind kind;
-  final String? header;
-  final AppNotification? notification;
-
-  bool get isHeader => kind == _NotificationListRowKind.header;
-
-  factory _NotificationListRow.header(String header) {
-    return _NotificationListRow._(
-      kind: _NotificationListRowKind.header,
-      header: header,
-    );
-  }
-
-  factory _NotificationListRow.item(AppNotification notification) {
-    return _NotificationListRow._(
-      kind: _NotificationListRowKind.item,
-      notification: notification,
+            const SizedBox(height: 24),
+            Text(
+              'Implementing soon',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'In-app notifications are coming in a future update.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                height: 1.4,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
 
-enum _NotificationListRowKind { header, item }
-
+// ignore: unused_element — kept for when notifications API is enabled.
 class _EmptyState extends StatelessWidget {
   const _EmptyState();
 
@@ -279,46 +167,7 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-class _ErrorState extends StatelessWidget {
-  const _ErrorState({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.cloud_off_outlined,
-              size: 48,
-              color: AppTheme.textSecondary.withValues(alpha: 0.6),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Couldn’t load notifications',
-              style: TextStyle(
-                fontWeight: FontWeight.w600,
-                fontSize: 16,
-                color: AppTheme.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14, color: AppTheme.textSecondary),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
+// ignore: unused_element — kept for when notifications API is enabled.
 class _NotificationCard extends StatelessWidget {
   const _NotificationCard({required this.notification, required this.onTap});
 

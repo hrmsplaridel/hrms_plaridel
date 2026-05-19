@@ -30,10 +30,7 @@ class HeaderSection extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            AppTheme.primaryNavy,
-            AppTheme.primaryNavyDark,
-          ],
+          colors: [AppTheme.primaryNavy, AppTheme.primaryNavyDark],
         ),
         boxShadow: [
           BoxShadow(
@@ -170,8 +167,10 @@ class _HeaderLoginButtonState extends State<_HeaderLoginButton> {
 
   static const _radius = 24.0;
   static const _padding = EdgeInsets.symmetric(horizontal: 24, vertical: 12);
-  static const _paddingCompact =
-      EdgeInsets.symmetric(horizontal: 18, vertical: 10);
+  static const _paddingCompact = EdgeInsets.symmetric(
+    horizontal: 18,
+    vertical: 10,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -307,8 +306,9 @@ class _LguBranding extends StatelessWidget {
     final lineMuted = lightOnColoredHeader
         ? Colors.white.withValues(alpha: 0.88)
         : AppTheme.textPrimary;
-    final titleColor =
-        lightOnColoredHeader ? Colors.white : AppTheme.textPrimary;
+    final titleColor = lightOnColoredHeader
+        ? Colors.white
+        : AppTheme.textPrimary;
     final dividerColor = lightOnColoredHeader
         ? Colors.white.withValues(alpha: 0.55)
         : Colors.black;
@@ -507,10 +507,7 @@ class _MunicipalityLogoCircular extends StatelessWidget {
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         border: lightEdge
-            ? Border.all(
-                color: Colors.white.withValues(alpha: 0.45),
-                width: 2,
-              )
+            ? Border.all(color: Colors.white.withValues(alpha: 0.45), width: 2)
             : null,
         boxShadow: lightEdge
             ? [

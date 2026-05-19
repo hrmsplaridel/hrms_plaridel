@@ -1566,20 +1566,23 @@ class _SectionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: AppTheme.white,
+        color: AppTheme.dashPanelOf(context),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+        boxShadow: dark
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 16,
+                  offset: const Offset(0, 4),
+                ),
+              ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1596,7 +1599,7 @@ class _SectionCard extends StatelessWidget {
                     Text(
                       title,
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         fontWeight: FontWeight.w700,
                         fontSize: 18,
                       ),
@@ -1605,7 +1608,7 @@ class _SectionCard extends StatelessWidget {
                     Text(
                       subtitle,
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 13,
                       ),
                     ),
@@ -1642,14 +1645,17 @@ class _CenteredState extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 28),
       decoration: BoxDecoration(
-        color: AppTheme.offWhite,
+        color: AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Text(
         message,
         textAlign: TextAlign.center,
-        style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+        style: TextStyle(
+          color: AppTheme.dashTextSecondaryOf(context),
+          fontSize: 14,
+        ),
       ),
     );
   }

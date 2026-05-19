@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../api/user_facing_api_error.dart';
@@ -101,7 +102,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   /// HR monitoring flag for Step 8 (independent of employee user link).
   bool _hrAccountSetupDone = false;
 
-  final _nameController = TextEditingController();
+  final _firstNameController = TextEditingController();
+  final _middleNameController = TextEditingController();
+  final _lastNameController = TextEditingController();
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
   final _continueEmailController = TextEditingController();
@@ -123,6 +126,31 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   Timer? _draftDebounce;
   bool _hasLocalDraft = false;
 
+  /// From [GET /api/rsp/email-verification/config]. `null` before first fetch.
+  bool? _serverRequiresEmailOtp;
+  int _emailOtpTtlMs = 600000;
+  bool _emailOtpSending = false;
+  bool _emailOtpVerifying = false;
+  String? _emailVerificationToken;
+  String? _verifiedEmailNorm;
+  final _emailOtpController = TextEditingController();
+  String? _suffixValue;
+  String? _sexValue;
+
+  static const List<String> _suffixOptions = [
+    'Jr.',
+    'Sr.',
+    'II',
+    'III',
+    'IV',
+    'V',
+    'VI',
+    'VII',
+    'VIII',
+    'IX',
+    'X',
+  ];
+
   /// Opens from **Apply now** on a vacancy (Step 1 form is shown). Otherwise = track-only entry.
   bool get _isVacancyApplication {
     final h = widget.selectedPositionHeadline?.trim();
@@ -142,13 +170,345 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   @override
   void initState() {
     super.initState();
-    _nameController.addListener(_scheduleDraftSave);
+    _firstNameController.addListener(_scheduleDraftSave);
+    _middleNameController.addListener(_scheduleDraftSave);
+    _lastNameController.addListener(_scheduleDraftSave);
     _emailController.addListener(_scheduleDraftSave);
+    _emailController.addListener(_onEmailMaybeInvalidateOtp);
     _phoneController.addListener(_scheduleDraftSave);
     _continueEmailController.addListener(_scheduleDraftSave);
     _continueEmailController.addListener(_onContinueEmailChangedForPreview);
     _continueEmailController.addListener(_rebuildForContinueButtonEligibility);
     if (_isVacancyApplication) _checkLocalDraft();
+    if (_isVacancyApplication) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _loadEmailOtpConfig(),
+      );
+    }
+  }
+
+  Future<void> _loadEmailOtpConfig() async {
+    if (!_isVacancyApplication) return;
+    try {
+      final cfg = await RecruitmentRepo.instance
+          .fetchRspEmailVerificationConfig();
+      if (!mounted) return;
+      setState(() {
+        _serverRequiresEmailOtp = cfg.requiresOtpForNewApplication;
+        _emailOtpTtlMs = cfg.otpTtlMs;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _serverRequiresEmailOtp = false);
+    }
+  }
+
+  void _onEmailMaybeInvalidateOtp() {
+    if (!_isVacancyApplication) return;
+    final e = _emailController.text.trim().toLowerCase();
+    if (_verifiedEmailNorm == null) return;
+    if (e == _verifiedEmailNorm) return;
+    setState(() {
+      _emailVerificationToken = null;
+      _verifiedEmailNorm = null;
+    });
+  }
+
+  bool get _step1EmailOtpVerified {
+    final tok = _emailVerificationToken?.trim();
+    if (tok == null || tok.isEmpty) return false;
+    final addr = _emailController.text.trim().toLowerCase();
+    final v = _verifiedEmailNorm?.trim().toLowerCase();
+    return v != null && v.isNotEmpty && addr == v;
+  }
+
+  int get _emailOtpTtlMinutes =>
+      ((_emailOtpTtlMs / 60000).round()).clamp(1, 120);
+
+  Future<void> _sendApplicantEmailOtp() async {
+    final email = _emailController.text.trim();
+    if (!_isValidEmailFormat(email)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid email address first.')),
+      );
+      return;
+    }
+    setState(() {
+      _emailOtpSending = true;
+      if (_verifiedEmailNorm != email.toLowerCase()) {
+        _emailVerificationToken = null;
+        _verifiedEmailNorm = null;
+      }
+    });
+    try {
+      await RecruitmentRepo.instance.sendRspApplicantEmailOtp(
+        email,
+        fullName: (() {
+          final first = _firstNameController.text.trim();
+          final middle = _middleNameController.text.trim();
+          final last = _lastNameController.text.trim();
+          final parts = <String>[
+            first,
+            if (middle.isNotEmpty) middle,
+            last,
+          ].where((s) => s.trim().isNotEmpty).toList();
+          final base = parts.join(' ').trim();
+          if (base.isEmpty) return null;
+          return _suffixValue != null ? '$base ${_suffixValue!}' : base;
+        })(),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Check your inbox for a 6-digit verification code (check spam folder too).',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    } finally {
+      if (mounted) setState(() => _emailOtpSending = false);
+    }
+  }
+
+  Future<void> _verifyApplicantEmailOtp() async {
+    final email = _emailController.text.trim();
+    final code = _emailOtpController.text.replaceAll(RegExp(r'\s'), '');
+    if (!_isValidEmailFormat(email)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid email address first.')),
+      );
+      return;
+    }
+    if (!RegExp(r'^\d{6}$').hasMatch(code)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Enter the 6-digit code from your email.'),
+        ),
+      );
+      return;
+    }
+    FocusScope.of(context).unfocus();
+    setState(() => _emailOtpVerifying = true);
+    try {
+      final token = await RecruitmentRepo.instance.verifyRspApplicantEmailOtp(
+        email,
+        code,
+      );
+      if (!mounted) return;
+      setState(() {
+        _emailVerificationToken = token;
+        _verifiedEmailNorm = email.toLowerCase();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Email verified. You can continue and submit your application.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    } finally {
+      if (mounted) setState(() => _emailOtpVerifying = false);
+    }
+  }
+
+  Widget _buildStep1EmailOtpSection() {
+    if (!_isVacancyApplication) return const SizedBox.shrink();
+    if (_serverRequiresEmailOtp == null) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppTheme.primaryNavy.withValues(alpha: 0.75),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Checking email verification…',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    if (_serverRequiresEmailOtp != true) return const SizedBox.shrink();
+
+    final verified = _step1EmailOtpVerified;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Verify your email',
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'We will send a one-time code to this address so we know it is yours and messages from HR '
+            'can reach you. The code expires in about $_emailOtpTtlMinutes minutes.',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 13,
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 14),
+          if (verified)
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: Colors.green.shade50,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: Colors.green.shade700.withValues(alpha: 0.35),
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.verified_rounded,
+                      color: Colors.green.shade800,
+                      size: 22,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Email verified for this application.',
+                        style: TextStyle(
+                          color: Colors.green.shade900,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else ...[
+            Wrap(
+              spacing: 12,
+              runSpacing: 10,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: (_submitting || _emailOtpSending)
+                      ? null
+                      : _sendApplicantEmailOtp,
+                  icon: _emailOtpSending
+                      ? SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppTheme.primaryNavy.withValues(alpha: 0.85),
+                          ),
+                        )
+                      : const Icon(Icons.mark_email_read_outlined, size: 20),
+                  label: Text(_emailOtpSending ? 'Sending…' : 'Send code'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.primaryNavy,
+                    side: BorderSide(
+                      color: AppTheme.primaryNavy.withValues(alpha: 0.65),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final narrow = constraints.maxWidth < 400;
+                final otpField = TextField(
+                  controller: _emailOtpController,
+                  decoration: _step1FieldDecoration(
+                    '6-digit code',
+                    hintText: '000000',
+                    prefixIcon: Icons.pin_outlined,
+                  ).copyWith(counterText: ''),
+                  keyboardType: TextInputType.number,
+                  maxLength: 6,
+                  textInputAction: TextInputAction.done,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  onSubmitted: (_) => _verifyApplicantEmailOtp(),
+                  enabled: !_submitting,
+                );
+                final verifyBtn = FilledButton(
+                  onPressed:
+                      (_submitting || _emailOtpVerifying || _emailOtpSending)
+                      ? null
+                      : _verifyApplicantEmailOtp,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.primaryNavy,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 14,
+                      horizontal: 18,
+                    ),
+                  ),
+                  child: _emailOtpVerifying
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text('Verify'),
+                );
+                if (narrow) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [otpField, const SizedBox(height: 10), verifyBtn],
+                  );
+                }
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: otpField),
+                    const SizedBox(width: 12),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: verifyBtn,
+                    ),
+                  ],
+                );
+              },
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   void _rebuildForContinueButtonEligibility() {
@@ -191,7 +551,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       return;
     }
     try {
-      final lookup = await RecruitmentRepo.instance.getApplicationByEmail(email);
+      final lookup = await RecruitmentRepo.instance.getApplicationByEmail(
+        email,
+      );
       if (!mounted || lookup == null) return;
       setState(() {
         _step1StatusApp = lookup.application;
@@ -215,7 +577,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       _step1StatusExam = null;
     });
     try {
-      final lookup = await RecruitmentRepo.instance.getApplicationByEmail(email);
+      final lookup = await RecruitmentRepo.instance.getApplicationByEmail(
+        email,
+      );
       if (!mounted) return;
       _stopStep1StatusTimer();
       if (lookup == null) {
@@ -261,11 +625,15 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     if (!_isVacancyApplication || _step != 1) return;
     try {
       final prefs = await SharedPreferences.getInstance();
-      final name = _nameController.text.trim();
+      final first = _firstNameController.text.trim();
+      final middle = _middleNameController.text.trim();
+      final last = _lastNameController.text.trim();
       final email = _emailController.text.trim();
       final phone = _phoneController.text.trim();
       final cont = _continueEmailController.text.trim();
-      if (name.isEmpty && email.isEmpty && phone.isEmpty && cont.isEmpty) {
+      final hasAnyName =
+          first.isNotEmpty || middle.isNotEmpty || last.isNotEmpty;
+      if (!hasAnyName && email.isEmpty && phone.isEmpty && cont.isEmpty) {
         await prefs.remove(_kRspStep1DraftKey);
         if (mounted) setState(() => _hasLocalDraft = false);
         return;
@@ -273,7 +641,11 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       await prefs.setString(
         _kRspStep1DraftKey,
         jsonEncode({
-          'name': _nameController.text,
+          'firstName': _firstNameController.text,
+          'middleName': _middleNameController.text,
+          'lastName': _lastNameController.text,
+          'suffix': _suffixValue,
+          'sex': _sexValue,
           'email': _emailController.text,
           'phone': _phoneController.text,
           'continueEmail': _continueEmailController.text,
@@ -292,7 +664,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       if (decoded is! Map) return;
       final m = Map<String, dynamic>.from(decoded);
       final hasText = [
-        m['name']?.toString().trim(),
+        m['firstName']?.toString().trim(),
+        m['middleName']?.toString().trim(),
+        m['lastName']?.toString().trim(),
         m['email']?.toString().trim(),
         m['phone']?.toString().trim(),
         m['continueEmail']?.toString().trim(),
@@ -308,7 +682,15 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       if (!mounted || raw == null) return;
       final m = Map<String, dynamic>.from(jsonDecode(raw) as Map);
       setState(() {
-        _nameController.text = m['name']?.toString() ?? '';
+        _firstNameController.text = m['firstName']?.toString() ?? '';
+        _middleNameController.text = m['middleName']?.toString() ?? '';
+        _lastNameController.text = m['lastName']?.toString() ?? '';
+        _suffixValue = m['suffix']?.toString().trim().isEmpty == true
+            ? null
+            : m['suffix']?.toString();
+        _sexValue = m['sex']?.toString().trim().isEmpty == true
+            ? null
+            : m['sex']?.toString();
         _emailController.text = m['email']?.toString() ?? '';
         _phoneController.text = m['phone']?.toString() ?? '';
         _continueEmailController.text = m['continueEmail']?.toString() ?? '';
@@ -334,13 +716,21 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     _step1StatusTimer?.cancel();
     _beiGradingPollTimer?.cancel();
     _draftDebounce?.cancel();
-    _nameController.removeListener(_scheduleDraftSave);
+    _firstNameController.removeListener(_scheduleDraftSave);
+    _middleNameController.removeListener(_scheduleDraftSave);
+    _lastNameController.removeListener(_scheduleDraftSave);
     _emailController.removeListener(_scheduleDraftSave);
+    _emailController.removeListener(_onEmailMaybeInvalidateOtp);
     _phoneController.removeListener(_scheduleDraftSave);
     _continueEmailController.removeListener(_scheduleDraftSave);
     _continueEmailController.removeListener(_onContinueEmailChangedForPreview);
-    _continueEmailController.removeListener(_rebuildForContinueButtonEligibility);
-    _nameController.dispose();
+    _continueEmailController.removeListener(
+      _rebuildForContinueButtonEligibility,
+    );
+    _firstNameController.dispose();
+    _middleNameController.dispose();
+    _lastNameController.dispose();
+    _emailOtpController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
     _continueEmailController.dispose();
@@ -457,14 +847,20 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   }
 
   Future<void> _submitStep1() async {
-    final name = _nameController.text.trim();
+    final first = _firstNameController.text.trim();
+    final middle = _middleNameController.text.trim();
+    final last = _lastNameController.text.trim();
     final email = _emailController.text.trim();
     final phone = _phoneController.text.trim();
-    if (name.isEmpty || email.isEmpty || phone.isEmpty) {
+    if (first.isEmpty ||
+        last.isEmpty ||
+        _sexValue == null ||
+        email.isEmpty ||
+        phone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Please enter your full name, email, and phone number.',
+            'Please enter your first name, last name, gender, email, and phone number.',
           ),
         ),
       );
@@ -473,6 +869,16 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     if (!_isValidEmailFormat(email)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a valid email address.')),
+      );
+      return;
+    }
+    if (_serverRequiresEmailOtp == true && !_step1EmailOtpVerified) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Verify your email first: tap Send code, enter the 6-digit code from your inbox, then Verify.',
+          ),
+        ),
       );
       return;
     }
@@ -511,14 +917,24 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       final id = await RecruitmentRepo.instance.insertApplication(
         RecruitmentApplication(
           id: '',
-          fullName: name,
+          fullName:
+              '$first${middle.isNotEmpty ? ' $middle' : ''} $last${_suffixValue != null ? ' ${_suffixValue!}' : ''}'
+                  .trim(),
+          firstName: first,
+          middleName: middle.isNotEmpty ? middle : null,
+          lastName: last,
+          suffix: _suffixValue,
+          sex: _sexValue,
           email: email,
           phone: phone,
           resumeNotes: null,
-          positionAppliedFor:
-              (pos != null && pos.isNotEmpty) ? pos : null,
+          positionAppliedFor: (pos != null && pos.isNotEmpty) ? pos : null,
           status: 'submitted',
         ),
+        emailVerificationToken:
+            (_serverRequiresEmailOtp == true && _step1EmailOtpVerified)
+            ? _emailVerificationToken
+            : null,
       );
       if (mounted) {
         try {
@@ -557,9 +973,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     } catch (e) {
       if (mounted) {
         setState(() => _submitting = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(userFacingApiError(e))),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
       }
     }
   }
@@ -623,13 +1039,15 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     _cancelExamCountdown();
     if (!mounted) return;
     final label = _examLabelForType(examType);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Time limit reached for $label.')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Time limit reached for $label.')));
     switch (examType) {
       case 'general':
         setState(() => _step = 5);
-        WidgetsBinding.instance.addPostFrameCallback((_) => _loadMathQuestions());
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _loadMathQuestions(),
+        );
         return;
       case 'math':
         setState(() => _step = 6);
@@ -704,7 +1122,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     }
     _beiAnswersForSubmit = answers;
     try {
-      _examTimeLimitSeconds = await RecruitmentRepo.instance.getExamTimeLimits();
+      _examTimeLimitSeconds = await RecruitmentRepo.instance
+          .getExamTimeLimits();
     } catch (_) {
       _examTimeLimitSeconds = Map<String, int>.from(
         RecruitmentRepo.kDefaultRspExamTimeLimitSeconds,
@@ -1088,7 +1507,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         : _continueEmailController.text.trim().toLowerCase();
     if (email.isEmpty || _applicationId == null) return;
     try {
-      final lookup = await RecruitmentRepo.instance.getApplicationByEmail(email);
+      final lookup = await RecruitmentRepo.instance.getApplicationByEmail(
+        email,
+      );
       if (!mounted || lookup == null) return;
       final app = lookup.application;
       if (app.id == _applicationId) {
@@ -1125,8 +1546,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final email = _emailForExamStatusLookup();
     if (email.isEmpty) return;
     try {
-      final lookup =
-          await RecruitmentRepo.instance.getApplicationByEmail(email);
+      final lookup = await RecruitmentRepo.instance.getApplicationByEmail(
+        email,
+      );
       if (!mounted || lookup == null) return;
       final exam = lookup.examResult;
       if (exam == null || !exam.beiGradingComplete) return;
@@ -1144,10 +1566,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   /// Picks the correct step after "Continue to exam" using DB status + optional exam row.
   /// Previously only `document_approved` advanced past step 2; after the exam, status is
   /// `passed`/`failed`, so applicants were stuck on "Under review".
-  int _resumeStepFor(
-    RecruitmentApplication app,
-    RecruitmentExamResult? exam,
-  ) {
+  int _resumeStepFor(RecruitmentApplication app, RecruitmentExamResult? exam) {
     if (app.status == 'document_declined') return 2;
     if (app.status == 'submitted') return 2;
 
@@ -1258,7 +1677,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     }
     setState(() => _continueLoading = true);
     try {
-      final lookup = await RecruitmentRepo.instance.getApplicationByEmail(email);
+      final lookup = await RecruitmentRepo.instance.getApplicationByEmail(
+        email,
+      );
       if (!mounted) return;
       if (lookup == null) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1301,8 +1722,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         _hiredUserId = app.hiredUserId;
         _hrAccountSetupDone = app.hrAccountSetupDone;
         final p = app.positionAppliedFor?.trim();
-        _applicationPositionAppliedFor =
-            (p != null && p.isNotEmpty) ? p : null;
+        _applicationPositionAppliedFor = (p != null && p.isNotEmpty) ? p : null;
         if (exam != null) {
           _examScore = exam.scorePercent;
           _examPassed = exam.passed;
@@ -1328,12 +1748,12 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       if (nextStep == 1 && trackingOnly && mounted) {
         final hint =
             (exam != null && !exam.passed && exam.beiGradingComplete) ||
-                    app.status == 'failed'
-                ? _trackingContinueBlockedHint(app, exam)
-                : _trackingOnlyContinueStayMessage(app.status);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(hint)),
-        );
+                app.status == 'failed'
+            ? _trackingContinueBlockedHint(app, exam)
+            : _trackingOnlyContinueStayMessage(app.status);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(hint)));
       }
     } catch (e) {
       if (mounted) {
@@ -1534,8 +1954,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                               fontSize: kIsWeb ? 14 : 13,
                               height: 1.4,
                               fontWeight: FontWeight.w500,
-                              color: AppTheme.textSecondary
-                                  .withValues(alpha: 0.92),
+                              color: AppTheme.textSecondary.withValues(
+                                alpha: 0.92,
+                              ),
                             ),
                           ),
                         ],
@@ -1699,10 +2120,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       style: FilledButton.styleFrom(
         backgroundColor: navy,
         foregroundColor: Colors.white,
-        disabledBackgroundColor:
-            AppTheme.lightGray.withValues(alpha: 0.92),
-        disabledForegroundColor:
-            AppTheme.textSecondary.withValues(alpha: 0.55),
+        disabledBackgroundColor: AppTheme.lightGray.withValues(alpha: 0.92),
+        disabledForegroundColor: AppTheme.textSecondary.withValues(alpha: 0.55),
         padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
         minimumSize: const Size(120, 48),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -1726,10 +2145,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           ? SizedBox(
               width: 18,
               height: 18,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: navy,
-              ),
+              child: CircularProgressIndicator(strokeWidth: 2, color: navy),
             )
           : const Icon(Icons.alt_route_rounded, size: 21),
       label: Text(_step1StatusLoading ? 'Checking…' : 'Check status'),
@@ -1749,12 +2165,14 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     );
     final app = _step1StatusApp;
     final emailNonEmpty = _continueEmailController.text.trim().isNotEmpty;
-    final showCheckStatusFirstHint = emailNonEmpty &&
+    final showCheckStatusFirstHint =
+        emailNonEmpty &&
         app == null &&
         !_step1StatusLoading &&
         !_continueLoading &&
         _step1StatusError == null;
-    final showBlockedHint = app != null &&
+    final showBlockedHint =
+        app != null &&
         emailNonEmpty &&
         !_canProceedTrackingContinue(app, _step1StatusExam);
 
@@ -1929,7 +2347,10 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
           child: ExpansionTile(
             initiallyExpanded: false,
-            tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+            tilePadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 2,
+            ),
             childrenPadding: const EdgeInsets.only(bottom: 4),
             iconColor: AppTheme.primaryNavy,
             collapsedIconColor: AppTheme.primaryNavy,
@@ -2090,17 +2511,82 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           ),
         ),
         const SizedBox(height: 22),
+        _step1FormSectionHeader(
+          'Personal information',
+          subtitle:
+              'Provide your name and gender exactly as it appears on your records.',
+        ),
+        const SizedBox(height: 14),
         Padding(
-          padding: const EdgeInsets.only(bottom: 18),
+          padding: const EdgeInsets.only(bottom: 14),
           child: TextField(
-            controller: _nameController,
+            controller: _firstNameController,
             decoration: _step1FieldDecoration(
-              'Full Name',
+              'First Name',
               requiredMark: true,
-              hintText: 'As it appears on valid ID',
+              hintText: 'First name',
               prefixIcon: Icons.person_outline_rounded,
             ),
             textCapitalization: TextCapitalization.words,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: TextField(
+            controller: _middleNameController,
+            decoration: _step1FieldDecoration(
+              'Middle Name',
+              hintText: 'Middle name (optional)',
+              prefixIcon: Icons.person_outline_rounded,
+            ),
+            textCapitalization: TextCapitalization.words,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: TextField(
+            controller: _lastNameController,
+            decoration: _step1FieldDecoration(
+              'Last Name',
+              requiredMark: true,
+              hintText: 'Last name',
+              prefixIcon: Icons.person_outline_rounded,
+            ),
+            textCapitalization: TextCapitalization.words,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: DropdownButtonFormField<String>(
+            initialValue: _suffixValue,
+            items: _suffixOptions
+                .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                .toList(),
+            onChanged: (v) => setState(() => _suffixValue = v),
+            decoration: _step1FieldDecoration(
+              'Suffix',
+              hintText: 'Select suffix (optional)',
+              prefixIcon: Icons.text_fields_rounded,
+            ),
+            isExpanded: true,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 18),
+          child: DropdownButtonFormField<String>(
+            initialValue: _sexValue,
+            items: const [
+              DropdownMenuItem(value: 'Male', child: Text('Male')),
+              DropdownMenuItem(value: 'Female', child: Text('Female')),
+            ],
+            onChanged: (v) => setState(() => _sexValue = v),
+            decoration: _step1FieldDecoration(
+              'Gender',
+              requiredMark: true,
+              hintText: 'Select gender',
+              prefixIcon: Icons.wc_rounded,
+            ),
+            isExpanded: true,
           ),
         ),
         _step1FormSectionHeader(
@@ -2115,6 +2601,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             controller: _emailController,
             decoration: _step1FieldDecoration(
               'Email',
+              requiredMark: _serverRequiresEmailOtp == true,
               hintText: 'you@example.com',
               prefixIcon: Icons.alternate_email_rounded,
             ),
@@ -2122,6 +2609,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             autocorrect: false,
           ),
         ),
+        _buildStep1EmailOtpSection(),
         Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: TextField(
@@ -2205,8 +2693,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                         label: const Text('Choose PDF file'),
                         style: FilledButton.styleFrom(
                           foregroundColor: AppTheme.primaryNavy,
-                          backgroundColor:
-                              AppTheme.primaryNavy.withValues(alpha: 0.12),
+                          backgroundColor: AppTheme.primaryNavy.withValues(
+                            alpha: 0.12,
+                          ),
                           padding: const EdgeInsets.symmetric(
                             vertical: 14,
                             horizontal: 16,
@@ -2259,8 +2748,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                             ),
                           ),
                           TextButton(
-                            onPressed:
-                                _submitting ? null : () => _removeDoc(kind),
+                            onPressed: _submitting
+                                ? null
+                                : () => _removeDoc(kind),
                             child: const Text('Remove'),
                           ),
                         ],
@@ -3025,8 +3515,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       return _buildStep7AwaitingBeiGrading();
     }
     final examOk = _examPassed;
-    final examAccent =
-        examOk ? const Color(0xFFE85D04) : Colors.deepOrange.shade700;
+    final examAccent = examOk
+        ? const Color(0xFFE85D04)
+        : Colors.deepOrange.shade700;
     final examBg = examOk
         ? AppTheme.primaryNavy.withValues(alpha: 0.07)
         : Colors.orange.shade50;
@@ -3079,8 +3570,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                 ),
               );
               final textBlock = Column(
-                crossAxisAlignment:
-                    narrow ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+                crossAxisAlignment: narrow
+                    ? CrossAxisAlignment.center
+                    : CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
@@ -3120,11 +3612,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               if (narrow) {
                 return Column(
                   mainAxisSize: MainAxisSize.min,
-                  children: [
-                    iconCircle,
-                    const SizedBox(height: 18),
-                    textBlock,
-                  ],
+                  children: [iconCircle, const SizedBox(height: 18), textBlock],
                 );
               }
               return Row(
@@ -3213,7 +3701,11 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.info_outline_rounded, color: Colors.red.shade800, size: 30),
+                Icon(
+                  Icons.info_outline_rounded,
+                  color: Colors.red.shade800,
+                  size: 30,
+                ),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Text(
@@ -3273,7 +3765,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                           color: Colors.white.withValues(alpha: 0.65),
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
-                            color: const Color(0xFF43A047).withValues(alpha: 0.25),
+                            color: const Color(
+                              0xFF43A047,
+                            ).withValues(alpha: 0.25),
                           ),
                         ),
                         child: Row(
@@ -3504,7 +3998,11 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               children: [
                 Row(
                   children: [
-                    Icon(Icons.emoji_events_rounded, color: Colors.green.shade900, size: 36),
+                    Icon(
+                      Icons.emoji_events_rounded,
+                      color: Colors.green.shade900,
+                      size: 36,
+                    ),
                     const SizedBox(width: 14),
                     Expanded(
                       child: Text(
@@ -3592,7 +4090,11 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.info_outline_rounded, color: Colors.red.shade800, size: 28),
+                Icon(
+                  Icons.info_outline_rounded,
+                  color: Colors.red.shade800,
+                  size: 28,
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
@@ -3626,7 +4128,11 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.info_outline_rounded, color: AppTheme.primaryNavy, size: 22),
+                  Icon(
+                    Icons.info_outline_rounded,
+                    color: AppTheme.primaryNavy,
+                    size: 22,
+                  ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(

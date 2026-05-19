@@ -25,6 +25,48 @@ class _TrainingDailyReportEmployeeScreenState
   PlatformFile? _selectedFile;
   List<TrainingDailyReport> _reports = [];
 
+  static String _formatSubmittedAt(DateTime d) {
+    final l = d.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${l.year}-${two(l.month)}-${two(l.day)} · ${two(l.hour)}:${two(l.minute)}';
+  }
+
+  InputDecoration _inputDecoration({
+    required String label,
+    String? hint,
+    Widget? prefixIcon,
+    bool alignLabelWithHint = false,
+  }) {
+    final muted = Colors.black.withValues(alpha: 0.14);
+    final focused = AppTheme.primaryNavy;
+    return InputDecoration(
+      labelText: label,
+      hintText: hint,
+      prefixIcon: prefixIcon,
+      alignLabelWithHint: alignLabelWithHint,
+      filled: true,
+      fillColor: AppTheme.sectionAlt.withValues(alpha: 0.35),
+      floatingLabelBehavior: FloatingLabelBehavior.auto,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: muted, width: 1),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: muted, width: 1),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: focused, width: 1.5),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+    );
+  }
+
+  void _clearSelectedFile() {
+    setState(() => _selectedFile = null);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -51,7 +93,7 @@ class _TrainingDailyReportEmployeeScreenState
   Future<void> _pickFile() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx'],
+      allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf'],
       withData: true,
     );
     if (result != null && result.files.isNotEmpty) {
@@ -117,168 +159,403 @@ class _TrainingDailyReportEmployeeScreenState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'Daily Training Reports',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.18),
+                ),
+              ),
+              child: Icon(
+                Icons.edit_note_rounded,
+                color: AppTheme.primaryNavy,
+                size: 28,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Daily Training Reports',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.4,
+                      height: 1.15,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Submit your daily training activities while you are on training.',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary.withValues(alpha: 0.95),
+                      fontSize: 14.5,
+                      height: 1.45,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 6),
-        Text(
-          'Submit your daily training activities while you are on training.',
-          style: TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: 14,
-          ),
-        ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 22),
         Container(
-          padding: const EdgeInsets.all(20),
+          clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             color: AppTheme.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.05)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.04),
-                blurRadius: 14,
-                offset: const Offset(0, 4),
-              ),
-            ],
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: Colors.black.withValues(alpha: 0.06),
+            ),
+            boxShadow: AppTheme.panelShadow,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              RspSpacedOutlineField(
-                child: TextField(
-                  controller: _titleController,
-                  decoration: InputDecoration(
-                    labelText: 'Report title',
-                    hintText: 'e.g. Orientation on HRIS and records filing',
-                    prefixIcon: const Icon(Icons.article_outlined),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                  ),
-                ),
-              ),
-              RspSpacedOutlineField(
-                child: TextField(
-                  controller: _descriptionController,
-                  maxLines: 5,
-                  decoration: InputDecoration(
-                    labelText: 'Description',
-                    hintText:
-                        'Provide details about the tasks, tools used, and what you learned.',
-                    alignLabelWithHint: true,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: rspFormFieldVerticalGap),
-              GestureDetector(
-                onTap: _pickFile,
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: Colors.black.withOpacity(0.1),
-                      style: BorderStyle.solid,
-                    ),
-                    color: Colors.grey.shade50,
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.attach_file_rounded,
-                        color: AppTheme.textSecondary.withOpacity(0.9),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _selectedFile?.name ??
-                              'Attach image or document (JPG, PNG, PDF, DOC, DOCX) · optional',
-                          style: TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 13,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      TextButton(
-                        onPressed: _pickFile,
-                        child: const Text('Browse'),
-                      ),
+              Container(
+                height: 4,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      AppTheme.primaryNavy,
+                      AppTheme.primaryNavyLight,
                     ],
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
-              Align(
-                alignment: Alignment.centerRight,
-                child: FilledButton(
-                  onPressed: _submitting ? null : _submit,
-                  child: _submitting
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(22, 18, 22, 22),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'New report',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Title is required. Add a short description and an optional JPG, PNG, or PDF.',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary.withValues(alpha: 0.92),
+                        fontSize: 13,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    RspSpacedOutlineField(
+                      child: TextField(
+                        controller: _titleController,
+                        textCapitalization: TextCapitalization.sentences,
+                        decoration: _inputDecoration(
+                          label: 'Report title',
+                          hint: 'e.g. Orientation on HRIS and records filing',
+                          prefixIcon: const Icon(Icons.article_outlined),
+                        ),
+                      ),
+                    ),
+                    RspSpacedOutlineField(
+                      child: TextField(
+                        controller: _descriptionController,
+                        maxLines: 5,
+                        textCapitalization: TextCapitalization.sentences,
+                        decoration: _inputDecoration(
+                          label: 'Description',
+                          hint:
+                              'Tasks, tools, and what you learned today.',
+                          alignLabelWithHint: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: rspFormFieldVerticalGap),
+                    Text(
+                      'Attachment',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Material(
+                      color: AppTheme.sectionAlt.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(14),
+                      child: InkWell(
+                        onTap: _pickFile,
+                        borderRadius: BorderRadius.circular(14),
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: AppTheme.primaryNavy.withValues(alpha: 0.2),
+                            ),
                           ),
-                        )
-                      : const Text('Submit report'),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.perm_media_outlined,
+                                    size: 22,
+                                    color: AppTheme.primaryNavy
+                                        .withValues(alpha: 0.85),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      'Image or PDF',
+                                      style: TextStyle(
+                                        color: AppTheme.textPrimary,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ),
+                                  FilledButton.tonal(
+                                    onPressed: _pickFile,
+                                    style: FilledButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 18,
+                                        vertical: 10,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                    ),
+                                    child: const Text('Browse'),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'JPG, PNG, or PDF · optional · up to 10 MB',
+                                style: TextStyle(
+                                  color: AppTheme.textSecondary.withValues(
+                                    alpha: 0.9,
+                                  ),
+                                  fontSize: 12.5,
+                                  height: 1.35,
+                                ),
+                              ),
+                              if (_selectedFile != null) ...[
+                                const SizedBox(height: 12),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 10,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.white,
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: Colors.black.withValues(
+                                        alpha: 0.08,
+                                      ),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.insert_drive_file_rounded,
+                                        size: 20,
+                                        color: AppTheme.primaryNavy,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(
+                                          _selectedFile!.name,
+                                          style: const TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600,
+                                            color: AppTheme.textPrimary,
+                                          ),
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      IconButton(
+                                        tooltip: 'Remove file',
+                                        onPressed: _clearSelectedFile,
+                                        icon: Icon(
+                                          Icons.close_rounded,
+                                          color: AppTheme.textSecondary
+                                              .withValues(alpha: 0.85),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ] else ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Tap this area or use Browse to attach proof.',
+                                  style: TextStyle(
+                                    color: AppTheme.textSecondary.withValues(
+                                      alpha: 0.75,
+                                    ),
+                                    fontSize: 12,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        FilledButton.icon(
+                          onPressed: _submitting ? null : _submit,
+                          icon: _submitting
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: AppTheme.white,
+                                  ),
+                                )
+                              : const Icon(Icons.send_rounded, size: 20),
+                          label: Text(_submitting ? 'Submitting…' : 'Submit report'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppTheme.primaryNavy,
+                            foregroundColor: AppTheme.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 22,
+                              vertical: 14,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 28),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Text(
+              'My previous reports',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.25,
+              ),
+            ),
+            if (!_loading && _reports.isNotEmpty) ...[
+              const SizedBox(width: 10),
+              Text(
+                '${_reports.length}',
+                style: TextStyle(
+                  color: AppTheme.textSecondary.withValues(alpha: 0.85),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 6),
         Text(
-          'My previous reports',
+          'Open any row to see the full entry you submitted.',
           style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
+            color: AppTheme.textSecondary.withValues(alpha: 0.88),
+            fontSize: 13,
+            height: 1.35,
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 14),
         if (_loading)
-          const Padding(
-            padding: EdgeInsets.all(16),
-            child: Center(child: CircularProgressIndicator()),
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 36),
+            decoration: BoxDecoration(
+              color: AppTheme.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: Colors.black.withValues(alpha: 0.06),
+              ),
+              boxShadow: AppTheme.cardShadow,
+            ),
+            child: const Center(
+              child: CircularProgressIndicator(),
+            ),
           )
         else if (_reports.isEmpty)
-          Padding(
-            padding: const EdgeInsets.all(16),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
+            decoration: BoxDecoration(
+              color: AppTheme.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: Colors.black.withValues(alpha: 0.06),
+              ),
+              boxShadow: AppTheme.cardShadow,
+            ),
             child: Row(
               children: [
-                Icon(
-                  Icons.info_outline_rounded,
-                  color: AppTheme.textSecondary.withOpacity(0.9),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.sectionAlt,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.inbox_outlined,
+                    color: AppTheme.textSecondary.withValues(alpha: 0.9),
+                    size: 26,
+                  ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 16),
                 Expanded(
-                  child: Text(
-                    'You have not submitted any training reports yet.',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 13,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'No reports yet',
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'When you submit your first daily report, it will show up here.',
+                        style: TextStyle(
+                          color: AppTheme.textSecondary.withValues(alpha: 0.92),
+                          fontSize: 13.5,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -288,68 +565,114 @@ class _TrainingDailyReportEmployeeScreenState
           Column(
             children: _reports
                 .map(
-                  (r) => Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
+                  (r) => Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Material(
                       color: AppTheme.white,
-                      borderRadius: BorderRadius.circular(12),
-                      border:
-                          Border.all(color: Colors.black.withOpacity(0.04)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Text(
-                                r.title,
+                      borderRadius: BorderRadius.circular(16),
+                      elevation: 0,
+                      shadowColor: Colors.transparent,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: Colors.black.withValues(alpha: 0.07),
+                          ),
+                          boxShadow: AppTheme.cardShadow,
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(18, 16, 14, 12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      r.title,
+                                      style: const TextStyle(
+                                        color: AppTheme.textPrimary,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 15,
+                                        height: 1.25,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  _StatusChip(status: r.status),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                (r.description != null &&
+                                        r.description!.trim().isNotEmpty)
+                                    ? r.description!.trim()
+                                    : 'No description provided.',
                                 style: TextStyle(
-                                  color: AppTheme.textPrimary,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 13,
+                                  color: AppTheme.textSecondary.withValues(
+                                    alpha: 0.95,
+                                  ),
+                                  fontSize: 13.5,
+                                  height: 1.45,
+                                ),
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 10),
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.schedule_rounded,
+                                    size: 16,
+                                    color: AppTheme.textSecondary.withValues(
+                                      alpha: 0.75,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Submitted ${_formatSubmittedAt(r.submittedAt)}',
+                                    style: TextStyle(
+                                      color: AppTheme.textSecondary.withValues(
+                                        alpha: 0.88,
+                                      ),
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton.icon(
+                                  onPressed: () => showReadOnlySavedEntryDialog(
+                                    context,
+                                    title: 'Submitted report',
+                                    previewBuilder: () =>
+                                        TrainingDailyReportReadOnlyView(
+                                          report: r,
+                                        ),
+                                    contentWidth: 560,
+                                  ),
+                                  icon: const Icon(
+                                    Icons.visibility_outlined,
+                                    size: 18,
+                                  ),
+                                  label: const Text('View full entry'),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: AppTheme.primaryNavy,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
+                                  ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            _StatusChip(status: r.status),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          r.description ?? 'No description provided.',
-                          style: TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 12,
-                          ),
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Submitted ${r.submittedAt.toLocal()}',
-                          style: TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 11,
+                            ],
                           ),
                         ),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: TextButton.icon(
-                            onPressed: () => showReadOnlySavedEntryDialog(
-                              context,
-                              title: 'Submitted report',
-                              previewBuilder: () =>
-                                  TrainingDailyReportReadOnlyView(report: r),
-                              contentWidth: 560,
-                            ),
-                            icon: const Icon(Icons.visibility_outlined, size: 18),
-                            label: const Text('View full entry'),
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
                   ),
                 )
@@ -364,10 +687,17 @@ class _StatusChip extends StatelessWidget {
   const _StatusChip({required this.status});
   final String status;
 
+  static String _displayLabel(String raw) {
+    final t = raw.trim();
+    if (t.isEmpty) return '—';
+    return t[0].toUpperCase() + t.substring(1).replaceAll('_', ' ');
+  }
+
   @override
   Widget build(BuildContext context) {
+    final raw = status.trim();
     Color color;
-    switch (status.toLowerCase()) {
+    switch (raw.toLowerCase()) {
       case 'seen':
         color = Colors.blueGrey;
         break;
@@ -385,17 +715,19 @@ class _StatusChip extends StatelessWidget {
         color = Colors.grey;
     }
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
       ),
       child: Text(
-        status[0].toUpperCase() + status.substring(1),
+        _displayLabel(raw),
         style: TextStyle(
           color: color,
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.15,
         ),
       ),
     );

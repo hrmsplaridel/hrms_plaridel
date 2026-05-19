@@ -28,6 +28,11 @@ class RecruitmentApplication {
   const RecruitmentApplication({
     required this.id,
     required this.fullName,
+    this.firstName,
+    this.middleName,
+    this.lastName,
+    this.suffix,
+    this.sex,
     required this.email,
     this.phone,
     this.resumeNotes,
@@ -53,6 +58,11 @@ class RecruitmentApplication {
 
   final String id;
   final String fullName;
+  final String? firstName;
+  final String? middleName;
+  final String? lastName;
+  final String? suffix;
+  final String? sex;
   final String email;
   final String? phone;
   final String? resumeNotes;
@@ -129,6 +139,11 @@ class RecruitmentApplication {
     return RecruitmentApplication(
       id: json['id'] as String,
       fullName: json['full_name'] as String? ?? '',
+      firstName: json['first_name'] as String?,
+      middleName: json['middle_name'] as String?,
+      lastName: json['last_name'] as String?,
+      suffix: json['suffix'] as String?,
+      sex: json['sex'] as String?,
       email: json['email'] as String? ?? '',
       phone: json['phone'] as String?,
       resumeNotes: json['resume_notes'] as String?,
@@ -163,7 +178,13 @@ class RecruitmentApplication {
 
   Map<String, dynamic> toJson() {
     return {
-      'full_name': fullName,
+      // Prefer new fields; backend will compute full_name.
+      'firstName': firstName,
+      'middleName': middleName,
+      'lastName': lastName,
+      'suffix': suffix,
+      'sex': sex,
+      'fullName': fullName,
       'email': email,
       'phone': phone?.trim().isEmpty == true ? null : phone?.trim(),
       'resume_notes': resumeNotes?.trim().isEmpty == true
@@ -249,6 +270,35 @@ class _RecruitmentJson {
   }
 }
 
+/// [GET /api/rsp/email-verification/config]: whether Step 1 must verify email via OTP before submit.
+class RspEmailVerificationConfig {
+  const RspEmailVerificationConfig({
+    required this.requiresOtpForNewApplication,
+    required this.otpTtlMs,
+  });
+
+  final bool requiresOtpForNewApplication;
+  /// Server OTP lifetime for display (code validity), not JWT lifetime.
+  final int otpTtlMs;
+
+  static RspEmailVerificationConfig fromJson(Map<String, dynamic>? m) {
+    if (m == null) {
+      return const RspEmailVerificationConfig(
+        requiresOtpForNewApplication: false,
+        otpTtlMs: 600000,
+      );
+    }
+    final req =
+        m['requiresOtpForNewApplication'] == true || m['otpEnabled'] == true;
+    final ttlRaw = (m['otpTtlMs'] as num?)?.toInt() ?? 600000;
+    final ttl = ttlRaw.clamp(60_000, 3_600_000).toInt();
+    return RspEmailVerificationConfig(
+      requiresOtpForNewApplication: req,
+      otpTtlMs: ttl,
+    );
+  }
+}
+
 /// Repo for recruitment applications and exam results.
 class RecruitmentRepo {
   RecruitmentRepo._();
@@ -260,6 +310,53 @@ class RecruitmentRepo {
     'math': 45 * 60,
     'general_info': 10 * 60,
   };
+
+  /// Step 1 email OTP enrollment (backend EmailJS template + JWT secret).
+  Future<RspEmailVerificationConfig> fetchRspEmailVerificationConfig() async {
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/rsp/email-verification/config',
+      );
+      return RspEmailVerificationConfig.fromJson(res.data);
+    } on DioException {
+      return const RspEmailVerificationConfig(
+        requiresOtpForNewApplication: false,
+        otpTtlMs: 600000,
+      );
+    }
+  }
+
+  /// Sends a 6-digit code to the applicant inbox (public).
+  ///
+  /// Optional [fullName] is sent as `fullName` for EmailJS {{to_name}} when provided.
+  Future<void> sendRspApplicantEmailOtp(
+    String email, {
+    String? fullName,
+  }) async {
+    final data = <String, dynamic>{'email': email.trim()};
+    final n = fullName?.trim();
+    if (n != null && n.isNotEmpty) data['fullName'] = n;
+    await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/email-verification/send',
+      data: data,
+    );
+  }
+
+  /// Confirms code; returns short-lived token for [insertApplication].
+  Future<String> verifyRspApplicantEmailOtp(String email, String code) async {
+    final res = await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/email-verification/verify',
+      data: <String, dynamic>{
+        'email': email.trim().toLowerCase(),
+        'code': code.trim(),
+      },
+    );
+    final t = res.data?['emailVerificationToken']?.toString().trim();
+    if (t == null || t.isEmpty) {
+      throw Exception('Verification did not return a token. Try again.');
+    }
+    return t;
+  }
 
   /// Delete an applicant and related exam result rows (PostgreSQL via API).
   Future<void> deleteApplication(String applicationId) async {
@@ -283,19 +380,35 @@ class RecruitmentRepo {
   }
 
   /// Insert new application (Step 1). Returns the created row id.
-  Future<String> insertApplication(RecruitmentApplication app) async {
+  ///
+  /// When the server enables email OTP, pass [emailVerificationToken] from
+  /// [verifyRspApplicantEmailOtp] for the same address as [app.email].
+  Future<String> insertApplication(
+    RecruitmentApplication app, {
+    String? emailVerificationToken,
+  }) async {
     final email = app.email.trim();
     try {
+      final body = <String, dynamic>{
+        'firstName': app.firstName,
+        'middleName': app.middleName,
+        'lastName': app.lastName,
+        'suffix': app.suffix,
+        'sex': app.sex,
+        'fullName': app.fullName, // legacy fallback
+        'email': email.isEmpty ? '' : email.toLowerCase(),
+        'phone': app.phone,
+        'resumeNotes': app.resumeNotes,
+        'positionAppliedFor': app.positionAppliedFor,
+        'status': app.status,
+      };
+      final tok = emailVerificationToken?.trim();
+      if (tok != null && tok.isNotEmpty) {
+        body['emailVerificationToken'] = tok;
+      }
       final res = await ApiClient.instance.post<Map<String, dynamic>>(
         '/api/rsp/applications',
-        data: {
-          'fullName': app.fullName,
-          'email': email.isEmpty ? '' : email.toLowerCase(),
-          'phone': app.phone,
-          'resumeNotes': app.resumeNotes,
-          'positionAppliedFor': app.positionAppliedFor,
-          'status': app.status,
-        },
+        data: body,
       );
       final appRow = res.data?['application'] as Map<String, dynamic>?;
       final id = appRow?['id'];

@@ -147,14 +147,17 @@ class _DocuTrackerDashboardScreenState extends State<DocuTrackerDashboardScreen>
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: AppTheme.white,
+        color: AppTheme.dashPanelOf(context),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Center(
         child: Text(
           'No documents yet.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+          style: TextStyle(
+            color: AppTheme.dashTextPrimaryOf(context),
+            fontSize: 13,
+          ),
         ),
       ),
     );
@@ -356,10 +359,10 @@ class _DocuTrackerDashboardScreenState extends State<DocuTrackerDashboardScreen>
         const SizedBox(height: 12),
         Container(
           decoration: highlightOverdue
-              ? DocuTrackerStyles.listCardDecoration().copyWith(
+              ? DocuTrackerStyles.listCardDecoration(context).copyWith(
                   border: Border.all(color: Colors.red.withOpacity(0.3)),
                 )
-              : DocuTrackerStyles.listCardDecoration(),
+              : DocuTrackerStyles.listCardDecoration(context),
           child: docs.isEmpty
               ? Padding(
                   padding: const EdgeInsets.all(24),

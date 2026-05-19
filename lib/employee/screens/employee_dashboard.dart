@@ -17,15 +17,15 @@ import '../../../leave/leave_main.dart';
 import '../../../leave/leave_provider.dart';
 import '../../../leave/widgets/my_leave_loading_skeleton.dart';
 import '../../../locator/screens/employee_locator_slip_screen.dart';
-import '../../../notifications/notification_provider.dart';
-import '../../../notifications/notification_tap_result.dart';
-import '../../../notifications/open_notifications_panel.dart';
 import '../../../leave/models/leave_type.dart';
 import '../../../widgets/user_avatar.dart';
 import '../../../ld/training_daily_report_employee_screen.dart';
 import '../widgets/attendance_overview/attendance_overview.dart';
 import '../widgets/employee_dashboard_skeletons.dart';
-import '../../shared/screens/profile_and_settings_page.dart';
+import '../../shared/screens/profile_page.dart' show DashboardProfilePanel;
+import '../../shared/widgets/dashboard_content_navigator.dart';
+import '../../shared/widgets/dashboard_header_actions.dart';
+import '../../shared/widgets/portal_sidebar_brand.dart';
 
 /// Main scroll padding: comfortable insets on phones (narrower gutters still breathe).
 EdgeInsets _employeeMainScrollPadding(BuildContext context) {
@@ -55,47 +55,8 @@ class EmployeeDashboard extends StatefulWidget {
   State<EmployeeDashboard> createState() => _EmployeeDashboardState();
 }
 
-class _EmployeeDashboardState extends State<EmployeeDashboard>
-    with WidgetsBindingObserver {
+class _EmployeeDashboardState extends State<EmployeeDashboard> {
   int _selectedNavIndex = 0;
-
-  /// One frame: open My Leave on the tab chosen from a notification tap.
-  LeaveSection? _leaveInitialSection;
-
-  /// Bumps when routing from a notification so [LeaveMain] remounts with [initialSection].
-  int _leaveNavKey = 0;
-
-  /// Polls unread count so badges update when other users trigger notifications (e.g. HR after dept head approval).
-  Timer? _notificationPollTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      context.read<NotificationProvider>().refreshUnreadCount();
-      _notificationPollTimer?.cancel();
-      _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-        if (!mounted) return;
-        context.read<NotificationProvider>().refreshUnreadCount();
-      });
-    });
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && mounted) {
-      context.read<NotificationProvider>().refreshUnreadCount();
-    }
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _notificationPollTimer?.cancel();
-    super.dispose();
-  }
 
   static const _navItems = [
     'Dashboard',
@@ -107,67 +68,82 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
     'Announcements',
   ];
 
-  Future<void> _handleOpenNotifications() async {
-    final result = await openNotificationsPanel(context);
-    if (!mounted) return;
-    await context.read<NotificationProvider>().refreshUnreadCount();
-    if (!mounted) return;
-    _applyNotificationTapResult(result);
+  /// Shown only via account menu (not listed in sidebar).
+  static const int _profileNavIndex = 7;
+  static const _settingsPanelKey = PageStorageKey<String>('employee_settings');
+  late final Widget _settingsPanel = const DashboardProfilePanel(
+    key: _settingsPanelKey,
+  );
+  final GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
+
+  void _openMyProfile() {
+    if (DashboardContentNavigator.isSettingsOnTop(_contentNavKey.currentState)) {
+      setState(() => _selectedNavIndex = _profileNavIndex);
+      return;
+    }
+    setState(() => _selectedNavIndex = _profileNavIndex);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      DashboardContentNavigator.openSettings(_contentNavKey);
+    });
   }
 
-  void _applyNotificationTapResult(NotificationTapResult? result) {
-    if (result == null || result.kind == NotificationTapKind.none) return;
-    switch (result.kind) {
-      case NotificationTapKind.employeeLeaveApprovals:
-      case NotificationTapKind.employeeLeaveRequests:
-        final section = result.employeeLeaveSection;
-        if (section == null) return;
-        setState(() {
-          _selectedNavIndex = 2;
-          _leaveInitialSection = section;
-          _leaveNavKey++;
-        });
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            setState(() => _leaveInitialSection = null);
-          }
-        });
-        break;
-      case NotificationTapKind.employeeMyAttendance:
-        setState(() => _selectedNavIndex = 1);
-        break;
-      case NotificationTapKind.employeeLocatorApprovals:
-      case NotificationTapKind.employeeLocatorRequests:
-        setState(() => _selectedNavIndex = 3);
-        break;
-      case NotificationTapKind.adminDtrLocatorManagement:
-      case NotificationTapKind.adminDtrLeaveManagement:
-      case NotificationTapKind.none:
-        break;
+  void _onNavSelected(int index) {
+    if (index == _profileNavIndex) {
+      _openMyProfile();
+      return;
+    }
+    setState(() => _selectedNavIndex = index);
+    DashboardContentNavigator.showHome(_contentNavKey);
+  }
+
+  Widget _employeeMainChild({required String displayName}) {
+    switch (_selectedNavIndex) {
+      case 0:
+        return _EmployeeDashboardContent(
+          displayName: displayName,
+          onViewAttendance: () => setState(() => _selectedNavIndex = 1),
+        );
+      case 1:
+        return const _EmployeeAttendanceContent();
+      case 2:
+        return const _EmployeeLeaveMainEntry();
+      case 3:
+        return const EmployeeLocatorSlipScreen();
+      case 4:
+        return const TrainingDailyReportEmployeeScreen();
+      case 5:
+        return const DocuTrackerMain(isAdmin: false);
+      case _profileNavIndex:
+        return const SizedBox.shrink();
+      default:
+        return _EmployeePlaceholderContent(
+          title: _navItems[_selectedNavIndex],
+        );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
-    // Sync DTR current user from API auth (so clock in/out and time records use correct user).
-    if (auth.user != null) {
+    final userId = context.select<AuthProvider, String?>((a) => a.user?.id);
+    if (userId != null && userId.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!context.mounted) return;
         final dtr = context.read<DtrProvider>();
-        if (dtr.userId != auth.user?.id) dtr.setUserFromApi(auth.user?.id);
+        if (dtr.userId != userId) dtr.setUserFromApi(userId);
       });
     }
-    final displayName = auth.displayName.isNotEmpty
-        ? auth.displayName
-        : 'Employee';
-    final email = auth.email;
-    final avatarPath = auth.avatarPath;
+    final displayName = context.select<AuthProvider, String>(
+      (a) => a.displayName.isNotEmpty ? a.displayName : 'Employee',
+    );
+    final avatarPath = context.select<AuthProvider, String?>(
+      (a) => a.avatarPath,
+    );
     final width = MediaQuery.of(context).size.width;
     final isWide = width > 900;
 
     return Scaffold(
-      backgroundColor: AppTheme.offWhite,
+      backgroundColor: AppTheme.dashCanvasOf(context),
       drawer: isWide
           ? null
           : Drawer(
@@ -177,71 +153,95 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                   avatarPath: avatarPath,
                   selectedIndex: _selectedNavIndex,
                   onTap: (i) {
-                    setState(() => _selectedNavIndex = i);
+                    _onNavSelected(i);
                     if (context.mounted) Navigator.of(context).pop();
                   },
                 ),
               ),
             ),
       body: SafeArea(
-        child: Row(
-          children: [
-            if (isWide)
-              _EmployeeSidebar(
-                displayName: displayName,
-                avatarPath: avatarPath,
-                selectedIndex: _selectedNavIndex,
-                onTap: (i) => setState(() => _selectedNavIndex = i),
-              ),
-            Expanded(
-              child: Column(
+        child: isWide
+            ? Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _EmployeeTopBar(
+                  _EmployeeSidebar(
+                    railMode: true,
                     displayName: displayName,
-                    email: email,
                     avatarPath: avatarPath,
-                    showMenuButton: !isWide,
-                    onOpenNotifications: _handleOpenNotifications,
-                    onProfileTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const ProfileAndSettingsPage(),
-                        ),
-                      );
-                    },
+                    selectedIndex: _selectedNavIndex,
+                    onTap: _onNavSelected,
                   ),
                   Expanded(
-                    child: SingleChildScrollView(
-                      padding: _employeeMainScrollPadding(context),
-                      child: _selectedNavIndex == 0
-                          ? _EmployeeDashboardContent(
-                              displayName: displayName,
-                              onViewAttendance: () =>
-                                  setState(() => _selectedNavIndex = 1),
-                            )
-                          : _selectedNavIndex == 1
-                          ? const _EmployeeAttendanceContent()
-                          : _selectedNavIndex == 2
-                          ? _EmployeeLeaveMainEntry(
-                              key: ValueKey(_leaveNavKey),
-                              initialSection: _leaveInitialSection,
-                            )
-                          : _selectedNavIndex == 3
-                          ? const EmployeeLocatorSlipScreen()
-                          : _selectedNavIndex == 4
-                          ? const TrainingDailyReportEmployeeScreen()
-                          : _selectedNavIndex == 5
-                          ? const DocuTrackerMain(isAdmin: false)
-                          : _EmployeePlaceholderContent(
-                              title: _navItems[_selectedNavIndex],
+                    child: Column(
+                      children: [
+                        DashboardAppHeaderBar(
+                          showBrand: false,
+                          compactActions: width < 600,
+                          trailing: DashboardAccountMenuButton(
+                            avatarPath: avatarPath,
+                            compact: width < 600,
+                            tooltip: displayName,
+                            onProfile: () => _openMyProfile(),
+                          ),
+                        ),
+                        Expanded(
+                          child: ColoredBox(
+                            color: AppTheme.dashCanvasOf(context),
+                            child: DashboardContentNavigator(
+                              navigatorKey: _contentNavKey,
+                              homeBuilder: () =>
+                                  _employeeMainChild(displayName: displayName),
+                              settingsPanel: _settingsPanel,
+                              homeScrollPadding:
+                                  _employeeMainScrollPadding(context),
+                              settingsScrollPadding: const EdgeInsets.fromLTRB(
+                                12,
+                                8,
+                                12,
+                                28,
+                              ),
                             ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              )
+            : Column(
+                children: [
+                  DashboardAppHeaderBar(
+                    showMenuButton: true,
+                    onMenuPressed: () => Scaffold.of(context).openDrawer(),
+                    compactActions: width < 600,
+                    trailing: DashboardAccountMenuButton(
+                      avatarPath: avatarPath,
+                      compact: width < 600,
+                      tooltip: displayName,
+                      onProfile: () => _openMyProfile(),
+                    ),
+                  ),
+                  Expanded(
+                    child: ColoredBox(
+                      color: AppTheme.dashCanvasOf(context),
+                      child: DashboardContentNavigator(
+                        navigatorKey: _contentNavKey,
+                        homeBuilder: () =>
+                            _employeeMainChild(displayName: displayName),
+                        settingsPanel: _settingsPanel,
+                        homeScrollPadding:
+                            _employeeMainScrollPadding(context),
+                        settingsScrollPadding: const EdgeInsets.fromLTRB(
+                          12,
+                          8,
+                          12,
+                          28,
+                        ),
+                      ),
                     ),
                   ),
                 ],
               ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -272,7 +272,7 @@ class EmployeeAttendanceOverviewSection extends StatelessWidget {
     final w = MediaQuery.sizeOf(context).width;
     final isNarrow = w < 600;
     final isTiny = w < 360;
-    final welcomeSize = isTiny ? 18.0 : (isNarrow ? 20.0 : 26.0);
+    final welcomeSize = isTiny ? 17.0 : (isNarrow ? 19.0 : 24.0);
     final subtitleSize = isNarrow ? 13.5 : 15.0;
 
     final header = adminPortal
@@ -282,17 +282,18 @@ class EmployeeAttendanceOverviewSection extends StatelessWidget {
               Text(
                 'My Attendance',
                 style: TextStyle(
-                  color: AppTheme.textPrimary,
+                  color: AppTheme.dashTextPrimaryOf(context),
                   fontSize: welcomeSize,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w700,
                   height: 1.25,
+                  letterSpacing: -0.35,
                 ),
               ),
               const SizedBox(height: 6),
               Text(
                 'View your time-in/out records.',
                 style: TextStyle(
-                  color: AppTheme.textSecondary,
+                  color: AppTheme.dashTextSecondaryOf(context),
                   fontSize: subtitleSize,
                   height: 1.35,
                 ),
@@ -305,10 +306,11 @@ class EmployeeAttendanceOverviewSection extends StatelessWidget {
               Text(
                 'Welcome back, $displayName!',
                 style: TextStyle(
-                  color: AppTheme.textPrimary,
+                  color: AppTheme.dashTextPrimaryOf(context),
                   fontSize: welcomeSize,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w700,
                   height: 1.25,
+                  letterSpacing: -0.35,
                 ),
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
@@ -317,7 +319,7 @@ class EmployeeAttendanceOverviewSection extends StatelessWidget {
               Text(
                 "Here's your latest information and updates.",
                 style: TextStyle(
-                  color: AppTheme.textSecondary,
+                  color: AppTheme.dashTextSecondaryOf(context),
                   fontSize: subtitleSize,
                   height: 1.35,
                 ),
@@ -382,9 +384,7 @@ class EmployeeAttendanceDetailsSection extends StatelessWidget {
 }
 
 class _EmployeeLeaveMainEntry extends StatefulWidget {
-  const _EmployeeLeaveMainEntry({super.key, this.initialSection});
-
-  final LeaveSection? initialSection;
+  const _EmployeeLeaveMainEntry();
 
   @override
   State<_EmployeeLeaveMainEntry> createState() =>
@@ -429,279 +429,223 @@ class _EmployeeLeaveMainEntryState extends State<_EmployeeLeaveMainEntry> {
             ],
           );
         }
-        return LeaveMain(
-          isAdmin: false,
-          isDepartmentHead: isDeptHead,
-          initialSection: widget.initialSection,
-        );
+        return LeaveMain(isAdmin: false, isDepartmentHead: isDeptHead);
       },
     );
   }
 }
 
-/// Dark blue sidebar: HR branding, nav (Dashboard, My Attendance, My Leave, DocuTracker, Announcements), user block, footer.
+/// Light sidebar: clean nav (same destinations as before), user block, footer.
 class _EmployeeSidebar extends StatelessWidget {
   const _EmployeeSidebar({
     required this.displayName,
     this.avatarPath,
     required this.selectedIndex,
     required this.onTap,
+    this.showBrand = true,
+    this.railMode = false,
   });
 
   final String displayName;
   final String? avatarPath;
   final int selectedIndex;
   final ValueChanged<int> onTap;
+  final bool showBrand;
+  final bool railMode;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 268,
-      decoration: const BoxDecoration(color: AppTheme.primaryNavy),
-      child: Column(
-        children: [
-          const SizedBox(height: 24),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
-              decoration: BoxDecoration(
-                color: AppTheme.primaryNavy,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: Colors.white.withOpacity(0.1),
-                  width: 1,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.3),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
+    final hairline = AppTheme.dashHairlineOf(context);
+    final canvas = AppTheme.dashCanvasOf(context);
+    final panel = AppTheme.dashPanelOf(context);
+
+    final navList = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(height: railMode ? 12 : (showBrand ? 4 : 12)),
+                  _EmployeeNavTile(
+                    icon: Icons.home_outlined,
+                    label: 'Dashboard',
+                    selected: selectedIndex == 0,
+                    onTap: () => onTap(0),
                   ),
-                ],
+                  _EmployeeNavTile(
+                    icon: Icons.event_available_outlined,
+                    label: 'My Attendance',
+                    selected: selectedIndex == 1,
+                    onTap: () => onTap(1),
+                  ),
+                  _EmployeeNavTile(
+                    icon: Icons.event_busy_outlined,
+                    label: 'My Leave',
+                    selected: selectedIndex == 2,
+                    onTap: () => onTap(2),
+                  ),
+                  _EmployeeNavTile(
+                    icon: Icons.pin_drop_outlined,
+                    label: 'Locator Slip',
+                    selected: selectedIndex == 3,
+                    onTap: () => onTap(3),
+                  ),
+                  _EmployeeNavTile(
+                    icon: Icons.assignment_outlined,
+                    label: 'Training Reports',
+                    selected: selectedIndex == 4,
+                    onTap: () => onTap(4),
+                  ),
+                  _EmployeeNavTile(
+                    icon: Icons.description_outlined,
+                    label: 'DocuTracker',
+                    selected: selectedIndex == 5,
+                    onTap: () => onTap(5),
+                  ),
+                  _EmployeeNavTile(
+                    icon: Icons.campaign_outlined,
+                    label: 'Announcements',
+                    selected: selectedIndex == 6,
+                    onTap: () => onTap(6),
+                  ),
+        const SizedBox(height: 12),
+      ],
+    );
+
+    final footer = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Container(
+            height: 2,
+            decoration: BoxDecoration(
+              color: AppTheme.primaryNavy.withValues(alpha: 0.28),
+              borderRadius: BorderRadius.circular(1),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+          child: DashboardSidebarProfileCard(
+            displayName: displayName,
+            subtitle: 'Employee',
+            avatarPath: avatarPath,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            children: [
+              Text(
+                '© ${DateTime.now().year} HRMS',
+                style: TextStyle(
+                  color: AppTheme.dashTextSecondaryOf(context)
+                      .withValues(alpha: 0.85),
+                  fontSize: 11,
+                ),
               ),
-              child: Row(
+              const SizedBox(height: 4),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.white, width: 2),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.2),
-                          blurRadius: 6,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
+                  TextButton(
+                    onPressed: () {},
+                    style: TextButton.styleFrom(
+                      minimumSize: Size.zero,
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
                     ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.asset(
-                        'assets/images/Plaridel Logo.jpg',
-                        width: 48,
-                        height: 48,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
-                          width: 48,
-                          height: 48,
-                          color: AppTheme.primaryNavy,
-                          child: const Icon(
-                            Icons.shield_rounded,
-                            color: Colors.white,
-                            size: 28,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            'Municipality of Plaridel',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w800,
-                              height: 1.2,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            'HUMAN RESOURCE MANAGEMENT SYSTEM',
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.95),
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 0.4,
-                              height: 1.2,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 28),
-          _EmployeeNavTile(
-            icon: Icons.home_rounded,
-            label: 'Dashboard',
-            selected: selectedIndex == 0,
-            onTap: () => onTap(0),
-          ),
-          _EmployeeNavTile(
-            icon: Icons.event_available_rounded,
-            label: 'My Attendance',
-            selected: selectedIndex == 1,
-            onTap: () => onTap(1),
-          ),
-          _EmployeeNavTile(
-            icon: Icons.event_busy_rounded,
-            label: 'My Leave',
-            selected: selectedIndex == 2,
-            onTap: () => onTap(2),
-          ),
-          _EmployeeNavTile(
-            icon: Icons.pin_drop_outlined,
-            label: 'Locator Slip',
-            selected: selectedIndex == 3,
-            onTap: () => onTap(3),
-          ),
-          _EmployeeNavTile(
-            icon: Icons.assignment_rounded,
-            label: 'Training Reports',
-            selected: selectedIndex == 4,
-            onTap: () => onTap(4),
-          ),
-          _EmployeeNavTile(
-            icon: Icons.description_rounded,
-            label: 'DocuTracker',
-            selected: selectedIndex == 5,
-            onTap: () => onTap(5),
-          ),
-          _EmployeeNavTile(
-            icon: Icons.campaign_rounded,
-            label: 'Announcements',
-            selected: selectedIndex == 6,
-            onTap: () => onTap(6),
-          ),
-          const Spacer(),
-          const Divider(height: 1, color: Colors.white24),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-            child: Row(
-              children: [
-                UserAvatar(
-                  avatarPath: avatarPath,
-                  radius: 24,
-                  backgroundColor: Colors.white.withOpacity(0.25),
-                  placeholderIconColor: Colors.white,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        displayName,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14,
-                        ),
-                      ),
-                      Text(
-                        'Employee',
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.85),
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Column(
-              children: [
-                Text(
-                  '© 2026 HRMS',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.6),
-                    fontSize: 11,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    TextButton(
-                      onPressed: () {},
-                      style: TextButton.styleFrom(
-                        minimumSize: Size.zero,
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                      ),
-                      child: Text(
-                        'Privacy Policy',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.white.withOpacity(0.7),
-                        ),
-                      ),
-                    ),
-                    Text(
-                      ' | ',
+                    child: Text(
+                      'Privacy Policy',
                       style: TextStyle(
                         fontSize: 11,
-                        color: Colors.white.withOpacity(0.6),
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.primaryNavy,
                       ),
                     ),
-                    TextButton(
-                      onPressed: () {},
-                      style: TextButton.styleFrom(
-                        minimumSize: Size.zero,
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                      ),
-                      child: Text(
-                        'Terms',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.white.withOpacity(0.7),
-                        ),
+                  ),
+                  Text(
+                    ' | ',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.textSecondary.withValues(alpha: 0.6),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () {},
+                    style: TextButton.styleFrom(
+                      minimumSize: Size.zero,
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                    ),
+                    child: Text(
+                      'Terms',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.primaryNavy,
                       ),
                     ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+
+    if (railMode) {
+      return Container(
+        width: kDashboardSidebarWidth,
+        decoration: BoxDecoration(
+          border: Border(right: BorderSide(color: hairline)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SidebarRailHeader(),
+            Expanded(
+              child: ColoredBox(
+                color: canvas,
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: SingleChildScrollView(child: navList),
+                    ),
+                    footer,
                   ],
                 ),
-              ],
+              ),
             ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      width: kDashboardSidebarWidth,
+      decoration: BoxDecoration(
+        color: panel,
+        border: Border(right: BorderSide(color: hairline)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 14,
+            offset: const Offset(1, 0),
           ),
-          const SizedBox(height: 16),
+        ],
+      ),
+      child: Column(
+        children: [
+          if (showBrand) const PortalSidebarBrand(),
+          Expanded(
+            child: SingleChildScrollView(child: navList),
+          ),
+          footer,
         ],
       ),
     );
   }
 }
 
-class _EmployeeNavTile extends StatelessWidget {
+class _EmployeeNavTile extends StatefulWidget {
   const _EmployeeNavTile({
     required this.icon,
     required this.label,
@@ -715,351 +659,62 @@ class _EmployeeNavTile extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) {
-    final bgColor = selected
-        ? Colors.white.withOpacity(0.22)
-        : Colors.transparent;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(10),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: bgColor,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              children: [
-                Icon(icon, size: 22, color: Colors.white),
-                const SizedBox(width: 14),
-                Text(
-                  label,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w500,
-                    fontSize: 14,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  State<_EmployeeNavTile> createState() => _EmployeeNavTileState();
 }
 
-/// Light gray top bar: search, notifications (badge), settings, user.
-class _EmployeeTopBar extends StatelessWidget {
-  const _EmployeeTopBar({
-    required this.displayName,
-    required this.email,
-    this.avatarPath,
-    this.showMenuButton = false,
-    required this.onOpenNotifications,
-    this.onProfileTap,
-  });
-
-  final String displayName;
-  final String email;
-  final String? avatarPath;
-  final bool showMenuButton;
-  final Future<void> Function() onOpenNotifications;
-  final VoidCallback? onProfileTap;
+class _EmployeeNavTileState extends State<_EmployeeNavTile> {
+  bool _hover = false;
 
   @override
   Widget build(BuildContext context) {
-    final isCompact = MediaQuery.of(context).size.width < 600;
-    return Container(
-      height: isCompact ? 56 : 64,
-      padding: EdgeInsets.symmetric(
-        horizontal: isCompact ? 16 : 24,
-        vertical: isCompact ? 6 : 8,
-      ),
-      decoration: BoxDecoration(
-        color: AppTheme.lightGray,
-        border: Border(
-          bottom: BorderSide(color: Colors.black.withOpacity(0.06)),
-        ),
-      ),
-      child: Row(
-        children: [
-          if (showMenuButton)
-            IconButton(
-              icon: const Icon(Icons.menu_rounded),
-              onPressed: () => Scaffold.of(context).openDrawer(),
-              color: AppTheme.textPrimary,
-              tooltip: 'Menu',
-              style: IconButton.styleFrom(
-                backgroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-          if (showMenuButton && !isCompact) const SizedBox(width: 12),
-          Expanded(
-            child: isCompact
-                ? const SizedBox.shrink()
-                : Container(
-                    height: 40,
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.black.withOpacity(0.08)),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.search_rounded,
-                          size: 20,
-                          color: AppTheme.textSecondary,
-                        ),
-                        const SizedBox(width: 10),
-                        Text(
-                          'Search',
-                          style: TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-          ),
-          if (isCompact) const Spacer(),
-          Consumer<NotificationProvider>(
-            builder: (context, np, _) {
-              final c = np.unreadCount;
-              return Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  IconButton(
-                    icon: Icon(
-                      Icons.notifications_outlined,
-                      color: AppTheme.textPrimary,
-                      size: isCompact ? 22 : 24,
-                    ),
-                    tooltip: 'Notifications',
-                    onPressed: () {
-                      onOpenNotifications();
-                    },
-                  ),
-                  if (c > 0)
-                    Positioned(
-                      right: -2,
-                      top: -2,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 5,
-                          vertical: 1,
-                        ),
-                        constraints: const BoxConstraints(
-                          minWidth: 18,
-                          minHeight: 18,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFE53935),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.white, width: 1.2),
-                        ),
-                        child: Text(
-                          c > 99 ? '99+' : '$c',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              );
-            },
-          ),
-          const SizedBox(width: 8),
-          _EmployeeUserMenu(
-            displayName: displayName,
-            email: email,
-            avatarPath: avatarPath,
-            isCompact: isCompact,
-            onProfileTap: onProfileTap,
-          ),
-        ],
-      ),
-    );
-  }
-}
+    final inactive = AppTheme.dashTextSecondaryOf(context);
+    final selected = widget.selected;
+    final bg = selected
+        ? AppTheme.primaryNavy
+        : (_hover ? AppTheme.dashMutedSurfaceOf(context) : Colors.transparent);
+    final fg = selected ? Colors.white : inactive;
 
-class _EmployeeUserMenu extends StatelessWidget {
-  const _EmployeeUserMenu({
-    required this.displayName,
-    required this.email,
-    this.avatarPath,
-    this.isCompact = false,
-    this.onProfileTap,
-  });
-
-  final String displayName;
-  final String email;
-  final String? avatarPath;
-  final bool isCompact;
-  final VoidCallback? onProfileTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<String>(
-      offset: const Offset(0, 48),
-      padding: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      elevation: 8,
-      shadowColor: Colors.black.withOpacity(0.15),
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
       child: Padding(
-        padding: const EdgeInsets.only(left: 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            UserAvatar(avatarPath: avatarPath, radius: isCompact ? 16 : 18),
-            if (!isCompact) ...[
-              const SizedBox(width: 10),
-              Text(
-                displayName,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                  color: AppTheme.textPrimary,
-                ),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onTap,
+            borderRadius: BorderRadius.circular(12),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+              decoration: BoxDecoration(
+                color: bg,
+                borderRadius: BorderRadius.circular(12),
               ),
-              const SizedBox(width: 4),
-              Icon(
-                Icons.keyboard_arrow_down_rounded,
-                size: 20,
-                color: AppTheme.textSecondary,
-              ),
-            ],
-          ],
-        ),
-      ),
-      itemBuilder: (context) => [
-        PopupMenuItem<String>(
-          enabled: false,
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+              child: Row(
                 children: [
-                  UserAvatar(
-                    avatarPath: avatarPath,
-                    radius: 28,
-                    backgroundColor: AppTheme.primaryNavy.withOpacity(0.12),
-                    placeholderIconColor: AppTheme.primaryNavy,
-                  ),
+                  Icon(widget.icon, size: 22, color: fg),
                   const SizedBox(width: 14),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          displayName,
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.textPrimary,
-                          ),
-                        ),
-                        if (email.isNotEmpty) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            email,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: AppTheme.textSecondary,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 1,
-                          ),
-                        ],
-                      ],
+                    child: Text(
+                      widget.label,
+                      style: TextStyle(
+                        color: fg,
+                        fontWeight: selected
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                        fontSize: 14,
+                        letterSpacing: -0.15,
+                      ),
                     ),
                   ),
                 ],
               ),
-            ],
+            ),
           ),
         ),
-        const PopupMenuDivider(height: 1),
-        PopupMenuItem(
-          value: 'profile_settings',
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-          child: Row(
-            children: [
-              Icon(
-                Icons.person_outline_rounded,
-                size: 22,
-                color: AppTheme.textSecondary,
-              ),
-              const SizedBox(width: 14),
-              Text(
-                'Profile & Settings',
-                style: TextStyle(fontSize: 14, color: AppTheme.textPrimary),
-              ),
-              const SizedBox(width: 8),
-              Icon(
-                Icons.settings_outlined,
-                size: 18,
-                color: AppTheme.textSecondary,
-              ),
-            ],
-          ),
-        ),
-        const PopupMenuDivider(height: 1),
-        PopupMenuItem(
-          value: 'signout',
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-          child: Row(
-            children: [
-              Icon(Icons.logout_rounded, size: 22, color: Color(0xFFC62828)),
-              const SizedBox(width: 14),
-              Text(
-                'Sign out',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFFC62828),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-      onSelected: (value) async {
-        if (value == 'signout') {
-          await context.read<AuthProvider>().signOut();
-          if (context.mounted) {
-            final dest = kIsWeb ? const LandingPage() : const LoginPage();
-            Navigator.of(context).pushAndRemoveUntil(
-              MaterialPageRoute(builder: (_) => dest),
-              (route) => false,
-            );
-          }
-        }
-        if (value == 'profile_settings') {
-          // Even though Settings content is empty for employees, they can still
-          // view and update their profile details.
-          Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const ProfileAndSettingsPage()),
-          );
-        }
-      },
+      ),
     );
   }
 }
@@ -1119,8 +774,8 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
     final w = MediaQuery.sizeOf(context).width;
     final isNarrow = w < 600;
     final isTiny = w < 360;
-    final welcomeSize = isTiny ? 18.0 : (isNarrow ? 20.0 : 26.0);
-    final subtitleSize = isNarrow ? 13.5 : 15.0;
+    final welcomeSize = isTiny ? 17.0 : (isNarrow ? 19.0 : 24.0);
+    final subtitleSize = isNarrow ? 13.5 : 14.5;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1128,24 +783,25 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
         Text(
           'Welcome back, ${widget.displayName}!',
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: AppTheme.dashTextPrimaryOf(context),
             fontSize: welcomeSize,
-            fontWeight: FontWeight.w800,
+            fontWeight: FontWeight.w700,
             height: 1.25,
+            letterSpacing: -0.35,
           ),
           maxLines: 3,
           overflow: TextOverflow.ellipsis,
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         Text(
           "Here's your latest information and updates.",
           style: TextStyle(
-            color: AppTheme.textSecondary,
+            color: AppTheme.dashTextSecondaryOf(context),
             fontSize: subtitleSize,
-            height: 1.35,
+            height: 1.45,
           ),
         ),
-        SizedBox(height: isNarrow ? 18 : 24),
+        SizedBox(height: isNarrow ? 20 : 26),
         EmployeeAttendanceOverviewCard(
           onViewMore: widget.onViewAttendance,
           summaryCards: _EmployeeSummaryCards(
@@ -1157,33 +813,17 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
         SizedBox(height: isNarrow ? 20 : 24),
         Text(
           'DocuTracker',
-          style: TextStyle(
-            fontSize: 18,
+          style: AppTheme.dashSectionTitle(context).copyWith(
+            fontSize: 15,
             fontWeight: FontWeight.w700,
-            color: AppTheme.textPrimary,
+            color: AppTheme.dashTextPrimaryOf(context),
             letterSpacing: -0.2,
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         Container(
           padding: EdgeInsets.all(_employeeSectionCardPadding(context)),
-          decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.06),
-                blurRadius: 20,
-                offset: const Offset(0, 4),
-              ),
-              BoxShadow(
-                color: Colors.black.withOpacity(0.02),
-                blurRadius: 16,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
+          decoration: AppTheme.dashSurfaceCard(context),
           child: const DocuTrackerDashboardScreen(
             isAdmin: false,
             showTitle: false,
@@ -1342,25 +982,14 @@ class _ClockInCard extends StatelessWidget {
 
         return Container(
           padding: EdgeInsets.all(_employeeCardPadding(context)),
-          decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
+          decoration: AppTheme.dashSurfaceCard(context),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 label,
                 style: TextStyle(
-                  color: AppTheme.textSecondary,
+                  color: AppTheme.dashTextSecondaryOf(context),
                   fontSize: 13,
                   fontWeight: FontWeight.w500,
                 ),
@@ -1371,7 +1000,7 @@ class _ClockInCard extends StatelessWidget {
                   child: Text(
                     'No clock in/out required',
                     style: TextStyle(
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                       fontSize: 12,
                     ),
                   ),
@@ -1385,7 +1014,7 @@ class _ClockInCard extends StatelessWidget {
                       record?.timeIn,
                 ),
                 style: TextStyle(
-                  color: AppTheme.textPrimary,
+                  color: AppTheme.dashTextPrimaryOf(context),
                   fontSize: 26,
                   fontWeight: FontWeight.w800,
                 ),
@@ -1398,7 +1027,7 @@ class _ClockInCard extends StatelessWidget {
                       ? 'AM In: ${_formatTime(record.timeIn)}  AM Out: ${_formatTime(record.breakOut)}  PM In: ${_formatTime(record.breakIn)}  PM Out: ${_formatTime(record.timeOut)}'
                       : 'AM: Absent  PM In: ${_formatTime(record.breakIn)}  PM Out: ${_formatTime(record.timeOut)}',
                   style: TextStyle(
-                    color: AppTheme.textSecondary,
+                    color: AppTheme.dashTextSecondaryOf(context),
                     fontSize: detailFontSize,
                     height: 1.35,
                   ),
@@ -1412,7 +1041,10 @@ class _ClockInCard extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 'Location: —',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                style: TextStyle(
+                  color: AppTheme.dashTextSecondaryOf(context),
+                  fontSize: 12,
+                ),
               ),
               const SizedBox(height: 16),
               if (isShiftDisabled &&
@@ -1539,18 +1171,7 @@ class _AttendanceCard extends StatelessWidget {
 
         return Container(
           padding: EdgeInsets.all(_employeeCardPadding(context)),
-          decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
+          decoration: AppTheme.dashSurfaceCard(context),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1562,7 +1183,7 @@ class _AttendanceCard extends StatelessWidget {
                     Text(
                       'Attendance',
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
                       ),
@@ -1571,7 +1192,7 @@ class _AttendanceCard extends StatelessWidget {
                     Text(
                       '$presentCount',
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         fontSize: 28,
                         fontWeight: FontWeight.w800,
                       ),
@@ -1580,7 +1201,7 @@ class _AttendanceCard extends StatelessWidget {
                     Text(
                       'Present Days',
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 12,
                       ),
                     ),
@@ -1599,7 +1220,7 @@ class _AttendanceCard extends StatelessWidget {
                       child: Text(
                         monthLabel,
                         style: TextStyle(
-                          color: AppTheme.textSecondary,
+                          color: AppTheme.dashTextSecondaryOf(context),
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
                         ),
@@ -1667,18 +1288,7 @@ class _LeaveBalanceCard extends StatelessWidget {
         }
         return Container(
           padding: EdgeInsets.all(_employeeCardPadding(context)),
-          decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
+          decoration: AppTheme.dashSurfaceCard(context),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1690,7 +1300,7 @@ class _LeaveBalanceCard extends StatelessWidget {
                     Text(
                       'Leave Balance',
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
                       ),
@@ -1699,7 +1309,7 @@ class _LeaveBalanceCard extends StatelessWidget {
                     Text(
                       hasData ? totalRemaining.toStringAsFixed(1) : '—',
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         fontSize: 28,
                         fontWeight: FontWeight.w800,
                       ),
@@ -1708,7 +1318,7 @@ class _LeaveBalanceCard extends StatelessWidget {
                     Text(
                       'Remaining Days',
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 12,
                       ),
                     ),
@@ -1791,13 +1401,13 @@ class _LeaveBalanceMiniLine extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.04),
+        color: AppTheme.dashMutedSurfaceOf(context).withValues(alpha: 0.65),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Row(
         children: [
-          Icon(icon, size: 16, color: AppTheme.textSecondary),
+          Icon(icon, size: 16, color: AppTheme.dashTextSecondaryOf(context)),
           const SizedBox(width: 8),
           Expanded(
             child: Column(
@@ -1807,7 +1417,7 @@ class _LeaveBalanceMiniLine extends StatelessWidget {
                 Text(
                   label,
                   style: TextStyle(
-                    color: AppTheme.textSecondary,
+                    color: AppTheme.dashTextSecondaryOf(context),
                     fontSize: 11,
                     fontWeight: FontWeight.w500,
                   ),
@@ -1817,7 +1427,7 @@ class _LeaveBalanceMiniLine extends StatelessWidget {
                 Text(
                   value,
                   style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.dashTextPrimaryOf(context),
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
                   ),
@@ -1913,7 +1523,7 @@ class _EmployeeAnnouncementsCard extends StatelessWidget {
     Widget titleRow() {
       return Row(
         children: [
-          Icon(Icons.campaign_rounded, color: AppTheme.primaryNavy, size: 22),
+          Icon(Icons.campaign_outlined, color: AppTheme.primaryNavy, size: 22),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -1921,7 +1531,8 @@ class _EmployeeAnnouncementsCard extends StatelessWidget {
               style: TextStyle(
                 color: AppTheme.textPrimary,
                 fontWeight: FontWeight.w700,
-                fontSize: 17,
+                fontSize: 15,
+                letterSpacing: -0.2,
               ),
               overflow: TextOverflow.ellipsis,
             ),
@@ -1935,18 +1546,7 @@ class _EmployeeAnnouncementsCard extends StatelessWidget {
         final stackHeader = c.maxWidth < 400;
         return Container(
           padding: EdgeInsets.all(pad),
-          decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
+          decoration: AppTheme.dashSurfaceCard(context),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1987,7 +1587,7 @@ class _EmployeeAnnouncementsCard extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: AppTheme.offWhite,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.black.withOpacity(0.06)),
+                  border: Border.all(color: AppTheme.dashHairline),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2025,7 +1625,7 @@ class _EmployeeUpcomingLeaveCard extends StatelessWidget {
     Widget titleRow() {
       return Row(
         children: [
-          Icon(Icons.event_rounded, color: AppTheme.primaryNavy, size: 22),
+          Icon(Icons.event_outlined, color: AppTheme.primaryNavy, size: 22),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -2033,7 +1633,8 @@ class _EmployeeUpcomingLeaveCard extends StatelessWidget {
               style: TextStyle(
                 color: AppTheme.textPrimary,
                 fontWeight: FontWeight.w700,
-                fontSize: 17,
+                fontSize: 15,
+                letterSpacing: -0.2,
               ),
               overflow: TextOverflow.ellipsis,
             ),
@@ -2085,7 +1686,7 @@ class _EmployeeUpcomingLeaveCard extends StatelessWidget {
               decoration: BoxDecoration(
                 color: AppTheme.offWhite,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.black.withOpacity(0.06)),
+                border: Border.all(color: AppTheme.dashHairline),
               ),
               child: Row(
                 children: [
@@ -2115,18 +1716,7 @@ class _EmployeeUpcomingLeaveCard extends StatelessWidget {
 
         return Container(
           padding: EdgeInsets.all(pad),
-          decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
+          decoration: AppTheme.dashSurfaceCard(context),
           child: content,
         );
       },
@@ -2323,24 +1913,24 @@ class _EmployeeAttendanceContentState
                   child: DropdownButtonFormField<int>(
                     value: _selectedMonth,
                     isExpanded: true,
-                    decoration: InputDecoration(
-                      isDense: true,
+                    decoration: AppTheme.dashInputDecoration(
+                      context,
                       contentPadding: const EdgeInsets.symmetric(
                         horizontal: 10,
                         vertical: 8,
                       ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      filled: true,
-                      fillColor: AppTheme.white,
+                      radius: 8,
                     ),
+                    style: AppTheme.dashFieldTextStyle(context),
+                    dropdownColor: AppTheme.dashPanelOf(context),
                     selectedItemBuilder: (context) => List.generate(
                       12,
                       (i) => Text(
                         _attendanceMonths[i],
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 14),
+                        style: AppTheme.dashFieldTextStyle(context).copyWith(
+                          fontSize: 14,
+                        ),
                       ),
                     ),
                     items: List.generate(12, (i) => i + 1)
@@ -2374,24 +1964,24 @@ class _EmployeeAttendanceContentState
                   child: DropdownButtonFormField<int>(
                     value: _selectedYear,
                     isExpanded: true,
-                    decoration: InputDecoration(
-                      isDense: true,
+                    decoration: AppTheme.dashInputDecoration(
+                      context,
                       contentPadding: const EdgeInsets.symmetric(
                         horizontal: 10,
                         vertical: 8,
                       ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      filled: true,
-                      fillColor: AppTheme.white,
+                      radius: 8,
                     ),
+                    style: AppTheme.dashFieldTextStyle(context),
+                    dropdownColor: AppTheme.dashPanelOf(context),
                     selectedItemBuilder: (context) => List.generate(
                       11,
                       (i) => Text(
                         '${DateTime.now().year - 5 + i}',
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 14),
+                        style: AppTheme.dashFieldTextStyle(context).copyWith(
+                          fontSize: 14,
+                        ),
                       ),
                     ),
                     items: List.generate(11, (i) => DateTime.now().year - 5 + i)
@@ -2419,35 +2009,39 @@ class _EmployeeAttendanceContentState
                   child: DropdownButtonFormField<int?>(
                     value: _selectedDay,
                     isExpanded: true,
-                    decoration: InputDecoration(
-                      isDense: true,
+                    decoration: AppTheme.dashInputDecoration(
+                      context,
                       contentPadding: const EdgeInsets.symmetric(
                         horizontal: 10,
                         vertical: 8,
                       ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      filled: true,
-                      fillColor: AppTheme.white,
+                      radius: 8,
                     ),
+                    style: AppTheme.dashFieldTextStyle(context),
+                    dropdownColor: AppTheme.dashPanelOf(context),
                     hint: Text(
                       'All days',
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 14),
+                      style: AppTheme.dashFieldTextStyle(context).copyWith(
+                        fontSize: 14,
+                      ),
                     ),
                     selectedItemBuilder: (context) => [
-                      const Text(
+                      Text(
                         'All days',
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 14),
+                        style: AppTheme.dashFieldTextStyle(context).copyWith(
+                          fontSize: 14,
+                        ),
                       ),
                       ...List.generate(
                         _maxSelectableCalendarDay,
                         (i) => Text(
                           'Day ${i + 1}',
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 14),
+                          style: AppTheme.dashFieldTextStyle(context).copyWith(
+                            fontSize: 14,
+                          ),
                         ),
                       ),
                     ],
@@ -2505,9 +2099,9 @@ class _EmployeeAttendanceContentState
           Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: AppTheme.white,
+              color: AppTheme.dashPanelOf(context),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.black.withOpacity(0.06)),
+              border: Border.all(color: AppTheme.dashHairlineOf(context)),
             ),
             child: Center(
               child: Column(
@@ -2516,7 +2110,7 @@ class _EmployeeAttendanceContentState
                   Text(
                     'No time records for the selected period.',
                     style: TextStyle(
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextPrimaryOf(context),
                       fontSize: 14,
                     ),
                   ),

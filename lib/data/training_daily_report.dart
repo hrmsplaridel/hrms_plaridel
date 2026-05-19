@@ -143,5 +143,10 @@ class TrainingDailyReportRepo {
       Map<String, dynamic>.from(res.data as Map),
     );
   }
+
+  /// Admin: permanently delete a report (and related attachment metadata).
+  Future<void> deleteReport(String id) async {
+    await ApiClient.instance.delete<void>('/api/training-daily-reports/$id');
+  }
 }
 

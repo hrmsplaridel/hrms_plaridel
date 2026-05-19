@@ -40,6 +40,15 @@ class _FeatureCardState extends State<FeatureCard> {
   Widget build(BuildContext context) {
     final navy = AppTheme.primaryNavy;
     final action = widget.actionLabel ?? 'Open';
+    final dark = AppTheme.dashIsDark(context);
+    final cardBg =
+        dark ? const Color(0xFF1E2430) : AppTheme.white;
+    final idleBorder = dark
+        ? AppTheme.dashHairlineOf(context)
+        : Colors.black.withValues(alpha: 0.07);
+    final titleColor = AppTheme.dashTextPrimaryOf(context);
+    final subtitleColor =
+        AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.95);
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
@@ -58,33 +67,40 @@ class _FeatureCardState extends State<FeatureCard> {
             child: InkWell(
               onTap: widget.onTap,
               borderRadius: BorderRadius.circular(18),
-              hoverColor: navy.withValues(alpha: 0.06),
-              splashColor: navy.withValues(alpha: 0.08),
+              hoverColor: dark
+                  ? Colors.white.withValues(alpha: 0.06)
+                  : navy.withValues(alpha: 0.06),
+              splashColor: dark
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : navy.withValues(alpha: 0.08),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
                 curve: Curves.easeOutCubic,
                 decoration: BoxDecoration(
-                  color: AppTheme.white,
+                  color: cardBg,
                   borderRadius: BorderRadius.circular(18),
                   border: Border.all(
                     color: _hover
-                        ? navy.withValues(alpha: 0.35)
-                        : Colors.black.withValues(alpha: 0.07),
+                        ? navy.withValues(alpha: dark ? 0.55 : 0.35)
+                        : idleBorder,
                     width: _hover ? 1.5 : 1,
                   ),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(
-                        alpha: _hover ? 0.12 : 0.06,
+                        alpha: dark
+                            ? (_hover ? 0.45 : 0.28)
+                            : (_hover ? 0.12 : 0.06),
                       ),
                       blurRadius: _hover ? 22 : 12,
                       offset: Offset(0, _hover ? 10 : 5),
                     ),
-                    BoxShadow(
-                      color: navy.withValues(alpha: _hover ? 0.08 : 0.04),
-                      blurRadius: _hover ? 18 : 0,
-                      offset: const Offset(0, 4),
-                    ),
+                    if (!dark)
+                      BoxShadow(
+                        color: navy.withValues(alpha: _hover ? 0.08 : 0.04),
+                        blurRadius: _hover ? 18 : 0,
+                        offset: const Offset(0, 4),
+                      ),
                   ],
                 ),
                 child: ClipRRect(
@@ -97,10 +113,7 @@ class _FeatureCardState extends State<FeatureCard> {
                         width: double.infinity,
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
-                            colors: [
-                              navy,
-                              AppTheme.primaryNavyLight,
-                            ],
+                            colors: [navy, AppTheme.primaryNavyLight],
                           ),
                         ),
                       ),
@@ -117,27 +130,26 @@ class _FeatureCardState extends State<FeatureCard> {
                                     begin: Alignment.topLeft,
                                     end: Alignment.bottomRight,
                                     colors: [
-                                      navy.withValues(alpha: 0.12),
-                                      AppTheme.primaryNavyLight
-                                          .withValues(alpha: 0.08),
+                                      navy.withValues(alpha: dark ? 0.22 : 0.12),
+                                      AppTheme.primaryNavyLight.withValues(
+                                        alpha: dark ? 0.14 : 0.08,
+                                      ),
                                     ],
                                   ),
                                   borderRadius: BorderRadius.circular(14),
                                   border: Border.all(
-                                    color: navy.withValues(alpha: 0.14),
+                                    color: navy.withValues(
+                                      alpha: dark ? 0.32 : 0.14,
+                                    ),
                                   ),
                                 ),
-                                child: Icon(
-                                  widget.icon,
-                                  size: 28,
-                                  color: navy,
-                                ),
+                                child: Icon(widget.icon, size: 28, color: navy),
                               ),
                               const SizedBox(height: 14),
                               Text(
                                 widget.title,
-                                style: const TextStyle(
-                                  color: AppTheme.textPrimary,
+                                style: TextStyle(
+                                  color: titleColor,
                                   fontSize: 16,
                                   fontWeight: FontWeight.w800,
                                   height: 1.25,
@@ -151,9 +163,7 @@ class _FeatureCardState extends State<FeatureCard> {
                                 child: Text(
                                   widget.subtitle,
                                   style: TextStyle(
-                                    color: AppTheme.textSecondary.withValues(
-                                      alpha: 0.95,
-                                    ),
+                                    color: subtitleColor,
                                     fontSize: 13,
                                     height: 1.45,
                                     fontWeight: FontWeight.w500,
@@ -178,9 +188,7 @@ class _FeatureCardState extends State<FeatureCard> {
                                   ),
                                   const SizedBox(width: 4),
                                   AnimatedSlide(
-                                    duration: const Duration(
-                                      milliseconds: 180,
-                                    ),
+                                    duration: const Duration(milliseconds: 180),
                                     curve: Curves.easeOutCubic,
                                     offset: _hover
                                         ? const Offset(0.06, 0)

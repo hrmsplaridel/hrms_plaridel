@@ -1,44 +1,44 @@
 import 'package:flutter/material.dart';
 
-import '../../../landingpage/constants/app_theme.dart';
+import '../../landingpage/constants/app_theme.dart';
+import '../widgets/profile_modern_ui.dart';
+import 'profile_page.dart';
 
-/// Reusable settings content (sections only, no scaffold).
-/// Currently simplified: we hide all advanced settings.
-class SettingsContent extends StatelessWidget {
-  const SettingsContent({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    // Empty placeholder so the Profile & Settings page only shows profile info.
-    return const SizedBox.shrink();
-  }
-}
-
-/// Standalone Settings page for admin and employee dashboards.
+/// App settings (notification, preference, about) live in [ProfileContent].
+/// This page is a thin standalone route for deep links or legacy navigation.
 class SettingsPage extends StatelessWidget {
-  const SettingsPage({super.key});
+  const SettingsPage({super.key, this.initialTab = ProfilePageTab.notification});
+
+  final ProfilePageTab initialTab;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF0F2F5),
+      backgroundColor: AppTheme.dashCanvasOf(context),
       appBar: AppBar(
-        backgroundColor: AppTheme.white,
+        backgroundColor: AppTheme.dashIsDark(context)
+            ? AppTheme.dashPanelOf(context)
+            : AppTheme.white,
         elevation: 0,
         scrolledUnderElevation: 1,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
           onPressed: () => Navigator.of(context).pop(),
-          color: AppTheme.textPrimary,
         ),
-        title: Text('Settings', style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.w700)),
+        title: const Text(
+          'Settings',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+        ),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: const SettingsContent(),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 28),
+        child: ProfileContent(
+          showAccountSection: false,
+          showPasswordSection: false,
+          showAppSettings: true,
+          initialTab: initialTab,
+        ),
       ),
     );
   }
 }
-
-// _SettingsSection removed since all advanced settings were hidden.

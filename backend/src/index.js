@@ -27,11 +27,17 @@ const rspJobVacanciesRoutes = require('./routes/rspJobVacancies');
 const rspExamQuestionsRoutes = require('./routes/rspExamQuestions');
 const rspExamTimeLimitsRoutes = require('./routes/rspExamTimeLimits');
 const rspApplicationsRoutes = require('./routes/rspApplications');
+const rspEmailVerificationPublicRoutes = require('./routes/rspEmailVerificationPublic');
 const rspStorageRoutes = require('./routes/rspStorage');
 const rspLdSavedEntriesRoutes = require('./routes/rspLdSavedEntries');
 const leaveRoutes = require('./routes/leaveRoutes');
 const notificationsRoutes = require('./routes/notifications');
 const locatorSlipsRoutes = require('./routes/locatorSlips');
+const contactPublicRoutes = require('./routes/contactPublic');
+const {
+  isEmailJsConfiguredForHireEmail,
+  isEmailJsContactConfigured,
+} = require('./utils/emailJsMail');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -108,17 +114,42 @@ app.use('/api/rsp/job-vacancies', rspJobVacanciesRoutes);
 app.use('/api/rsp/exam-questions', rspExamQuestionsRoutes);
 app.use('/api/rsp/exam-time-limits', rspExamTimeLimitsRoutes);
 app.use('/api/rsp/applications', rspApplicationsRoutes);
+app.use('/api/rsp/email-verification', rspEmailVerificationPublicRoutes);
 app.use('/api/rsp/storage', rspStorageRoutes);
 app.use('/api/rsp-ld-saved-entries', rspLdSavedEntriesRoutes);
 app.use('/api/leave', leaveRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/locator-slips', locatorSlipsRoutes);
+app.use('/api/contact', contactPublicRoutes);
 
 // --- Start server ---
 const server = app.listen(PORT, HOST, () => {
   console.log(`HRMS API listening on http://${HOST}:${PORT}`);
   console.log('  GET  /health           - app health');
   console.log('  GET  /health/db        - database health');
+  if (isEmailJsConfiguredForHireEmail()) {
+    console.log('  EmailJS hire email     - enabled (POST …/send-hire-email)');
+  } else {
+    console.log(
+      '  EmailJS hire email     - off (set EMAILJS_SERVICE_ID, EMAILJS_PUBLIC_KEY, EMAILJS_TEMPLATE_HIRE_CREDENTIALS_ID; else SMTP)',
+    );
+  }
+  if (isEmailJsContactConfigured()) {
+    console.log('  EmailJS contact form   - enabled (POST /api/contact)');
+  }
+  if (rspEmailVerificationPublicRoutes.rspEmailOtpEnrollmentActive?.()) {
+    console.log(
+      '  RSP email OTP          - enabled (GET/POST /api/rsp/email-verification/*)',
+    );
+  }
+  if (isEmailJsConfiguredForHireEmail() || isEmailJsContactConfigured()) {
+    console.log(
+      '  EmailJS security      - allow non-browser API: https://dashboard.emailjs.com/admin/account/security',
+    );
+    console.log(
+      '  EmailJS strict mode   - set EMAILJS_PRIVATE_KEY if dashboard requires Private Key (403)',
+    );
+  }
   console.log('  POST /auth/login       - login');
   console.log('  POST /auth/register    - register');
   console.log('  POST /auth/refresh     - new access token (refresh token body)');

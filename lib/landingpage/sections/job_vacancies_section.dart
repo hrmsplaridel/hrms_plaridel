@@ -3,6 +3,55 @@ import '../../data/job_vacancy_announcement.dart';
 import '../constants/app_theme.dart';
 import '../widgets/section_container.dart';
 
+/// When [vacancy] has education / experience / training, show labeled blocks; otherwise null.
+Widget? _structuredVacancyBody(JobVacancyItem vacancy) {
+  if (!vacancy.hasStructuredDetails) return null;
+
+  Widget? block(String title, String? raw) {
+    final text = raw?.trim();
+    if (text == null || text.isEmpty) return null;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: TextStyle(
+              color: AppTheme.textSecondary.withValues(alpha: 0.88),
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.55,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            text,
+            style: TextStyle(
+              color: AppTheme.textPrimary.withValues(alpha: 0.92),
+              fontSize: 14.5,
+              height: 1.55,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  final children = [
+    block('Education', vacancy.education),
+    block('Experience', vacancy.experience),
+    block('Training', vacancy.training),
+  ].whereType<Widget>().toList();
+
+  if (children.isEmpty) return null;
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: children,
+  );
+}
+
 /// Job Vacancies as announcement area (controlled by HR Head/Admin via RSP module).
 /// When [vacancies] is non-empty, shows each entry as a card; otherwise uses single [headline]/[body] or defaults.
 class JobVacanciesSection extends StatelessWidget {
@@ -115,20 +164,25 @@ class JobVacanciesSection extends StatelessWidget {
 
                 Widget cardFor(JobVacancyItem v) {
                   final headlineText = _displayHeadline(v.headline);
+                  final structured = _structuredVacancyBody(v);
                   final max = v.maxApplicants;
                   final count = v.applicationCount ?? 0;
                   final slotLine = (max != null && max >= 1)
                       ? '$count of $max active applicants'
                       : null;
                   final quotaFull = v.isApplicationQuotaFull;
+                  final closed = v.isClosed == true;
                   return _VacancyCard(
                     headline: headlineText,
-                    body: _displayBody(v.body),
+                    body: structured != null
+                        ? ''
+                        : _displayBody(v.body),
+                    bodyChild: structured,
                     hasVacancies: hasVacancies,
                     minTall: twoColumns,
                     slotSummaryLine: slotLine,
-                    applicationQuotaFull: quotaFull,
-                    onApplyTap: hasVacancies && !quotaFull
+                    applicationQuotaFull: quotaFull || closed,
+                    onApplyTap: hasVacancies && !quotaFull && !closed
                         ? () => onApplyForVacancyTap?.call(v)
                         : null,
                   );
@@ -191,6 +245,7 @@ class JobVacanciesSection extends StatelessWidget {
             _VacancyCard(
               headline: _displayHeadline(headline),
               body: _displayBody(body),
+              bodyChild: null,
               hasVacancies: hasVacancies,
               minTall: false,
               slotSummaryLine: null,
@@ -329,6 +384,7 @@ class _VacancyCard extends StatelessWidget {
   const _VacancyCard({
     required this.headline,
     required this.body,
+    this.bodyChild,
     required this.hasVacancies,
     this.minTall = false,
     this.slotSummaryLine,
@@ -338,6 +394,8 @@ class _VacancyCard extends StatelessWidget {
 
   final String headline;
   final String body;
+  /// When set (e.g. education / experience / training), replaces [body] text in the open card.
+  final Widget? bodyChild;
   final bool hasVacancies;
 
   /// When true (wide two-column layout), cards share a minimum height so rows align cleanly.
@@ -403,14 +461,15 @@ class _VacancyCard extends StatelessWidget {
               border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
               boxShadow: AppTheme.cardShadow,
             ),
-            child: Text(
-              body,
-              style: TextStyle(
-                color: AppTheme.textPrimary.withValues(alpha: 0.9),
-                fontSize: 14.5,
-                height: 1.55,
-              ),
-            ),
+            child: bodyChild ??
+                Text(
+                  body,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary.withValues(alpha: 0.9),
+                    fontSize: 14.5,
+                    height: 1.55,
+                  ),
+                ),
           )
         : Container(
             width: double.infinity,
@@ -522,7 +581,7 @@ class _VacancyCard extends StatelessWidget {
               ),
             ),
           ],
-          if (hasVacancies && onApplyTap != null) ...[
+          if (onApplyTap != null) ...[
             const SizedBox(height: 14),
             Text(
               'You will submit your profile, contact details, and required PDF documents in the next steps.',
@@ -543,6 +602,30 @@ class _VacancyCard extends StatelessWidget {
                 style: FilledButton.styleFrom(
                   backgroundColor: AppTheme.primaryNavy,
                   foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 14,
+                  ),
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+          ] else if (!hasVacancies || applicationQuotaFull) ...[
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: null,
+                icon: const Icon(Icons.arrow_forward_rounded, size: 20),
+                label: const Text('Apply now'),
+                style: FilledButton.styleFrom(
+                  disabledBackgroundColor: AppTheme.textSecondary.withValues(
+                    alpha: 0.32,
+                  ),
+                  disabledForegroundColor: Colors.white.withValues(alpha: 0.85),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 20,
                     vertical: 14,

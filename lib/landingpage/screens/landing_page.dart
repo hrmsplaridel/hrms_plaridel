@@ -95,11 +95,7 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
   }
 
   void _onApplyForVacancy(JobVacancyItem vacancy) {
-    final selected = (vacancy.headline?.trim().isNotEmpty == true)
-        ? vacancy.headline!.trim()
-        : (vacancy.body?.trim().isNotEmpty == true
-              ? vacancy.body!.trim()
-              : null);
+    final selected = vacancy.positionKey;
 
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -146,13 +142,22 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
                   const SizedBox(height: 18),
                   FutureBuilder<JobVacancyAnnouncement>(
                     future: _announcementFuture,
-                    initialData: const JobVacancyAnnouncement(
-                      hasVacancies: true,
-                    ),
                     builder: (context, snapshot) {
-                      final a =
-                          snapshot.data ??
-                          const JobVacancyAnnouncement(hasVacancies: true);
+                      if (snapshot.connectionState == ConnectionState.waiting &&
+                          !snapshot.hasData) {
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 48),
+                          child: Center(
+                            child: SizedBox(
+                              width: 28,
+                              height: 28,
+                              child: CircularProgressIndicator(strokeWidth: 2.5),
+                            ),
+                          ),
+                        );
+                      }
+                      final a = snapshot.data ??
+                          const JobVacancyAnnouncement(hasVacancies: false);
                       return JobVacanciesSection(
                         key: _jobVacanciesKey,
                         hasVacancies: a.hasVacancies,

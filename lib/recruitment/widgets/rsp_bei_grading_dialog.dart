@@ -16,6 +16,7 @@ Future<void> showRspBeiGradingDialog({
 }) {
   return showDialog<void>(
     context: context,
+    useRootNavigator: true,
     barrierDismissible: false,
     builder: (ctx) => _RspBeiGradingDialog(
       applicant: applicant,
@@ -23,6 +24,10 @@ Future<void> showRspBeiGradingDialog({
       onSaved: onSaved,
     ),
   );
+}
+
+void _popBeiDialog(BuildContext context) {
+  Navigator.of(context, rootNavigator: true).pop();
 }
 
 class _RspBeiGradingDialog extends StatefulWidget {
@@ -214,7 +219,7 @@ class _RspBeiGradingDialogState extends State<_RspBeiGradingDialog> {
       );
       if (!mounted) return;
       final messenger = ScaffoldMessenger.of(context);
-      Navigator.of(context).pop();
+      _popBeiDialog(context);
       widget.onSaved();
       messenger.showSnackBar(
         SnackBar(
@@ -256,46 +261,90 @@ class _RspBeiGradingDialogState extends State<_RspBeiGradingDialog> {
       );
     }
     final pass = metrics['status'] == 'Pass';
-    return Material(
-      color: AppTheme.primaryNavy.withValues(alpha: 0.06),
-      borderRadius: BorderRadius.circular(12),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            const Color(0xFFFFF5F0),
+            const Color(0xFFFFEDE4).withValues(alpha: 0.92),
+            AppTheme.white,
+          ],
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primaryNavy.withValues(alpha: 0.06),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
         child: Wrap(
           spacing: 10,
-          runSpacing: 8,
+          runSpacing: 10,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             _metricChip(
+              icon: Icons.psychology_outlined,
               label: 'BEI average',
               value: metrics['bei']!,
             ),
             _metricChip(
+              icon: Icons.summarize_outlined,
               label: 'Overall screening',
               value: metrics['overall']!,
             ),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
                 color: pass
                     ? const Color(0xFFE8F5E9)
                     : const Color(0xFFFFEBEE),
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(999),
                 border: Border.all(
                   color: pass
-                      ? const Color(0xFF43A047).withValues(alpha: 0.4)
-                      : const Color(0xFFE57373).withValues(alpha: 0.45),
+                      ? const Color(0xFF43A047).withValues(alpha: 0.45)
+                      : const Color(0xFFE57373).withValues(alpha: 0.5),
+                  width: 1.2,
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: (pass ? _kChipGreen : const Color(0xFFE57373))
+                        .withValues(alpha: 0.18),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
-              child: Text(
-                pass ? 'Meets 60% threshold' : 'Below 60% threshold',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: pass
-                      ? const Color(0xFF1B5E20)
-                      : const Color(0xFFB71C1C),
-                ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    pass ? Icons.verified_rounded : Icons.warning_rounded,
+                    size: 17,
+                    color: pass
+                        ? const Color(0xFF1B5E20)
+                        : const Color(0xFFB71C1C),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    pass ? 'Meets 60% threshold' : 'Below 60% threshold',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: pass
+                          ? const Color(0xFF1B5E20)
+                          : const Color(0xFFB71C1C),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -304,31 +353,54 @@ class _RspBeiGradingDialogState extends State<_RspBeiGradingDialog> {
     );
   }
 
-  static Widget _metricChip({required String label, required String value}) {
+  static const Color _kChipGreen = Color(0xFF43A047);
+
+  static Widget _metricChip({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
       decoration: BoxDecoration(
         color: AppTheme.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.black.withValues(alpha: 0.07),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.045),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          Icon(
+            icon,
+            size: 18,
+            color: AppTheme.primaryNavy.withValues(alpha: 0.88),
+          ),
+          const SizedBox(width: 8),
           Text(
             '$label: ',
             style: TextStyle(
-              fontSize: 12,
+              fontSize: 11.5,
               color: AppTheme.textSecondary,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.15,
             ),
           ),
           Text(
             value,
-            style: TextStyle(
-              fontSize: 13,
+            style: const TextStyle(
+              fontSize: 14,
               color: AppTheme.textPrimary,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w900,
+              fontFeatures: [FontFeature.tabularFigures()],
             ),
           ),
         ],
@@ -345,23 +417,22 @@ class _RspBeiGradingDialogState extends State<_RspBeiGradingDialog> {
 
     final answerBox = Container(
       width: double.infinity,
-      constraints: const BoxConstraints(maxHeight: 132),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      constraints: const BoxConstraints(minHeight: 72, maxHeight: 140),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
-        color: AppTheme.offWhite,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.07)),
+        color: AppTheme.sectionAlt.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+        ),
       ),
-      child: Scrollbar(
-        thumbVisibility: false,
-        child: SingleChildScrollView(
-          child: SelectableText(
-            answerText,
-            style: TextStyle(
-              fontSize: 13,
-              color: AppTheme.textPrimary.withValues(alpha: 0.88),
-              height: 1.45,
-            ),
+      child: SingleChildScrollView(
+        child: SelectableText(
+          answerText,
+          style: TextStyle(
+            fontSize: 13,
+            color: AppTheme.textPrimary.withValues(alpha: 0.88),
+            height: 1.45,
           ),
         ),
       ),
@@ -396,7 +467,23 @@ class _RspBeiGradingDialogState extends State<_RspBeiGradingDialog> {
               vertical: 12,
             ),
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: Colors.black.withValues(alpha: 0.1),
+              ),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: Colors.black.withValues(alpha: 0.1),
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(
+                color: AppTheme.primaryNavy,
+                width: 2,
+              ),
             ),
             filled: true,
             fillColor: AppTheme.white,
@@ -407,36 +494,52 @@ class _RspBeiGradingDialogState extends State<_RspBeiGradingDialog> {
     );
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Material(
-        color: AppTheme.white,
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: BorderSide(color: Colors.black.withValues(alpha: 0.08)),
+      padding: const EdgeInsets.only(bottom: 14),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: AppTheme.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: Colors.black.withValues(alpha: 0.07),
+          ),
+          boxShadow: AppTheme.cardShadow,
         ),
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Stack(
+            clipBehavior: Clip.hardEdge,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(left: 5),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
               final wide = constraints.maxWidth >= 520;
               final header = Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    width: 26,
-                    height: 26,
+                    width: 32,
+                    height: 32,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
-                      color: AppTheme.primaryNavy.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(8),
+                      color: AppTheme.primaryNavy,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.35),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
                     ),
                     child: Text(
                       '${i + 1}',
-                      style: TextStyle(
-                        fontSize: 13,
+                      style: const TextStyle(
+                        fontSize: 14,
                         fontWeight: FontWeight.w800,
-                        color: AppTheme.primaryNavy,
+                        color: AppTheme.white,
                       ),
                     ),
                   ),
@@ -444,11 +547,12 @@ class _RspBeiGradingDialogState extends State<_RspBeiGradingDialog> {
                   Expanded(
                     child: Text(
                       qText,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14,
                         height: 1.35,
                         color: AppTheme.textPrimary,
+                        letterSpacing: -0.1,
                       ),
                     ),
                   ),
@@ -460,13 +564,23 @@ class _RspBeiGradingDialogState extends State<_RspBeiGradingDialog> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     header,
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Applicant response',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.55,
+                        color: AppTheme.textSecondary.withValues(alpha: 0.88),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(child: answerBox),
                         const SizedBox(width: 16),
-                        SizedBox(width: 108, child: scoreColumn),
+                        SizedBox(width: 112, child: scoreColumn),
                       ],
                     ),
                   ],
@@ -476,13 +590,45 @@ class _RspBeiGradingDialogState extends State<_RspBeiGradingDialog> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   header,
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Applicant response',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.55,
+                      color: AppTheme.textSecondary.withValues(alpha: 0.88),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                   answerBox,
                   const SizedBox(height: 12),
                   scoreColumn,
                 ],
               );
-            },
+                    },
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: 5,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        AppTheme.primaryNavy,
+                        AppTheme.primaryNavyLight.withValues(alpha: 0.85),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -495,58 +641,124 @@ class _RspBeiGradingDialogState extends State<_RspBeiGradingDialog> {
     final screenH = MediaQuery.sizeOf(context).height;
 
     return Dialog(
-      backgroundColor: AppTheme.offWhite,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
       child: ConstrainedBox(
         constraints: BoxConstraints(
           maxWidth: 880,
           maxHeight: screenH * 0.9,
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(22, 20, 16, 12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Grade BEI — ${widget.applicant.fullName}',
-                          style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: 19,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.2,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Score each response from 0 to 100. When every item has a score, the overall screening result updates using the average of General, Math, General Information, and BEI.',
-                          style: TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 13,
-                            height: 1.45,
-                          ),
-                        ),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: AppTheme.white,
+            borderRadius: BorderRadius.circular(22),
+            boxShadow: AppTheme.panelShadow,
+            border: Border.all(
+              color: Colors.black.withValues(alpha: 0.06),
+            ),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(22),
+            child: Column(
+              mainAxisSize: MainAxisSize.max,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  height: 4,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        AppTheme.primaryNavy,
+                        AppTheme.primaryNavyLight.withValues(alpha: 0.92),
                       ],
                     ),
                   ),
-                  IconButton(
-                    onPressed:
-                        _saving ? null : () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close_rounded),
-                    tooltip: 'Close',
-                    color: AppTheme.textSecondary,
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(22, 18, 12, 12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          gradient: LinearGradient(
+                            colors: [
+                              AppTheme.primaryNavy.withValues(alpha: 0.12),
+                              AppTheme.primaryNavy.withValues(alpha: 0.05),
+                            ],
+                          ),
+                          border: Border.all(
+                            color: AppTheme.primaryNavy.withValues(alpha: 0.15),
+                          ),
+                        ),
+                        child: Icon(
+                          Icons.fact_check_rounded,
+                          size: 26,
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.95),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Grade BEI',
+                              style: TextStyle(
+                                color: AppTheme.textSecondary.withValues(
+                                  alpha: 0.92,
+                                ),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.9,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              widget.applicant.fullName,
+                              style: const TextStyle(
+                                color: AppTheme.textPrimary,
+                                fontSize: 22,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.35,
+                                height: 1.15,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              'Score each response from 0 to 100. When every item has a score, the overall screening result updates using the average of General, Math, General Information, and BEI.',
+                              style: TextStyle(
+                                color: AppTheme.textSecondary.withValues(
+                                  alpha: 0.95,
+                                ),
+                                fontSize: 13,
+                                height: 1.5,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton.filledTonal(
+                        onPressed:
+                            _saving ? null : () => _popBeiDialog(context),
+                        icon: const Icon(Icons.close_rounded, size: 22),
+                        tooltip: 'Close',
+                        style: IconButton.styleFrom(
+                          foregroundColor: AppTheme.textSecondary,
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ),
-            Divider(height: 1, color: Colors.black.withValues(alpha: 0.08)),
+                ),
+                Divider(
+                  height: 1,
+                  thickness: 1,
+                  color: Colors.black.withValues(alpha: 0.07),
+                ),
             if (!hasBei)
               Padding(
                 padding: const EdgeInsets.all(28),
@@ -558,20 +770,17 @@ class _RspBeiGradingDialogState extends State<_RspBeiGradingDialog> {
             else
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       _previewBar(),
                       const SizedBox(height: 14),
                       Expanded(
-                        child: Scrollbar(
-                          thumbVisibility: true,
-                          child: ListView.builder(
-                            padding: EdgeInsets.zero,
-                            itemCount: _answers.length,
-                            itemBuilder: (context, i) => _questionCard(i),
-                          ),
+                        child: ListView.builder(
+                          padding: EdgeInsets.zero,
+                          itemCount: _answers.length,
+                          itemBuilder: (context, i) => _questionCard(i),
                         ),
                       ),
                       if (_error != null) ...[
@@ -588,46 +797,75 @@ class _RspBeiGradingDialogState extends State<_RspBeiGradingDialog> {
                   ),
                 ),
               ),
-            Divider(height: 1, color: Colors.black.withValues(alpha: 0.08)),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-              child: Row(
-                children: [
-                  TextButton(
-                    onPressed:
-                        _saving ? null : () => Navigator.of(context).pop(),
-                    child: Text(
-                      'Cancel',
-                      style: TextStyle(color: AppTheme.textSecondary),
-                    ),
-                  ),
-                  const Spacer(),
-                  FilledButton.icon(
-                    onPressed: (!hasBei || _saving) ? null : _save,
-                    icon: _saving
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
+                Divider(
+                  height: 1,
+                  thickness: 1,
+                  color: Colors.black.withValues(alpha: 0.07),
+                ),
+                Container(
+                  color: AppTheme.sectionAlt.withValues(alpha: 0.4),
+                  padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
+                  child: Row(
+                    children: [
+                      OutlinedButton(
+                        onPressed:
+                            _saving ? null : () => _popBeiDialog(context),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppTheme.textPrimary,
+                          side: BorderSide(
+                            color: AppTheme.textSecondary.withValues(
+                              alpha: 0.35,
                             ),
-                          )
-                        : const Icon(Icons.save_rounded, size: 20),
-                    label: Text(_saving ? 'Saving…' : 'Save & update exam'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppTheme.primaryNavy,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 22,
-                        vertical: 14,
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 14,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          'Cancel',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
                       ),
-                    ),
+                      const Spacer(),
+                      FilledButton.icon(
+                        onPressed: (!hasBei || _saving) ? null : _save,
+                        icon: _saving
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.save_rounded, size: 20),
+                        label: Text(_saving ? 'Saving…' : 'Save & update exam'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.primaryNavy,
+                          foregroundColor: Colors.white,
+                          elevation: 2,
+                          shadowColor: AppTheme.primaryNavy.withValues(
+                            alpha: 0.45,
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 15,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
