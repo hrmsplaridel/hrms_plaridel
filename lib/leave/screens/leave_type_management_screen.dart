@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
+import '../leave_type_definition_cache.dart';
 import '../models/leave_type_definition.dart';
 
 class LeaveTypeManagementScreen extends StatefulWidget {
@@ -70,17 +71,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final res = await ApiClient.instance.get<List<dynamic>>(
-        '/api/leave/types',
-        queryParameters: const {'include_inactive': '1'},
+      final rows = await LeaveTypeDefinitionCache.instance.listAll(
+        includeInactive: true,
       );
-      final rows = (res.data ?? const [])
-          .map(
-            (item) => LeaveTypeDefinition.fromJson(
-              Map<String, dynamic>.from(item as Map),
-            ),
-          )
-          .toList();
       if (!mounted) return;
       setState(() {
         _items = rows;
@@ -145,10 +138,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   }
 
   String? _slugName(String displayName) {
-    final words = RegExp(r'[A-Za-z0-9]+')
-        .allMatches(displayName)
-        .map((m) => m.group(0)!)
-        .toList();
+    final words = RegExp(
+      r'[A-Za-z0-9]+',
+    ).allMatches(displayName).map((m) => m.group(0)!).toList();
     if (words.isEmpty) return null;
     final first = words.first.toLowerCase();
     final rest = words.skip(1).map((word) {
@@ -199,6 +191,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
         _showMessage('Leave type updated.');
       }
       if (saved != null) _selected = saved;
+      LeaveTypeDefinitionCache.instance.invalidate();
       await _load();
     } on DioException catch (e) {
       _showMessage(_messageFromDio(e));
@@ -252,10 +245,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  SizedBox(
-                    width: 360,
-                    child: _buildList(),
-                  ),
+                  SizedBox(width: 360, child: _buildList()),
                   const SizedBox(width: 18),
                   Expanded(child: _buildForm(systemLocked)),
                 ],
@@ -273,10 +263,8 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       decoration: _panelDecoration(),
       child: ListView.separated(
         itemCount: _items.length,
-        separatorBuilder: (_, __) => Divider(
-          height: 1,
-          color: Colors.black.withValues(alpha: 0.06),
-        ),
+        separatorBuilder: (_, __) =>
+            Divider(height: 1, color: Colors.black.withValues(alpha: 0.06)),
         itemBuilder: (context, index) {
           final item = _items[index];
           final selected = item.id == _selected?.id;
@@ -496,9 +484,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
 
   void _showMessage(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 }
 

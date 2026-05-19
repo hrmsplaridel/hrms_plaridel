@@ -294,7 +294,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
     await _applyFilters();
   }
 
-  Future<void> _applyFilters({bool silent = false}) async {
+  Future<void> _applyFilters({
+    bool silent = false,
+    bool forceRefresh = false,
+  }) async {
     if (!mounted) return;
     final dayBefore = _selectedDay;
     _clampSelectedDayIfNeeded();
@@ -324,6 +327,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
           ? null
           : _selectedDepartmentId,
       silent: silent,
+      forceRefresh: forceRefresh,
     );
   }
 
@@ -1844,7 +1848,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
       ),
     );
     if (ok == true && mounted) {
-      _applyFilters();
+      context.read<DtrProvider>().invalidateCachedDtrData();
+      _applyFilters(forceRefresh: true);
     }
   }
 

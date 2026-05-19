@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
+import '../leave/leave_provider.dart';
 import '../notifications/notification_provider.dart';
 import 'app_realtime_provider.dart';
 
@@ -32,6 +33,12 @@ class _AppRealtimeBridgeState extends State<AppRealtimeBridge> {
 
   void _handleEvent(AppRealtimeEvent event) {
     if (!mounted) return;
+    if (event.name == 'leave_updated') {
+      try {
+        context.read<LeaveProvider>().invalidateCachedLeaveData();
+      } catch (_) {}
+      return;
+    }
     if (event.name != 'notification_created') return;
 
     final notifications = context.read<NotificationProvider>();

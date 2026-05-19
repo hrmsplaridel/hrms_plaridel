@@ -334,7 +334,7 @@ class _ProfileContentState extends State<ProfileContent> {
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.08),
+                            color: Colors.black.withValues(alpha: 0.08),
                             blurRadius: 16,
                             offset: const Offset(0, 4),
                           ),
@@ -350,11 +350,13 @@ class _ProfileContentState extends State<ProfileContent> {
                                 errorBuilder: (_, __, ___) => CircleAvatar(
                                   radius: avatarRadius,
                                   backgroundColor: AppTheme.primaryNavy
-                                      .withOpacity(0.1),
+                                      .withValues(alpha: 0.1),
                                   child: Icon(
                                     Icons.person_rounded,
                                     size: avatarSize,
-                                    color: AppTheme.primaryNavy.withOpacity(0.5),
+                                    color: AppTheme.primaryNavy.withValues(
+                                      alpha: 0.5,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -362,11 +364,13 @@ class _ProfileContentState extends State<ProfileContent> {
                           : CircleAvatar(
                               radius: avatarRadius,
                               backgroundColor:
-                                  AppTheme.primaryNavy.withOpacity(0.1),
+                                  AppTheme.primaryNavy.withValues(alpha: 0.1),
                               child: Icon(
                                 Icons.person_rounded,
                                 size: avatarSize,
-                                color: AppTheme.primaryNavy.withOpacity(0.5),
+                                color: AppTheme.primaryNavy.withValues(
+                                  alpha: 0.5,
+                                ),
                               ),
                             ),
                     ),
@@ -389,7 +393,7 @@ class _ProfileContentState extends State<ProfileContent> {
                           border: Border.all(color: Colors.white, width: 2),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.2),
+                              color: Colors.black.withValues(alpha: 0.2),
                               blurRadius: 8,
                               offset: const Offset(0, 2),
                             ),
@@ -530,7 +534,7 @@ class _ProfileContentState extends State<ProfileContent> {
                 borderRadius: BorderRadius.circular(12),
               ),
               elevation: 1,
-              shadowColor: Colors.black.withOpacity(0.2),
+              shadowColor: Colors.black.withValues(alpha: 0.2),
             ),
           ),
         ),
@@ -735,7 +739,7 @@ class _ProfileContentState extends State<ProfileContent> {
                 borderRadius: BorderRadius.circular(12),
               ),
               elevation: 1,
-              shadowColor: Colors.black.withOpacity(0.2),
+              shadowColor: Colors.black.withValues(alpha: 0.2),
             ),
           ),
         ),
@@ -807,7 +811,7 @@ class _ProfileSection extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: AppTheme.primaryNavy.withOpacity(0.12),
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Icon(
@@ -836,10 +840,12 @@ class _ProfileSection extends StatelessWidget {
           decoration: BoxDecoration(
             color: AppTheme.white,
             borderRadius: BorderRadius.circular(radius),
-            border: Border.all(color: Colors.black.withOpacity(0.04)),
+            border: Border.all(
+              color: Colors.black.withValues(alpha: 0.04),
+            ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.06),
+                color: Colors.black.withValues(alpha: 0.06),
                 blurRadius: 24,
                 offset: const Offset(0, 8),
               ),

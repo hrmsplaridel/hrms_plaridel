@@ -373,7 +373,9 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
 
       if (!mounted) return;
       try {
-        context.read<DtrProvider>().loadEmployees();
+        final dtr = context.read<DtrProvider>();
+        dtr.invalidateCachedDtrData(includeReferenceData: true);
+        dtr.loadEmployees(forceRefresh: true);
       } catch (_) {}
       _clearForm();
       if (widget.onAccountCreated != null) {
@@ -1031,6 +1033,13 @@ class ManageEmployee extends StatefulWidget {
   State<ManageEmployee> createState() => _ManageEmployeeState();
 }
 
+enum _EmployeeToolbarAction {
+  importFromDevice,
+  biometricRoster,
+  exportAllCsv,
+  exportPageCsv,
+}
+
 class _ManageEmployeeState extends State<ManageEmployee> {
   static const _kSearchDebounceMs = 350;
   static const _kPageSizes = [10, 25, 50, 100];
@@ -1534,7 +1543,10 @@ class _ManageEmployeeState extends State<ManageEmployee> {
         _selectedBulkIds.clear();
       });
       await _loadEmployees();
-      if (mounted) dtr.loadEmployees();
+      if (mounted) {
+        dtr.invalidateCachedDtrData(includeReferenceData: true);
+        dtr.loadEmployees(forceRefresh: true);
+      }
     } catch (e) {
       if (mounted) {
         messenger.showSnackBar(
@@ -1595,7 +1607,10 @@ class _ManageEmployeeState extends State<ManageEmployee> {
         _selectedBulkIds.clear();
       });
       await _loadEmployees();
-      if (mounted) dtr.loadEmployees();
+      if (mounted) {
+        dtr.invalidateCachedDtrData(includeReferenceData: true);
+        dtr.loadEmployees(forceRefresh: true);
+      }
     } catch (e) {
       if (mounted) {
         messenger.showSnackBar(
@@ -1836,114 +1851,72 @@ class _ManageEmployeeState extends State<ManageEmployee> {
         ),
       ),
     );
-    final actions = Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      alignment: WrapAlignment.center,
+    final actions = Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        OutlinedButton.icon(
-          onPressed: () => _showImportDialog(context),
-          icon: Icon(
-            Icons.download_rounded,
-            size: 18,
-            color: AppTheme.primaryNavy,
-          ),
-          label: Text(
-            'Import from Device',
-            style: TextStyle(color: AppTheme.primaryNavy),
-          ),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: AppTheme.primaryNavy,
-            side: BorderSide(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.45),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-        ),
-        OutlinedButton.icon(
-          onPressed: () => _showBiometricRosterDialog(context),
-          icon: Icon(
-            Icons.badge_outlined,
-            size: 18,
-            color: AppTheme.primaryNavy,
-          ),
-          label: Text(
-            'Biometric roster',
-            style: TextStyle(color: AppTheme.primaryNavy),
-          ),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: AppTheme.primaryNavy,
-            side: BorderSide(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.45),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-        ),
-        MenuAnchor(
-          alignmentOffset: const Offset(0, 8),
-          builder: (context, controller, _) {
-            return OutlinedButton.icon(
-              onPressed: _exportingCsv
-                  ? null
-                  : () {
-                      if (controller.isOpen) {
-                        controller.close();
-                      } else {
-                        controller.open();
-                      }
-                    },
-              icon: _exportingCsv
-                  ? ExcludeSemantics(
-                      child: SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: AppTheme.primaryNavy,
-                        ),
-                      ),
-                    )
-                  : Icon(
-                      Icons.file_download_outlined,
-                      size: 18,
-                      color: AppTheme.primaryNavy,
-                    ),
-              label: Text(
-                'Export CSV',
-                style: TextStyle(color: AppTheme.primaryNavy),
-              ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-                side: BorderSide(
-                  color: AppTheme.primaryNavy.withValues(alpha: 0.45),
-                ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 12,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-            );
+        PopupMenuButton<_EmployeeToolbarAction>(
+          tooltip: 'More actions',
+          offset: const Offset(0, 8),
+          onSelected: (action) {
+            switch (action) {
+              case _EmployeeToolbarAction.importFromDevice:
+                _showImportDialog(context);
+              case _EmployeeToolbarAction.biometricRoster:
+                _showBiometricRosterDialog(context);
+              case _EmployeeToolbarAction.exportAllCsv:
+                _exportCsv();
+              case _EmployeeToolbarAction.exportPageCsv:
+                _exportCsvPageOnly();
+            }
           },
-          menuChildren: [
-            MenuItemButton(
-              onPressed: _exportingCsv ? null : () => _exportCsv(),
-              child: const Text('All matching rows (max 10,000)'),
+          itemBuilder: (context) => [
+            PopupMenuItem(
+              value: _EmployeeToolbarAction.importFromDevice,
+              child: _toolbarMenuItem(
+                icon: Icons.download_rounded,
+                label: 'Import from Device',
+              ),
             ),
-            MenuItemButton(
-              onPressed: _exportingCsv ? null : () => _exportCsvPageOnly(),
-              child: const Text('This page only'),
+            PopupMenuItem(
+              value: _EmployeeToolbarAction.biometricRoster,
+              child: _toolbarMenuItem(
+                icon: Icons.badge_outlined,
+                label: 'Biometric roster',
+              ),
+            ),
+            const PopupMenuDivider(),
+            PopupMenuItem(
+              value: _EmployeeToolbarAction.exportAllCsv,
+              enabled: !_exportingCsv,
+              child: _toolbarMenuItem(
+                icon: Icons.file_download_outlined,
+                label: _exportingCsv ? 'Exporting CSV...' : 'Export CSV',
+              ),
+            ),
+            PopupMenuItem(
+              value: _EmployeeToolbarAction.exportPageCsv,
+              enabled: !_exportingCsv,
+              child: _toolbarMenuItem(
+                icon: Icons.download_for_offline_outlined,
+                label: 'Export current page',
+              ),
             ),
           ],
+          child: Container(
+            width: 46,
+            height: 44,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: AppTheme.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: AppTheme.primaryNavy.withValues(alpha: 0.45),
+              ),
+            ),
+            child: Icon(Icons.more_vert_rounded, color: AppTheme.primaryNavy),
+          ),
         ),
+        const SizedBox(width: 8),
         FilledButton.icon(
           onPressed: _showAddEmployeeDialog,
           icon: const Icon(Icons.person_add_rounded, size: 18),
@@ -1964,7 +1937,17 @@ class _ManageEmployeeState extends State<ManageEmployee> {
       children: [
         filterStrip,
         const SizedBox(height: 12),
-        Center(child: actions),
+        Align(alignment: Alignment.centerRight, child: actions),
+      ],
+    );
+  }
+
+  Widget _toolbarMenuItem({required IconData icon, required String label}) {
+    return Row(
+      children: [
+        Icon(icon, size: 18),
+        const SizedBox(width: 10),
+        Expanded(child: Text(label)),
       ],
     );
   }
@@ -3020,7 +3003,9 @@ class _ManageEmployeeState extends State<ManageEmployee> {
       );
       await _loadEmployees();
       if (!mounted) return;
-      context.read<DtrProvider>().loadEmployees();
+      final dtr = context.read<DtrProvider>();
+      dtr.invalidateCachedDtrData(includeReferenceData: true);
+      dtr.loadEmployees(forceRefresh: true);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -3037,7 +3022,9 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     if (updated != true || !mounted) return;
     await _loadEmployees();
     if (!mounted) return;
-    context.read<DtrProvider>().loadEmployees();
+    final dtr = context.read<DtrProvider>();
+    dtr.invalidateCachedDtrData(includeReferenceData: true);
+    dtr.loadEmployees(forceRefresh: true);
   }
 
   void _showImportDialog(BuildContext context) async {
@@ -3047,7 +3034,9 @@ class _ManageEmployeeState extends State<ManageEmployee> {
         onImportSuccess: () {
           setState(() => _pageIndex = 0);
           _loadEmployees();
-          dialogContext.read<DtrProvider>().loadEmployees();
+          final dtr = dialogContext.read<DtrProvider>();
+          dtr.invalidateCachedDtrData(includeReferenceData: true);
+          dtr.loadEmployees(forceRefresh: true);
         },
       ),
     );
@@ -3090,7 +3079,9 @@ class _ManageEmployeeState extends State<ManageEmployee> {
       );
       await _loadEmployees();
       if (!mounted) return;
-      context.read<DtrProvider>().loadEmployees();
+      final dtr = context.read<DtrProvider>();
+      dtr.invalidateCachedDtrData(includeReferenceData: true);
+      dtr.loadEmployees(forceRefresh: true);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -3384,7 +3375,9 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
 
       if (!mounted) return;
       try {
-        context.read<DtrProvider>().loadEmployees();
+        final dtr = context.read<DtrProvider>();
+        dtr.invalidateCachedDtrData(includeReferenceData: true);
+        dtr.loadEmployees(forceRefresh: true);
       } catch (_) {}
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Employee updated successfully.')),

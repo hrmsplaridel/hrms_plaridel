@@ -53,12 +53,14 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
     });
     WidgetsBinding.instance.addObserver(this);
     _startAutoRefresh();
-    _leaveRealtimeSub ??=
-        context.read<AppRealtimeProvider>().events.listen((event) {
+    _leaveRealtimeSub ??= context.read<AppRealtimeProvider>().events.listen((
+      event,
+    ) {
       if (event.name != 'leave_updated') return;
       final userId = context.read<AuthProvider>().user?.id;
       if (!event.affectsUser(userId)) return;
-      unawaited(_refreshMyLeaveData());
+      context.read<LeaveProvider>().invalidateCachedLeaveData();
+      unawaited(_refreshMyLeaveData(forceRefresh: true));
     });
   }
 
@@ -73,7 +75,7 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _refreshMyLeaveData();
+      _refreshMyLeaveData(forceRefresh: true);
     }
   }
 
@@ -84,11 +86,14 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
     });
   }
 
-  Future<void> _refreshMyLeaveData() async {
+  Future<void> _refreshMyLeaveData({bool forceRefresh = false}) async {
     if (!mounted) return;
     final userId = context.read<AuthProvider>().user?.id;
     if (userId == null || userId.isEmpty) return;
-    await context.read<LeaveProvider>().loadMyLeaveData(userId);
+    await context.read<LeaveProvider>().loadMyLeaveData(
+      userId,
+      forceRefresh: forceRefresh,
+    );
   }
 
   @override
@@ -296,7 +301,10 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
         if (fresh != null) target = fresh;
       }
 
-      final balances = await provider.fetchBalancesForUser(target.userId);
+      final balances = await provider.fetchBalancesForUser(
+        target.userId,
+        forceRefresh: true,
+      );
 
       if (!mounted) return;
       ScaffoldMessenger.of(

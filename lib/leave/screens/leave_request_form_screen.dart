@@ -6,6 +6,7 @@ import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../leave_provider.dart';
+import '../leave_type_definition_cache.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
 import '../models/leave_type_definition.dart';
@@ -164,19 +165,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   Future<void> _loadLeaveTypes() async {
     setState(() => _loadingLeaveTypes = true);
     try {
-      final res = await ApiClient.instance.get<List<dynamic>>(
-        '/api/leave/types',
-      );
-      final items = (res.data ?? const [])
-          .map(
-            (item) => LeaveTypeDefinition.fromJson(
-              Map<String, dynamic>.from(item as Map),
-            ),
-          )
-          .where(
-            (item) => item.isActive && item.employeeCanFile && !item.adminOnly,
-          )
-          .toList();
+      final items = await LeaveTypeDefinitionCache.instance
+          .listActiveEmployeeTypes();
       if (!mounted) return;
       setState(() {
         _leaveTypeDefinitions = items;

@@ -140,7 +140,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       event,
     ) {
       if (event.name != 'leave_updated') return;
-      unawaited(_safeAutoRefresh());
+      context.read<LeaveProvider>().invalidateCachedLeaveData();
+      unawaited(_safeAutoRefresh(forceRefresh: true));
     });
   }
 
@@ -155,7 +156,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _safeAutoRefresh();
+      _safeAutoRefresh(forceRefresh: true);
     }
   }
 
@@ -166,11 +167,11 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     });
   }
 
-  Future<void> _safeAutoRefresh() async {
+  Future<void> _safeAutoRefresh({bool forceRefresh = false}) async {
     if (!mounted) return;
     final provider = context.read<LeaveProvider>();
     if (provider.reviewing || provider.submitting) return;
-    await _loadRequests();
+    await _loadRequests(forceRefresh: forceRefresh);
   }
 
   @override
@@ -285,7 +286,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
               )
               .length,
           reviewing: provider.reviewing,
-          onRefresh: _loadRequests,
+          onRefresh: () => _loadRequests(forceRefresh: true),
           onForcedLeaveDeduction: widget.isDepartmentHead
               ? null
               : _applyForcedLeaveDeduction,
@@ -369,7 +370,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     );
   }
 
-  Future<void> _loadRequests() async {
+  Future<void> _loadRequests({bool forceRefresh = false}) async {
     if (!mounted) return;
     final provider = context.read<LeaveProvider>();
     final query = LeaveRequestQuery(
@@ -380,9 +381,12 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       limit: 200,
     );
     if (widget.isDepartmentHead) {
-      await provider.loadDepartmentHeadRequests(query: query);
+      await provider.loadDepartmentHeadRequests(
+        query: query,
+        forceRefresh: forceRefresh,
+      );
     } else {
-      await provider.loadRequests(query: query);
+      await provider.loadRequests(query: query, forceRefresh: forceRefresh);
     }
     if (!mounted) return;
   }
@@ -449,7 +453,10 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         reviewerTitle: signerInfo.title,
       );
 
-      final balances = await provider.fetchBalancesForUser(target.userId);
+      final balances = await provider.fetchBalancesForUser(
+        target.userId,
+        forceRefresh: true,
+      );
 
       if (mounted) {
         ScaffoldMessenger.of(
@@ -478,6 +485,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     }
     final balances = await context.read<LeaveProvider>().fetchBalancesForUser(
       userId,
+      forceRefresh: true,
     );
     LeaveBalance? leaveBalance;
     final ledgerType = request.leaveType.balanceLedgerType;
