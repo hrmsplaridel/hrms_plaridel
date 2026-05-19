@@ -2,9 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 // ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html;
 // ignore: avoid_web_libraries_in_flutter
-import 'dart:ui_web' as ui_web;
 import 'package:url_launcher/url_launcher.dart';
 import '../../data/applicants_profile.dart';
 import '../../data/bi_form.dart';
@@ -482,7 +480,8 @@ class _RspExamTimeLimitEditor extends StatefulWidget {
   final String examType;
 
   @override
-  State<_RspExamTimeLimitEditor> createState() => _RspExamTimeLimitEditorState();
+  State<_RspExamTimeLimitEditor> createState() =>
+      _RspExamTimeLimitEditorState();
 }
 
 class _RspExamTimeLimitEditorState extends State<_RspExamTimeLimitEditor> {
@@ -517,7 +516,9 @@ class _RspExamTimeLimitEditorState extends State<_RspExamTimeLimitEditor> {
     if (parsed == null || parsed < 0 || parsed > 24 * 60) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Enter minutes between 0 (no limit) and 1440 (24 hours).'),
+          content: Text(
+            'Enter minutes between 0 (no limit) and 1440 (24 hours).',
+          ),
         ),
       );
       return;
@@ -529,9 +530,9 @@ class _RspExamTimeLimitEditorState extends State<_RspExamTimeLimitEditor> {
         parsed * 60,
       );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Time limit saved.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Time limit saved.')));
       }
     } catch (e) {
       if (mounted) {
@@ -618,7 +619,9 @@ class _RspExamTimeLimitEditorState extends State<_RspExamTimeLimitEditor> {
                               ? const SizedBox(
                                   width: 18,
                                   height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
                                 )
                               : const Text('Save limit'),
                         ),
@@ -6044,7 +6047,11 @@ class _PromotionCertificationEditorState
             const SizedBox(height: rspFormSectionGap),
             const Text(
               'We hereby certify that the above candidate(s) have been screened and found to be qualified for promotion to the above position.',
-              style: TextStyle(fontSize: 13, fontStyle: FontStyle.italic, height: 1.45),
+              style: TextStyle(
+                fontSize: 13,
+                fontStyle: FontStyle.italic,
+                height: 1.45,
+              ),
             ),
             const SizedBox(height: 20),
             Text(
@@ -7929,8 +7936,9 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
           final item = _VacancyFormItem();
           item.headline.text = v.headline ?? '';
           item.body.text = v.body ?? '';
-          item.maxApplicants.text =
-              v.maxApplicants != null ? '${v.maxApplicants}' : '';
+          item.maxApplicants.text = v.maxApplicants != null
+              ? '${v.maxApplicants}'
+              : '';
           next.add(item);
         }
       } else {
@@ -8002,25 +8010,21 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
-      final list = _vacancies
-          .map(
-            (v) {
-              final rawMax = v.maxApplicants.text.trim();
-              int? maxParsed;
-              if (rawMax.isNotEmpty) {
-                maxParsed = int.tryParse(rawMax);
-                if (maxParsed != null && maxParsed < 1) maxParsed = null;
-              }
-              return JobVacancyItem(
-                headline: v.headline.text.trim().isEmpty
-                    ? null
-                    : v.headline.text.trim(),
-                body: v.body.text.trim().isEmpty ? null : v.body.text.trim(),
-                maxApplicants: maxParsed,
-              );
-            },
-          )
-          .toList();
+      final list = _vacancies.map((v) {
+        final rawMax = v.maxApplicants.text.trim();
+        int? maxParsed;
+        if (rawMax.isNotEmpty) {
+          maxParsed = int.tryParse(rawMax);
+          if (maxParsed != null && maxParsed < 1) maxParsed = null;
+        }
+        return JobVacancyItem(
+          headline: v.headline.text.trim().isEmpty
+              ? null
+              : v.headline.text.trim(),
+          body: v.body.text.trim().isEmpty ? null : v.body.text.trim(),
+          maxApplicants: maxParsed,
+        );
+      }).toList();
       final a = JobVacancyAnnouncement(
         hasVacancies: _hasVacancies,
         headline: list.isNotEmpty ? list.first.headline : null,
@@ -8280,7 +8284,9 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
                               Text(
                                 'Counts only applicants still in process. Document declined, exam failed, final interview failed, or hired (registered) frees a slot.',
                                 style: TextStyle(
-                                  color: AppTheme.textSecondary.withOpacity(0.9),
+                                  color: AppTheme.textSecondary.withOpacity(
+                                    0.9,
+                                  ),
                                   fontSize: 11.5,
                                   height: 1.35,
                                 ),
@@ -8620,9 +8626,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                   const DataColumn(label: Text('Math'), numeric: true),
                   const DataColumn(label: Text('Gen. info'), numeric: true),
                   const DataColumn(label: Text('BEI'), numeric: true),
-                  const DataColumn(
-                    label: Text('Grade'),
-                  ),
+                  const DataColumn(label: Text('Grade')),
                   const DataColumn(label: Text('Result')),
                 ],
                 rows: _applications.map((app) {
@@ -8645,8 +8649,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                   String scoreLabel(double? v) =>
                       v == null ? '—' : '${v.toStringAsFixed(0)}%';
 
-                  final canGradeBei =
-                      exam != null && _hasBeiAnswers(exam);
+                  final canGradeBei = exam != null && _hasBeiAnswers(exam);
 
                   return DataRow(
                     cells: [
@@ -8754,16 +8757,15 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                     child: Icon(
                                       Icons.remove_rounded,
                                       size: 20,
-                                      color: AppTheme.textSecondary
-                                          .withValues(alpha: 0.3),
+                                      color: AppTheme.textSecondary.withValues(
+                                        alpha: 0.3,
+                                      ),
                                     ),
                                   ),
                                 ),
                         ),
                       ),
-                      DataCell(
-                        _scoreBreakdownStatusPill(exam: exam),
-                      ),
+                      DataCell(_scoreBreakdownStatusPill(exam: exam)),
                     ],
                   );
                 }).toList(),
@@ -8783,7 +8785,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
         final borderColor = Colors.black.withValues(alpha: 0.08);
         return AlertDialog(
           backgroundColor: AppTheme.offWhite,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 24,
+          ),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
@@ -8817,7 +8822,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                   builder: (_) {
                     final mq = MediaQuery.sizeOf(ctx);
                     final contentWidth = (mq.width - 48).clamp(280.0, 1120.0);
-                    final contentHeight = (mq.height * 0.58).clamp(300.0, 560.0);
+                    final contentHeight = (mq.height * 0.58).clamp(
+                      300.0,
+                      560.0,
+                    );
                     final useWide = contentWidth >= 760;
                     final table = _buildScoreBreakdownDataTable(ctx);
                     final side = _scoreBreakdownSidePanel();
@@ -8828,10 +8836,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                           ? Row(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                Expanded(
-                                  flex: 13,
-                                  child: table,
-                                ),
+                                Expanded(flex: 13, child: table),
                                 VerticalDivider(
                                   width: 1,
                                   thickness: 1,
@@ -8986,9 +8991,9 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   Future<void> _showEditApplicantDialog(RecruitmentApplication app) async {
     final result =
         await showDialog<({String fullName, String email, String? phone})?>(
-      context: context,
-      builder: (ctx) => _EditApplicantBasicDialog(app: app),
-    );
+          context: context,
+          builder: (ctx) => _EditApplicantBasicDialog(app: app),
+        );
     if (result == null || !mounted) return;
     try {
       final updated = await RecruitmentRepo.instance.updateApplicationBasicInfo(
@@ -9002,14 +9007,14 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
         final i = _applications.indexWhere((a) => a.id == app.id);
         if (i >= 0) _applications[i] = updated;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Applicant details saved.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Applicant details saved.')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to save: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
     }
   }
 
@@ -9426,7 +9431,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                                           .trim()
                                                           .isNotEmpty)
                                                   ? app.positionAppliedFor!
-                                                      .trim()
+                                                        .trim()
                                                   : _kNa,
                                               style: textStyle,
                                               overflow: TextOverflow.ellipsis,
@@ -9474,8 +9479,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                                     ),
                                                     if (_hasBeiAnswers(exam))
                                                       TextButton(
-                                                        style: TextButton
-                                                            .styleFrom(
+                                                        style: TextButton.styleFrom(
                                                           padding:
                                                               EdgeInsets.zero,
                                                           minimumSize:
@@ -9489,10 +9493,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                                         ),
                                                         onPressed: () =>
                                                             _openBeiGrading(
-                                                          context,
-                                                          app,
-                                                          exam,
-                                                        ),
+                                                              context,
+                                                              app,
+                                                              exam,
+                                                            ),
                                                         child: const Text(
                                                           'Grade BEI',
                                                           style: TextStyle(
@@ -9595,40 +9599,48 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                               IconButton(
                                                 onPressed: () =>
                                                     _showEditApplicantDialog(
-                                                  app,
-                                                ),
+                                                      app,
+                                                    ),
                                                 icon: const Icon(
                                                   Icons.edit_outlined,
                                                   size: 20,
                                                 ),
-                                                tooltip: 'Edit name, email, phone',
+                                                tooltip:
+                                                    'Edit name, email, phone',
                                                 style: IconButton.styleFrom(
                                                   foregroundColor:
                                                       AppTheme.primaryNavy,
-                                                  padding:
-                                                      const EdgeInsets.all(6),
-                                                  minimumSize:
-                                                      const Size(32, 32),
+                                                  padding: const EdgeInsets.all(
+                                                    6,
+                                                  ),
+                                                  minimumSize: const Size(
+                                                    32,
+                                                    32,
+                                                  ),
                                                 ),
                                               ),
                                               IconButton(
                                                 onPressed: () =>
                                                     _confirmDeleteApplicantRow(
-                                                  context,
-                                                  app,
-                                                ),
+                                                      context,
+                                                      app,
+                                                    ),
                                                 icon: const Icon(
                                                   Icons.delete_outline_rounded,
                                                   size: 20,
                                                 ),
                                                 tooltip: 'Delete applicant',
                                                 style: IconButton.styleFrom(
-                                                  foregroundColor:
-                                                      const Color(0xFFC62828),
-                                                  padding:
-                                                      const EdgeInsets.all(6),
-                                                  minimumSize:
-                                                      const Size(32, 32),
+                                                  foregroundColor: const Color(
+                                                    0xFFC62828,
+                                                  ),
+                                                  padding: const EdgeInsets.all(
+                                                    6,
+                                                  ),
+                                                  minimumSize: const Size(
+                                                    32,
+                                                    32,
+                                                  ),
                                                 ),
                                               ),
                                             ],
