@@ -9,6 +9,7 @@ class LeaveRequestQuery {
     this.userId,
     this.status,
     this.leaveType,
+    this.leaveTypeName,
     this.startDateFrom,
     this.startDateTo,
     this.createdFrom,
@@ -19,6 +20,7 @@ class LeaveRequestQuery {
   final String? userId;
   final LeaveRequestStatus? status;
   final LeaveType? leaveType;
+  final String? leaveTypeName;
   final DateTime? startDateFrom;
   final DateTime? startDateTo;
   final DateTime? createdFrom;
@@ -28,7 +30,7 @@ class LeaveRequestQuery {
   /// Convert to URL query-param map for the API layer.
   Map<String, dynamic> toQueryParams() => {
     if (status != null) 'status': status!.value,
-    if (leaveType != null) 'leave_type': leaveType!.value,
+    if (_effectiveLeaveTypeName != null) 'leave_type': _effectiveLeaveTypeName,
     if (userId != null && userId!.isNotEmpty) 'user_id': userId,
     if (limit != null) 'limit': limit,
     if (startDateFrom != null) 'start_date_from': _toDateStr(startDateFrom!),
@@ -39,6 +41,12 @@ class LeaveRequestQuery {
 
   static String _toDateStr(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  String? get _effectiveLeaveTypeName {
+    final raw = leaveTypeName?.trim();
+    if (raw != null && raw.isNotEmpty) return raw;
+    return leaveType?.value;
+  }
 }
 
 /// Approval payload used by HR/admin actions.

@@ -87,7 +87,15 @@ class MockLeaveRepository implements LeaveRepository {
     var results = _requests.where((r) {
       if (query.userId != null && r.userId != query.userId) return false;
       if (query.status != null && r.status != query.status) return false;
-      if (query.leaveType != null && r.leaveType != query.leaveType) {
+      final leaveTypeName = query.leaveTypeName?.trim();
+      if (leaveTypeName != null &&
+          leaveTypeName.isNotEmpty &&
+          r.effectiveLeaveTypeName != leaveTypeName) {
+        return false;
+      }
+      if ((leaveTypeName == null || leaveTypeName.isEmpty) &&
+          query.leaveType != null &&
+          r.leaveType != query.leaveType) {
         return false;
       }
       if (query.startDateFrom != null &&
@@ -330,13 +338,14 @@ class MockLeaveRepository implements LeaveRepository {
   @override
   Future<List<LeaveRequest>> listDepartmentHeadRequests({
     LeaveRequestQuery query = const LeaveRequestQuery(),
-  }) async =>
-      _requests.where((request) {
-        final statusOk = query.status == null || request.status == query.status;
-        final leaveTypeOk =
-            query.leaveType == null || request.leaveType == query.leaveType;
-        return statusOk && leaveTypeOk;
-      }).toList();
+  }) async => _requests.where((request) {
+    final statusOk = query.status == null || request.status == query.status;
+    final leaveTypeName = query.leaveTypeName?.trim();
+    final leaveTypeOk = leaveTypeName != null && leaveTypeName.isNotEmpty
+        ? request.effectiveLeaveTypeName == leaveTypeName
+        : query.leaveType == null || request.leaveType == query.leaveType;
+    return statusOk && leaveTypeOk;
+  }).toList();
 
   @override
   Future<LeaveRequest> departmentHeadApprove(

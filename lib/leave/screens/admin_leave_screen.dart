@@ -12,6 +12,7 @@ import '../../providers/auth_provider.dart';
 import '../../realtime/app_realtime_provider.dart';
 import '../leave_provider.dart';
 import '../leave_repository.dart';
+import '../leave_type_definition_cache.dart';
 import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
@@ -55,7 +56,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   bool _initialized = false;
   LeaveRequest? _selectedRequest;
   LeaveRequestStatus? _statusFilter;
-  LeaveType? _leaveTypeFilter;
+  String? _leaveTypeFilter;
+  List<_LeaveTypeFilterOption> _configuredLeaveTypeOptions = const [];
   String? _departmentFilter;
   String? _employeeFilter;
   // #11: Date range filters.
@@ -134,6 +136,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     if (_initialized) return;
     _initialized = true;
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadRequests());
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _loadLeaveTypeFilterOptions(),
+    );
     WidgetsBinding.instance.addObserver(this);
     _startAutoRefresh();
     _leaveRealtimeSub ??= context.read<AppRealtimeProvider>().events.listen((
@@ -165,6 +170,62 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     _autoRefreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       _safeAutoRefresh();
     });
+  }
+
+  Future<void> _loadLeaveTypeFilterOptions({bool forceRefresh = false}) async {
+    try {
+      final definitions = await LeaveTypeDefinitionCache.instance.listAll(
+        includeInactive: true,
+        forceRefresh: forceRefresh,
+      );
+      final options =
+          definitions
+              .where((item) => item.name.trim().isNotEmpty)
+              .map(
+                (item) => _LeaveTypeFilterOption(
+                  value: item.name.trim(),
+                  label: item.displayName.trim().isNotEmpty
+                      ? item.displayName.trim()
+                      : item.name.trim(),
+                ),
+              )
+              .toList()
+            ..sort((a, b) => a.label.compareTo(b.label));
+      if (!mounted) return;
+      setState(() => _configuredLeaveTypeOptions = options);
+    } catch (_) {
+      // Request rows still supply used leave types if rules cannot be loaded.
+    }
+  }
+
+  List<_LeaveTypeFilterOption> _leaveTypeFilterOptions(
+    List<LeaveRequest> requests,
+  ) {
+    final byValue = <String, _LeaveTypeFilterOption>{};
+    for (final option in _configuredLeaveTypeOptions) {
+      byValue[option.value] = option;
+    }
+    for (final request in requests) {
+      final value = request.effectiveLeaveTypeName.trim();
+      if (value.isEmpty) continue;
+      byValue.putIfAbsent(
+        value,
+        () => _LeaveTypeFilterOption(
+          value: value,
+          label: request.leaveTypeLabel.trim().isNotEmpty
+              ? request.leaveTypeLabel.trim()
+              : value,
+        ),
+      );
+    }
+    final selected = _leaveTypeFilter?.trim();
+    if (selected != null && selected.isNotEmpty) {
+      byValue.putIfAbsent(
+        selected,
+        () => _LeaveTypeFilterOption(value: selected, label: selected),
+      );
+    }
+    return byValue.values.toList()..sort((a, b) => a.label.compareTo(b.label));
   }
 
   Future<void> _safeAutoRefresh({bool forceRefresh = false}) async {
@@ -206,6 +267,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
             (r) => (r.officeDepartment ?? '').trim() == _departmentFilter,
           );
         }).toList()..sort((a, b) => a.name.compareTo(b.name));
+    final leaveTypeOptions = _leaveTypeFilterOptions(requests);
 
     final filteredRequests = requests.where((r) {
       if (!widget.isDepartmentHead &&
@@ -215,7 +277,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       final statusOk = _statusFilter == null || r.status == _statusFilter;
       if (!statusOk) return false;
       final leaveTypeOk =
-          _leaveTypeFilter == null || r.leaveType == _leaveTypeFilter;
+          _leaveTypeFilter == null ||
+          r.effectiveLeaveTypeName == _leaveTypeFilter;
       if (!leaveTypeOk) return false;
       final fromOk =
           _startDateFrom == null ||
@@ -319,6 +382,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
             isDepartmentHead: widget.isDepartmentHead,
             status: _statusFilter,
             leaveType: _leaveTypeFilter,
+            leaveTypeOptions: leaveTypeOptions,
             department: _departmentFilter,
             departments: departments,
             employee: _employeeFilter,
@@ -375,7 +439,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     final provider = context.read<LeaveProvider>();
     final query = LeaveRequestQuery(
       status: _statusFilter,
-      leaveType: _leaveTypeFilter,
+      leaveTypeName: _leaveTypeFilter,
       startDateFrom: _startDateFrom,
       startDateTo: _startDateTo,
       limit: 200,
@@ -884,6 +948,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         child: const LeaveTypeManagementScreen(),
       ),
     );
+    if (!mounted) return;
+    await _loadLeaveTypeFilterOptions(forceRefresh: true);
   }
 }
 
@@ -3004,6 +3070,7 @@ class _FilterBar extends StatelessWidget {
     required this.isDepartmentHead,
     required this.status,
     required this.leaveType,
+    required this.leaveTypeOptions,
     required this.department,
     required this.departments,
     required this.employee,
@@ -3021,13 +3088,14 @@ class _FilterBar extends StatelessWidget {
 
   final bool isDepartmentHead;
   final LeaveRequestStatus? status;
-  final LeaveType? leaveType;
+  final String? leaveType;
+  final List<_LeaveTypeFilterOption> leaveTypeOptions;
   final String? department;
   final List<String> departments;
   final String? employee;
   final List<_EmployeeFilterOption> employees;
   final ValueChanged<LeaveRequestStatus?> onStatusChanged;
-  final ValueChanged<LeaveType?> onLeaveTypeChanged;
+  final ValueChanged<String?> onLeaveTypeChanged;
   final ValueChanged<String?> onDepartmentChanged;
   final ValueChanged<String?> onEmployeeChanged;
   final VoidCallback onReset;
@@ -3095,19 +3163,22 @@ class _FilterBar extends StatelessWidget {
                 ),
                 SizedBox(
                   width: 180,
-                  child: DropdownButtonFormField<LeaveType?>(
+                  child: DropdownButtonFormField<String?>(
                     isExpanded: true,
-                    initialValue: leaveType,
+                    initialValue: _safeLeaveTypeValue(
+                      leaveType,
+                      leaveTypeOptions,
+                    ),
                     decoration: _inputDecoration('Leave Type'),
                     items: [
-                      const DropdownMenuItem<LeaveType?>(
+                      const DropdownMenuItem<String?>(
                         value: null,
                         child: Text('All leave types'),
                       ),
-                      ...LeaveType.values.map(
-                        (value) => DropdownMenuItem<LeaveType?>(
-                          value: value,
-                          child: Text(value.displayName),
+                      ...leaveTypeOptions.map(
+                        (option) => DropdownMenuItem<String?>(
+                          value: option.value,
+                          child: Text(option.label),
                         ),
                       ),
                     ],
@@ -3188,6 +3259,15 @@ class _FilterBar extends StatelessWidget {
     );
   }
 
+  String? _safeLeaveTypeValue(
+    String? value,
+    List<_LeaveTypeFilterOption> options,
+  ) {
+    final raw = value?.trim();
+    if (raw == null || raw.isEmpty) return null;
+    return options.any((option) => option.value == raw) ? raw : null;
+  }
+
   String _statusLabel(LeaveRequestStatus? value) {
     if (value == null) return 'All statuses';
     if (!isDepartmentHead) return value.displayName;
@@ -3209,6 +3289,13 @@ class _EmployeeFilterOption {
 
   final String id;
   final String name;
+}
+
+class _LeaveTypeFilterOption {
+  const _LeaveTypeFilterOption({required this.value, required this.label});
+
+  final String value;
+  final String label;
 }
 
 /// Small chip-style date picker for filter bar.

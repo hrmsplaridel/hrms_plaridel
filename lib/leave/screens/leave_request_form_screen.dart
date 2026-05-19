@@ -612,7 +612,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
                           // B. Dynamic leave-type guidance
                           const SizedBox(height: 14),
-                          LeaveTypeGuidanceCard(leaveType: _leaveType),
+                          LeaveTypeGuidanceCard(
+                            leaveType: _leaveType,
+                            definition: _selectedLeaveTypeDefinition,
+                          ),
 
                           if (_leaveType == LeaveType.others &&
                               _leaveTypeName == LeaveType.others.value) ...[

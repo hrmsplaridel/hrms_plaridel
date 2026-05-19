@@ -146,7 +146,7 @@ class LeaveProvider extends ChangeNotifier {
       scope,
       _normalize(query.userId) ?? '',
       query.status?.value ?? '',
-      query.leaveType?.value ?? '',
+      _normalize(query.leaveTypeName) ?? query.leaveType?.value ?? '',
       _dateOnlyKey(query.startDateFrom),
       _dateOnlyKey(query.startDateTo),
       _dateTimeKey(query.createdFrom),
