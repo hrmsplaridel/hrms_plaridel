@@ -129,18 +129,25 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   void _applyNotificationTapResult(NotificationTapResult? result) {
-    if (result == null) return;
+    if (result == null || result.kind == NotificationTapKind.none) return;
     switch (result.kind) {
       case NotificationTapKind.adminDtrLeaveManagement:
         setState(() => _selectedMenu = AdminMenu.dtr);
+        DashboardContentNavigator.showHome(_contentNavKey);
+        // DTR mounts on the next frame(s) after the nested navigator rebuilds home.
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          _dtrContentKey.currentState?.openLeaveManagement();
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _dtrContentKey.currentState?.openLeaveManagement();
+          });
         });
         break;
       case NotificationTapKind.adminDtrLocatorManagement:
         setState(() => _selectedMenu = AdminMenu.dtr);
+        DashboardContentNavigator.showHome(_contentNavKey);
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          _dtrContentKey.currentState?.openLocatorManagement();
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _dtrContentKey.currentState?.openLocatorManagement();
+          });
         });
         break;
       case NotificationTapKind.none:

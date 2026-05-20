@@ -179,7 +179,6 @@ class _ProfilePreferenceSettingsPanelState
   bool _pPayroll = true;
   bool _pAnnounce = true;
   bool _pTask = true;
-  String _prefTheme = 'system';
   String _prefLanguage = 'en';
 
   @override
