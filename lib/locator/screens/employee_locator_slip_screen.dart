@@ -61,11 +61,11 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
     if (!_loadingMy && _slips.isEmpty) {
       _loadMyRequests();
     }
-    _locatorRealtimeSub ??= context.read<AppRealtimeProvider>().events.listen((
-      event,
-    ) {
+    final realtimeProvider = context.read<AppRealtimeProvider>();
+    final authProvider = context.read<AuthProvider>();
+    _locatorRealtimeSub ??= realtimeProvider.events.listen((event) {
       if (event.name != 'locator_updated') return;
-      final userId = context.read<AuthProvider>().user?.id;
+      final userId = authProvider.user?.id;
       if (event.affectsUser(userId)) {
         unawaited(_loadMyRequests());
       }
@@ -658,52 +658,243 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
                   const _EmptyState(
                     message: 'No locator slips match the current filter.',
                   )
-                else if (!useScrollableList)
-                  Column(
-                    children: List.generate(visibleItems.length, (index) {
-                      final item = visibleItems[index];
-                      return Padding(
-                        padding: EdgeInsets.only(
-                          bottom: index == visibleItems.length - 1 ? 0 : 10,
-                        ),
-                        child: _LocatorApprovalCard(
-                          item: item,
-                          isSelected:
-                              _slipSelectionKey(item) ==
-                              _selectedApprovalSlipId,
-                          onTap: () => _toggleApprovalSelection(item),
-                        ),
-                      );
-                    }),
-                  )
                 else
-                  ConstrainedBox(
-                    constraints: BoxConstraints(maxHeight: maxListHeight),
-                    child: Scrollbar(
-                      thumbVisibility: true,
-                      child: ListView.separated(
-                        primary: false,
-                        physics: const BouncingScrollPhysics(
-                          parent: AlwaysScrollableScrollPhysics(),
-                        ),
-                        itemCount: visibleItems.length,
-                        itemBuilder: (context, index) {
-                          final item = visibleItems[index];
-                          return _LocatorApprovalCard(
-                            item: item,
-                            isSelected:
-                                _slipSelectionKey(item) ==
-                                _selectedApprovalSlipId,
-                            onTap: () => _toggleApprovalSelection(item),
-                          );
-                        },
-                        separatorBuilder: (_, __) => const SizedBox(height: 10),
-                      ),
-                    ),
+                  _approvalItemsTable(
+                    items: visibleItems,
+                    maxHeight: maxListHeight,
+                    useScrollableList: useScrollableList,
                   ),
               ],
             ),
     );
+  }
+
+  Widget _approvalItemsTable({
+    required List<_LocatorSlipDraft> items,
+    required double maxHeight,
+    required bool useScrollableList,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tableWidth = constraints.maxWidth < 920
+            ? 920.0
+            : constraints.maxWidth;
+        final purposeWidth = tableWidth - 580;
+        final content = SizedBox(
+          width: tableWidth,
+          child: Column(
+            children: [
+              _approvalTableHeader(purposeWidth),
+              for (var index = 0; index < items.length; index++)
+                _approvalTableRow(
+                  items[index],
+                  purposeWidth: purposeWidth,
+                  isLast: index == items.length - 1,
+                  isSelected:
+                      _slipSelectionKey(items[index]) ==
+                      _selectedApprovalSlipId,
+                  onTap: () => _toggleApprovalSelection(items[index]),
+                ),
+            ],
+          ),
+        );
+
+        final table = ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: content,
+            ),
+          ),
+        );
+
+        if (!useScrollableList) return table;
+
+        return ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxHeight),
+          child: Scrollbar(
+            thumbVisibility: true,
+            child: SingleChildScrollView(
+              primary: false,
+              physics: const BouncingScrollPhysics(
+                parent: AlwaysScrollableScrollPhysics(),
+              ),
+              child: table,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _approvalTableHeader(double purposeWidth) {
+    return Container(
+      height: 44,
+      color: AppTheme.offWhite,
+      child: Row(
+        children: [
+          _approvalHeaderCell('Employee', width: 190),
+          _approvalHeaderCell('Date', width: 120),
+          _approvalHeaderCell('Purpose / Location', width: purposeWidth),
+          _approvalHeaderCell('Time', width: 120),
+          _approvalHeaderCell('Status', width: 150),
+        ],
+      ),
+    );
+  }
+
+  Widget _approvalTableRow(
+    _LocatorSlipDraft item, {
+    required double purposeWidth,
+    required bool isLast,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    final borderColor = Colors.black.withValues(alpha: 0.06);
+    final rowColor = isSelected
+        ? AppTheme.primaryNavy.withValues(alpha: 0.08)
+        : Colors.transparent;
+    final leftBorderColor = isSelected
+        ? AppTheme.primaryNavy
+        : Colors.transparent;
+
+    return Material(
+      color: rowColor,
+      child: InkWell(
+        onTap: onTap,
+        hoverColor: AppTheme.primaryNavy.withValues(alpha: 0.04),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 60),
+          decoration: BoxDecoration(
+            border: Border(
+              left: BorderSide(color: leftBorderColor, width: 4),
+              bottom: isLast ? BorderSide.none : BorderSide(color: borderColor),
+            ),
+          ),
+          child: Row(
+            children: [
+              _approvalBodyCell(
+                width: 186,
+                child: _approvalCellText(item.employeeName, strong: true),
+              ),
+              _approvalBodyCell(
+                width: 120,
+                child: _approvalCellText(_formatDate(item.date)),
+              ),
+              _approvalBodyCell(
+                width: purposeWidth,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _approvalCellText(item.office, strong: true),
+                    if (item.remarks.trim().isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      _approvalCellText(
+                        item.remarks,
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              _approvalBodyCell(
+                width: 120,
+                child: _approvalCellText(_approvalSegmentsText(item)),
+              ),
+              _approvalBodyCell(width: 150, child: _approvalStatusPill(item)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _approvalHeaderCell(String label, {required double width}) {
+    return SizedBox(
+      width: width,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _approvalBodyCell({required double width, required Widget child}) {
+    return SizedBox(
+      width: width,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Align(alignment: Alignment.centerLeft, child: child),
+      ),
+    );
+  }
+
+  Widget _approvalCellText(
+    String text, {
+    bool strong = false,
+    Color? color,
+    double fontSize = 13,
+  }) {
+    return Text(
+      text,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        color: color ?? AppTheme.textPrimary,
+        fontSize: fontSize,
+        fontWeight: strong ? FontWeight.w700 : FontWeight.w500,
+      ),
+    );
+  }
+
+  Widget _approvalStatusPill(_LocatorSlipDraft item) {
+    final (bg, border, textColor) = _statusColors(item.status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: border),
+      ),
+      child: Text(
+        _departmentHeadStatusLabel(item),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: textColor,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  String _approvalSegmentsText(_LocatorSlipDraft item) {
+    final segments = <String>[];
+    if (item.amIn) segments.add('AM IN');
+    if (item.amOut) segments.add('AM OUT');
+    if (item.pmIn) segments.add('PM IN');
+    if (item.pmOut) segments.add('PM OUT');
+    return segments.isEmpty ? '-' : segments.join(', ');
   }
 
   void _toggleApprovalSelection(_LocatorSlipDraft item) {
@@ -1864,117 +2055,6 @@ class _LocatorSlipCard extends StatelessWidget {
           color: AppTheme.textPrimary,
           fontSize: 11,
           fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-}
-
-class _LocatorApprovalCard extends StatelessWidget {
-  const _LocatorApprovalCard({
-    required this.item,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  final _LocatorSlipDraft item;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: isSelected
-                  ? AppTheme.primaryNavy.withValues(alpha: 0.25)
-                  : Colors.black.withValues(alpha: 0.08),
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Text(
-                      item.employeeName,
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 15,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  _statusPill(item),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '${_formatDate(item.date)} • ${item.office}',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  if (item.amIn) _chip('AM IN'),
-                  if (item.amOut) _chip('AM OUT'),
-                  if (item.pmIn) _chip('PM IN'),
-                  if (item.pmOut) _chip('PM OUT'),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Text(
-                item.remarks,
-                style: TextStyle(color: AppTheme.textSecondary, height: 1.4),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _chip(String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppTheme.offWhite,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
-      ),
-      child: Text(text, style: const TextStyle(fontSize: 11)),
-    );
-  }
-
-  Widget _statusPill(_LocatorSlipDraft item) {
-    final (bg, border, textColor) = _statusColors(item.status);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: border),
-      ),
-      child: Text(
-        _departmentHeadStatusLabel(item),
-        style: TextStyle(
-          color: textColor,
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
         ),
       ),
     );

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../landingpage/constants/app_theme.dart';
 import '../models/leave_request.dart';
-import '../models/leave_type.dart';
 import 'leave_status_chip.dart';
 
 class LeaveCard extends StatelessWidget {

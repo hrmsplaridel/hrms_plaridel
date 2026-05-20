@@ -55,8 +55,9 @@ class _AdminLocatorManagementScreenState
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _locatorRealtimeSub ??=
-        context.read<AppRealtimeProvider>().events.listen((event) {
+    _locatorRealtimeSub ??= context.read<AppRealtimeProvider>().events.listen((
+      event,
+    ) {
       if (event.name != 'locator_updated') return;
       unawaited(_load());
     });
@@ -221,43 +222,13 @@ class _AdminLocatorManagementScreenState
                   ),
                 )
               else
-                !useScrollableList
-                    ? Column(
-                        children: List.generate(_items.length, (index) {
-                          final item = _items[index];
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 10),
-                            child: _adminItemCard(
-                              item,
-                              isSelected: item.id == _selectedItemId,
-                              onTap: () => _toggleItemSelection(item.id),
-                            ),
-                          );
-                        }),
-                      )
-                    : ConstrainedBox(
-                        constraints: BoxConstraints(maxHeight: maxListHeight),
-                        child: Scrollbar(
-                          thumbVisibility: true,
-                          child: ListView.separated(
-                            primary: false,
-                            physics: const BouncingScrollPhysics(
-                              parent: AlwaysScrollableScrollPhysics(),
-                            ),
-                            itemCount: _items.length,
-                            separatorBuilder: (_, __) =>
-                                const SizedBox(height: 10),
-                            itemBuilder: (context, index) {
-                              final item = _items[index];
-                              return _adminItemCard(
-                                item,
-                                isSelected: item.id == _selectedItemId,
-                                onTap: () => _toggleItemSelection(item.id),
-                              );
-                            },
-                          ),
-                        ),
-                      ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: _adminItemsTable(
+                    maxHeight: maxListHeight,
+                    useScrollableList: useScrollableList,
+                  ),
+                ),
             ],
           ),
         ),
@@ -265,91 +236,205 @@ class _AdminLocatorManagementScreenState
     );
   }
 
-  Widget _adminItemCard(
+  Widget _adminItemsTable({
+    required double maxHeight,
+    required bool useScrollableList,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tableWidth = constraints.maxWidth < 1040
+            ? 1040.0
+            : constraints.maxWidth;
+        final purposeWidth = tableWidth - 740;
+        final content = SizedBox(
+          width: tableWidth,
+          child: Column(
+            children: [
+              _adminTableHeader(purposeWidth),
+              for (var index = 0; index < _items.length; index++)
+                _adminTableRow(
+                  _items[index],
+                  purposeWidth: purposeWidth,
+                  isLast: index == _items.length - 1,
+                  isSelected: _items[index].id == _selectedItemId,
+                  onTap: () => _toggleItemSelection(_items[index].id),
+                ),
+            ],
+          ),
+        );
+
+        final table = ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: content,
+            ),
+          ),
+        );
+
+        if (!useScrollableList) return table;
+
+        return ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxHeight),
+          child: Scrollbar(
+            thumbVisibility: true,
+            child: SingleChildScrollView(
+              primary: false,
+              physics: const BouncingScrollPhysics(
+                parent: AlwaysScrollableScrollPhysics(),
+              ),
+              child: table,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _adminTableHeader(double purposeWidth) {
+    return Container(
+      height: 44,
+      color: AppTheme.offWhite,
+      child: Row(
+        children: [
+          _adminHeaderCell('Employee', width: 190),
+          _adminHeaderCell('Date', width: 120),
+          _adminHeaderCell('Purpose / Location', width: purposeWidth),
+          _adminHeaderCell('Department', width: 160),
+          _adminHeaderCell('Time', width: 120),
+          _adminHeaderCell('Status', width: 150),
+        ],
+      ),
+    );
+  }
+
+  Widget _adminTableRow(
     _LocatorAdminRecord item, {
+    required double purposeWidth,
+    required bool isLast,
     required bool isSelected,
     required VoidCallback onTap,
   }) {
+    final borderColor = Colors.black.withValues(alpha: 0.06);
+    final rowColor = isSelected
+        ? AppTheme.primaryNavy.withValues(alpha: 0.08)
+        : Colors.transparent;
+    final leftBorderColor = isSelected
+        ? AppTheme.primaryNavy
+        : Colors.transparent;
+
     return Material(
-      color: Colors.transparent,
+      color: rowColor,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        hoverColor: AppTheme.primaryNavy.withValues(alpha: 0.04),
         child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(12),
+          constraints: const BoxConstraints(minHeight: 60),
           decoration: BoxDecoration(
-            color: AppTheme.offWhite,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isSelected
-                  ? AppTheme.primaryNavy.withValues(alpha: 0.25)
-                  : Colors.black.withValues(alpha: 0.06),
+            border: Border(
+              left: BorderSide(color: leftBorderColor, width: 4),
+              bottom: isLast ? BorderSide.none : BorderSide(color: borderColor),
             ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Row(
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      item.employeeName,
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ),
-                  _statusPill(item),
-                ],
+              _adminBodyCell(
+                width: 186,
+                child: _adminCellText(item.employeeName, strong: true),
               ),
-              const SizedBox(height: 6),
-              Text(
-                '${item.slipDate} • ${item.office}',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+              _adminBodyCell(
+                width: 120,
+                child: _adminCellText(item.slipDateLabel),
               ),
-              if (item.departmentName.trim().isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(
-                  item.departmentName,
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                ),
-              ],
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  if (item.amIn) _chip('AM IN'),
-                  if (item.amOut) _chip('AM OUT'),
-                  if (item.pmIn) _chip('PM IN'),
-                  if (item.pmOut) _chip('PM OUT'),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                item.reason,
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-              ),
-              if ((item.deptHeadReviewerName ?? item.hrReviewerName) !=
-                  null) ...[
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
+              _adminBodyCell(
+                width: purposeWidth,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if ((item.deptHeadReviewerName ?? '').trim().isNotEmpty)
-                      _chip('Dept Head: ${item.deptHeadReviewerName}'),
-                    if ((item.hrReviewerName ?? '').trim().isNotEmpty)
-                      _chip('HR: ${item.hrReviewerName}'),
+                    _adminCellText(item.office, strong: true),
+                    if (item.reason.trim().isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      _adminCellText(
+                        item.reason,
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ],
                   ],
                 ),
-              ],
+              ),
+              _adminBodyCell(
+                width: 160,
+                child: _adminCellText(
+                  item.departmentName.trim().isEmpty
+                      ? '—'
+                      : item.departmentName,
+                ),
+              ),
+              _adminBodyCell(
+                width: 120,
+                child: _adminCellText(item.segmentText),
+              ),
+              _adminBodyCell(width: 150, child: _statusPill(item)),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _adminHeaderCell(String label, {required double width}) {
+    return SizedBox(
+      width: width,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _adminBodyCell({required double width, required Widget child}) {
+    return SizedBox(
+      width: width,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Align(alignment: Alignment.centerLeft, child: child),
+      ),
+    );
+  }
+
+  Widget _adminCellText(
+    String text, {
+    bool strong = false,
+    Color? color,
+    double fontSize = 13,
+  }) {
+    return Text(
+      text,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        color: color ?? AppTheme.textPrimary,
+        fontSize: fontSize,
+        fontWeight: strong ? FontWeight.w700 : FontWeight.w500,
       ),
     );
   }
@@ -727,18 +812,6 @@ class _AdminLocatorManagementScreenState
     );
   }
 
-  Widget _chip(String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
-      ),
-      child: Text(text, style: const TextStyle(fontSize: 11)),
-    );
-  }
-
   Widget _statusPill(_LocatorAdminRecord item) {
     final lower = item.status.toLowerCase();
     final isApproved = lower == 'approved';
@@ -804,12 +877,12 @@ class _AdminLocatorManagementScreenState
           )
           .toList();
       final filtered = switch (_queue) {
-        _LocatorAdminQueue.pendingHrAdmin => all
-            .where((e) => e.canHrReview)
-            .toList(),
-        _LocatorAdminQueue.rejected => all
-            .where((e) => e.status.toLowerCase().contains('rejected'))
-            .toList(),
+        _LocatorAdminQueue.pendingHrAdmin =>
+          all.where((e) => e.canHrReview).toList(),
+        _LocatorAdminQueue.rejected =>
+          all
+              .where((e) => e.status.toLowerCase().contains('rejected'))
+              .toList(),
         _ => all,
       };
       if (!mounted) return;

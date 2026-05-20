@@ -68,10 +68,11 @@ Recommended starter specs:
 - Ubuntu Server 22.04 LTS or 24.04 LTS
 - Public IP enabled
 
-Daily backup:
+Backups:
 
-- Optional at first
-- Enable when production data matters
+- Enable Kamatera provider snapshots when production traffic starts.
+- Keep the office Windows Task Scheduler backup as the primary backup when the office PostgreSQL database is the source of truth.
+- Use a VPS cron or systemd timer backup for VPS-owned data and optional offsite copies. See section 14.1.
 
 ## 1.5 Advanced configuration
 
@@ -472,6 +473,153 @@ Logs:
 ```bash
 sudo journalctl -u hrms-api -n 80 --no-pager
 ```
+
+## 14.1 VPS backup scheduler
+
+Use this only for data that lives on the VPS, or as a secondary/offsite backup through Tailscale. If PostgreSQL on the office Windows server is the source of truth, the primary backup must still run on that Windows server with Task Scheduler.
+
+Backups contain HR records and attachments. Keep `/var/backups/hrms-plaridel` locked down and use encrypted storage for any copy that leaves the server.
+
+Install PostgreSQL client tools so the VPS can run `pg_dump` when needed:
+
+```bash
+sudo apt update
+sudo apt install -y postgresql-client tar gzip
+```
+
+Install the repo backup helper:
+
+```bash
+sudo install -m 750 -o root -g root /opt/hrms-plaridel/scripts/backup-vps-linux.sh /usr/local/sbin/hrms-vps-backup
+sudo mkdir -p /var/backups/hrms-plaridel
+sudo chown root:root /var/backups/hrms-plaridel
+sudo chmod 700 /var/backups/hrms-plaridel
+```
+
+The script reads `/opt/hrms-plaridel/backend/.env` for `DATABASE_URL` and `UPLOAD_DIR`. It creates:
+
+```text
+/var/backups/hrms-plaridel/daily
+/var/backups/hrms-plaridel/weekly
+/var/backups/hrms-plaridel/monthly
+/var/backups/hrms-plaridel/logs
+```
+
+Default retention:
+
+```text
+Daily snapshots: keep 7
+Weekly snapshots: keep 4
+Monthly snapshots: keep 12
+```
+
+Manual test:
+
+```bash
+sudo /usr/local/sbin/hrms-vps-backup
+sudo ls -lah /var/backups/hrms-plaridel/daily
+```
+
+If the VPS should only back up local uploads/config and should not run `pg_dump` over Tailscale, use:
+
+```bash
+sudo SKIP_DB=1 /usr/local/sbin/hrms-vps-backup
+```
+
+If you have a mounted offsite folder, set `HRMS_OFFSITE_BACKUP_ROOT`:
+
+```bash
+sudo HRMS_OFFSITE_BACKUP_ROOT=/mnt/hrms-offsite /usr/local/sbin/hrms-vps-backup
+```
+
+### Option A: systemd timer, recommended on Ubuntu
+
+Create the service:
+
+```bash
+sudo nano /etc/systemd/system/hrms-vps-backup.service
+```
+
+Content:
+
+```ini
+[Unit]
+Description=HRMS Plaridel VPS backup
+
+[Service]
+Type=oneshot
+Environment=HRMS_BACKUP_ROOT=/var/backups/hrms-plaridel
+ExecStart=/usr/local/sbin/hrms-vps-backup
+```
+
+Create the timer:
+
+```bash
+sudo nano /etc/systemd/system/hrms-vps-backup.timer
+```
+
+Content:
+
+```ini
+[Unit]
+Description=Run HRMS Plaridel VPS backup daily
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+Unit=hrms-vps-backup.service
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable and verify:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now hrms-vps-backup.timer
+systemctl list-timers --all | grep hrms-vps-backup
+sudo systemctl start hrms-vps-backup.service
+sudo journalctl -u hrms-vps-backup.service -n 80 --no-pager
+```
+
+### Option B: cron
+
+Use cron if you prefer the classic scheduler:
+
+```bash
+sudo crontab -e
+```
+
+Add:
+
+```cron
+30 2 * * * HRMS_BACKUP_ROOT=/var/backups/hrms-plaridel /usr/local/sbin/hrms-vps-backup >> /var/backups/hrms-plaridel/logs/cron.log 2>&1
+```
+
+To skip database dumps from the VPS and back up only VPS local files:
+
+```cron
+30 2 * * * HRMS_BACKUP_ROOT=/var/backups/hrms-plaridel SKIP_DB=1 /usr/local/sbin/hrms-vps-backup >> /var/backups/hrms-plaridel/logs/cron.log 2>&1
+```
+
+Check results:
+
+```bash
+sudo tail -n 80 /var/backups/hrms-plaridel/logs/cron.log
+sudo find /var/backups/hrms-plaridel -maxdepth 2 -type d | sort
+```
+
+### Restore test
+
+At least monthly, restore one dump into a test database:
+
+```bash
+createdb hrms_restore_test
+pg_restore -d hrms_restore_test /var/backups/hrms-plaridel/daily/YYYYMMDD_HHMMSS/database.dump
+```
+
+Do not overwrite production during restore tests. Use a separate restore database.
 
 ---
 
