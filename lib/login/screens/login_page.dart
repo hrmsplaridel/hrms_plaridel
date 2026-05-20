@@ -447,14 +447,14 @@ class _SecureAccessPill extends StatelessWidget {
           Icon(
             Icons.shield_outlined,
             size: 18,
-            color: light ? Colors.white : LoginTheme.bluePrimary,
+            color: light ? Colors.black : LoginTheme.bluePrimary,
           ),
           const SizedBox(width: 10),
           Flexible(
             child: Text(
               'Secure access for municipal employees and HR staff.',
               style: TextStyle(
-                color: light ? Colors.white : LoginTheme.bluePrimary,
+                color: light ? Colors.black : LoginTheme.bluePrimary,
                 fontSize: light ? 13 : 12,
                 fontWeight: FontWeight.w600,
                 height: 1.35,
@@ -505,9 +505,9 @@ class _LoginBranding extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final titleColor = lightText ? Colors.white : AppTheme.textPrimary;
+    final titleColor = lightText ? Colors.black : AppTheme.textPrimary;
     final subtitleColor = lightText
-        ? Colors.white.withValues(alpha: 0.92)
+        ? Colors.black.withValues(alpha: 0.85)
         : AppTheme.textSecondary;
     final logoSize = compact ? 72.0 : 88.0;
 

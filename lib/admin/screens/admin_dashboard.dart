@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-
 import '../../api/user_facing_api_error.dart';
 import 'package:provider/provider.dart';
 import '../../../providers/auth_provider.dart';
@@ -22,6 +21,7 @@ import '../../../widgets/user_avatar.dart';
 import '../../shared/screens/profile_page.dart' show DashboardProfilePanel;
 import '../../shared/widgets/dashboard_content_navigator.dart';
 import '../../shared/widgets/dashboard_header_actions.dart';
+import '../../shared/widgets/collapsible_dashboard_sidebar.dart';
 import '../../shared/widgets/portal_sidebar_brand.dart';
 import '../../../dtr/dtr_main.dart';
 import '../../../dtr/dtr_provider.dart';
@@ -82,6 +82,7 @@ class AdminDashboard extends StatefulWidget {
 
 class _AdminDashboardState extends State<AdminDashboard> {
   AdminMenu _selectedMenu = AdminMenu.dashboard;
+  bool _sidebarCollapsed = false;
   final GlobalKey<_DtrContentState> _dtrContentKey =
       GlobalKey<_DtrContentState>();
   static const _settingsPanelKey = PageStorageKey<String>('admin_settings');
@@ -233,6 +234,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 children: [
                   _Sidebar(
                     railMode: true,
+                    collapsed: _sidebarCollapsed,
                     selectedMenu: _selectedMenu,
                     avatarPath: avatarPath,
                     email: email,
@@ -244,6 +246,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       children: [
                         DashboardAppHeaderBar(
                           showBrand: false,
+                          showSidebarToggle: true,
+                          onSidebarToggle: () => setState(
+                            () => _sidebarCollapsed = !_sidebarCollapsed,
+                          ),
                           compactActions: width < 600,
                           trailing: DashboardAccountMenuButton(
                             avatarPath: avatarPath,
@@ -320,6 +326,7 @@ class _Sidebar extends StatelessWidget {
     required this.onTap,
     this.showBrand = true,
     this.railMode = false,
+    this.collapsed = false,
   });
 
   final AdminMenu selectedMenu;
@@ -331,6 +338,234 @@ class _Sidebar extends StatelessWidget {
 
   /// Full-height rail with one straight right edge through header + nav.
   final bool railMode;
+  final bool collapsed;
+
+  Widget _buildNavList(BuildContext context, {required bool compact}) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(height: railMode ? 12 : (showBrand ? 4 : 12)),
+        DashboardSidebarNavTile(
+          icon: Icons.dashboard_outlined,
+          label: 'Dashboard',
+          selected: selectedMenu == AdminMenu.dashboard,
+          collapsed: compact,
+          onTap: () => onTap(AdminMenu.dashboard),
+        ),
+        if (!compact)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+            child: Divider(
+              height: 1,
+              thickness: 1,
+              color: AppTheme.dashHairlineOf(context),
+            ),
+          ),
+        DashboardSidebarSectionLabel('MY PORTAL', collapsed: compact),
+        DashboardSidebarNavTile(
+          icon: Icons.schedule_outlined,
+          label: 'My Attendance',
+          selected: selectedMenu == AdminMenu.myAttendance,
+          collapsed: compact,
+          onTap: () => onTap(AdminMenu.myAttendance),
+        ),
+        DashboardSidebarNavTile(
+          icon: Icons.event_note_outlined,
+          label: 'My Leave',
+          selected: selectedMenu == AdminMenu.myLeave,
+          collapsed: compact,
+          onTap: () => onTap(AdminMenu.myLeave),
+        ),
+        DashboardSidebarSectionLabel('MANAGEMENT', collapsed: compact),
+        DashboardSidebarNavTile(
+          icon: Icons.how_to_reg_outlined,
+          label: 'RSP',
+          selected: selectedMenu == AdminMenu.rsp,
+          collapsed: compact,
+          onTap: () => onTap(AdminMenu.rsp),
+        ),
+        DashboardSidebarNavTile(
+          icon: Icons.school_outlined,
+          label: 'L&D',
+          selected: selectedMenu == AdminMenu.ld,
+          collapsed: compact,
+          onTap: () => onTap(AdminMenu.ld),
+        ),
+        DashboardSidebarNavTile(
+          icon: Icons.access_time_outlined,
+          label: 'DTR',
+          selected: selectedMenu == AdminMenu.dtr,
+          collapsed: compact,
+          onTap: () => onTap(AdminMenu.dtr),
+        ),
+        DashboardSidebarNavTile(
+          icon: Icons.folder_outlined,
+          label: 'DocuTracker',
+          selected: selectedMenu == AdminMenu.docutracker,
+          collapsed: compact,
+          onTap: () => onTap(AdminMenu.docutracker),
+        ),
+        DashboardSidebarNavTile(
+          icon: Icons.person_add_outlined,
+          label: 'Create Account',
+          selected: selectedMenu == AdminMenu.createAccount,
+          collapsed: compact,
+          onTap: () => onTap(AdminMenu.createAccount),
+        ),
+        const SizedBox(height: 12),
+      ],
+    );
+  }
+
+  Widget _buildFooter(
+    BuildContext context, {
+    required bool compact,
+    required int year,
+  }) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (!compact)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Container(
+              height: 2,
+              decoration: BoxDecoration(
+                color: AppTheme.primaryNavy.withValues(alpha: 0.28),
+                borderRadius: BorderRadius.circular(1),
+              ),
+            ),
+          ),
+        Padding(
+          padding: EdgeInsets.fromLTRB(
+            compact ? 8 : 12,
+            4,
+            compact ? 8 : 12,
+            compact ? 8 : 10,
+          ),
+          child: DashboardSidebarProfileCard(
+            displayName: displayName,
+            subtitle: email.isNotEmpty ? email : 'System Administrator',
+            avatarPath: avatarPath,
+            collapsed: compact,
+          ),
+        ),
+        if (!compact)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
+            child: Wrap(
+              alignment: WrapAlignment.center,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 0,
+              children: [
+                Text(
+                  '\u00a9 $year HRMS',
+                  style: TextStyle(
+                    color: AppTheme.dashTextSecondaryOf(context),
+                    fontSize: 11,
+                    height: 1.2,
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Text(
+                    '\u00b7',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.textSecondary.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () {},
+                  style: TextButton.styleFrom(
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 2,
+                      vertical: 0,
+                    ),
+                  ),
+                  child: Text(
+                    'Privacy',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.primaryNavy,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Text(
+                    '\u00b7',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.textSecondary.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () {},
+                  style: TextButton.styleFrom(
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 2,
+                      vertical: 0,
+                    ),
+                  ),
+                  child: Text(
+                    'Terms',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.primaryNavy,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (compact) const SizedBox(height: 12),
+      ],
+    );
+  }
+
+  Widget _buildRail({
+    required BuildContext context,
+    required bool compact,
+    required Color hairline,
+    required Color canvas,
+    required int year,
+  }) {
+    return DashboardSidebarRailFrame(
+      compact: compact,
+      hairline: hairline,
+      canvas: canvas,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SidebarRailHeader(collapsed: compact),
+          Expanded(
+            child: ColoredBox(
+              color: compact ? Colors.transparent : canvas,
+              child: Column(
+                children: [
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: _buildNavList(context, compact: compact),
+                    ),
+                  ),
+                  _buildFooter(context, compact: compact, year: year),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -339,194 +574,15 @@ class _Sidebar extends StatelessWidget {
     final canvas = AppTheme.dashCanvasOf(context);
     final panel = AppTheme.dashPanelOf(context);
 
-    final navList = Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(height: railMode ? 12 : (showBrand ? 4 : 12)),
-        _NavTile(
-          icon: Icons.dashboard_outlined,
-          label: 'Dashboard',
-          selected: selectedMenu == AdminMenu.dashboard,
-          onTap: () => onTap(AdminMenu.dashboard),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-          child: Divider(
-            height: 1,
-            thickness: 1,
-            color: AppTheme.dashHairlineOf(context),
-          ),
-        ),
-        const _SidebarSectionLabel('MY PORTAL'),
-        _NavTile(
-          icon: Icons.schedule_outlined,
-          label: 'My Attendance',
-          selected: selectedMenu == AdminMenu.myAttendance,
-          onTap: () => onTap(AdminMenu.myAttendance),
-        ),
-        _NavTile(
-          icon: Icons.event_note_outlined,
-          label: 'My Leave',
-          selected: selectedMenu == AdminMenu.myLeave,
-          onTap: () => onTap(AdminMenu.myLeave),
-        ),
-        const _SidebarSectionLabel('MANAGEMENT'),
-        _NavTile(
-          icon: Icons.how_to_reg_outlined,
-          label: 'RSP',
-          selected: selectedMenu == AdminMenu.rsp,
-          onTap: () => onTap(AdminMenu.rsp),
-        ),
-        _NavTile(
-          icon: Icons.school_outlined,
-          label: 'L&D',
-          selected: selectedMenu == AdminMenu.ld,
-          onTap: () => onTap(AdminMenu.ld),
-        ),
-        _NavTile(
-          icon: Icons.access_time_outlined,
-          label: 'DTR',
-          selected: selectedMenu == AdminMenu.dtr,
-          onTap: () => onTap(AdminMenu.dtr),
-        ),
-        _NavTile(
-          icon: Icons.folder_outlined,
-          label: 'DocuTracker',
-          selected: selectedMenu == AdminMenu.docutracker,
-          onTap: () => onTap(AdminMenu.docutracker),
-        ),
-        _NavTile(
-          icon: Icons.person_add_outlined,
-          label: 'Create Account',
-          selected: selectedMenu == AdminMenu.createAccount,
-          onTap: () => onTap(AdminMenu.createAccount),
-        ),
-        const SizedBox(height: 12),
-      ],
-    );
-
-    final footer = Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: Container(
-            height: 2,
-            decoration: BoxDecoration(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.28),
-              borderRadius: BorderRadius.circular(1),
-            ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
-          child: DashboardSidebarProfileCard(
-            displayName: displayName,
-            subtitle: email.isNotEmpty ? email : 'System Administrator',
-            avatarPath: avatarPath,
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
-          child: Wrap(
-            alignment: WrapAlignment.center,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 0,
-            children: [
-              Text(
-                '\u00a9 $year HRMS',
-                style: TextStyle(
-                  color: AppTheme.dashTextSecondaryOf(context),
-                  fontSize: 11,
-                  height: 1.2,
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                child: Text(
-                  '\u00b7',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: AppTheme.textSecondary.withValues(alpha: 0.7),
-                  ),
-                ),
-              ),
-              TextButton(
-                onPressed: () {},
-                style: TextButton.styleFrom(
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 2,
-                    vertical: 0,
-                  ),
-                ),
-                child: Text(
-                  'Privacy',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.primaryNavy,
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                child: Text(
-                  '\u00b7',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: AppTheme.textSecondary.withValues(alpha: 0.7),
-                  ),
-                ),
-              ),
-              TextButton(
-                onPressed: () {},
-                style: TextButton.styleFrom(
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 2,
-                    vertical: 0,
-                  ),
-                ),
-                child: Text(
-                  'Terms',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.primaryNavy,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-
     if (railMode) {
-      return Container(
-        width: kDashboardSidebarWidth,
-        decoration: BoxDecoration(
-          border: Border(right: BorderSide(color: hairline)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const SidebarRailHeader(),
-            Expanded(
-              child: ColoredBox(
-                color: canvas,
-                child: Column(
-                  children: [
-                    Expanded(child: SingleChildScrollView(child: navList)),
-                    footer,
-                  ],
-                ),
-              ),
-            ),
-          ],
+      return AnimatedSidebarWidth(
+        collapsed: collapsed,
+        builder: (context, compact) => _buildRail(
+          context: context,
+          compact: compact,
+          hairline: hairline,
+          canvas: canvas,
+          year: year,
         ),
       );
     }
@@ -547,110 +603,13 @@ class _Sidebar extends StatelessWidget {
       child: Column(
         children: [
           if (showBrand) const PortalSidebarBrand(),
-          Expanded(child: SingleChildScrollView(child: navList)),
-          footer,
-        ],
-      ),
-    );
-  }
-}
-
-class _SidebarSectionLabel extends StatelessWidget {
-  const _SidebarSectionLabel(this.label);
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: AppTheme.dashIsDark(context)
-                ? AppTheme.primaryNavyLight.withValues(alpha: 0.95)
-                : AppTheme.letterheadNavy.withValues(alpha: 0.92),
-            fontSize: 11,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1.15,
-            height: 1.1,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _NavTile extends StatefulWidget {
-  const _NavTile({
-    required this.icon,
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-  final IconData icon;
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  State<_NavTile> createState() => _NavTileState();
-}
-
-class _NavTileState extends State<_NavTile> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final inactive = AppTheme.dashTextSecondaryOf(context);
-    final selected = widget.selected;
-    final bg = selected
-        ? AppTheme.primaryNavy
-        : (_hover ? AppTheme.dashMutedSurfaceOf(context) : Colors.transparent);
-    final fg = selected ? Colors.white : inactive;
-
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: widget.onTap,
-            borderRadius: BorderRadius.circular(12),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              curve: Curves.easeOutCubic,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-              decoration: BoxDecoration(
-                color: bg,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                children: [
-                  Icon(widget.icon, size: 22, color: fg),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Text(
-                      widget.label,
-                      style: TextStyle(
-                        color: fg,
-                        fontWeight: selected
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                        fontSize: 14,
-                        letterSpacing: -0.15,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+          Expanded(
+            child: SingleChildScrollView(
+              child: _buildNavList(context, compact: false),
             ),
           ),
-        ),
+          _buildFooter(context, compact: false, year: year),
+        ],
       ),
     );
   }
@@ -1856,9 +1815,7 @@ class _DtrContentState extends State<_DtrContent> {
                   ],
                 ),
                 const SizedBox(height: 24),
-                Wrap(
-                  spacing: 16,
-                  runSpacing: 16,
+                FeatureCardGrid(
                   children: [
                     FeatureCard(
                       title: 'Time Logs',
@@ -2098,9 +2055,7 @@ class _LdContentState extends State<_LdContent> {
             ),
           ),
           const SizedBox(height: 24),
-          Wrap(
-            spacing: 16,
-            runSpacing: 16,
+          FeatureCardGrid(
             children: [
               FeatureCard(
                 title: 'Training Need Analysis and Consolidated Report',
@@ -2132,6 +2087,424 @@ class _LdContentState extends State<_LdContent> {
         else
           const _LdTrainingReportsSection(),
       ],
+    );
+  }
+}
+
+Widget _ldSectionHeader(
+  BuildContext context, {
+  required IconData icon,
+  required String title,
+  required String subtitle,
+}) {
+  return Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              AppTheme.primaryNavy.withValues(alpha: 0.14),
+              AppTheme.primaryNavyLight.withValues(alpha: 0.08),
+            ],
+          ),
+          border: Border.all(
+            color: AppTheme.primaryNavy.withValues(alpha: 0.2),
+          ),
+        ),
+        child: Icon(icon, size: 26, color: AppTheme.primaryNavy),
+      ),
+      const SizedBox(width: 16),
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: TextStyle(
+                color: AppTheme.dashTextPrimaryOf(context),
+                fontSize: 26,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.4,
+                height: 1.15,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              subtitle,
+              style: TextStyle(
+                color: AppTheme.dashTextSecondaryOf(context),
+                fontSize: 14.5,
+                height: 1.45,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ],
+  );
+}
+
+Widget _ldSectionToolbar(
+  BuildContext context, {
+  required bool loading,
+  required String addLabel,
+  required VoidCallback onAdd,
+  required VoidCallback onRefresh,
+  required VoidCallback onViewRecords,
+}) {
+  final narrow = MediaQuery.sizeOf(context).width < 720;
+  final addBtn = FilledButton.icon(
+    onPressed: loading ? null : onAdd,
+    icon: const Icon(Icons.add_rounded, size: 20),
+    label: Text(addLabel),
+    style: FilledButton.styleFrom(
+      backgroundColor: AppTheme.primaryNavy,
+      foregroundColor: Colors.white,
+      elevation: 0,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ),
+  );
+  final refreshBtn = OutlinedButton.icon(
+    onPressed: loading ? null : onRefresh,
+    icon: const Icon(Icons.refresh_rounded, size: 20),
+    label: const Text('Refresh'),
+    style: OutlinedButton.styleFrom(
+      foregroundColor: AppTheme.primaryNavy,
+      side: BorderSide(color: AppTheme.primaryNavy.withValues(alpha: 0.45)),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ),
+  );
+  final recordsBtn = OutlinedButton.icon(
+    onPressed: loading ? null : onViewRecords,
+    icon: const Icon(Icons.folder_open_outlined, size: 20),
+    label: const Text('View records'),
+    style: OutlinedButton.styleFrom(
+      foregroundColor: AppTheme.primaryNavy,
+      side: BorderSide(color: AppTheme.primaryNavy.withValues(alpha: 0.45)),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ),
+  );
+
+  return Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: AppTheme.dashMutedSurfaceOf(context),
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: AppTheme.dashHairlineOf(context)),
+    ),
+    child: narrow
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              addBtn,
+              const SizedBox(height: 10),
+              refreshBtn,
+              const SizedBox(height: 10),
+              recordsBtn,
+            ],
+          )
+        : Row(
+            children: [
+              addBtn,
+              const Spacer(),
+              refreshBtn,
+              const SizedBox(width: 10),
+              recordsBtn,
+            ],
+          ),
+  );
+}
+
+Widget _ldEmptyRecordsPlaceholder({
+  required IconData icon,
+  required String title,
+  required String subtitle,
+}) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 32),
+    child: Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              icon,
+              size: 40,
+              color: AppTheme.primaryNavy.withValues(alpha: 0.75),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            style: const TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 14,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _LdSavedEntryCard extends StatelessWidget {
+  const _LdSavedEntryCard({
+    required this.title,
+    required this.subtitle,
+    required this.meta,
+    required this.onView,
+    required this.onEdit,
+    required this.onPrint,
+    required this.onDownloadPdf,
+    required this.onDelete,
+  });
+
+  final String title;
+  final String subtitle;
+  final String meta;
+  final VoidCallback onView;
+  final VoidCallback onEdit;
+  final Future<void> Function() onPrint;
+  final Future<void> Function() onDownloadPdf;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final hairline = AppTheme.dashHairlineOf(context);
+    final muted = AppTheme.dashMutedSurfaceOf(context);
+    final panel = AppTheme.dashPanelOf(context);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: panel,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: hairline),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primaryNavy.withValues(alpha: 0.05),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            height: 4,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: TextStyle(
+                              color: AppTheme.dashTextPrimaryOf(context),
+                              fontWeight: FontWeight.w800,
+                              fontSize: 17,
+                              letterSpacing: -0.2,
+                              height: 1.2,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.topic_rounded,
+                                size: 15,
+                                color: AppTheme.dashTextSecondaryOf(context),
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  subtitle,
+                                  style: TextStyle(
+                                    color: AppTheme.dashTextSecondaryOf(
+                                      context,
+                                    ),
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w600,
+                                    height: 1.3,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(999),
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                        border: Border.all(
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.22),
+                        ),
+                      ),
+                      child: Text(
+                        meta,
+                        style: const TextStyle(
+                          color: AppTheme.primaryNavy,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Divider(height: 1, color: hairline),
+                const SizedBox(height: 12),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: onView,
+                          icon: const Icon(Icons.visibility_outlined, size: 18),
+                          label: const Text('View'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTheme.primaryNavy,
+                            side: BorderSide(
+                              color: AppTheme.primaryNavy.withValues(
+                                alpha: 0.45,
+                              ),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: onEdit,
+                          icon: const Icon(Icons.edit_outlined, size: 18),
+                          label: const Text('Edit'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTheme.primaryNavy,
+                            side: BorderSide(
+                              color: AppTheme.primaryNavy.withValues(
+                                alpha: 0.45,
+                              ),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Spacer(),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        IconButton(
+                          onPressed: () => onPrint(),
+                          icon: const Icon(Icons.print_rounded, size: 20),
+                          tooltip: 'Print',
+                          style: IconButton.styleFrom(
+                            backgroundColor: muted,
+                            foregroundColor: AppTheme.primaryNavy,
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => onDownloadPdf(),
+                          icon: const Icon(
+                            Icons.picture_as_pdf_rounded,
+                            size: 20,
+                          ),
+                          tooltip: 'Download PDF',
+                          style: IconButton.styleFrom(
+                            backgroundColor: muted,
+                            foregroundColor: AppTheme.primaryNavy,
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: onDelete,
+                          icon: Icon(
+                            Icons.delete_outline_rounded,
+                            size: 18,
+                            color: Colors.red.shade700,
+                          ),
+                          label: Text(
+                            'Delete',
+                            style: TextStyle(
+                              color: Colors.red.shade700,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2291,20 +2664,23 @@ class _TrainingNeedAnalysisSectionState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Training Need Analysis and Consolidated Report',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
+        _ldSectionHeader(
+          context,
+          icon: Icons.school_rounded,
+          title: 'Training Need Analysis and Consolidated Report',
+          subtitle:
+              'FOR CY [year], DEPARTMENT. Table: Name/Position, Goal, Behavior, Skills/Knowledge, Need for Training, Training Recommendations.',
         ),
-        const SizedBox(height: 8),
-        Text(
-          'FOR CY [year], DEPARTMENT. Table: Name/Position, Goal, Behavior, Skills/Knowledge, Need for Training, Training Recommendations.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+        const SizedBox(height: 22),
+        _ldSectionToolbar(
+          context,
+          loading: _loading,
+          addLabel: 'Add report',
+          onAdd: _startNew,
+          onRefresh: _load,
+          onViewRecords: _openSavedRecordsBrowser,
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
         if (_editing != null) ...[
           _TrainingNeedAnalysisFormEditor(
             key: ValueKey(_editing?.id ?? 'new'),
@@ -2314,48 +2690,19 @@ class _TrainingNeedAnalysisSectionState
             onPrint: _printTna,
             onDownloadPdf: _downloadTna,
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
         ],
-        Row(
-          children: [
-            FilledButton.icon(
-              onPressed: _loading ? null : _startNew,
-              icon: const Icon(Icons.add_rounded, size: 20),
-              label: const Text('Add report'),
-            ),
-            const SizedBox(width: 12),
-            TextButton.icon(
-              onPressed: _loading ? null : _load,
-              icon: const Icon(Icons.refresh_rounded, size: 20),
-              label: const Text('Refresh'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-            const SizedBox(width: 4),
-            TextButton.icon(
-              onPressed: _loading ? null : _openSavedRecordsBrowser,
-              icon: const Icon(Icons.folder_open_outlined, size: 20),
-              label: const Text('View records'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
         if (_loading)
           const Padding(
-            padding: EdgeInsets.all(24),
+            padding: EdgeInsets.symmetric(vertical: 32),
             child: Center(child: CircularProgressIndicator()),
           )
         else if (_entries.isEmpty)
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text(
-              'No Training Need Analysis reports yet. Tap "Add report" to add one.',
-              style: TextStyle(color: AppTheme.textSecondary),
-            ),
+          _ldEmptyRecordsPlaceholder(
+            icon: Icons.school_outlined,
+            title: 'No reports yet',
+            subtitle:
+                'Tap "Add report" to create a Training Need Analysis and Consolidated Report.',
           )
         else
           _TrainingNeedAnalysisList(
@@ -2494,147 +2841,83 @@ class _LdTrainingReportsSectionState extends State<_LdTrainingReportsSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'Training Daily Reports',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 26,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.45,
-            height: 1.15,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Monitor daily reports from employees under training, review attachments, and mark them as seen.',
-          style: TextStyle(
-            color: AppTheme.textSecondary.withValues(alpha: 0.92),
-            fontSize: 14.5,
-            height: 1.45,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-        const SizedBox(height: 14),
-        Container(
-          width: 56,
-          height: 4,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(4),
-            gradient: LinearGradient(
-              colors: [
-                AppTheme.primaryNavy,
-                AppTheme.primaryNavy.withValues(alpha: 0.5),
-              ],
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppTheme.primaryNavy.withValues(alpha: 0.14),
+                    AppTheme.primaryNavyLight.withValues(alpha: 0.08),
+                  ],
+                ),
+                border: Border.all(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.2),
+                ),
+              ),
+              child: const Icon(
+                Icons.assignment_outlined,
+                size: 26,
+                color: AppTheme.primaryNavy,
+              ),
             ),
-          ),
-        ),
-        const SizedBox(height: 22),
-        narrowToolbar
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  TextField(
-                    controller: _searchController,
-                    decoration: InputDecoration(
-                      hintText: 'Search by name, title, or notes…',
-                      hintStyle: TextStyle(
-                        color: AppTheme.textSecondary.withValues(alpha: 0.65),
-                        fontSize: 14,
-                      ),
-                      prefixIcon: Icon(
-                        Icons.search_rounded,
-                        color: AppTheme.textSecondary.withValues(alpha: 0.75),
-                        size: 22,
-                      ),
-                      filled: true,
-                      fillColor: AppTheme.offWhite,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide(
-                          color: AppTheme.lightGray.withValues(alpha: 0.9),
-                        ),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide(
-                          color: AppTheme.lightGray.withValues(alpha: 0.9),
-                        ),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide(
-                          color: AppTheme.primaryNavy.withValues(alpha: 0.65),
-                          width: 1.5,
-                        ),
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 14,
-                      ),
+                  Text(
+                    'Training Daily Reports',
+                    style: TextStyle(
+                      color: AppTheme.dashTextPrimaryOf(context),
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.45,
+                      height: 1.15,
                     ),
-                    onSubmitted: (_) => _load(),
                   ),
-                  const SizedBox(height: 10),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: IconButton(
-                      tooltip: 'Refresh',
-                      onPressed: _load,
-                      style: IconButton.styleFrom(
-                        backgroundColor: AppTheme.primaryNavy.withValues(
-                          alpha: 0.1,
-                        ),
-                        foregroundColor: AppTheme.primaryNavy,
-                        side: BorderSide(
-                          color: AppTheme.primaryNavy.withValues(alpha: 0.35),
-                        ),
-                        padding: const EdgeInsets.all(14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      icon: const Icon(Icons.refresh_rounded, size: 22),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Monitor daily reports from employees under training, review attachments, and mark them as seen.',
+                    style: TextStyle(
+                      color: AppTheme.dashTextSecondaryOf(context),
+                      fontSize: 14.5,
+                      height: 1.45,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ],
-              )
-            : Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Expanded(
-                    child: TextField(
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 22),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppTheme.dashMutedSurfaceOf(context),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppTheme.dashHairlineOf(context)),
+          ),
+          child: narrowToolbar
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextField(
                       controller: _searchController,
-                      decoration: InputDecoration(
+                      decoration: AppTheme.dashInputDecoration(
+                        context,
                         hintText: 'Search by name, title, or notes…',
-                        hintStyle: TextStyle(
-                          color: AppTheme.textSecondary.withValues(alpha: 0.65),
-                          fontSize: 14,
-                        ),
                         prefixIcon: Icon(
                           Icons.search_rounded,
-                          color: AppTheme.textSecondary.withValues(alpha: 0.75),
+                          color: AppTheme.dashTextSecondaryOf(context),
                           size: 22,
-                        ),
-                        filled: true,
-                        fillColor: AppTheme.offWhite,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide(
-                            color: AppTheme.lightGray.withValues(alpha: 0.9),
-                          ),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide(
-                            color: AppTheme.lightGray.withValues(alpha: 0.9),
-                          ),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide(
-                            color: AppTheme.primaryNavy.withValues(alpha: 0.65),
-                            width: 1.5,
-                          ),
                         ),
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 16,
@@ -2643,28 +2926,65 @@ class _LdTrainingReportsSectionState extends State<_LdTrainingReportsSection> {
                       ),
                       onSubmitted: (_) => _load(),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  IconButton(
-                    tooltip: 'Refresh',
-                    onPressed: _load,
-                    style: IconButton.styleFrom(
-                      backgroundColor: AppTheme.primaryNavy.withValues(
-                        alpha: 0.1,
-                      ),
-                      foregroundColor: AppTheme.primaryNavy,
-                      side: BorderSide(
-                        color: AppTheme.primaryNavy.withValues(alpha: 0.35),
-                      ),
-                      padding: const EdgeInsets.all(14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
+                    const SizedBox(height: 10),
+                    FilledButton.icon(
+                      onPressed: _load,
+                      icon: const Icon(Icons.refresh_rounded, size: 20),
+                      label: const Text('Refresh'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.primaryNavy,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                     ),
-                    icon: const Icon(Icons.refresh_rounded, size: 22),
-                  ),
-                ],
-              ),
+                  ],
+                )
+              : Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _searchController,
+                        decoration: AppTheme.dashInputDecoration(
+                          context,
+                          hintText: 'Search by name, title, or notes…',
+                          prefixIcon: Icon(
+                            Icons.search_rounded,
+                            color: AppTheme.dashTextSecondaryOf(context),
+                            size: 22,
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
+                        ),
+                        onSubmitted: (_) => _load(),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    FilledButton.icon(
+                      onPressed: _load,
+                      icon: const Icon(Icons.refresh_rounded, size: 20),
+                      label: const Text('Refresh'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.primaryNavy,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 14,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+        ),
         const SizedBox(height: 20),
         if (_loading)
           const Padding(
@@ -2759,13 +3079,37 @@ class _LdReportCard extends StatelessWidget {
     final r = report;
     final desc = (r.description ?? '').trim();
     final submitted = _formatLdTrainingDailySubmittedAt(r.submittedAt);
+    final hairline = AppTheme.dashHairlineOf(context);
+    final muted = AppTheme.dashMutedSurfaceOf(context);
+    final panel = AppTheme.dashPanelOf(context);
+    final name = r.employeeName ?? 'Unknown employee';
+    final parts = name.trim().split(RegExp(r'\s+'));
+    var initials = '';
+    if (parts.isNotEmpty && parts.first.isNotEmpty) {
+      initials += parts.first[0].toUpperCase();
+    }
+    if (parts.length > 1 && parts.last.isNotEmpty) {
+      initials += parts.last[0].toUpperCase();
+    }
+    if (initials.isEmpty) initials = '?';
 
     return Container(
       decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppTheme.lightGray.withValues(alpha: 0.85)),
-        boxShadow: AppTheme.cardShadow,
+        color: panel,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: hairline),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primaryNavy.withValues(alpha: 0.05),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -2773,13 +3117,10 @@ class _LdReportCard extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            height: 3,
-            decoration: BoxDecoration(
+            height: 4,
+            decoration: const BoxDecoration(
               gradient: LinearGradient(
-                colors: [
-                  AppTheme.primaryNavy,
-                  AppTheme.primaryNavyLight.withValues(alpha: 0.85),
-                ],
+                colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
               ),
             ),
           ),
@@ -2788,13 +3129,31 @@ class _LdReportCard extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                CircleAvatar(
-                  radius: 22,
-                  backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.12),
-                  child: Icon(
-                    Icons.person_outline_rounded,
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.9),
-                    size: 24,
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        AppTheme.primaryNavy.withValues(alpha: 0.16),
+                        AppTheme.primaryNavyLight.withValues(alpha: 0.08),
+                      ],
+                    ),
+                    border: Border.all(
+                      color: AppTheme.primaryNavy.withValues(alpha: 0.2),
+                    ),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    initials,
+                    style: const TextStyle(
+                      color: AppTheme.primaryNavy,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 15,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 14),
@@ -2810,9 +3169,9 @@ class _LdReportCard extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  r.employeeName ?? 'Unknown employee',
-                                  style: const TextStyle(
-                                    color: AppTheme.textPrimary,
+                                  name,
+                                  style: TextStyle(
+                                    color: AppTheme.dashTextPrimaryOf(context),
                                     fontWeight: FontWeight.w800,
                                     fontSize: 17,
                                     letterSpacing: -0.2,
@@ -2859,11 +3218,9 @@ class _LdReportCard extends StatelessWidget {
                           vertical: 12,
                         ),
                         decoration: BoxDecoration(
-                          color: AppTheme.sectionAlt.withValues(alpha: 0.65),
+                          color: muted,
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: Colors.black.withValues(alpha: 0.05),
-                          ),
+                          border: Border.all(color: hairline),
                         ),
                         child: Text(
                           desc.isEmpty ? 'No description provided.' : desc,
@@ -2908,97 +3265,112 @@ class _LdReportCard extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 14),
-                      Divider(
-                        height: 1,
-                        color: AppTheme.lightGray.withValues(alpha: 0.9),
-                      ),
-                      const SizedBox(height: 8),
+                      Divider(height: 1, color: hairline),
+                      const SizedBox(height: 12),
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          Flexible(
-                            child: Wrap(
-                              spacing: 0,
-                              runSpacing: 4,
-                              children: [
-                                TextButton.icon(
-                                  onPressed: () => showReadOnlySavedEntryDialog(
-                                    context,
-                                    title: 'Training daily report',
-                                    previewBuilder: () =>
-                                        TrainingDailyReportReadOnlyView(
-                                          report: r,
-                                        ),
-                                    contentWidth: 560,
-                                  ),
-                                  style: TextButton.styleFrom(
-                                    foregroundColor: AppTheme.primaryNavy,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 6,
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              OutlinedButton.icon(
+                                onPressed: () => showReadOnlySavedEntryDialog(
+                                  context,
+                                  title: 'Training daily report',
+                                  previewBuilder: () =>
+                                      TrainingDailyReportReadOnlyView(
+                                        report: r,
+                                      ),
+                                  contentWidth: 560,
+                                ),
+                                icon: const Icon(
+                                  Icons.article_outlined,
+                                  size: 18,
+                                ),
+                                label: const Text('View form'),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: AppTheme.primaryNavy,
+                                  side: BorderSide(
+                                    color: AppTheme.primaryNavy.withValues(
+                                      alpha: 0.45,
                                     ),
                                   ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 10,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
+                              ),
+                              if (onViewFile != null)
+                                OutlinedButton.icon(
+                                  onPressed: onViewFile,
                                   icon: const Icon(
-                                    Icons.article_outlined,
+                                    Icons.visibility_outlined,
                                     size: 18,
                                   ),
-                                  label: const Text('View form'),
-                                ),
-                                if (onViewFile != null)
-                                  TextButton.icon(
-                                    onPressed: onViewFile,
-                                    style: TextButton.styleFrom(
-                                      foregroundColor: AppTheme.primaryNavy,
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 10,
-                                        vertical: 6,
+                                  label: const Text('View file'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: AppTheme.primaryNavy,
+                                    side: BorderSide(
+                                      color: AppTheme.primaryNavy.withValues(
+                                        alpha: 0.45,
                                       ),
                                     ),
-                                    icon: const Icon(
-                                      Icons.visibility_outlined,
-                                      size: 18,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 10,
                                     ),
-                                    label: const Text('View file'),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
                                   ),
-                              ],
-                            ),
+                                ),
+                            ],
                           ),
-                          TextButton.icon(
-                            onPressed: onDelete,
-                            icon: Icon(
-                              Icons.delete_outline_rounded,
-                              size: 18,
-                              color: Colors.red.shade700,
-                            ),
-                            label: Text(
-                              'Delete',
-                              style: TextStyle(
-                                color: Colors.red.shade700,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 13,
+                          const Spacer(),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              TextButton.icon(
+                                onPressed: onDelete,
+                                icon: Icon(
+                                  Icons.delete_outline_rounded,
+                                  size: 18,
+                                  color: Colors.red.shade700,
+                                ),
+                                label: Text(
+                                  'Delete',
+                                  style: TextStyle(
+                                    color: Colors.red.shade700,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
                               ),
-                            ),
-                            style: TextButton.styleFrom(
-                              foregroundColor: Colors.red.shade700,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
+                              FilledButton(
+                                onPressed: onMarkSeen,
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: AppTheme.primaryNavy,
+                                  foregroundColor: Colors.white,
+                                  elevation: 0,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 10,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
+                                child: const Text(
+                                  'Mark as seen',
+                                  style: TextStyle(fontWeight: FontWeight.w700),
+                                ),
                               ),
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: onMarkSeen,
-                            style: TextButton.styleFrom(
-                              foregroundColor: AppTheme.primaryNavy,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 6,
-                              ),
-                            ),
-                            child: const Text(
-                              'Mark as seen',
-                              style: TextStyle(fontWeight: FontWeight.w700),
-                            ),
+                            ],
                           ),
                         ],
                       ),
@@ -3213,9 +3585,16 @@ class _TrainingNeedAnalysisFormEditorState
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: AppTheme.white,
+        color: AppTheme.dashPanelOf(context),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primaryNavy.withValues(alpha: 0.04),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
       ),
       child: SingleChildScrollView(
         child: Column(
@@ -3422,93 +3801,67 @@ class _TrainingNeedAnalysisList extends StatelessWidget {
   final Future<void> Function(TrainingNeedAnalysisEntry) onPrint;
   final Future<void> Function(TrainingNeedAnalysisEntry) onDownloadPdf;
 
+  Future<void> _confirmDelete(
+    BuildContext context,
+    TrainingNeedAnalysisEntry e,
+  ) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete this report?'),
+        content: const Text('This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && e.id != null) onDelete(e.id!);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('CY')),
-          DataColumn(label: Text('Department')),
-          DataColumn(label: Text('Rows')),
-          DataColumn(label: Text('Actions')),
-        ],
-        rows: entries.map((e) {
-          return DataRow(
-            cells: [
-              DataCell(Text(e.cyYear ?? 'â€”')),
-              DataCell(Text(e.department ?? 'â€”')),
-              DataCell(Text('${e.rows.length}')),
-              DataCell(
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextButton(
-                      onPressed: () => showReadOnlySavedEntryDialog(
-                        context,
-                        title: 'Saved training need analysis',
-                        previewBuilder: () => _TrainingNeedAnalysisFormEditor(
-                          readOnly: true,
-                          entry: e,
-                          onSave: (_) {},
-                          onCancel: () {},
-                          onPrint: (_) async {},
-                          onDownloadPdf: (_) async {},
-                        ),
-                        contentWidth: 1100,
-                      ),
-                      child: const Text('View'),
-                    ),
-                    TextButton(
-                      onPressed: () => onEdit(e),
-                      child: const Text('Edit'),
-                    ),
-                    IconButton(
-                      onPressed: () => onPrint(e),
-                      icon: const Icon(Icons.print_rounded, size: 20),
-                      tooltip: 'Print',
-                    ),
-                    IconButton(
-                      onPressed: () => onDownloadPdf(e),
-                      icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
-                      tooltip: 'Download PDF',
-                    ),
-                    TextButton(
-                      onPressed: () async {
-                        final ok = await showDialog<bool>(
-                          context: context,
-                          builder: (ctx) => AlertDialog(
-                            title: const Text('Delete this report?'),
-                            content: const Text('This cannot be undone.'),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.of(ctx).pop(false),
-                                child: const Text('Cancel'),
-                              ),
-                              FilledButton(
-                                onPressed: () => Navigator.of(ctx).pop(true),
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: Colors.red,
-                                ),
-                                child: const Text('Delete'),
-                              ),
-                            ],
-                          ),
-                        );
-                        if (ok == true && e.id != null) onDelete(e.id!);
-                      },
-                      child: const Text(
-                        'Delete',
-                        style: TextStyle(color: Colors.red),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          );
-        }).toList(),
-      ),
+    return ListView.separated(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: entries.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 12),
+      itemBuilder: (context, index) {
+        final e = entries[index];
+        final cy = e.cyYear?.trim().isNotEmpty == true ? e.cyYear! : '—';
+        final dept = e.department?.trim().isNotEmpty == true
+            ? e.department!
+            : 'No department';
+        return _LdSavedEntryCard(
+          title: 'CY $cy',
+          subtitle: dept,
+          meta: '${e.rows.length} row${e.rows.length == 1 ? '' : 's'}',
+          onView: () => showReadOnlySavedEntryDialog(
+            context,
+            title: 'Saved training need analysis',
+            previewBuilder: () => _TrainingNeedAnalysisFormEditor(
+              readOnly: true,
+              entry: e,
+              onSave: (_) {},
+              onCancel: () {},
+              onPrint: (_) async {},
+              onDownloadPdf: (_) async {},
+            ),
+            contentWidth: 1100,
+          ),
+          onEdit: () => onEdit(e),
+          onPrint: () => onPrint(e),
+          onDownloadPdf: () => onDownloadPdf(e),
+          onDelete: () => _confirmDelete(context, e),
+        );
+      },
     );
   }
 }
@@ -3675,20 +4028,23 @@ class _ActionBrainstormingSectionState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Action Brainstorming and Coaching Worksheet',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
+        _ldSectionHeader(
+          context,
+          icon: Icons.lightbulb_outline_rounded,
+          title: 'Action Brainstorming and Coaching Worksheet',
+          subtitle:
+              'Use the worksheet to brainstorm/coach staff on new ideas to move the department closer to department goal.',
         ),
-        const SizedBox(height: 8),
-        Text(
-          'Use the worksheet to brainstorm/coach staff on new ideas to move the department closer to department goal.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+        const SizedBox(height: 22),
+        _ldSectionToolbar(
+          context,
+          loading: _loading,
+          addLabel: 'Add worksheet',
+          onAdd: _startNew,
+          onRefresh: _load,
+          onViewRecords: _openSavedRecordsBrowser,
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
         if (_editing != null) ...[
           _ActionBrainstormingFormEditor(
             key: ValueKey(_editing?.id ?? 'new'),
@@ -3698,48 +4054,19 @@ class _ActionBrainstormingSectionState
             onPrint: _printAb,
             onDownloadPdf: _downloadAb,
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
         ],
-        Row(
-          children: [
-            FilledButton.icon(
-              onPressed: _loading ? null : _startNew,
-              icon: const Icon(Icons.add_rounded, size: 20),
-              label: const Text('Add worksheet'),
-            ),
-            const SizedBox(width: 12),
-            TextButton.icon(
-              onPressed: _loading ? null : _load,
-              icon: const Icon(Icons.refresh_rounded, size: 20),
-              label: const Text('Refresh'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-            const SizedBox(width: 4),
-            TextButton.icon(
-              onPressed: _loading ? null : _openSavedRecordsBrowser,
-              icon: const Icon(Icons.folder_open_outlined, size: 20),
-              label: const Text('View records'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
         if (_loading)
           const Padding(
-            padding: EdgeInsets.all(24),
+            padding: EdgeInsets.symmetric(vertical: 32),
             child: Center(child: CircularProgressIndicator()),
           )
         else if (_entries.isEmpty)
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text(
-              'No worksheets yet. Tap "Add worksheet" to add one.',
-              style: TextStyle(color: AppTheme.textSecondary),
-            ),
+          _ldEmptyRecordsPlaceholder(
+            icon: Icons.lightbulb_outline,
+            title: 'No worksheets yet',
+            subtitle:
+                'Tap "Add worksheet" to create an Action Brainstorming and Coaching Worksheet.',
           )
         else
           _ActionBrainstormingList(
@@ -3922,9 +4249,16 @@ class _ActionBrainstormingFormEditorState
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: AppTheme.white,
+        color: AppTheme.dashPanelOf(context),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primaryNavy.withValues(alpha: 0.04),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
       ),
       child: SingleChildScrollView(
         child: Column(
@@ -4199,93 +4533,67 @@ class _ActionBrainstormingList extends StatelessWidget {
   final Future<void> Function(ActionBrainstormingEntry) onPrint;
   final Future<void> Function(ActionBrainstormingEntry) onDownloadPdf;
 
+  Future<void> _confirmDelete(
+    BuildContext context,
+    ActionBrainstormingEntry e,
+  ) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete this worksheet?'),
+        content: const Text('This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && e.id != null) onDelete(e.id!);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('Department')),
-          DataColumn(label: Text('Date')),
-          DataColumn(label: Text('Rows')),
-          DataColumn(label: Text('Actions')),
-        ],
-        rows: entries.map((e) {
-          return DataRow(
-            cells: [
-              DataCell(Text(e.department ?? 'â€”')),
-              DataCell(Text(e.date ?? 'â€”')),
-              DataCell(Text('${e.rows.length}')),
-              DataCell(
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextButton(
-                      onPressed: () => showReadOnlySavedEntryDialog(
-                        context,
-                        title: 'Saved action brainstorming worksheet',
-                        previewBuilder: () => _ActionBrainstormingFormEditor(
-                          readOnly: true,
-                          entry: e,
-                          onSave: (_) {},
-                          onCancel: () {},
-                          onPrint: (_) async {},
-                          onDownloadPdf: (_) async {},
-                        ),
-                        contentWidth: 1280,
-                      ),
-                      child: const Text('View'),
-                    ),
-                    TextButton(
-                      onPressed: () => onEdit(e),
-                      child: const Text('Edit'),
-                    ),
-                    IconButton(
-                      onPressed: () => onPrint(e),
-                      icon: const Icon(Icons.print_rounded, size: 20),
-                      tooltip: 'Print',
-                    ),
-                    IconButton(
-                      onPressed: () => onDownloadPdf(e),
-                      icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
-                      tooltip: 'Download PDF',
-                    ),
-                    TextButton(
-                      onPressed: () async {
-                        final ok = await showDialog<bool>(
-                          context: context,
-                          builder: (ctx) => AlertDialog(
-                            title: const Text('Delete this worksheet?'),
-                            content: const Text('This cannot be undone.'),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.of(ctx).pop(false),
-                                child: const Text('Cancel'),
-                              ),
-                              FilledButton(
-                                onPressed: () => Navigator.of(ctx).pop(true),
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: Colors.red,
-                                ),
-                                child: const Text('Delete'),
-                              ),
-                            ],
-                          ),
-                        );
-                        if (ok == true && e.id != null) onDelete(e.id!);
-                      },
-                      child: const Text(
-                        'Delete',
-                        style: TextStyle(color: Colors.red),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          );
-        }).toList(),
-      ),
+    return ListView.separated(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: entries.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 12),
+      itemBuilder: (context, index) {
+        final e = entries[index];
+        final dept = e.department?.trim().isNotEmpty == true
+            ? e.department!
+            : 'No department';
+        final date = e.date?.trim().isNotEmpty == true ? e.date! : '—';
+        return _LdSavedEntryCard(
+          title: dept,
+          subtitle: date,
+          meta: '${e.rows.length} row${e.rows.length == 1 ? '' : 's'}',
+          onView: () => showReadOnlySavedEntryDialog(
+            context,
+            title: 'Saved action brainstorming worksheet',
+            previewBuilder: () => _ActionBrainstormingFormEditor(
+              readOnly: true,
+              entry: e,
+              onSave: (_) {},
+              onCancel: () {},
+              onPrint: (_) async {},
+              onDownloadPdf: (_) async {},
+            ),
+            contentWidth: 1280,
+          ),
+          onEdit: () => onEdit(e),
+          onPrint: () => onPrint(e),
+          onDownloadPdf: () => onDownloadPdf(e),
+          onDelete: () => _confirmDelete(context, e),
+        );
+      },
     );
   }
 }

@@ -9,18 +9,15 @@ import '../../login/screens/login_page.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/theme_mode_provider.dart';
 import '../../widgets/user_avatar.dart';
+import 'collapsible_dashboard_sidebar.dart';
 import 'dashboard_notifications_dropdown.dart';
 
-/// Label for account menu ID row (employee number preferred).
+/// Label for profile header / account menu (employee number only, never auth UUID).
 String? dashboardAccountIdLabel(AppUser? user) {
   if (user == null) return null;
-  if (user.employeeNumber != null) {
-    final n = user.employeeNumber!;
-    final padded = n < 10000 ? n.toString().padLeft(4, '0') : n.toString();
-    return 'Employee ID · $padded';
-  }
-  if (user.id.isNotEmpty) return 'User ID · ${user.id}';
-  return null;
+  final empId = user.displayEmployeeId;
+  if (empId.isEmpty) return null;
+  return 'Employee ID · $empId';
 }
 
 /// Theme toggle + notifications bell for admin/employee dashboard top bars.
@@ -232,11 +229,13 @@ class DashboardSidebarProfileCard extends StatefulWidget {
     required this.displayName,
     required this.subtitle,
     this.avatarPath,
+    this.collapsed = false,
   });
 
   final String displayName;
   final String subtitle;
   final String? avatarPath;
+  final bool collapsed;
 
   @override
   State<DashboardSidebarProfileCard> createState() =>
@@ -269,6 +268,15 @@ class _DashboardSidebarProfileCardState
   @override
   Widget build(BuildContext context) {
     const avatarRadius = 20.0;
+    final collapsed = widget.collapsed;
+
+    if (collapsed) {
+      return CollapsedSidebarProfileOrb(
+        displayName: widget.displayName,
+        subtitle: widget.subtitle,
+        avatarPath: widget.avatarPath,
+      );
+    }
 
     return AnimatedBuilder(
       animation: _pulse,

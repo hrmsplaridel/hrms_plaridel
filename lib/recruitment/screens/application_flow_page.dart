@@ -1794,14 +1794,15 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           _appBarTitle(),
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.w700, letterSpacing: -0.2),
         ),
         backgroundColor: AppTheme.primaryNavy,
         foregroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
-        elevation: 1,
-        shadowColor: Colors.black.withValues(alpha: 0.12),
+        elevation: 0,
+        scrolledUnderElevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
           onPressed: () => Navigator.of(context).pop(),
         ),
         actions: [
@@ -1920,18 +1921,29 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(10),
+                      width: kIsWeb ? 52 : 48,
+                      height: kIsWeb ? 52 : 48,
                       decoration: BoxDecoration(
-                        color: AppTheme.primaryNavy.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(14),
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            AppTheme.primaryNavy.withValues(alpha: 0.16),
+                            AppTheme.primaryNavyLight.withValues(alpha: 0.08),
+                          ],
+                        ),
+                        border: Border.all(
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.2),
+                        ),
                       ),
                       child: Icon(
                         Icons.manage_search_rounded,
                         color: AppTheme.primaryNavy,
-                        size: kIsWeb ? 30 : 26,
+                        size: kIsWeb ? 28 : 24,
                       ),
                     ),
-                    const SizedBox(width: 14),
+                    const SizedBox(width: 16),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1943,15 +1955,15 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                               fontSize: kIsWeb ? 26 : 22,
                               height: 1.15,
                               letterSpacing: -0.35,
-                              color: AppTheme.primaryNavy,
+                              color: AppTheme.textPrimary,
                             ),
                           ),
-                          const SizedBox(height: 6),
+                          const SizedBox(height: 8),
                           Text(
                             'Look up your record by email, then continue when the process allows it.',
                             style: TextStyle(
-                              fontSize: kIsWeb ? 14 : 13,
-                              height: 1.4,
+                              fontSize: kIsWeb ? 14.5 : 13.5,
+                              height: 1.45,
                               fontWeight: FontWeight.w500,
                               color: AppTheme.textSecondary.withValues(
                                 alpha: 0.92,
@@ -1963,28 +1975,64 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                     ),
                   ],
                 ),
-                SizedBox(height: kIsWeb ? 20 : 16),
-                Divider(
-                  height: 1,
-                  thickness: 1,
-                  color: AppTheme.lightGray.withValues(alpha: 0.75),
-                ),
-                SizedBox(height: kIsWeb ? 18 : 14),
-                Text(
-                  'To start a new application, go back to the home page, open Job Vacancies, and tap Apply now on the position you want.',
-                  style: TextStyle(
-                    fontSize: kIsWeb ? 15 : 14,
-                    height: 1.5,
-                    color: AppTheme.textSecondary,
+                SizedBox(height: kIsWeb ? 22 : 18),
+                Container(
+                  width: double.infinity,
+                  padding: EdgeInsets.all(kIsWeb ? 16 : 14),
+                  decoration: BoxDecoration(
+                    color: AppTheme.sectionAlt.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: AppTheme.lightGray.withValues(alpha: 0.65),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'Enter the email you used when you applied, then tap Check status. Continue stays off until your application is loaded and you are allowed to proceed (for example, after HR approves your documents).',
-                  style: TextStyle(
-                    fontSize: kIsWeb ? 15 : 14,
-                    height: 1.5,
-                    color: AppTheme.textSecondary,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons.info_outline_rounded,
+                            size: 18,
+                            color: AppTheme.primaryNavy.withValues(alpha: 0.75),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'To start a new application, go back to the home page, open Job Vacancies, and tap Apply now on the position you want.',
+                              style: TextStyle(
+                                fontSize: kIsWeb ? 14.5 : 14,
+                                height: 1.5,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons.mail_outline_rounded,
+                            size: 18,
+                            color: AppTheme.primaryNavy.withValues(alpha: 0.75),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'Enter the email you used when you applied, then tap Check status. Continue stays off until your application is loaded and you are allowed to proceed (for example, after HR approves your documents).',
+                              style: TextStyle(
+                                fontSize: kIsWeb ? 14.5 : 14,
+                                height: 1.5,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
                 SizedBox(height: kIsWeb ? 22 : 18),
@@ -2053,16 +2101,27 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
 
   Widget _recruitmentWebPanel({required bool tinted, required Widget child}) {
     final radius = BorderRadius.circular(20);
-    final borderSide = Border.all(
-      color: AppTheme.lightGray.withValues(alpha: 0.88),
-    );
+    final hairline = AppTheme.lightGray.withValues(alpha: 0.75);
+    final borderSide = Border.all(color: hairline);
+    final panelShadow = [
+      BoxShadow(
+        color: AppTheme.primaryNavy.withValues(alpha: 0.06),
+        blurRadius: 28,
+        offset: const Offset(0, 10),
+      ),
+      BoxShadow(
+        color: Colors.black.withValues(alpha: 0.04),
+        blurRadius: 12,
+        offset: const Offset(0, 4),
+      ),
+    ];
     if (tinted) {
       return Container(
         decoration: BoxDecoration(
-          color: const Color(0xFFFFF6F1),
+          color: AppTheme.white,
           borderRadius: radius,
           border: borderSide,
-          boxShadow: AppTheme.panelShadow,
+          boxShadow: panelShadow,
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(
@@ -2084,7 +2143,12 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 22, 24, 26),
+              padding: EdgeInsets.fromLTRB(
+                kIsWeb ? 28 : 22,
+                kIsWeb ? 26 : 20,
+                kIsWeb ? 28 : 22,
+                kIsWeb ? 28 : 24,
+              ),
               child: child,
             ),
           ],
@@ -2096,9 +2160,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         color: AppTheme.white,
         borderRadius: radius,
         border: borderSide,
-        boxShadow: AppTheme.panelShadow,
+        boxShadow: panelShadow,
       ),
-      padding: const EdgeInsets.all(26),
+      padding: EdgeInsets.all(kIsWeb ? 28 : 22),
       child: child,
     );
   }
@@ -2119,10 +2183,11 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       style: FilledButton.styleFrom(
         backgroundColor: navy,
         foregroundColor: Colors.white,
-        disabledBackgroundColor: AppTheme.lightGray.withValues(alpha: 0.92),
-        disabledForegroundColor: AppTheme.textSecondary.withValues(alpha: 0.55),
-        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
-        minimumSize: const Size(120, 48),
+        elevation: 0,
+        disabledBackgroundColor: AppTheme.lightGray.withValues(alpha: 0.85),
+        disabledForegroundColor: AppTheme.textSecondary.withValues(alpha: 0.5),
+        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+        minimumSize: const Size(128, 48),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
       child: _continueLoading
@@ -2134,7 +2199,10 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                 color: Colors.white,
               ),
             )
-          : const Text('Continue'),
+          : const Text(
+              'Continue',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
     );
     final checkBtn = OutlinedButton.icon(
       onPressed: (_step1StatusLoading || _continueLoading)
@@ -2146,11 +2214,14 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               height: 18,
               child: CircularProgressIndicator(strokeWidth: 2, color: navy),
             )
-          : const Icon(Icons.alt_route_rounded, size: 21),
-      label: Text(_step1StatusLoading ? 'Checking…' : 'Check status'),
+          : const Icon(Icons.search_rounded, size: 20),
+      label: Text(
+        _step1StatusLoading ? 'Checking…' : 'Check status',
+        style: const TextStyle(fontWeight: FontWeight.w700),
+      ),
       style: OutlinedButton.styleFrom(
         foregroundColor: navy,
-        side: BorderSide(color: navy, width: 2),
+        side: BorderSide(color: navy.withValues(alpha: 0.55)),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
         minimumSize: const Size(0, 48),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -2175,42 +2246,83 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         emailNonEmpty &&
         !_canProceedTrackingContinue(app, _step1StatusExam);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        emailField,
-        const SizedBox(height: 12),
-        Wrap(
-          alignment: WrapAlignment.end,
-          spacing: 12,
-          runSpacing: 12,
-          children: [checkBtn, continueBtn],
+    Widget hintBox(String text) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppTheme.primaryNavy.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: AppTheme.primaryNavy.withValues(alpha: 0.14),
+          ),
         ),
-        if (showCheckStatusFirstHint) ...[
-          const SizedBox(height: 14),
-          Text(
-            'Tap Check status first so we can load your application. Continue stays off until we confirm your record and you are allowed to move forward (for example, after HR approves your documents).',
-            style: TextStyle(
-              fontSize: 14,
-              height: 1.45,
-              color: AppTheme.textSecondary.withValues(alpha: 0.95),
-              fontStyle: FontStyle.italic,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              Icons.lightbulb_outline_rounded,
+              size: 18,
+              color: AppTheme.primaryNavy.withValues(alpha: 0.7),
             ),
-          ),
-        ],
-        if (showBlockedHint) ...[
-          const SizedBox(height: 14),
-          Text(
-            _trackingContinueBlockedHint(app, _step1StatusExam),
-            style: TextStyle(
-              fontSize: 14,
-              height: 1.45,
-              color: AppTheme.textSecondary.withValues(alpha: 0.95),
-              fontStyle: FontStyle.italic,
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                text,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  height: 1.45,
+                  color: AppTheme.textSecondary.withValues(alpha: 0.95),
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
             ),
-          ),
+          ],
+        ),
+      );
+    }
+
+    final narrowActions = MediaQuery.sizeOf(context).width < 480;
+
+    return Container(
+      padding: EdgeInsets.all(kIsWeb ? 16 : 14),
+      decoration: BoxDecoration(
+        color: AppTheme.offWhite,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: AppTheme.lightGray.withValues(alpha: 0.7),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          emailField,
+          const SizedBox(height: 14),
+          if (narrowActions) ...[
+            checkBtn,
+            const SizedBox(height: 10),
+            continueBtn,
+          ] else
+            Row(
+              children: [
+                const Spacer(),
+                checkBtn,
+                const SizedBox(width: 10),
+                continueBtn,
+              ],
+            ),
+          if (showCheckStatusFirstHint) ...[
+            const SizedBox(height: 14),
+            hintBox(
+              'Tap Check status first so we can load your application. Continue stays off until we confirm your record and you are allowed to move forward (for example, after HR approves your documents).',
+            ),
+          ],
+          if (showBlockedHint) ...[
+            const SizedBox(height: 14),
+            hintBox(_trackingContinueBlockedHint(app, _step1StatusExam)),
+          ],
         ],
-      ],
+      ),
     );
   }
 
@@ -4287,22 +4399,11 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   InputDecoration _trackEmailDecoration(String label) {
     final radius = BorderRadius.circular(14);
     return InputDecoration(
-      labelText: label,
-      floatingLabelBehavior: FloatingLabelBehavior.auto,
-      labelStyle: TextStyle(
-        color: AppTheme.primaryNavy.withValues(alpha: 0.95),
-        fontWeight: FontWeight.w600,
-        fontSize: 14,
-      ),
-      floatingLabelStyle: const TextStyle(
-        color: AppTheme.primaryNavy,
-        fontWeight: FontWeight.w600,
-        fontSize: 13,
-      ),
-      hintText: 'applicant@example.com',
+      hintText: label,
       hintStyle: TextStyle(
-        color: AppTheme.textSecondary.withValues(alpha: 0.5),
+        color: AppTheme.textSecondary.withValues(alpha: 0.65),
         fontSize: 15,
+        fontWeight: FontWeight.w500,
       ),
       filled: true,
       fillColor: AppTheme.white,
@@ -4315,15 +4416,14 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       enabledBorder: OutlineInputBorder(
         borderRadius: radius,
         borderSide: BorderSide(
-          color: AppTheme.lightGray.withValues(alpha: 0.95),
-          width: 1.5,
+          color: AppTheme.lightGray.withValues(alpha: 0.85),
         ),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: radius,
         borderSide: const BorderSide(color: AppTheme.primaryNavy, width: 2),
       ),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 18),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
     );
   }
 }

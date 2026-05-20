@@ -2,6 +2,55 @@ import 'package:flutter/material.dart';
 
 import '../landingpage/constants/app_theme.dart';
 
+/// Responsive grid for [FeatureCard] rows — cards stretch to fill width.
+class FeatureCardGrid extends StatelessWidget {
+  const FeatureCardGrid({
+    super.key,
+    required this.children,
+    this.minCardWidth = 260,
+    this.cardHeight = 286,
+    this.spacing = 16,
+  });
+
+  final List<Widget> children;
+  final double minCardWidth;
+  final double cardHeight;
+  final double spacing;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxW = constraints.maxWidth;
+        if (!maxW.isFinite || maxW <= 0) {
+          return Wrap(
+            spacing: spacing,
+            runSpacing: spacing,
+            children: children,
+          );
+        }
+
+        var columns = ((maxW + spacing) / (minCardWidth + spacing)).floor();
+        columns = columns.clamp(1, 8);
+        final cardWidth = (maxW - (columns - 1) * spacing) / columns;
+
+        return Wrap(
+          spacing: spacing,
+          runSpacing: spacing,
+          children: [
+            for (final child in children)
+              SizedBox(
+                width: cardWidth,
+                height: cardHeight,
+                child: child,
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 /// Reusable feature card for RSP, DTR, L&D, and other dashboard sections.
 /// Tap target with hover lift, top accent, icon tile, and optional action label.
 class FeatureCard extends StatefulWidget {
@@ -13,6 +62,7 @@ class FeatureCard extends StatefulWidget {
     required this.onTap,
     this.actionLabel,
     this.maxSubtitleLines = 5,
+    this.showActionArrow = false,
   });
 
   final String title;
@@ -20,11 +70,14 @@ class FeatureCard extends StatefulWidget {
   final IconData icon;
   final VoidCallback onTap;
 
-  /// Shown on the bottom row (defaults to "Open").
+  /// Shown on the bottom row (defaults to "Open"), aligned right.
   final String? actionLabel;
 
   /// Lines of subtitle before ellipsis.
   final int maxSubtitleLines;
+
+  /// When false, only the action label is shown (no trailing arrow).
+  final bool showActionArrow;
 
   @override
   State<FeatureCard> createState() => _FeatureCardState();
@@ -33,22 +86,38 @@ class FeatureCard extends StatefulWidget {
 class _FeatureCardState extends State<FeatureCard> {
   bool _hover = false;
 
-  static const double _cardWidth = 280;
-  static const double _cardHeight = 286;
+  static const double _fallbackWidth = 280;
+  static const double _fallbackHeight = 286;
 
   @override
   Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth.isFinite && constraints.maxWidth > 0
+            ? constraints.maxWidth
+            : _fallbackWidth;
+        final height =
+            constraints.maxHeight.isFinite && constraints.maxHeight > 0
+            ? constraints.maxHeight
+            : _fallbackHeight;
+
+        return _buildCard(width: width, height: height);
+      },
+    );
+  }
+
+  Widget _buildCard({required double width, required double height}) {
     final navy = AppTheme.primaryNavy;
     final action = widget.actionLabel ?? 'Open';
     final dark = AppTheme.dashIsDark(context);
-    final cardBg =
-        dark ? const Color(0xFF1E2430) : AppTheme.white;
+    final cardBg = dark ? const Color(0xFF1E2430) : AppTheme.white;
     final idleBorder = dark
         ? AppTheme.dashHairlineOf(context)
         : Colors.black.withValues(alpha: 0.07);
     final titleColor = AppTheme.dashTextPrimaryOf(context);
-    final subtitleColor =
-        AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.95);
+    final subtitleColor = AppTheme.dashTextSecondaryOf(
+      context,
+    ).withValues(alpha: 0.95);
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
@@ -59,8 +128,8 @@ class _FeatureCardState extends State<FeatureCard> {
         duration: const Duration(milliseconds: 180),
         curve: Curves.easeOutCubic,
         child: SizedBox(
-          width: _cardWidth,
-          height: _cardHeight,
+          width: width,
+          height: height,
           child: Material(
             color: Colors.transparent,
             elevation: 0,
@@ -130,7 +199,9 @@ class _FeatureCardState extends State<FeatureCard> {
                                     begin: Alignment.topLeft,
                                     end: Alignment.bottomRight,
                                     colors: [
-                                      navy.withValues(alpha: dark ? 0.22 : 0.12),
+                                      navy.withValues(
+                                        alpha: dark ? 0.22 : 0.12,
+                                      ),
                                       AppTheme.primaryNavyLight.withValues(
                                         alpha: dark ? 0.14 : 0.08,
                                       ),
@@ -173,35 +244,43 @@ class _FeatureCardState extends State<FeatureCard> {
                                 ),
                               ),
                               const SizedBox(height: 10),
-                              Row(
-                                children: [
-                                  Text(
-                                    action,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w800,
-                                      fontSize: 13,
-                                      letterSpacing: 0.15,
-                                      color: navy.withValues(
-                                        alpha: _hover ? 1 : 0.88,
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      action,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 13,
+                                        letterSpacing: 0.15,
+                                        color: navy.withValues(
+                                          alpha: _hover ? 1 : 0.88,
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  AnimatedSlide(
-                                    duration: const Duration(milliseconds: 180),
-                                    curve: Curves.easeOutCubic,
-                                    offset: _hover
-                                        ? const Offset(0.06, 0)
-                                        : Offset.zero,
-                                    child: Icon(
-                                      Icons.arrow_forward_rounded,
-                                      size: 20,
-                                      color: navy.withValues(
-                                        alpha: _hover ? 1 : 0.75,
+                                    if (widget.showActionArrow) ...[
+                                      const SizedBox(width: 4),
+                                      AnimatedSlide(
+                                        duration: const Duration(
+                                          milliseconds: 180,
+                                        ),
+                                        curve: Curves.easeOutCubic,
+                                        offset: _hover
+                                            ? const Offset(0.06, 0)
+                                            : Offset.zero,
+                                        child: Icon(
+                                          Icons.arrow_forward_rounded,
+                                          size: 20,
+                                          color: navy.withValues(
+                                            alpha: _hover ? 1 : 0.75,
+                                          ),
+                                        ),
                                       ),
-                                    ),
-                                  ),
-                                ],
+                                    ],
+                                  ],
+                                ),
                               ),
                             ],
                           ),

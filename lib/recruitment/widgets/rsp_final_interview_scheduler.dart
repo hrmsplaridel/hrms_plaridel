@@ -654,83 +654,162 @@ class _RspFinalInterviewSchedulerState
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final w = MediaQuery.sizeOf(context).width;
-    final headerWide = w >= 720;
+  BoxDecoration _shellCardDecoration(BuildContext context) {
+    final hairline = AppTheme.dashHairlineOf(context);
+    final panel = AppTheme.dashPanelOf(context);
+    return BoxDecoration(
+      color: panel,
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: hairline),
+      boxShadow: [
+        BoxShadow(
+          color: AppTheme.primaryNavy.withValues(alpha: 0.06),
+          blurRadius: 28,
+          offset: const Offset(0, 12),
+        ),
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.04),
+          blurRadius: 10,
+          offset: const Offset(0, 3),
+        ),
+      ],
+    );
+  }
 
-    final titleStyle = const TextStyle(
-      fontFamily: 'NotoSans',
-      color: AppTheme.textPrimary,
-      fontSize: 24,
-      fontWeight: FontWeight.w800,
-      letterSpacing: -0.4,
-      height: 1.15,
-    );
-    final introStyle = const TextStyle(
-      fontFamily: 'NotoSans',
-      color: AppTheme.textSecondary,
-      fontSize: 14,
-      height: 1.55,
-      fontWeight: FontWeight.w500,
-    );
-    final refreshBtn = OutlinedButton.icon(
-      onPressed: _loading ? null : _load,
-      icon: Icon(
-        Icons.refresh_rounded,
-        size: 20,
-        color: AppTheme.primaryNavy.withValues(alpha: _loading ? 0.4 : 1),
-      ),
-      label: Text(
-        'Refresh list',
-        style: TextStyle(
-          fontFamily: 'NotoSans',
-          color: AppTheme.primaryNavy.withValues(alpha: _loading ? 0.4 : 1),
-          fontWeight: FontWeight.w700,
+  Widget _shellTopAccent() {
+    return Container(
+      height: 4,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
         ),
       ),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: AppTheme.primaryNavy,
-        side: BorderSide(color: AppTheme.primaryNavy.withValues(alpha: 0.45)),
+    );
+  }
+
+  Widget _applicantInitials(String name) {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    String initials = '';
+    if (parts.isNotEmpty && parts.first.isNotEmpty) {
+      initials += parts.first[0].toUpperCase();
+    }
+    if (parts.length > 1 && parts.last.isNotEmpty) {
+      initials += parts.last[0].toUpperCase();
+    }
+    if (initials.isEmpty) initials = '?';
+    return Container(
+      width: 44,
+      height: 44,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppTheme.primaryNavy.withValues(alpha: 0.18),
+            AppTheme.primaryNavyLight.withValues(alpha: 0.1),
+          ],
+        ),
+        border: Border.all(
+          color: AppTheme.primaryNavy.withValues(alpha: 0.22),
+        ),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        initials,
+        style: const TextStyle(
+          fontFamily: 'NotoSans',
+          color: AppTheme.primaryNavy,
+          fontWeight: FontWeight.w800,
+          fontSize: 16,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hairline = AppTheme.dashHairlineOf(context);
+    final muted = AppTheme.dashMutedSurfaceOf(context);
+
+    final refreshBtn = FilledButton.icon(
+      onPressed: _loading ? null : _load,
+      icon: const Icon(Icons.refresh_rounded, size: 20),
+      label: const Text('Refresh list'),
+      style: FilledButton.styleFrom(
+        backgroundColor: AppTheme.primaryNavy,
+        foregroundColor: Colors.white,
+        elevation: 0,
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
       ),
     );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (headerWide)
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Final interview (passed exam)', style: titleStyle),
-                    const SizedBox(height: 10),
-                    Text(
-                      'Applicants listed here already passed the screening exam. Schedule the in-person interview, record the result, then open Create Account when they pass.',
-                      style: introStyle,
-                    ),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppTheme.primaryNavy.withValues(alpha: 0.14),
+                    AppTheme.primaryNavyLight.withValues(alpha: 0.08),
                   ],
                 ),
+                border: Border.all(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.2),
+                ),
               ),
-              const SizedBox(width: 20),
-              refreshBtn,
-            ],
-          )
-        else ...[
-          Text('Final interview (passed exam)', style: titleStyle),
-          const SizedBox(height: 10),
-          Text(
-            'Applicants listed here already passed the screening exam. Schedule the in-person interview, record the result, then open Create Account when they pass.',
-            style: introStyle,
-          ),
-          const SizedBox(height: 16),
-          refreshBtn,
-        ],
+              child: const Icon(
+                Icons.event_available_outlined,
+                size: 26,
+                color: AppTheme.primaryNavy,
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Final interview (passed exam)',
+                    style: TextStyle(
+                      fontFamily: 'NotoSans',
+                      color: AppTheme.dashTextPrimaryOf(context),
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.4,
+                      height: 1.15,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Applicants listed here already passed the screening exam. Schedule the in-person interview, record the result, then open Create Account when they pass.',
+                    style: TextStyle(
+                      fontFamily: 'NotoSans',
+                      color: AppTheme.dashTextSecondaryOf(context),
+                      fontSize: 14,
+                      height: 1.5,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            refreshBtn,
+          ],
+        ),
         const SizedBox(height: 24),
         if (_loading)
           const Padding(
@@ -740,31 +819,36 @@ class _RspFinalInterviewSchedulerState
         else if (_passedApplicants.isEmpty)
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(28),
-            decoration: BoxDecoration(
-              color: AppTheme.white,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: Colors.black.withValues(alpha: 0.07)),
-              boxShadow: [
-                BoxShadow(
-                  color: AppTheme.primaryNavy.withValues(alpha: 0.06),
-                  blurRadius: 22,
-                  offset: const Offset(0, 8),
-                ),
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
+            decoration: _shellCardDecoration(context),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _shellTopAccent(),
+                Padding(
+                  padding: const EdgeInsets.all(28),
+                  child: Column(
+                    children: [
+                      Icon(
+                        Icons.people_outline_rounded,
+                        size: 40,
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.45),
+                      ),
+                      const SizedBox(height: 14),
+                      Text(
+                        'No applicants have passed the exam yet. When an applicant completes the screening exam with a passing score, they will show up here automatically.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontFamily: 'NotoSans',
+                          color: AppTheme.dashTextSecondaryOf(context),
+                          fontSize: 14,
+                          height: 1.5,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
-            ),
-            child: Text(
-              'No applicants have passed the exam yet. When an applicant completes the screening exam with a passing score, they will show up here automatically.',
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 14,
-                height: 1.45,
-              ),
             ),
           )
         else
@@ -798,62 +882,28 @@ class _RspFinalInterviewSchedulerState
 
               if (useMinimalApplicantRow) {
                 return Container(
-                  decoration: BoxDecoration(
-                    color: AppTheme.white,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: Colors.black.withValues(alpha: 0.07),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppTheme.primaryNavy.withValues(alpha: 0.08),
-                        blurRadius: 26,
-                        offset: const Offset(0, 11),
-                      ),
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.065),
-                        blurRadius: 18,
-                        offset: const Offset(0, 6),
-                      ),
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.035),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
+                  decoration: _shellCardDecoration(context),
                   clipBehavior: Clip.antiAlias,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Container(
-                        height: 4,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              AppTheme.primaryNavy,
-                              AppTheme.primaryNavyLight,
-                            ],
-                          ),
-                        ),
-                      ),
+                      _shellTopAccent(),
                       Material(
                         color: Colors.transparent,
                         child: InkWell(
                           onTap: () => setState(
                             () => _expandedHiredApplicantIds.add(app.id),
                           ),
-                          borderRadius: const BorderRadius.vertical(
-                            bottom: Radius.circular(20),
-                          ),
                           child: Padding(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 20,
-                              vertical: 14,
+                              horizontal: 18,
+                              vertical: 16,
                             ),
                             child: Row(
                               children: [
+                                _applicantInitials(app.fullName),
+                                const SizedBox(width: 14),
                                 Expanded(
                                   child: Column(
                                     crossAxisAlignment:
@@ -862,12 +912,14 @@ class _RspFinalInterviewSchedulerState
                                     children: [
                                       Text(
                                         app.fullName,
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontFamily: 'NotoSans',
                                           fontWeight: FontWeight.w800,
                                           fontSize: 17,
                                           letterSpacing: -0.2,
-                                          color: AppTheme.textPrimary,
+                                          color: AppTheme.dashTextPrimaryOf(
+                                            context,
+                                          ),
                                           height: 1.2,
                                         ),
                                       ),
@@ -880,29 +932,54 @@ class _RspFinalInterviewSchedulerState
                                         ),
                                         fontSize: 11,
                                       ),
-                                      if (exam != null) ...[
-                                        const SizedBox(height: 10),
-                                        Text(
-                                          'Exam: ${exam.scorePercent.toStringAsFixed(0)}%',
-                                          style: TextStyle(
-                                            fontFamily: 'NotoSans',
-                                            color: AppTheme.textSecondary
-                                                .withValues(alpha: 0.92),
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w700,
-                                            height: 1.2,
-                                          ),
-                                        ),
-                                      ],
                                     ],
                                   ),
                                 ),
-                                Icon(
-                                  Icons.keyboard_arrow_down_rounded,
-                                  color: AppTheme.textSecondary.withValues(
-                                    alpha: 0.78,
+                                if (exam != null) ...[
+                                  const SizedBox(width: 12),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 8,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.primaryNavy.withValues(
+                                        alpha: 0.08,
+                                      ),
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(
+                                        color: AppTheme.primaryNavy.withValues(
+                                          alpha: 0.2,
+                                        ),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      '${exam.scorePercent.toStringAsFixed(0)}%',
+                                      style: const TextStyle(
+                                        fontFamily: 'NotoSans',
+                                        color: AppTheme.primaryNavy,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
                                   ),
-                                  size: 26,
+                                ],
+                                const SizedBox(width: 10),
+                                Container(
+                                  width: 36,
+                                  height: 36,
+                                  decoration: BoxDecoration(
+                                    color: muted,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: hairline),
+                                  ),
+                                  child: Icon(
+                                    Icons.expand_more_rounded,
+                                    color: AppTheme.dashTextSecondaryOf(
+                                      context,
+                                    ),
+                                    size: 24,
+                                  ),
                                 ),
                               ],
                             ),
@@ -915,119 +992,65 @@ class _RspFinalInterviewSchedulerState
               }
 
               return Container(
-                decoration: BoxDecoration(
-                  color: AppTheme.white,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: Colors.black.withValues(alpha: 0.07),
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppTheme.primaryNavy.withValues(alpha: 0.08),
-                      blurRadius: 26,
-                      offset: const Offset(0, 11),
-                    ),
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.065),
-                      blurRadius: 18,
-                      offset: const Offset(0, 6),
-                    ),
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.035),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
+                decoration: _shellCardDecoration(context),
                 clipBehavior: Clip.antiAlias,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Container(
-                      height: 4,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            AppTheme.primaryNavy,
-                            AppTheme.primaryNavyLight,
-                          ],
-                        ),
-                      ),
-                    ),
+                    _shellTopAccent(),
                     Padding(
                       padding: const EdgeInsets.all(_kCardPadding),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton.icon(
-                              onPressed: () => setState(
-                                () => _expandedHiredApplicantIds.remove(
-                                  app.id,
-                                ),
-                              ),
-                              icon: Icon(
-                                Icons.unfold_less_rounded,
-                                size: 20,
-                                color: AppTheme.primaryNavy.withValues(
-                                  alpha: 0.9,
-                                ),
-                              ),
-                              label: Text(
-                                'Show less',
-                                style: TextStyle(
-                                  fontFamily: 'NotoSans',
-                                  fontWeight: FontWeight.w700,
-                                  color: AppTheme.primaryNavy.withValues(
-                                    alpha: 0.92,
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  'APPLICANT',
+                                  style: TextStyle(
+                                    fontFamily: 'NotoSans',
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 0.65,
+                                    color: AppTheme.dashTextSecondaryOf(
+                                      context,
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Applicant',
-                            style: TextStyle(
-                              fontFamily: 'NotoSans',
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 1.1,
-                              color: AppTheme.textSecondary.withValues(
-                                alpha: 0.85,
+                              TextButton.icon(
+                                onPressed: () => setState(
+                                  () => _expandedHiredApplicantIds.remove(
+                                    app.id,
+                                  ),
+                                ),
+                                icon: const Icon(
+                                  Icons.unfold_less_rounded,
+                                  size: 20,
+                                ),
+                                label: const Text('Show less'),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: AppTheme.primaryNavy,
+                                ),
                               ),
-                            ),
+                            ],
                           ),
-                          const SizedBox(height: 10),
+                          const SizedBox(height: 12),
                           Container(
                             width: double.infinity,
-                            padding: const EdgeInsets.all(16),
+                            padding: const EdgeInsets.all(18),
                             decoration: BoxDecoration(
-                              color: AppTheme.offWhite,
+                              color: muted,
                               borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: const Color(0xFFE2E6EA),
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.045),
-                                  blurRadius: 12,
-                                  offset: const Offset(0, 4),
-                                ),
-                                BoxShadow(
-                                  color: AppTheme.primaryNavy.withValues(
-                                    alpha: 0.04,
-                                  ),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
+                              border: Border.all(color: hairline),
                             ),
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
+                                _applicantInitials(app.fullName),
+                                const SizedBox(width: 14),
                                 Expanded(
                                   child: Column(
                                     crossAxisAlignment:
@@ -1035,12 +1058,14 @@ class _RspFinalInterviewSchedulerState
                                     children: [
                                       Text(
                                         app.fullName,
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontFamily: 'NotoSans',
                                           fontWeight: FontWeight.w800,
                                           fontSize: 18,
                                           letterSpacing: -0.25,
-                                          color: AppTheme.textPrimary,
+                                          color: AppTheme.dashTextPrimaryOf(
+                                            context,
+                                          ),
                                           height: 1.2,
                                         ),
                                       ),
@@ -1183,16 +1208,16 @@ class _RspFinalInterviewSchedulerState
                             ),
                           ),
                           const SizedBox(height: 22),
+                          Divider(height: 1, color: hairline),
+                          const SizedBox(height: 18),
                           Text(
-                            'Workflow',
+                            'WORKFLOW',
                             style: TextStyle(
                               fontFamily: 'NotoSans',
                               fontSize: 11,
                               fontWeight: FontWeight.w800,
-                              letterSpacing: 1.1,
-                              color: AppTheme.textSecondary.withValues(
-                                alpha: 0.85,
-                              ),
+                              letterSpacing: 0.65,
+                              color: AppTheme.dashTextSecondaryOf(context),
                             ),
                           ),
                           const SizedBox(height: 14),
@@ -1457,96 +1482,115 @@ class _CollapsibleWorkflowStepState extends State<_CollapsibleWorkflowStep> {
 
   @override
   Widget build(BuildContext context) {
+    final hairline = AppTheme.dashHairlineOf(context);
+    final panel = AppTheme.dashPanelOf(context);
     final summaryStyle = TextStyle(
       fontFamily: 'NotoSans',
       fontSize: 13,
       height: 1.35,
       fontWeight: FontWeight.w600,
-      color: AppTheme.textSecondary.withValues(alpha: 0.92),
+      color: AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.92),
     );
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 34,
-          height: 34,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: AppTheme.primaryNavy,
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: AppTheme.primaryNavy.withValues(alpha: 0.35),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: panel,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: _expanded
+              ? AppTheme.primaryNavy.withValues(alpha: 0.22)
+              : hairline,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [AppTheme.primaryNavyLight, AppTheme.primaryNavy],
               ),
-            ],
-            border: Border.all(color: Colors.white, width: 2),
-          ),
-          child: Text(
-            '${widget.number}',
-            style: const TextStyle(
-              fontFamily: 'NotoSans',
-              color: Colors.white,
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              '${widget.number}',
+              style: const TextStyle(
+                fontFamily: 'NotoSans',
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: () => setState(() => _expanded = !_expanded),
-                  borderRadius: BorderRadius.circular(12),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 6, 4, 6),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                widget.title,
-                                style: const TextStyle(
-                                  fontFamily: 'NotoSans',
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w800,
-                                  color: AppTheme.textPrimary,
-                                  letterSpacing: -0.25,
-                                  height: 1.2,
-                                ),
-                              ),
-                              if (!_expanded) ...[
-                                const SizedBox(height: 4),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => setState(() => _expanded = !_expanded),
+                    borderRadius: BorderRadius.circular(10),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
                                 Text(
-                                  widget.collapsedSummary,
-                                  style: summaryStyle,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
+                                  widget.title,
+                                  style: TextStyle(
+                                    fontFamily: 'NotoSans',
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppTheme.dashTextPrimaryOf(context),
+                                    letterSpacing: -0.2,
+                                    height: 1.2,
+                                  ),
                                 ),
+                                if (!_expanded) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    widget.collapsedSummary,
+                                    style: summaryStyle,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
                               ],
-                            ],
+                            ),
                           ),
-                        ),
-                        Icon(
-                          _expanded
-                              ? Icons.expand_less_rounded
-                              : Icons.expand_more_rounded,
-                          color: AppTheme.textSecondary.withValues(alpha: 0.75),
-                          size: 28,
-                        ),
-                      ],
+                          Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              color: AppTheme.dashMutedSurfaceOf(context),
+                              shape: BoxShape.circle,
+                              border: Border.all(color: hairline),
+                            ),
+                            child: Icon(
+                              _expanded
+                                  ? Icons.expand_less_rounded
+                                  : Icons.expand_more_rounded,
+                              color: AppTheme.dashTextSecondaryOf(context),
+                              size: 22,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
               AnimatedSize(
                 duration: const Duration(milliseconds: 220),
                 curve: Curves.easeInOut,
@@ -1559,11 +1603,11 @@ class _CollapsibleWorkflowStepState extends State<_CollapsibleWorkflowStep> {
                           const SizedBox(height: 6),
                           Text(
                             widget.subtitle,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontFamily: 'NotoSans',
                               fontSize: 13,
                               height: 1.5,
-                              color: AppTheme.textSecondary,
+                              color: AppTheme.dashTextSecondaryOf(context),
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -1573,10 +1617,11 @@ class _CollapsibleWorkflowStepState extends State<_CollapsibleWorkflowStep> {
                       )
                     : const SizedBox(width: double.infinity),
               ),
-            ],
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

@@ -78,9 +78,7 @@ class _RspAdminContentState extends State<RspAdminContent> {
             ),
           ),
           const SizedBox(height: 24),
-          Wrap(
-            spacing: 16,
-            runSpacing: 16,
+          FeatureCardGrid(
             children: [
               FeatureCard(
                 title: 'Job Vacancies (Landing Page)',
@@ -5501,6 +5499,410 @@ class _ComparativeAssessmentList extends StatelessWidget {
   }
 }
 
+Widget _rspSectionHeader(
+  BuildContext context, {
+  required IconData icon,
+  required String title,
+  required String subtitle,
+}) {
+  return Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              AppTheme.primaryNavy.withValues(alpha: 0.14),
+              AppTheme.primaryNavyLight.withValues(alpha: 0.08),
+            ],
+          ),
+          border: Border.all(
+            color: AppTheme.primaryNavy.withValues(alpha: 0.2),
+          ),
+        ),
+        child: Icon(icon, size: 26, color: AppTheme.primaryNavy),
+      ),
+      const SizedBox(width: 16),
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: TextStyle(
+                color: AppTheme.dashTextPrimaryOf(context),
+                fontSize: 26,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.4,
+                height: 1.15,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              subtitle,
+              style: TextStyle(
+                color: AppTheme.dashTextSecondaryOf(context),
+                fontSize: 14.5,
+                height: 1.45,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ],
+  );
+}
+
+Widget _rspSectionToolbar(
+  BuildContext context, {
+  required bool loading,
+  required String addLabel,
+  required VoidCallback onAdd,
+  required VoidCallback onRefresh,
+  required VoidCallback onViewRecords,
+}) {
+  final narrow = MediaQuery.sizeOf(context).width < 720;
+  final addBtn = FilledButton.icon(
+    onPressed: loading ? null : onAdd,
+    icon: const Icon(Icons.add_rounded, size: 20),
+    label: Text(addLabel),
+    style: FilledButton.styleFrom(
+      backgroundColor: AppTheme.primaryNavy,
+      foregroundColor: Colors.white,
+      elevation: 0,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ),
+  );
+  final refreshBtn = OutlinedButton.icon(
+    onPressed: loading ? null : onRefresh,
+    icon: const Icon(Icons.refresh_rounded, size: 20),
+    label: const Text('Refresh'),
+    style: OutlinedButton.styleFrom(
+      foregroundColor: AppTheme.primaryNavy,
+      side: BorderSide(color: AppTheme.primaryNavy.withValues(alpha: 0.45)),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ),
+  );
+  final recordsBtn = OutlinedButton.icon(
+    onPressed: loading ? null : onViewRecords,
+    icon: const Icon(Icons.folder_open_outlined, size: 20),
+    label: const Text('View records'),
+    style: OutlinedButton.styleFrom(
+      foregroundColor: AppTheme.primaryNavy,
+      side: BorderSide(color: AppTheme.primaryNavy.withValues(alpha: 0.45)),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ),
+  );
+
+  return Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: AppTheme.dashMutedSurfaceOf(context),
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: AppTheme.dashHairlineOf(context)),
+    ),
+    child: narrow
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              addBtn,
+              const SizedBox(height: 10),
+              refreshBtn,
+              const SizedBox(height: 10),
+              recordsBtn,
+            ],
+          )
+        : Row(
+            children: [
+              addBtn,
+              const Spacer(),
+              refreshBtn,
+              const SizedBox(width: 10),
+              recordsBtn,
+            ],
+          ),
+  );
+}
+
+Widget _rspEmptyPlaceholder({
+  required IconData icon,
+  required String title,
+  required String subtitle,
+}) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 32),
+    child: Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              icon,
+              size: 40,
+              color: AppTheme.primaryNavy.withValues(alpha: 0.75),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            style: const TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 14,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _RspSavedEntryCard extends StatelessWidget {
+  const _RspSavedEntryCard({
+    required this.title,
+    required this.subtitle,
+    required this.meta,
+    required this.onView,
+    required this.onEdit,
+    required this.onPrint,
+    required this.onDownloadPdf,
+    required this.onDelete,
+  });
+
+  final String title;
+  final String subtitle;
+  final String meta;
+  final VoidCallback onView;
+  final VoidCallback onEdit;
+  final Future<void> Function() onPrint;
+  final Future<void> Function() onDownloadPdf;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final hairline = AppTheme.dashHairlineOf(context);
+    final muted = AppTheme.dashMutedSurfaceOf(context);
+    final panel = AppTheme.dashPanelOf(context);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: panel,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: hairline),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primaryNavy.withValues(alpha: 0.05),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            height: 4,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: TextStyle(
+                              color: AppTheme.dashTextPrimaryOf(context),
+                              fontWeight: FontWeight.w800,
+                              fontSize: 17,
+                              letterSpacing: -0.2,
+                              height: 1.2,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            subtitle,
+                            style: TextStyle(
+                              color: AppTheme.dashTextSecondaryOf(context),
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w600,
+                              height: 1.3,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(999),
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                        border: Border.all(
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.22),
+                        ),
+                      ),
+                      child: Text(
+                        meta,
+                        style: const TextStyle(
+                          color: AppTheme.primaryNavy,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Divider(height: 1, color: hairline),
+                const SizedBox(height: 12),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: onView,
+                          icon: const Icon(Icons.visibility_outlined, size: 18),
+                          label: const Text('View'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTheme.primaryNavy,
+                            side: BorderSide(
+                              color: AppTheme.primaryNavy.withValues(
+                                alpha: 0.45,
+                              ),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: onEdit,
+                          icon: const Icon(Icons.edit_outlined, size: 18),
+                          label: const Text('Edit'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTheme.primaryNavy,
+                            side: BorderSide(
+                              color: AppTheme.primaryNavy.withValues(
+                                alpha: 0.45,
+                              ),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Spacer(),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        IconButton(
+                          onPressed: () => onPrint(),
+                          icon: const Icon(Icons.print_rounded, size: 20),
+                          tooltip: 'Print',
+                          style: IconButton.styleFrom(
+                            backgroundColor: muted,
+                            foregroundColor: AppTheme.primaryNavy,
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => onDownloadPdf(),
+                          icon: const Icon(
+                            Icons.picture_as_pdf_rounded,
+                            size: 20,
+                          ),
+                          tooltip: 'Download PDF',
+                          style: IconButton.styleFrom(
+                            backgroundColor: muted,
+                            foregroundColor: AppTheme.primaryNavy,
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: onDelete,
+                          icon: Icon(
+                            Icons.delete_outline_rounded,
+                            size: 18,
+                            color: Colors.red.shade700,
+                          ),
+                          label: Text(
+                            'Delete',
+                            style: TextStyle(
+                              color: Colors.red.shade700,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// RSP: Promotion Certification / Screening — form only, no names/values pre-filled.
 class _RspPromotionCertificationSection extends StatefulWidget {
   const _RspPromotionCertificationSection();
@@ -5658,20 +6060,23 @@ class _RspPromotionCertificationSectionState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Promotion Certification / Screening',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
+        _rspSectionHeader(
+          context,
+          icon: Icons.verified_outlined,
+          title: 'Promotion Certification / Screening',
+          subtitle:
+              'Certification that candidate(s) have been screened and found qualified for promotion. Form only—no names or values pre-filled.',
         ),
-        const SizedBox(height: 8),
-        Text(
-          'Certification that candidate(s) have been screened and found qualified for promotion. Form only—no names or values pre-filled.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+        const SizedBox(height: 22),
+        _rspSectionToolbar(
+          context,
+          loading: _loading,
+          addLabel: 'Add certification',
+          onAdd: _startNew,
+          onRefresh: _load,
+          onViewRecords: _openSavedRecordsBrowser,
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
         if (_editing != null) ...[
           _PromotionCertificationEditor(
             key: ValueKey(_editing?.id ?? 'new'),
@@ -5681,48 +6086,19 @@ class _RspPromotionCertificationSectionState
             onPrint: _printPc,
             onDownloadPdf: _downloadPc,
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
         ],
-        Row(
-          children: [
-            FilledButton.icon(
-              onPressed: _loading ? null : _startNew,
-              icon: const Icon(Icons.add_rounded, size: 20),
-              label: const Text('Add certification'),
-            ),
-            const SizedBox(width: 12),
-            TextButton.icon(
-              onPressed: _loading ? null : _load,
-              icon: const Icon(Icons.refresh_rounded, size: 20),
-              label: const Text('Refresh'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-            const SizedBox(width: 4),
-            TextButton.icon(
-              onPressed: _loading ? null : _openSavedRecordsBrowser,
-              icon: const Icon(Icons.folder_open_outlined, size: 20),
-              label: const Text('View records'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
         if (_loading)
           const Padding(
-            padding: EdgeInsets.all(24),
+            padding: EdgeInsets.symmetric(vertical: 32),
             child: Center(child: CircularProgressIndicator()),
           )
         else if (_entries.isEmpty)
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text(
-              'No certifications yet. Tap "Add certification" to add one.',
-              style: TextStyle(color: AppTheme.textSecondary),
-            ),
+          _rspEmptyPlaceholder(
+            icon: Icons.verified_outlined,
+            title: 'No certifications yet',
+            subtitle:
+                'Tap "Add certification" to create a Promotion Certification / Screening form.',
           )
         else
           _PromotionCertificationList(
@@ -5896,66 +6272,109 @@ class _PromotionCertificationEditorState
     widget.onSave(_buildCurrentEntry());
   }
 
+  Widget _pcSectionLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Text(
+        text.toUpperCase(),
+        style: TextStyle(
+          color: AppTheme.primaryNavy.withValues(alpha: 0.85),
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.65,
+          height: 1.2,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final ro = widget.readOnly;
+    final hairline = AppTheme.dashHairlineOf(context);
+    final muted = AppTheme.dashMutedSurfaceOf(context);
+
     return Container(
-      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: hairline),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primaryNavy.withValues(alpha: 0.04),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const RspFormHeader(
-              formTitle: 'Promotion Certification / Screening',
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Position for promotion:',
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-            ),
-            const SizedBox(height: 8),
-            RspSpacedOutlineField(
-              child: TextFormField(
-                controller: _position,
-                readOnly: ro,
-                decoration: rspUnderlinedField(''),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            height: 4,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
               ),
             ),
-            const SizedBox(height: rspFormSectionGap),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Text(
-                    'Candidates (name + 5 columns)',
-                    style: TextStyle(
-                      color: AppTheme.primaryNavy,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
+          ),
+          Padding(
+            padding: const EdgeInsets.all(24),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const RspFormHeader(
+                    formTitle: 'Promotion Certification / Screening',
+                  ),
+                  const SizedBox(height: 20),
+                  _pcSectionLabel('Position for promotion'),
+                  RspSpacedOutlineField(
+                    child: TextFormField(
+                      controller: _position,
+                      readOnly: ro,
+                      decoration: rspUnderlinedField(''),
                     ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
                   ),
-                ),
-                if (!ro) ...[
-                  const SizedBox(width: 8),
-                  TextButton.icon(
-                    onPressed: _addRow,
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Add row'),
+                  const SizedBox(height: rspFormSectionGap),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(child: _pcSectionLabel('Candidates (name + 5 columns)')),
+                      if (!ro)
+                        OutlinedButton.icon(
+                          onPressed: _addRow,
+                          icon: const Icon(Icons.add_rounded, size: 18),
+                          label: const Text('Add row'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTheme.primaryNavy,
+                            side: BorderSide(
+                              color: AppTheme.primaryNavy.withValues(alpha: 0.45),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
-                ],
-              ],
-            ),
-            const SizedBox(height: 14),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
+                  const SizedBox(height: 8),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: muted,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: hairline),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: DataTable(
                 columns: const [
                   DataColumn(label: Text('Name')),
                   DataColumn(label: Text('1')),
@@ -6045,28 +6464,44 @@ class _PromotionCertificationEditorState
                     ],
                   );
                 }),
-              ),
-            ),
-            const SizedBox(height: rspFormSectionGap),
-            const Text(
-              'We hereby certify that the above candidate(s) have been screened and found to be qualified for promotion to the above position.',
-              style: TextStyle(
-                fontSize: 13,
-                fontStyle: FontStyle.italic,
-                height: 1.45,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              'Date of certification',
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Wrap(
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: rspFormSectionGap),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppTheme.sectionAlt.withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: hairline),
+                    ),
+                    child: const Text(
+                      'We hereby certify that the above candidate(s) have been screened and found to be qualified for promotion to the above position.',
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontStyle: FontStyle.italic,
+                        height: 1.5,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: rspFormSectionGap),
+                  _pcSectionLabel('Date of certification'),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: muted,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: hairline),
+                    ),
+                    child: Wrap(
               crossAxisAlignment: WrapCrossAlignment.center,
               spacing: 6,
               runSpacing: 12,
@@ -6130,57 +6565,101 @@ class _PromotionCertificationEditorState
                     height: 1.35,
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: rspFormSectionGap),
-            Text(
-              'Signatory (e.g. Secretariat)',
-              style: TextStyle(
-                color: AppTheme.primaryNavy,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            _field(_signName, 'Name'),
-            _field(_signTitle, 'Title'),
-            const SizedBox(height: 24),
-            if (!ro) ...[
-              Row(
-                children: [
-                  FilledButton(onPressed: _save, child: const Text('Save')),
-                  const SizedBox(width: 16),
-                  TextButton(
-                    onPressed: widget.onCancel,
-                    child: const Text('Cancel'),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                    icon: const Icon(Icons.print_rounded),
-                    tooltip: 'Print',
                   ),
-                  IconButton(
-                    onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
-                    icon: const Icon(Icons.picture_as_pdf_rounded),
-                    tooltip: 'Download PDF',
-                  ),
+                  const SizedBox(height: rspFormSectionGap),
+                  _pcSectionLabel('Signatory (e.g. Secretariat)'),
+                  _field(_signName, 'Name'),
+                  _field(_signTitle, 'Title'),
+                  const SizedBox(height: 24),
+                  if (!ro) ...[
+                    Divider(height: 1, color: hairline),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        FilledButton(
+                          onPressed: _save,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppTheme.primaryNavy,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 22,
+                              vertical: 14,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text(
+                            'Save',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        OutlinedButton(
+                          onPressed: widget.onCancel,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTheme.primaryNavy,
+                            side: BorderSide(
+                              color: AppTheme.primaryNavy.withValues(alpha: 0.45),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 18,
+                              vertical: 14,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text('Cancel'),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          onPressed: () => widget.onPrint(_buildCurrentEntry()),
+                          icon: const Icon(Icons.print_rounded),
+                          tooltip: 'Print',
+                          style: IconButton.styleFrom(
+                            backgroundColor: muted,
+                            foregroundColor: AppTheme.primaryNavy,
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () =>
+                              widget.onDownloadPdf(_buildCurrentEntry()),
+                          icon: const Icon(Icons.picture_as_pdf_rounded),
+                          tooltip: 'Download PDF',
+                          style: IconButton.styleFrom(
+                            backgroundColor: muted,
+                            foregroundColor: AppTheme.primaryNavy,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ] else ...[
+                    if (widget.entry.createdAt != null)
+                      Text(
+                        'Created: ${widget.entry.createdAt!.toLocal()}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                    if (widget.entry.updatedAt != null)
+                      Text(
+                        'Last updated: ${widget.entry.updatedAt!.toLocal()}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                  ],
                 ],
               ),
-            ] else ...[
-              if (widget.entry.createdAt != null)
-                Text(
-                  'Created: ${widget.entry.createdAt!.toLocal()}',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
-                ),
-              if (widget.entry.updatedAt != null)
-                Text(
-                  'Last updated: ${widget.entry.updatedAt!.toLocal()}',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
-                ),
-            ],
-          ],
-        ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -6211,98 +6690,67 @@ class _PromotionCertificationList extends StatelessWidget {
   final Future<void> Function(PromotionCertificationEntry) onPrint;
   final Future<void> Function(PromotionCertificationEntry) onDownloadPdf;
 
+  Future<void> _confirmDelete(
+    BuildContext context,
+    PromotionCertificationEntry e,
+  ) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete?'),
+        content: const Text('This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && e.id != null) onDelete(e.id!);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('Position')),
-          DataColumn(label: Text('Candidates')),
-          DataColumn(label: Text('Actions')),
-        ],
-        rows: entries
-            .map(
-              (e) => DataRow(
-                cells: [
-                  DataCell(Text(e.positionForPromotion ?? 'â€”')),
-                  DataCell(Text('${e.candidates.length}')),
-                  DataCell(
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        TextButton(
-                          onPressed: () => showReadOnlySavedEntryDialog(
-                            context,
-                            title: 'Saved promotion certification',
-                            previewBuilder: () => _PromotionCertificationEditor(
-                              readOnly: true,
-                              entry: e,
-                              onSave: (_) {},
-                              onCancel: () {},
-                              onPrint: (_) async {},
-                              onDownloadPdf: (_) async {},
-                            ),
-                            contentWidth: 960,
-                          ),
-                          child: const Text('View'),
-                        ),
-                        TextButton(
-                          onPressed: () => onEdit(e),
-                          child: const Text('Edit'),
-                        ),
-                        IconButton(
-                          onPressed: () => onPrint(e),
-                          icon: const Icon(Icons.print_rounded, size: 20),
-                          tooltip: 'Print',
-                        ),
-                        IconButton(
-                          onPressed: () => onDownloadPdf(e),
-                          icon: const Icon(
-                            Icons.picture_as_pdf_rounded,
-                            size: 20,
-                          ),
-                          tooltip: 'Download PDF',
-                        ),
-                        TextButton(
-                          onPressed: () async {
-                            final ok = await showDialog<bool>(
-                              context: context,
-                              builder: (ctx) => AlertDialog(
-                                title: const Text('Delete?'),
-                                content: const Text('This cannot be undone.'),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () =>
-                                        Navigator.of(ctx).pop(false),
-                                    child: const Text('Cancel'),
-                                  ),
-                                  FilledButton(
-                                    onPressed: () =>
-                                        Navigator.of(ctx).pop(true),
-                                    style: FilledButton.styleFrom(
-                                      backgroundColor: Colors.red,
-                                    ),
-                                    child: const Text('Delete'),
-                                  ),
-                                ],
-                              ),
-                            );
-                            if (ok == true && e.id != null) onDelete(e.id!);
-                          },
-                          child: const Text(
-                            'Delete',
-                            style: TextStyle(color: Colors.red),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            )
-            .toList(),
-      ),
+    return ListView.separated(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: entries.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 12),
+      itemBuilder: (context, index) {
+        final e = entries[index];
+        final pos = e.positionForPromotion?.trim().isNotEmpty == true
+            ? e.positionForPromotion!
+            : 'No position';
+        return _RspSavedEntryCard(
+          title: pos,
+          subtitle: 'Promotion certification',
+          meta:
+              '${e.candidates.length} candidate${e.candidates.length == 1 ? '' : 's'}',
+          onView: () => showReadOnlySavedEntryDialog(
+            context,
+            title: 'Saved promotion certification',
+            previewBuilder: () => _PromotionCertificationEditor(
+              readOnly: true,
+              entry: e,
+              onSave: (_) {},
+              onCancel: () {},
+              onPrint: (_) async {},
+              onDownloadPdf: (_) async {},
+            ),
+            contentWidth: 960,
+          ),
+          onEdit: () => onEdit(e),
+          onPrint: () => onPrint(e),
+          onDownloadPdf: () => onDownloadPdf(e),
+          onDelete: () => _confirmDelete(context, e),
+        );
+      },
     );
   }
 }
@@ -8120,52 +8568,116 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
     }
   }
 
+  InputDecoration _vacancyInput(
+    BuildContext context, {
+    required String hint,
+    Widget? suffixIcon,
+  }) {
+    return AppTheme.dashInputDecoration(
+      context,
+      hintText: hint,
+      suffixIcon: suffixIcon,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+    );
+  }
+
+  Widget _vacancyFieldLabel(BuildContext context, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        text.toUpperCase(),
+        style: TextStyle(
+          color: AppTheme.dashTextSecondaryOf(context),
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.65,
+          height: 1.2,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final hairline = AppTheme.dashHairlineOf(context);
+    final panel = AppTheme.dashPanelOf(context);
+    final muted = AppTheme.dashMutedSurfaceOf(context);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Job Vacancies Announcement',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.35,
-            height: 1.2,
-          ),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppTheme.primaryNavy.withValues(alpha: 0.14),
+                    AppTheme.primaryNavyLight.withValues(alpha: 0.08),
+                  ],
+                ),
+                border: Border.all(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.2),
+                ),
+              ),
+              child: const Icon(
+                Icons.work_outline_rounded,
+                color: AppTheme.primaryNavy,
+                size: 26,
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Job Vacancies Announcement',
+                    style: TextStyle(
+                      color: AppTheme.dashTextPrimaryOf(context),
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.4,
+                      height: 1.15,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Control what appears in the Job Vacancies section on the landing page. Add multiple entries when you have more than one position.',
+                    style: TextStyle(
+                      color: AppTheme.dashTextSecondaryOf(context),
+                      fontSize: 14,
+                      height: 1.5,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 10),
-        Text(
-          'Control what appears in the Job Vacancies section on the landing page. Add multiple entries when you have more than one position.',
-          style: TextStyle(
-            color: AppTheme.textSecondary.withValues(alpha: 0.95),
-            fontSize: 14,
-            height: 1.45,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 28),
         Container(
           decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: Colors.black.withValues(alpha: 0.07)),
+            color: panel,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: hairline),
             boxShadow: [
               BoxShadow(
-                color: AppTheme.primaryNavy.withValues(alpha: 0.08),
-                blurRadius: 28,
-                offset: const Offset(0, 12),
-              ),
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.07),
-                blurRadius: 20,
-                offset: const Offset(0, 7),
+                color: AppTheme.primaryNavy.withValues(alpha: 0.06),
+                blurRadius: 32,
+                offset: const Offset(0, 14),
               ),
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
               ),
             ],
           ),
@@ -8175,14 +8687,14 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
             children: [
               Container(
                 height: 4,
-                decoration: BoxDecoration(
+                decoration: const BoxDecoration(
                   gradient: LinearGradient(
                     colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
                   ),
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(22, 20, 22, 22),
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 28),
                 child: _loading
                     ? const Center(
                         child: Padding(
@@ -8195,290 +8707,400 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
                         children: [
                           Container(
                             width: double.infinity,
-                            padding: const EdgeInsets.fromLTRB(16, 14, 10, 14),
+                            padding: const EdgeInsets.all(18),
                             decoration: BoxDecoration(
-                              color: AppTheme.sectionAlt,
-                              borderRadius: BorderRadius.circular(14),
+                              color: muted,
+                              borderRadius: BorderRadius.circular(16),
                               border: Border.all(
-                                color: Colors.black.withValues(alpha: 0.06),
+                                color: _hasVacancies
+                                    ? AppTheme.primaryNavy.withValues(
+                                        alpha: 0.28,
+                                      )
+                                    : hairline,
+                                width: _hasVacancies ? 1.5 : 1,
                               ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.045),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 3),
-                                ),
-                              ],
                             ),
-                            child: Column(
+                            child: Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        'Accepting applications',
+                                Container(
+                                  width: 44,
+                                  height: 44,
+                                  decoration: BoxDecoration(
+                                    color: panel,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: hairline),
+                                  ),
+                                  child: Icon(
+                                    _hasVacancies
+                                        ? Icons.campaign_rounded
+                                        : Icons.pause_circle_outline_rounded,
+                                    color: _hasVacancies
+                                        ? AppTheme.primaryNavy
+                                        : AppTheme.dashTextSecondaryOf(
+                                            context,
+                                          ),
+                                    size: 24,
+                                  ),
+                                ),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              'Accepting applications',
+                                              style: TextStyle(
+                                                color: AppTheme.dashTextPrimaryOf(
+                                                  context,
+                                                ),
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w700,
+                                                letterSpacing: -0.15,
+                                              ),
+                                            ),
+                                          ),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 10,
+                                              vertical: 4,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: _hasVacancies
+                                                  ? AppTheme.primaryNavy
+                                                      .withValues(alpha: 0.12)
+                                                  : AppTheme.dashTextSecondaryOf(
+                                                      context,
+                                                    ).withValues(alpha: 0.1),
+                                              borderRadius:
+                                                  BorderRadius.circular(20),
+                                            ),
+                                            child: Text(
+                                              _hasVacancies ? 'Hiring' : 'Closed',
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w800,
+                                                letterSpacing: 0.3,
+                                                color: _hasVacancies
+                                                    ? AppTheme.primaryNavy
+                                                    : AppTheme.dashTextSecondaryOf(
+                                                        context,
+                                                      ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        'When ON, the landing page shows that you are hiring. When OFF, it shows no vacancies.',
                                         style: TextStyle(
-                                          color: AppTheme.textPrimary,
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w700,
+                                          color: AppTheme.dashTextSecondaryOf(
+                                            context,
+                                          ),
+                                          fontSize: 13,
+                                          height: 1.45,
+                                          fontWeight: FontWeight.w500,
                                         ),
                                       ),
-                                    ),
-                                    Switch(
-                                      value: _hasVacancies,
-                                      onChanged: (v) =>
-                                          setState(() => _hasVacancies = v),
-                                      activeTrackColor: AppTheme.primaryNavy
-                                          .withValues(alpha: 0.45),
-                                      activeThumbColor: AppTheme.primaryNavy,
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  'When ON, the landing page shows that you are hiring. When OFF, it shows no vacancies.',
-                                  style: TextStyle(
-                                    color: AppTheme.textSecondary.withValues(
-                                      alpha: 0.92,
-                                    ),
-                                    fontSize: 13,
-                                    height: 1.4,
-                                    fontWeight: FontWeight.w500,
+                                    ],
                                   ),
+                                ),
+                                const SizedBox(width: 8),
+                                Switch(
+                                  value: _hasVacancies,
+                                  onChanged: (v) =>
+                                      setState(() => _hasVacancies = v),
+                                  activeTrackColor: AppTheme.primaryNavy
+                                      .withValues(alpha: 0.45),
+                                  activeThumbColor: AppTheme.primaryNavy,
                                 ),
                               ],
                             ),
                           ),
-                          const SizedBox(height: 26),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                'Job vacancy entries',
-                                style: TextStyle(
-                                  color: AppTheme.textPrimary,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: -0.2,
-                                ),
-                              ),
-                              FilledButton.icon(
+                          const SizedBox(height: 28),
+                          Divider(height: 1, color: hairline),
+                          const SizedBox(height: 24),
+                          LayoutBuilder(
+                            builder: (context, constraints) {
+                              final stackHeader = constraints.maxWidth < 520;
+                              final headerTitle = Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    'Job vacancy entries',
+                                    style: TextStyle(
+                                      color: AppTheme.dashTextPrimaryOf(
+                                        context,
+                                      ),
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: -0.25,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 9,
+                                      vertical: 3,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.primaryNavy.withValues(
+                                        alpha: 0.1,
+                                      ),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      '${_vacancies.length}',
+                                      style: const TextStyle(
+                                        color: AppTheme.primaryNavy,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                              final addBtn = FilledButton.icon(
                                 onPressed: _addVacancy,
                                 icon: const Icon(Icons.add_rounded, size: 20),
                                 label: const Text('Add new vacancy'),
                                 style: FilledButton.styleFrom(
                                   backgroundColor: AppTheme.primaryNavy,
                                   foregroundColor: Colors.white,
+                                  elevation: 0,
                                   padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
+                                    horizontal: 18,
                                     vertical: 12,
                                   ),
                                   shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
+                                    borderRadius: BorderRadius.circular(12),
                                   ),
                                 ),
-                              ),
-                            ],
+                              );
+                              if (stackHeader) {
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    headerTitle,
+                                    const SizedBox(height: 12),
+                                    Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: addBtn,
+                                    ),
+                                  ],
+                                );
+                              }
+                              return Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Expanded(child: headerTitle),
+                                  addBtn,
+                                ],
+                              );
+                            },
                           ),
-                          const SizedBox(height: 6),
+                          const SizedBox(height: 10),
                           Text(
                             'Tap a row to expand or collapse fields. Delete is available when there is more than one entry.',
                             style: TextStyle(
-                              color: AppTheme.textSecondary.withValues(
-                                alpha: 0.88,
-                              ),
-                              fontSize: 12.5,
-                              height: 1.35,
+                              color: AppTheme.dashTextSecondaryOf(context)
+                                  .withValues(alpha: 0.9),
+                              fontSize: 13,
+                              height: 1.4,
                             ),
                           ),
-                          const SizedBox(height: 14),
+                          const SizedBox(height: 18),
                           ...List.generate(_vacancies.length, (i) {
                             final v = _vacancies[i];
                             final expanded = i < _vacancyExpanded.length
                                 ? _vacancyExpanded[i]
                                 : true;
                             return Padding(
-                              padding: const EdgeInsets.only(bottom: 16),
+                              padding: const EdgeInsets.only(bottom: 14),
                               child: Container(
                                 decoration: BoxDecoration(
-                                  color: AppTheme.white,
+                                  color: panel,
                                   borderRadius: BorderRadius.circular(16),
                                   border: Border.all(
-                                    color: Colors.black.withValues(alpha: 0.08),
+                                    color: expanded
+                                        ? AppTheme.primaryNavy.withValues(
+                                            alpha: 0.22,
+                                          )
+                                        : hairline,
                                   ),
-                                  boxShadow: AppTheme.cardShadow,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(
+                                        alpha: 0.035,
+                                      ),
+                                      blurRadius: 12,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                  ],
                                 ),
                                 clipBehavior: Clip.antiAlias,
                                 child: Column(
                                   crossAxisAlignment:
                                       CrossAxisAlignment.stretch,
                                   children: [
-                                    Container(
-                                      height: 3,
-                                      decoration: BoxDecoration(
-                                        gradient: LinearGradient(
-                                          colors: [
-                                            AppTheme.primaryNavy.withValues(
-                                              alpha: 0.85,
-                                            ),
-                                            AppTheme.primaryNavyLight
-                                                .withValues(alpha: 0.5),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                    Padding(
-                                      padding: const EdgeInsets.fromLTRB(
-                                        4,
-                                        2,
-                                        8,
-                                        2,
-                                      ),
-                                      child: Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Expanded(
-                                            child: Material(
-                                              color: Colors.transparent,
-                                              child: InkWell(
-                                                onTap: () => setState(() {
-                                                  if (i <
-                                                      _vacancyExpanded.length) {
-                                                    _vacancyExpanded[i] =
-                                                        !_vacancyExpanded[i];
-                                                  }
-                                                }),
-                                                borderRadius:
-                                                    BorderRadius.circular(12),
-                                                child: Padding(
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 10,
-                                                        vertical: 10,
+                                    Material(
+                                      color: expanded
+                                          ? AppTheme.primaryNavy.withValues(
+                                              alpha: 0.04,
+                                            )
+                                          : Colors.transparent,
+                                      child: InkWell(
+                                        onTap: () => setState(() {
+                                          if (i < _vacancyExpanded.length) {
+                                            _vacancyExpanded[i] =
+                                                !_vacancyExpanded[i];
+                                          }
+                                        }),
+                                        child: Padding(
+                                          padding: const EdgeInsets.fromLTRB(
+                                            14,
+                                            14,
+                                            12,
+                                            14,
+                                          ),
+                                          child: Row(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Container(
+                                                width: 36,
+                                                height: 36,
+                                                decoration: BoxDecoration(
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                        10,
                                                       ),
-                                                  child: Row(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .start,
-                                                    children: [
-                                                      Padding(
-                                                        padding:
-                                                            const EdgeInsets.only(
-                                                              top: 2,
-                                                            ),
-                                                        child: Icon(
-                                                          expanded
-                                                              ? Icons
-                                                                    .expand_less_rounded
-                                                              : Icons
-                                                                    .expand_more_rounded,
-                                                          color: AppTheme
-                                                              .textSecondary
-                                                              .withValues(
-                                                                alpha: 0.75,
-                                                              ),
-                                                          size: 26,
-                                                        ),
-                                                      ),
-                                                      const SizedBox(width: 6),
-                                                      Expanded(
-                                                        child: Column(
-                                                          crossAxisAlignment:
-                                                              CrossAxisAlignment
-                                                                  .start,
-                                                          children: [
-                                                            Text(
-                                                              'Position ${i + 1}',
-                                                              style: const TextStyle(
-                                                                color: AppTheme
-                                                                    .textPrimary,
-                                                                fontSize: 15,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w800,
-                                                                letterSpacing:
-                                                                    -0.2,
-                                                              ),
-                                                            ),
-                                                            if (!expanded) ...[
-                                                              const SizedBox(
-                                                                height: 6,
-                                                              ),
-                                                              Text(
-                                                                _vacancyEntrySummary(
-                                                                  v,
-                                                                ),
-                                                                style: TextStyle(
-                                                                  color: AppTheme
-                                                                      .textSecondary
-                                                                      .withValues(
-                                                                        alpha:
-                                                                            0.92,
-                                                                      ),
-                                                                  fontSize:
-                                                                      12.5,
-                                                                  height: 1.4,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .w500,
-                                                                ),
-                                                                maxLines: 2,
-                                                                overflow:
-                                                                    TextOverflow
-                                                                        .ellipsis,
-                                                              ),
-                                                            ],
-                                                          ],
-                                                        ),
-                                                      ),
+                                                  gradient: LinearGradient(
+                                                    begin: Alignment.topLeft,
+                                                    end: Alignment.bottomRight,
+                                                    colors: [
+                                                      AppTheme.primaryNavy
+                                                          .withValues(
+                                                            alpha: 0.9,
+                                                          ),
+                                                      AppTheme.primaryNavyLight
+                                                          .withValues(
+                                                            alpha: 0.75,
+                                                          ),
                                                     ],
                                                   ),
                                                 ),
-                                              ),
-                                            ),
-                                          ),
-                                          if (_vacancies.length > 1)
-                                            Padding(
-                                              padding: const EdgeInsets.only(
-                                                top: 6,
-                                              ),
-                                              child: OutlinedButton.icon(
-                                                onPressed: () =>
-                                                    _confirmDeleteVacancy(
-                                                      context,
-                                                      i,
-                                                    ),
-                                                icon: Icon(
-                                                  Icons.delete_outline_rounded,
-                                                  size: 18,
-                                                  color: Colors.red.shade700,
-                                                ),
-                                                label: Text(
-                                                  'Delete',
-                                                  style: TextStyle(
-                                                    color: Colors.red.shade700,
-                                                    fontSize: 13,
-                                                    fontWeight: FontWeight.w600,
+                                                alignment: Alignment.center,
+                                                child: Text(
+                                                  '${i + 1}',
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 15,
+                                                    fontWeight: FontWeight.w800,
                                                   ),
                                                 ),
-                                                style: OutlinedButton.styleFrom(
-                                                  foregroundColor:
-                                                      Colors.red.shade700,
-                                                  side: BorderSide(
-                                                    color: Colors.red.shade400,
-                                                  ),
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 12,
-                                                        vertical: 8,
+                                              ),
+                                              const SizedBox(width: 12),
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      'Position ${i + 1}',
+                                                      style: TextStyle(
+                                                        color: AppTheme
+                                                            .dashTextPrimaryOf(
+                                                          context,
+                                                        ),
+                                                        fontSize: 15,
+                                                        fontWeight:
+                                                            FontWeight.w800,
+                                                        letterSpacing: -0.2,
                                                       ),
-                                                  minimumSize: Size.zero,
+                                                    ),
+                                                    if (!expanded) ...[
+                                                      const SizedBox(height: 6),
+                                                      Text(
+                                                        _vacancyEntrySummary(v),
+                                                        style: TextStyle(
+                                                          color: AppTheme
+                                                              .dashTextSecondaryOf(
+                                                            context,
+                                                          ).withValues(
+                                                            alpha: 0.92,
+                                                          ),
+                                                          fontSize: 12.5,
+                                                          height: 1.4,
+                                                          fontWeight:
+                                                              FontWeight.w500,
+                                                        ),
+                                                        maxLines: 2,
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                      ),
+                                                    ],
+                                                  ],
                                                 ),
                                               ),
-                                            ),
-                                        ],
+                                              Container(
+                                                width: 32,
+                                                height: 32,
+                                                decoration: BoxDecoration(
+                                                  color: panel,
+                                                  shape: BoxShape.circle,
+                                                  border: Border.all(
+                                                    color: hairline,
+                                                  ),
+                                                ),
+                                                child: Icon(
+                                                  expanded
+                                                      ? Icons
+                                                          .expand_less_rounded
+                                                      : Icons
+                                                          .expand_more_rounded,
+                                                  size: 22,
+                                                  color: AppTheme
+                                                      .dashTextSecondaryOf(
+                                                    context,
+                                                  ),
+                                                ),
+                                              ),
+                                              if (_vacancies.length > 1) ...[
+                                                const SizedBox(width: 8),
+                                                IconButton(
+                                                  onPressed: () =>
+                                                      _confirmDeleteVacancy(
+                                                    context,
+                                                    i,
+                                                  ),
+                                                  icon: Icon(
+                                                    Icons
+                                                        .delete_outline_rounded,
+                                                    size: 20,
+                                                    color: Colors.red.shade700,
+                                                  ),
+                                                  tooltip: 'Delete',
+                                                  style: IconButton.styleFrom(
+                                                    backgroundColor: Colors.red
+                                                        .shade50,
+                                                    shape: RoundedRectangleBorder(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                        10,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                        ),
                                       ),
                                     ),
                                     AnimatedSize(
@@ -8489,188 +9111,110 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
                                       alignment: Alignment.topCenter,
                                       child: expanded
                                           ? Padding(
-                                              padding:
-                                                  const EdgeInsets.fromLTRB(
-                                                    18,
-                                                    0,
-                                                    18,
-                                                    18,
+                                              padding: const EdgeInsets.fromLTRB(
+                                                14,
+                                                0,
+                                                14,
+                                                14,
+                                              ),
+                                              child: Container(
+                                                padding: const EdgeInsets.all(18),
+                                                decoration: BoxDecoration(
+                                                  color: muted,
+                                                  borderRadius:
+                                                      BorderRadius.circular(14),
+                                                  border: Border.all(
+                                                    color: hairline,
                                                   ),
-                                              child: Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    'Headline',
-                                                    style: TextStyle(
-                                                      color: AppTheme
-                                                          .textSecondary,
-                                                      fontSize: 13,
-                                                      fontWeight:
-                                                          FontWeight.w600,
+                                                ),
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    _vacancyFieldLabel(
+                                                      context,
+                                                      'Headline',
                                                     ),
-                                                  ),
-                                                  const SizedBox(height: 6),
-                                                  TextField(
-                                                    controller: v.headline,
-                                                    onChanged: (_) =>
-                                                        setState(() {}),
-                                                    decoration: InputDecoration(
-                                                      hintText:
-                                                          'e.g. Now Hiring: Human Resource Assistant',
-                                                      border: OutlineInputBorder(
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              10,
-                                                            ),
+                                                    TextField(
+                                                      controller: v.headline,
+                                                      onChanged: (_) =>
+                                                          setState(() {}),
+                                                      decoration: _vacancyInput(
+                                                        context,
+                                                        hint:
+                                                            'e.g. Now Hiring: Human Resource Assistant',
                                                       ),
-                                                      filled: true,
-                                                      fillColor: Colors.white,
-                                                      contentPadding:
-                                                          const EdgeInsets.symmetric(
-                                                            horizontal: 14,
-                                                            vertical: 12,
-                                                          ),
+                                                      maxLines: 1,
                                                     ),
-                                                    maxLines: 1,
-                                                  ),
-                                                  const SizedBox(height: 14),
-                                                  Text(
-                                                    'Education',
-                                                    style: TextStyle(
-                                                      color: AppTheme
-                                                          .textSecondary,
-                                                      fontSize: 13,
-                                                      fontWeight:
-                                                          FontWeight.w600,
+                                                    const SizedBox(height: 18),
+                                                    _vacancyFieldLabel(
+                                                      context,
+                                                      'Education',
                                                     ),
-                                                  ),
-                                                  const SizedBox(height: 6),
-                                                  TextField(
-                                                    controller: v.education,
-                                                    onChanged: (_) =>
-                                                        setState(() {}),
-                                                    decoration: InputDecoration(
-                                                      hintText:
-                                                          'e.g. Bachelor\'s degree in relevant field',
-                                                      border: OutlineInputBorder(
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              10,
-                                                            ),
+                                                    TextField(
+                                                      controller: v.education,
+                                                      onChanged: (_) =>
+                                                          setState(() {}),
+                                                      decoration: _vacancyInput(
+                                                        context,
+                                                        hint:
+                                                            'e.g. Bachelor\'s degree in relevant field',
                                                       ),
-                                                      filled: true,
-                                                      fillColor: Colors.white,
-                                                      contentPadding:
-                                                          const EdgeInsets.symmetric(
-                                                            horizontal: 14,
-                                                            vertical: 12,
-                                                          ),
-                                                      alignLabelWithHint: true,
+                                                      maxLines: 3,
                                                     ),
-                                                    maxLines: 3,
-                                                  ),
-                                                  const SizedBox(height: 14),
-                                                  Text(
-                                                    'Experience',
-                                                    style: TextStyle(
-                                                      color: AppTheme
-                                                          .textSecondary,
-                                                      fontSize: 13,
-                                                      fontWeight:
-                                                          FontWeight.w600,
+                                                    const SizedBox(height: 18),
+                                                    _vacancyFieldLabel(
+                                                      context,
+                                                      'Experience',
                                                     ),
-                                                  ),
-                                                  const SizedBox(height: 6),
-                                                  TextField(
-                                                    controller: v.experience,
-                                                    onChanged: (_) =>
-                                                        setState(() {}),
-                                                    decoration: InputDecoration(
-                                                      hintText:
-                                                          'e.g. 2 years in HR or local government',
-                                                      border: OutlineInputBorder(
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              10,
-                                                            ),
+                                                    TextField(
+                                                      controller: v.experience,
+                                                      onChanged: (_) =>
+                                                          setState(() {}),
+                                                      decoration: _vacancyInput(
+                                                        context,
+                                                        hint:
+                                                            'e.g. 2 years in HR or local government',
                                                       ),
-                                                      filled: true,
-                                                      fillColor: Colors.white,
-                                                      contentPadding:
-                                                          const EdgeInsets.symmetric(
-                                                            horizontal: 14,
-                                                            vertical: 12,
-                                                          ),
-                                                      alignLabelWithHint: true,
+                                                      maxLines: 3,
                                                     ),
-                                                    maxLines: 3,
-                                                  ),
-                                                  const SizedBox(height: 14),
-                                                  Text(
-                                                    'Training',
-                                                    style: TextStyle(
-                                                      color: AppTheme
-                                                          .textSecondary,
-                                                      fontSize: 13,
-                                                      fontWeight:
-                                                          FontWeight.w600,
+                                                    const SizedBox(height: 18),
+                                                    _vacancyFieldLabel(
+                                                      context,
+                                                      'Training',
                                                     ),
-                                                  ),
-                                                  const SizedBox(height: 6),
-                                                  TextField(
-                                                    controller: v.training,
-                                                    onChanged: (_) =>
-                                                        setState(() {}),
-                                                    decoration: InputDecoration(
-                                                      hintText:
-                                                          'e.g. Civil service eligibility, seminars',
-                                                      border: OutlineInputBorder(
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              10,
-                                                            ),
+                                                    TextField(
+                                                      controller: v.training,
+                                                      onChanged: (_) =>
+                                                          setState(() {}),
+                                                      decoration: _vacancyInput(
+                                                        context,
+                                                        hint:
+                                                            'e.g. Civil service eligibility, seminars',
                                                       ),
-                                                      filled: true,
-                                                      fillColor: Colors.white,
-                                                      contentPadding:
-                                                          const EdgeInsets.symmetric(
-                                                            horizontal: 14,
-                                                            vertical: 12,
-                                                          ),
-                                                      alignLabelWithHint: true,
+                                                      maxLines: 3,
                                                     ),
-                                                    maxLines: 3,
-                                                  ),
-                                                  const SizedBox(height: 14),
-                                                  Text(
-                                                    'Due date (auto-close)',
-                                                    style: TextStyle(
-                                                      color: AppTheme
-                                                          .textSecondary,
-                                                      fontSize: 13,
-                                                      fontWeight:
-                                                          FontWeight.w600,
+                                                    const SizedBox(height: 18),
+                                                    _vacancyFieldLabel(
+                                                      context,
+                                                      'Due date (auto-close)',
                                                     ),
-                                                  ),
-                                                  const SizedBox(height: 4),
-                                                  Text(
-                                                    'After this date, the system will automatically stop accepting applicants for this position.',
-                                                    style: TextStyle(
-                                                      color: AppTheme
-                                                          .textSecondary
-                                                          .withValues(
-                                                            alpha: 0.9,
-                                                          ),
-                                                      fontSize: 11.5,
-                                                      height: 1.35,
+                                                    Text(
+                                                      'After this date, the system will automatically stop accepting applicants for this position.',
+                                                      style: TextStyle(
+                                                        color: AppTheme
+                                                            .dashTextSecondaryOf(
+                                                          context,
+                                                        ).withValues(alpha: 0.9),
+                                                        fontSize: 12,
+                                                        height: 1.4,
+                                                      ),
                                                     ),
-                                                  ),
-                                                  const SizedBox(height: 6),
-                                                  TextField(
-                                                    controller: v.closingDate,
-                                                    readOnly: true,
-                                                    onTap: () async {
+                                                    const SizedBox(height: 10),
+                                                    TextField(
+                                                      controller: v.closingDate,
+                                                      readOnly: true,
+                                                      onTap: () async {
                                                       final now =
                                                           DateTime.now();
                                                       final parsed =
@@ -8711,82 +9255,51 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
                                                             '${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
                                                       });
                                                     },
-                                                    decoration: InputDecoration(
-                                                      hintText:
+                                                    decoration: _vacancyInput(
+                                                      context,
+                                                      hint:
                                                           'Select a date (YYYY-MM-DD)',
                                                       suffixIcon: const Icon(
                                                         Icons
                                                             .calendar_month_rounded,
                                                       ),
-                                                      border: OutlineInputBorder(
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              10,
-                                                            ),
-                                                      ),
-                                                      filled: true,
-                                                      fillColor: Colors.white,
-                                                      contentPadding:
-                                                          const EdgeInsets.symmetric(
-                                                            horizontal: 14,
-                                                            vertical: 12,
-                                                          ),
                                                     ),
                                                     maxLines: 1,
                                                   ),
-                                                  const SizedBox(height: 14),
-                                                  Text(
+                                                  const SizedBox(height: 18),
+                                                  _vacancyFieldLabel(
+                                                    context,
                                                     'Max applicants',
-                                                    style: TextStyle(
-                                                      color: AppTheme
-                                                          .textSecondary,
-                                                      fontSize: 13,
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                    ),
                                                   ),
-                                                  const SizedBox(height: 4),
                                                   Text(
                                                     'Counts only applicants still in process. Document declined, exam failed, final interview failed, or hired (registered) frees a slot.',
                                                     style: TextStyle(
                                                       color: AppTheme
-                                                          .textSecondary
-                                                          .withValues(
-                                                            alpha: 0.9,
-                                                          ),
-                                                      fontSize: 11.5,
-                                                      height: 1.35,
+                                                          .dashTextSecondaryOf(
+                                                        context,
+                                                      ).withValues(alpha: 0.9),
+                                                      fontSize: 12,
+                                                      height: 1.4,
                                                     ),
                                                   ),
-                                                  const SizedBox(height: 6),
+                                                  const SizedBox(height: 10),
                                                   TextField(
                                                     controller: v.maxApplicants,
                                                     onChanged: (_) =>
                                                         setState(() {}),
                                                     keyboardType:
                                                         TextInputType.number,
-                                                    decoration: InputDecoration(
-                                                      hintText:
+                                                    decoration: _vacancyInput(
+                                                      context,
+                                                      hint:
                                                           'Leave blank for no limit (e.g. 50)',
-                                                      border: OutlineInputBorder(
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              10,
-                                                            ),
-                                                      ),
-                                                      filled: true,
-                                                      fillColor: Colors.white,
-                                                      contentPadding:
-                                                          const EdgeInsets.symmetric(
-                                                            horizontal: 14,
-                                                            vertical: 12,
-                                                          ),
                                                     ),
                                                     maxLines: 1,
                                                   ),
                                                 ],
                                               ),
-                                            )
+                                            ),
+                                          )
                                           : const SizedBox(
                                               width: double.infinity,
                                             ),
@@ -8796,33 +9309,61 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
                               ),
                             );
                           }),
-                          const SizedBox(height: 28),
-                          SizedBox(
-                            width: double.infinity,
-                            child: FilledButton.icon(
-                              onPressed: _saving ? null : _save,
-                              icon: _saving
-                                  ? const SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Icon(Icons.save_rounded, size: 20),
-                              label: Text(
-                                _saving
-                                    ? 'Saving...'
-                                    : 'Save and display on landing page',
+                          const SizedBox(height: 8),
+                          Divider(height: 1, color: hairline),
+                          const SizedBox(height: 20),
+                          DecoratedBox(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(14),
+                              gradient: const LinearGradient(
+                                colors: [
+                                  AppTheme.primaryNavy,
+                                  AppTheme.primaryNavyLight,
+                                ],
                               ),
-                              style: FilledButton.styleFrom(
-                                backgroundColor: AppTheme.primaryNavy,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 14,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: AppTheme.primaryNavy.withValues(
+                                    alpha: 0.28,
+                                  ),
+                                  blurRadius: 16,
+                                  offset: const Offset(0, 6),
                                 ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
+                              ],
+                            ),
+                            child: SizedBox(
+                              width: double.infinity,
+                              child: FilledButton.icon(
+                                onPressed: _saving ? null : _save,
+                                icon: _saving
+                                    ? const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                    : const Icon(Icons.save_rounded, size: 20),
+                                label: Text(
+                                  _saving
+                                      ? 'Saving...'
+                                      : 'Save and display on landing page',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: Colors.transparent,
+                                  foregroundColor: Colors.white,
+                                  shadowColor: Colors.transparent,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 16,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
                                 ),
                               ),
                             ),
@@ -8967,8 +9508,8 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   }
 
   Widget _buildScoreBreakdownDataTable(BuildContext dialogContext) {
-    final borderColor = Colors.black.withValues(alpha: 0.085);
-    final headerBg = AppTheme.primaryNavy;
+    final borderColor = AppTheme.dashHairlineOf(dialogContext);
+    final headerBg = AppTheme.primaryNavy.withValues(alpha: 0.09);
     return SizedBox.expand(
       child: Scrollbar(
         thickness: 8,
@@ -9004,22 +9545,21 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                   headingRowHeight: 56,
                   dataRowMinHeight: 62,
                   dataRowMaxHeight: 100,
-                  border: TableBorder.symmetric(
-                    inside: BorderSide(
-                      color: borderColor.withValues(alpha: 0.7),
-                    ),
+                  border: TableBorder(
+                    horizontalInside: BorderSide(color: borderColor),
+                    verticalInside: BorderSide.none,
                   ),
                   dividerThickness: 0,
                   headingRowColor: WidgetStateProperty.all(headerBg),
-                  headingTextStyle: const TextStyle(
-                    color: AppTheme.white,
+                  headingTextStyle: TextStyle(
+                    color: AppTheme.letterheadNavy,
                     fontWeight: FontWeight.w800,
-                    fontSize: 12.5,
+                    fontSize: 11.5,
                     letterSpacing: 0.55,
                     height: 1.25,
                   ),
                   dataTextStyle: TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.dashTextPrimaryOf(dialogContext),
                     fontSize: 13.5,
                     height: 1.3,
                     fontWeight: FontWeight.w500,
@@ -9084,9 +9624,9 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                     return DataRow(
                       color: WidgetStateProperty.resolveWith((states) {
                         if (index.isOdd) {
-                          return AppTheme.sectionAlt.withValues(alpha: 0.62);
+                          return AppTheme.dashMutedSurfaceOf(dialogContext);
                         }
-                        return AppTheme.white;
+                        return AppTheme.dashPanelOf(dialogContext);
                       }),
                       cells: [
                         DataCell(
@@ -9234,47 +9774,46 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
       context: context,
       builder: (ctx) {
         final hasData = _applications.isNotEmpty;
+        final hairline = AppTheme.dashHairlineOf(ctx);
+        final panel = AppTheme.dashPanelOf(ctx);
         return AlertDialog(
-          backgroundColor: AppTheme.white,
+          backgroundColor: panel,
           surfaceTintColor: Colors.transparent,
           insetPadding: const EdgeInsets.symmetric(
             horizontal: 18,
             vertical: 22,
           ),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(22),
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: hairline),
           ),
           titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
-          contentPadding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 20, 16),
+          contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+          actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
           title: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                padding: const EdgeInsets.all(12),
+                width: 48,
+                height: 48,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(14),
                   gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                     colors: [
-                      AppTheme.primaryNavy.withValues(alpha: 0.14),
-                      AppTheme.primaryNavy.withValues(alpha: 0.06),
+                      AppTheme.primaryNavy.withValues(alpha: 0.16),
+                      AppTheme.primaryNavyLight.withValues(alpha: 0.08),
                     ],
                   ),
                   border: Border.all(
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.2),
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.22),
                   ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppTheme.primaryNavy.withValues(alpha: 0.12),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
                 ),
-                child: Icon(
-                  Icons.analytics_rounded,
-                  size: 28,
-                  color: AppTheme.primaryNavy.withValues(alpha: 0.95),
+                child: const Icon(
+                  Icons.analytics_outlined,
+                  size: 26,
+                  color: AppTheme.primaryNavy,
                 ),
               ),
               const SizedBox(width: 16),
@@ -9285,35 +9824,21 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                     Text(
                       'Applicant score breakdown',
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 23,
+                        color: AppTheme.dashTextPrimaryOf(ctx),
+                        fontSize: 22,
                         fontWeight: FontWeight.w800,
-                        letterSpacing: -0.55,
-                        height: 1.12,
+                        letterSpacing: -0.4,
+                        height: 1.15,
                       ),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       'View section scores below. Grade BEI from the Grade column when answers exist; overall scores update automatically.',
                       style: TextStyle(
-                        color: AppTheme.textSecondary.withValues(alpha: 0.92),
+                        color: AppTheme.dashTextSecondaryOf(ctx),
                         fontSize: 14,
                         height: 1.5,
                         fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Container(
-                      height: 4,
-                      width: 52,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(4),
-                        gradient: LinearGradient(
-                          colors: [
-                            AppTheme.primaryNavy,
-                            AppTheme.primaryNavy.withValues(alpha: 0.4),
-                          ],
-                        ),
                       ),
                     ),
                   ],
@@ -9335,63 +9860,38 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                       height: contentHeight,
                       child: DecoratedBox(
                         decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(18),
-                          color: AppTheme.white,
-                          border: Border.all(
-                            color: Colors.black.withValues(alpha: 0.07),
-                          ),
-                          boxShadow: AppTheme.panelShadow,
+                          borderRadius: BorderRadius.circular(16),
+                          color: AppTheme.dashMutedSurfaceOf(ctx),
+                          border: Border.all(color: hairline),
                         ),
                         child: ClipRRect(
-                          borderRadius: BorderRadius.circular(18),
+                          borderRadius: BorderRadius.circular(16),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              Expanded(
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      begin: Alignment.topCenter,
-                                      end: Alignment.bottomCenter,
-                                      colors: [
-                                        AppTheme.sectionAlt.withValues(
-                                          alpha: 0.45,
-                                        ),
-                                        AppTheme.sectionAlt.withValues(
-                                          alpha: 0.2,
-                                        ),
-                                      ],
-                                    ),
+                              Container(
+                                height: 3,
+                                decoration: const BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      AppTheme.primaryNavy,
+                                      AppTheme.primaryNavyLight,
+                                    ],
                                   ),
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(12),
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(14),
-                                      child: DecoratedBox(
-                                        decoration: BoxDecoration(
-                                          color: AppTheme.white,
-                                          borderRadius: BorderRadius.circular(
-                                            14,
-                                          ),
-                                          border: Border.all(
-                                            color: Colors.black.withValues(
-                                              alpha: 0.06,
-                                            ),
-                                          ),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: Colors.black.withValues(
-                                                alpha: 0.05,
-                                              ),
-                                              blurRadius: 16,
-                                              offset: const Offset(0, 6),
-                                            ),
-                                          ],
-                                        ),
-                                        child: _buildScoreBreakdownDataTable(
-                                          ctx,
-                                        ),
+                                ),
+                              ),
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: DecoratedBox(
+                                      decoration: BoxDecoration(
+                                        color: panel,
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(color: hairline),
                                       ),
+                                      child: _buildScoreBreakdownDataTable(ctx),
                                     ),
                                   ),
                                 ),
@@ -9418,24 +9918,38 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                   ),
                 ),
           actions: [
-            FilledButton.icon(
-              onPressed: () => Navigator.of(ctx).pop(),
-              icon: const Icon(Icons.check_rounded, size: 20),
-              label: const Text(
-                'Close',
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
-              ),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.primaryNavy,
-                foregroundColor: AppTheme.white,
-                elevation: 2,
-                shadowColor: AppTheme.primaryNavy.withValues(alpha: 0.4),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 26,
-                  vertical: 14,
+            DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                gradient: const LinearGradient(
+                  colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
                 ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.25),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: FilledButton.icon(
+                onPressed: () => Navigator.of(ctx).pop(),
+                icon: const Icon(Icons.check_rounded, size: 20),
+                label: const Text(
+                  'Close',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.transparent,
+                  foregroundColor: Colors.white,
+                  shadowColor: Colors.transparent,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 14,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
               ),
             ),
@@ -9735,115 +10249,180 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
 
   @override
   Widget build(BuildContext context) {
+    final hairline = AppTheme.dashHairlineOf(context);
+    final panel = AppTheme.dashPanelOf(context);
+    final muted = AppTheme.dashMutedSurfaceOf(context);
+
+    final viewScoreBtn = Tooltip(
+      message:
+          'Open the score table to grade BEI, see section scores, and pass/fail.',
+      child: FilledButton.icon(
+        onPressed: _loading ? null : _showApplicantScoreBreakdownDialog,
+        icon: const Icon(Icons.assessment_outlined, size: 18),
+        label: const Text('View score'),
+        style: FilledButton.styleFrom(
+          backgroundColor: AppTheme.primaryNavy,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+    );
+
+    final syncBtn = Tooltip(
+      message:
+          'Link files already in storage to applications that show "No file" (e.g. after fixing RLS).',
+      child: TextButton.icon(
+        onPressed:
+            (_loading || _syncing) ? null : _syncAttachmentsFromStorage,
+        icon: _syncing
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.sync_rounded, size: 20),
+        label: Text(
+          _syncing ? 'Syncing...' : 'Sync attachments from storage',
+        ),
+        style: TextButton.styleFrom(
+          foregroundColor: AppTheme.primaryNavy,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        ),
+      ),
+    );
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Applications & Exam Results',
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 24,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.35,
-                height: 1.2,
-              ),
-            ),
-            const SizedBox(width: 8),
-            IconButton(
-              icon: const Icon(Icons.refresh_rounded, size: 22),
-              onPressed: _loading ? null : _load,
-              tooltip: 'Refresh',
-              style: IconButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Tooltip(
-              message:
-                  'Open the score table to grade BEI, see section scores, and pass/fail.',
-              child: OutlinedButton.icon(
-                onPressed: _loading ? null : _showApplicantScoreBreakdownDialog,
-                icon: const Icon(Icons.assessment_rounded, size: 18),
-                label: const Text('View score'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppTheme.primaryNavy,
-                  side: BorderSide(
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.85),
-                    width: 1.5,
-                  ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppTheme.primaryNavy.withValues(alpha: 0.14),
+                    AppTheme.primaryNavyLight.withValues(alpha: 0.08),
+                  ],
+                ),
+                border: Border.all(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.2),
                 ),
               ),
+              child: const Icon(
+                Icons.assignment_outlined,
+                size: 26,
+                color: AppTheme.primaryNavy,
+              ),
             ),
-            Tooltip(
-              message:
-                  'Link files already in storage to applications that show "No file" (e.g. after fixing RLS).',
-              child: TextButton.icon(
-                onPressed: (_loading || _syncing)
-                    ? null
-                    : _syncAttachmentsFromStorage,
-                icon: _syncing
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.sync_rounded, size: 20),
-                label: Text(
-                  _syncing ? 'Syncing...' : 'Sync attachments from storage',
-                ),
-                style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.primaryNavy,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 8,
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Applications & Exam Results',
+                          style: TextStyle(
+                            color: AppTheme.dashTextPrimaryOf(context),
+                            fontSize: 26,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.4,
+                            height: 1.15,
+                          ),
+                        ),
+                      ),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: panel,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: hairline),
+                        ),
+                        child: IconButton(
+                          icon: const Icon(Icons.refresh_rounded, size: 22),
+                          onPressed: _loading ? null : _load,
+                          tooltip: 'Refresh',
+                          style: IconButton.styleFrom(
+                            foregroundColor: AppTheme.primaryNavy,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Monitor all documents (basic info) and screening exam results from applicants. '
+                    'Use View score to open the score table — grade BEI and review section results there.',
+                    style: TextStyle(
+                      color: AppTheme.dashTextSecondaryOf(context),
+                      fontSize: 14,
+                      height: 1.5,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
         ),
-        const SizedBox(height: 10),
-        Text(
-          'Monitor all documents (basic info) and screening exam results from applicants. '
-          'Use View score to open the score table — grade BEI and review section results there.',
-          style: TextStyle(
-            color: AppTheme.textSecondary.withValues(alpha: 0.95),
-            fontSize: 14,
-            height: 1.45,
-            fontWeight: FontWeight.w500,
+        const SizedBox(height: 20),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: muted,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: hairline),
+          ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              if (constraints.maxWidth < 640) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    viewScoreBtn,
+                    const SizedBox(height: 10),
+                    syncBtn,
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  viewScoreBtn,
+                  const Spacer(),
+                  syncBtn,
+                ],
+              );
+            },
           ),
         ),
         const SizedBox(height: 20),
         Container(
           decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: Colors.black.withValues(alpha: 0.07)),
+            color: panel,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: hairline),
             boxShadow: [
               BoxShadow(
-                color: AppTheme.primaryNavy.withValues(alpha: 0.08),
-                blurRadius: 28,
-                offset: const Offset(0, 12),
-              ),
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.07),
-                blurRadius: 20,
-                offset: const Offset(0, 7),
+                color: AppTheme.primaryNavy.withValues(alpha: 0.06),
+                blurRadius: 32,
+                offset: const Offset(0, 14),
               ),
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
               ),
             ],
           ),
@@ -9854,7 +10433,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
             children: [
               Container(
                 height: 4,
-                decoration: BoxDecoration(
+                decoration: const BoxDecoration(
                   gradient: LinearGradient(
                     colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
                   ),
@@ -9943,23 +10522,25 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                   TableRow(
                                     decoration: BoxDecoration(
                                       color: AppTheme.primaryNavy.withValues(
-                                        alpha: 0.1,
+                                        alpha: 0.08,
                                       ),
                                       border: Border(
                                         bottom: BorderSide(
                                           color: AppTheme.primaryNavy
-                                              .withValues(alpha: 0.15),
+                                              .withValues(alpha: 0.2),
                                         ),
                                       ),
                                     ),
                                     children: [
                                       _tableCell(
                                         140,
-                                        const Text(
+                                        Text(
                                           'First name',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
@@ -9968,8 +10549,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         const Text(
                                           'Middle name',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
@@ -9978,8 +10561,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         const Text(
                                           'Last name',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
@@ -9988,8 +10573,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         const Text(
                                           'Suffix',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
@@ -9998,8 +10585,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         const Text(
                                           'Gender',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
@@ -10008,8 +10597,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         const Text(
                                           'Email',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
@@ -10018,8 +10609,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         const Text(
                                           'Phone',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
@@ -10028,8 +10621,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         const Text(
                                           'Position applied',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
@@ -10038,8 +10633,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         const Text(
                                           'Status',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
@@ -10048,28 +10645,34 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         const Text(
                                           'Exam',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
                                       _tableCell(
                                         108,
-                                        const Text(
+                                        Text(
                                           'Exam score',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 12,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
                                       _tableCell(
                                         188,
-                                        const Text(
+                                        Text(
                                           'Application letter',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 12,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
@@ -10078,8 +10681,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         const Text(
                                           'Resume',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
@@ -10088,18 +10693,22 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         const Text(
                                           'TOR',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
                                       _tableCell(
                                         200,
-                                        const Text(
+                                        Text(
                                           'Eligibility / trainings (prelim.)',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 11,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
@@ -10108,8 +10717,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         const Text(
                                           'Document review',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
@@ -10118,8 +10729,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         const Text(
                                           'Actions',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),

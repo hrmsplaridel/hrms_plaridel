@@ -134,6 +134,8 @@ class DashboardAppHeaderBar extends StatelessWidget {
     this.showBrand = true,
     this.showMenuButton = false,
     this.onMenuPressed,
+    this.showSidebarToggle = false,
+    this.onSidebarToggle,
     this.compactActions = false,
     this.onViewAllNotifications,
   });
@@ -144,6 +146,9 @@ class DashboardAppHeaderBar extends StatelessWidget {
   final bool showBrand;
   final bool showMenuButton;
   final VoidCallback? onMenuPressed;
+  /// Desktop rail collapse — hamburger at start of content header (edusync-style).
+  final bool showSidebarToggle;
+  final VoidCallback? onSidebarToggle;
   final bool compactActions;
 
   @override
@@ -163,6 +168,24 @@ class DashboardAppHeaderBar extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
+          if (showSidebarToggle && onSidebarToggle != null) ...[
+            IconButton(
+              icon: const Icon(Icons.menu_rounded),
+              onPressed: onSidebarToggle,
+              color: AppTheme.primaryNavy,
+              tooltip: 'Toggle sidebar',
+              style: IconButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.all(8),
+              ),
+            ),
+            Container(
+              width: 1,
+              height: 40,
+              margin: const EdgeInsets.symmetric(horizontal: 8),
+              color: hairline,
+            ),
+          ],
           if (showMenuButton) ...[
             IconButton(
               icon: const Icon(Icons.menu_rounded),
@@ -201,7 +224,12 @@ class DashboardAppHeaderBar extends StatelessWidget {
 
 /// Brand block sized for the sidebar rail header (matches top bar height).
 class SidebarRailHeader extends StatelessWidget {
-  const SidebarRailHeader({super.key});
+  const SidebarRailHeader({
+    super.key,
+    this.collapsed = false,
+  });
+
+  final bool collapsed;
 
   @override
   Widget build(BuildContext context) {
@@ -210,16 +238,167 @@ class SidebarRailHeader extends StatelessWidget {
 
     return Container(
       height: barH,
-      width: kDashboardSidebarWidth,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      alignment: Alignment.centerLeft,
+      padding: EdgeInsets.symmetric(horizontal: collapsed ? 4 : 10),
+      alignment: collapsed ? Alignment.center : Alignment.centerLeft,
       decoration: BoxDecoration(
         color: AppTheme.dashPanelOf(context),
         border: Border(
           bottom: BorderSide(color: hairline),
         ),
       ),
-      child: const DashboardHeaderBrand(compact: true),
+      child: collapsed
+          ? const _SidebarRailMedallion()
+          : const Align(
+              alignment: Alignment.centerLeft,
+              child: DashboardHeaderBrand(compact: true),
+            ),
     );
   }
 }
+
+/// Collapsed rail logo — circular medallion with HRMS accent ring.
+class _SidebarRailMedallion extends StatelessWidget {
+  const _SidebarRailMedallion();
+
+  static const _logoAsset = 'assets/images/hrmslogo.png';
+
+  @override
+  Widget build(BuildContext context) {
+    final panel = AppTheme.dashPanelOf(context);
+    const size = 44.0;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: panel,
+            border: Border.all(
+              color: AppTheme.primaryNavy.withValues(alpha: 0.25),
+              width: 1.5,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: AppTheme.primaryNavy.withValues(alpha: 0.14),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Positioned.fill(
+                child: CustomPaint(
+                  painter: _MedallionRingPainter(),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(7),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(999),
+                  child: Image.asset(
+                    _logoAsset,
+                    fit: BoxFit.contain,
+                    filterQuality: FilterQuality.high,
+                    gaplessPlayback: true,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Icon(
+                        Icons.hub_rounded,
+                        size: 22,
+                        color: AppTheme.primaryNavy,
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 6),
+        Container(
+          width: 24,
+          height: 2,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(2),
+            gradient: LinearGradient(
+              colors: [
+                AppTheme.primaryNavy.withValues(alpha: 0.15),
+                AppTheme.primaryNavy,
+                AppTheme.primaryNavy.withValues(alpha: 0.15),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MedallionRingPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2 - 2;
+
+    final arcPaint = Paint()
+      ..shader = const SweepGradient(
+        startAngle: 0,
+        colors: [
+          AppTheme.primaryNavyLight,
+          AppTheme.primaryNavy,
+          AppTheme.letterheadNavy,
+          AppTheme.primaryNavyLight,
+        ],
+        stops: [0, 0.35, 0.65, 1],
+      ).createShader(Rect.fromCircle(center: center, radius: radius))
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.5
+      ..strokeCap = StrokeCap.round;
+
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      -1.2,
+      2.4,
+      false,
+      arcPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _SidebarRailLogoMark extends StatelessWidget {
+  const _SidebarRailLogoMark({required this.size});
+
+  final double size;
+
+  static const _logoAsset = 'assets/images/hrmslogo.png';
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Image.asset(
+        _logoAsset,
+        width: size,
+        height: size,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.high,
+        gaplessPlayback: true,
+        errorBuilder: (context, error, stackTrace) {
+          return Icon(
+            Icons.hub_rounded,
+            size: size * 0.55,
+            color: AppTheme.primaryNavy,
+          );
+        },
+      ),
+    );
+  }
+}
+

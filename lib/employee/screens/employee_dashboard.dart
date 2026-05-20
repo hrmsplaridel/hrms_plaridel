@@ -25,6 +25,7 @@ import '../widgets/employee_dashboard_skeletons.dart';
 import '../../shared/screens/profile_page.dart' show DashboardProfilePanel;
 import '../../shared/widgets/dashboard_content_navigator.dart';
 import '../../shared/widgets/dashboard_header_actions.dart';
+import '../../shared/widgets/collapsible_dashboard_sidebar.dart';
 import '../../shared/widgets/portal_sidebar_brand.dart';
 
 /// Main scroll padding: comfortable insets on phones (narrower gutters still breathe).
@@ -57,6 +58,7 @@ class EmployeeDashboard extends StatefulWidget {
 
 class _EmployeeDashboardState extends State<EmployeeDashboard> {
   int _selectedNavIndex = 0;
+  bool _sidebarCollapsed = false;
 
   static const _navItems = [
     'Dashboard',
@@ -166,6 +168,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                 children: [
                   _EmployeeSidebar(
                     railMode: true,
+                    collapsed: _sidebarCollapsed,
                     displayName: displayName,
                     avatarPath: avatarPath,
                     selectedIndex: _selectedNavIndex,
@@ -176,6 +179,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                       children: [
                         DashboardAppHeaderBar(
                           showBrand: false,
+                          showSidebarToggle: true,
+                          onSidebarToggle: () => setState(
+                            () => _sidebarCollapsed = !_sidebarCollapsed,
+                          ),
                           compactActions: width < 600,
                           trailing: DashboardAccountMenuButton(
                             avatarPath: avatarPath,
@@ -444,6 +451,7 @@ class _EmployeeSidebar extends StatelessWidget {
     required this.onTap,
     this.showBrand = true,
     this.railMode = false,
+    this.collapsed = false,
   });
 
   final String displayName;
@@ -452,85 +460,98 @@ class _EmployeeSidebar extends StatelessWidget {
   final ValueChanged<int> onTap;
   final bool showBrand;
   final bool railMode;
+  final bool collapsed;
 
-  @override
-  Widget build(BuildContext context) {
-    final hairline = AppTheme.dashHairlineOf(context);
-    final canvas = AppTheme.dashCanvasOf(context);
-    final panel = AppTheme.dashPanelOf(context);
-
-    final navList = Column(
+  Widget _buildNavList({required bool compact}) {
+    return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         SizedBox(height: railMode ? 12 : (showBrand ? 4 : 12)),
-                  _EmployeeNavTile(
-                    icon: Icons.home_outlined,
-                    label: 'Dashboard',
-                    selected: selectedIndex == 0,
-                    onTap: () => onTap(0),
-                  ),
-                  _EmployeeNavTile(
-                    icon: Icons.event_available_outlined,
-                    label: 'My Attendance',
-                    selected: selectedIndex == 1,
-                    onTap: () => onTap(1),
-                  ),
-                  _EmployeeNavTile(
-                    icon: Icons.event_busy_outlined,
-                    label: 'My Leave',
-                    selected: selectedIndex == 2,
-                    onTap: () => onTap(2),
-                  ),
-                  _EmployeeNavTile(
-                    icon: Icons.pin_drop_outlined,
-                    label: 'Locator Slip',
-                    selected: selectedIndex == 3,
-                    onTap: () => onTap(3),
-                  ),
-                  _EmployeeNavTile(
-                    icon: Icons.assignment_outlined,
-                    label: 'Training Reports',
-                    selected: selectedIndex == 4,
-                    onTap: () => onTap(4),
-                  ),
-                  _EmployeeNavTile(
-                    icon: Icons.description_outlined,
-                    label: 'DocuTracker',
-                    selected: selectedIndex == 5,
-                    onTap: () => onTap(5),
-                  ),
-                  _EmployeeNavTile(
-                    icon: Icons.campaign_outlined,
-                    label: 'Announcements',
-                    selected: selectedIndex == 6,
-                    onTap: () => onTap(6),
-                  ),
+        DashboardSidebarNavTile(
+          icon: Icons.home_outlined,
+          label: 'Dashboard',
+          selected: selectedIndex == 0,
+          collapsed: compact,
+          onTap: () => onTap(0),
+        ),
+        DashboardSidebarNavTile(
+          icon: Icons.event_available_outlined,
+          label: 'My Attendance',
+          selected: selectedIndex == 1,
+          collapsed: compact,
+          onTap: () => onTap(1),
+        ),
+        DashboardSidebarNavTile(
+          icon: Icons.event_busy_outlined,
+          label: 'My Leave',
+          selected: selectedIndex == 2,
+          collapsed: compact,
+          onTap: () => onTap(2),
+        ),
+        DashboardSidebarNavTile(
+          icon: Icons.pin_drop_outlined,
+          label: 'Locator Slip',
+          selected: selectedIndex == 3,
+          collapsed: compact,
+          onTap: () => onTap(3),
+        ),
+        DashboardSidebarNavTile(
+          icon: Icons.assignment_outlined,
+          label: 'Training Reports',
+          selected: selectedIndex == 4,
+          collapsed: compact,
+          onTap: () => onTap(4),
+        ),
+        DashboardSidebarNavTile(
+          icon: Icons.description_outlined,
+          label: 'DocuTracker',
+          selected: selectedIndex == 5,
+          collapsed: compact,
+          onTap: () => onTap(5),
+        ),
+        DashboardSidebarNavTile(
+          icon: Icons.campaign_outlined,
+          label: 'Announcements',
+          selected: selectedIndex == 6,
+          collapsed: compact,
+          onTap: () => onTap(6),
+        ),
         const SizedBox(height: 12),
       ],
     );
+  }
 
-    final footer = Column(
+  Widget _buildFooter(BuildContext context, {required bool compact}) {
+    return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: Container(
-            height: 2,
-            decoration: BoxDecoration(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.28),
-              borderRadius: BorderRadius.circular(1),
+        if (!compact)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Container(
+              height: 2,
+              decoration: BoxDecoration(
+                color: AppTheme.primaryNavy.withValues(alpha: 0.28),
+                borderRadius: BorderRadius.circular(1),
+              ),
             ),
           ),
-        ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+          padding: EdgeInsets.fromLTRB(
+            compact ? 8 : 12,
+            4,
+            compact ? 8 : 12,
+            compact ? 8 : 10,
+          ),
           child: DashboardSidebarProfileCard(
             displayName: displayName,
             subtitle: 'Employee',
             avatarPath: avatarPath,
+            collapsed: compact,
           ),
         ),
-        Padding(
+        if (!compact)
+          Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           child: Column(
             children: [
@@ -588,33 +609,60 @@ class _EmployeeSidebar extends StatelessWidget {
             ],
           ),
         ),
+        if (compact)
+          const SizedBox(height: 12),
       ],
     );
+  }
 
-    if (railMode) {
-      return Container(
-        width: kDashboardSidebarWidth,
-        decoration: BoxDecoration(
-          border: Border(right: BorderSide(color: hairline)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const SidebarRailHeader(),
-            Expanded(
-              child: ColoredBox(
-                color: canvas,
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: SingleChildScrollView(child: navList),
+  Widget _buildRail({
+    required bool compact,
+    required Color hairline,
+    required Color canvas,
+    required BuildContext context,
+  }) {
+    return DashboardSidebarRailFrame(
+      compact: compact,
+      hairline: hairline,
+      canvas: canvas,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SidebarRailHeader(collapsed: compact),
+          Expanded(
+            child: ColoredBox(
+              color: compact ? Colors.transparent : canvas,
+              child: Column(
+                children: [
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: _buildNavList(compact: compact),
                     ),
-                    footer,
-                  ],
-                ),
+                  ),
+                  _buildFooter(context, compact: compact),
+                ],
               ),
             ),
-          ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hairline = AppTheme.dashHairlineOf(context);
+    final canvas = AppTheme.dashCanvasOf(context);
+    final panel = AppTheme.dashPanelOf(context);
+
+    if (railMode) {
+      return AnimatedSidebarWidth(
+        collapsed: collapsed,
+        builder: (context, compact) => _buildRail(
+          compact: compact,
+          hairline: hairline,
+          canvas: canvas,
+          context: context,
         ),
       );
     }
@@ -636,84 +684,12 @@ class _EmployeeSidebar extends StatelessWidget {
         children: [
           if (showBrand) const PortalSidebarBrand(),
           Expanded(
-            child: SingleChildScrollView(child: navList),
-          ),
-          footer,
-        ],
-      ),
-    );
-  }
-}
-
-class _EmployeeNavTile extends StatefulWidget {
-  const _EmployeeNavTile({
-    required this.icon,
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  State<_EmployeeNavTile> createState() => _EmployeeNavTileState();
-}
-
-class _EmployeeNavTileState extends State<_EmployeeNavTile> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final inactive = AppTheme.dashTextSecondaryOf(context);
-    final selected = widget.selected;
-    final bg = selected
-        ? AppTheme.primaryNavy
-        : (_hover ? AppTheme.dashMutedSurfaceOf(context) : Colors.transparent);
-    final fg = selected ? Colors.white : inactive;
-
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: widget.onTap,
-            borderRadius: BorderRadius.circular(12),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              curve: Curves.easeOutCubic,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-              decoration: BoxDecoration(
-                color: bg,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                children: [
-                  Icon(widget.icon, size: 22, color: fg),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Text(
-                      widget.label,
-                      style: TextStyle(
-                        color: fg,
-                        fontWeight: selected
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                        fontSize: 14,
-                        letterSpacing: -0.15,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+            child: SingleChildScrollView(
+              child: _buildNavList(compact: false),
             ),
           ),
-        ),
+          _buildFooter(context, compact: false),
+        ],
       ),
     );
   }
