@@ -1,11 +1,7 @@
 import 'dart:async';
-
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../landingpage/constants/app_theme.dart';
-import '../../../landingpage/screens/landing_page.dart';
-import '../../../login/screens/login_page.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../dtr/dtr_provider.dart';
 import '../../../data/time_record.dart';
@@ -21,7 +17,6 @@ import '../../../notifications/open_notifications_panel.dart';
 import '../../../leave/widgets/my_leave_loading_skeleton.dart';
 import '../../../locator/screens/employee_locator_slip_screen.dart';
 import '../../../leave/models/leave_type.dart';
-import '../../../widgets/user_avatar.dart';
 import '../../../ld/training_daily_report_employee_screen.dart';
 import '../widgets/attendance_overview/attendance_overview.dart';
 import '../widgets/employee_dashboard_skeletons.dart';
@@ -154,7 +149,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
   }
 
   void _openMyProfile() {
-    if (DashboardContentNavigator.isSettingsOnTop(_contentNavKey.currentState)) {
+    if (DashboardContentNavigator.isSettingsOnTop(
+      _contentNavKey.currentState,
+    )) {
       setState(() => _selectedNavIndex = _profileNavIndex);
       return;
     }
@@ -197,9 +194,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
       case _profileNavIndex:
         return const SizedBox.shrink();
       default:
-        return _EmployeePlaceholderContent(
-          title: _navItems[_selectedNavIndex],
-        );
+        return _EmployeePlaceholderContent(title: _navItems[_selectedNavIndex]);
     }
   }
 
@@ -232,6 +227,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                   displayName: displayName,
                   avatarPath: avatarPath,
                   selectedIndex: _selectedNavIndex,
+                  showBrand: true,
                   onTap: (i) {
                     _onNavSelected(i);
                     if (context.mounted) Navigator.of(context).pop();
@@ -246,6 +242,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                 children: [
                   _EmployeeSidebar(
                     railMode: true,
+                    showBrand: false,
                     displayName: displayName,
                     avatarPath: avatarPath,
                     selectedIndex: _selectedNavIndex,
@@ -274,8 +271,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                               homeBuilder: () =>
                                   _employeeMainChild(displayName: displayName),
                               settingsPanel: _settingsPanel,
-                              homeScrollPadding:
-                                  _employeeMainScrollPadding(context),
+                              homeScrollPadding: _employeeMainScrollPadding(
+                                context,
+                              ),
                               settingsScrollPadding: const EdgeInsets.fromLTRB(
                                 12,
                                 8,
@@ -313,8 +311,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                         homeBuilder: () =>
                             _employeeMainChild(displayName: displayName),
                         settingsPanel: _settingsPanel,
-                        homeScrollPadding:
-                            _employeeMainScrollPadding(context),
+                        homeScrollPadding: _employeeMainScrollPadding(context),
                         settingsScrollPadding: const EdgeInsets.fromLTRB(
                           12,
                           8,
@@ -553,48 +550,48 @@ class _EmployeeSidebar extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         SizedBox(height: railMode ? 12 : (showBrand ? 4 : 12)),
-                  _EmployeeNavTile(
-                    icon: Icons.home_outlined,
-                    label: 'Dashboard',
-                    selected: selectedIndex == 0,
-                    onTap: () => onTap(0),
-                  ),
-                  _EmployeeNavTile(
-                    icon: Icons.event_available_outlined,
-                    label: 'My Attendance',
-                    selected: selectedIndex == 1,
-                    onTap: () => onTap(1),
-                  ),
-                  _EmployeeNavTile(
-                    icon: Icons.event_busy_outlined,
-                    label: 'My Leave',
-                    selected: selectedIndex == 2,
-                    onTap: () => onTap(2),
-                  ),
-                  _EmployeeNavTile(
-                    icon: Icons.pin_drop_outlined,
-                    label: 'Locator Slip',
-                    selected: selectedIndex == 3,
-                    onTap: () => onTap(3),
-                  ),
-                  _EmployeeNavTile(
-                    icon: Icons.assignment_outlined,
-                    label: 'Training Reports',
-                    selected: selectedIndex == 4,
-                    onTap: () => onTap(4),
-                  ),
-                  _EmployeeNavTile(
-                    icon: Icons.description_outlined,
-                    label: 'DocuTracker',
-                    selected: selectedIndex == 5,
-                    onTap: () => onTap(5),
-                  ),
-                  _EmployeeNavTile(
-                    icon: Icons.campaign_outlined,
-                    label: 'Announcements',
-                    selected: selectedIndex == 6,
-                    onTap: () => onTap(6),
-                  ),
+        _EmployeeNavTile(
+          icon: Icons.home_outlined,
+          label: 'Dashboard',
+          selected: selectedIndex == 0,
+          onTap: () => onTap(0),
+        ),
+        _EmployeeNavTile(
+          icon: Icons.event_available_outlined,
+          label: 'My Attendance',
+          selected: selectedIndex == 1,
+          onTap: () => onTap(1),
+        ),
+        _EmployeeNavTile(
+          icon: Icons.event_busy_outlined,
+          label: 'My Leave',
+          selected: selectedIndex == 2,
+          onTap: () => onTap(2),
+        ),
+        _EmployeeNavTile(
+          icon: Icons.pin_drop_outlined,
+          label: 'Locator Slip',
+          selected: selectedIndex == 3,
+          onTap: () => onTap(3),
+        ),
+        _EmployeeNavTile(
+          icon: Icons.assignment_outlined,
+          label: 'Training Reports',
+          selected: selectedIndex == 4,
+          onTap: () => onTap(4),
+        ),
+        _EmployeeNavTile(
+          icon: Icons.description_outlined,
+          label: 'DocuTracker',
+          selected: selectedIndex == 5,
+          onTap: () => onTap(5),
+        ),
+        _EmployeeNavTile(
+          icon: Icons.campaign_outlined,
+          label: 'Announcements',
+          selected: selectedIndex == 6,
+          onTap: () => onTap(6),
+        ),
         const SizedBox(height: 12),
       ],
     );
@@ -627,8 +624,9 @@ class _EmployeeSidebar extends StatelessWidget {
               Text(
                 '© ${DateTime.now().year} HRMS',
                 style: TextStyle(
-                  color: AppTheme.dashTextSecondaryOf(context)
-                      .withValues(alpha: 0.85),
+                  color: AppTheme.dashTextSecondaryOf(
+                    context,
+                  ).withValues(alpha: 0.85),
                   fontSize: 11,
                 ),
               ),
@@ -696,9 +694,7 @@ class _EmployeeSidebar extends StatelessWidget {
                 color: canvas,
                 child: Column(
                   children: [
-                    Expanded(
-                      child: SingleChildScrollView(child: navList),
-                    ),
+                    Expanded(child: SingleChildScrollView(child: navList)),
                     footer,
                   ],
                 ),
@@ -725,9 +721,7 @@ class _EmployeeSidebar extends StatelessWidget {
       child: Column(
         children: [
           if (showBrand) const PortalSidebarBrand(),
-          Expanded(
-            child: SingleChildScrollView(child: navList),
-          ),
+          Expanded(child: SingleChildScrollView(child: navList)),
           footer,
         ],
       ),
@@ -2028,9 +2022,9 @@ class _EmployeeAttendanceContentState
                       (i) => Text(
                         _attendanceMonths[i],
                         overflow: TextOverflow.ellipsis,
-                        style: AppTheme.dashFieldTextStyle(context).copyWith(
-                          fontSize: 14,
-                        ),
+                        style: AppTheme.dashFieldTextStyle(
+                          context,
+                        ).copyWith(fontSize: 14),
                       ),
                     ),
                     items: List.generate(12, (i) => i + 1)
@@ -2079,9 +2073,9 @@ class _EmployeeAttendanceContentState
                       (i) => Text(
                         '${DateTime.now().year - 5 + i}',
                         overflow: TextOverflow.ellipsis,
-                        style: AppTheme.dashFieldTextStyle(context).copyWith(
-                          fontSize: 14,
-                        ),
+                        style: AppTheme.dashFieldTextStyle(
+                          context,
+                        ).copyWith(fontSize: 14),
                       ),
                     ),
                     items: List.generate(11, (i) => DateTime.now().year - 5 + i)
@@ -2122,26 +2116,26 @@ class _EmployeeAttendanceContentState
                     hint: Text(
                       'All days',
                       overflow: TextOverflow.ellipsis,
-                      style: AppTheme.dashFieldTextStyle(context).copyWith(
-                        fontSize: 14,
-                      ),
+                      style: AppTheme.dashFieldTextStyle(
+                        context,
+                      ).copyWith(fontSize: 14),
                     ),
                     selectedItemBuilder: (context) => [
                       Text(
                         'All days',
                         overflow: TextOverflow.ellipsis,
-                        style: AppTheme.dashFieldTextStyle(context).copyWith(
-                          fontSize: 14,
-                        ),
+                        style: AppTheme.dashFieldTextStyle(
+                          context,
+                        ).copyWith(fontSize: 14),
                       ),
                       ...List.generate(
                         _maxSelectableCalendarDay,
                         (i) => Text(
                           'Day ${i + 1}',
                           overflow: TextOverflow.ellipsis,
-                          style: AppTheme.dashFieldTextStyle(context).copyWith(
-                            fontSize: 14,
-                          ),
+                          style: AppTheme.dashFieldTextStyle(
+                            context,
+                          ).copyWith(fontSize: 14),
                         ),
                       ),
                     ],
