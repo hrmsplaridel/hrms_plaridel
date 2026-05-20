@@ -179,13 +179,14 @@ class _DtrReportsState extends State<DtrReports> {
           return;
         }
       }
-      if (mounted)
+      if (mounted) {
         setState(() {
           _shiftWorkingDays = null;
           _shiftOfficialHours = null;
           _assignmentEffectiveFrom = null;
           _assignmentEffectiveTo = null;
         });
+      }
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -821,7 +822,7 @@ class _DtrReportsState extends State<DtrReports> {
               SizedBox(
                 width: 130,
                 child: DropdownButtonFormField<int>(
-                  value: _selectedMonth,
+                  initialValue: _selectedMonth,
                   decoration: InputDecoration(
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
@@ -855,7 +856,7 @@ class _DtrReportsState extends State<DtrReports> {
               SizedBox(
                 width: 90,
                 child: DropdownButtonFormField<int>(
-                  value: _selectedYear,
+                  initialValue: _selectedYear,
                   decoration: InputDecoration(
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
@@ -917,7 +918,7 @@ class _DtrReportsState extends State<DtrReports> {
           decoration: BoxDecoration(
             color: AppTheme.white,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.black.withOpacity(0.08)),
+            border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
           ),
           child: DropdownButtonHideUnderline(
             child: DropdownButton<String>(
@@ -979,7 +980,7 @@ class _DtrReportsState extends State<DtrReports> {
       decoration: BoxDecoration(
         color: AppTheme.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.08)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -987,7 +988,7 @@ class _DtrReportsState extends State<DtrReports> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: AppTheme.lightGray.withOpacity(0.5),
+              color: AppTheme.lightGray.withValues(alpha: 0.5),
               borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(12),
               ),
@@ -1100,7 +1101,7 @@ class _DtrReportsState extends State<DtrReports> {
           decoration: BoxDecoration(
             color: AppTheme.white,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.black.withOpacity(0.08)),
+            border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1112,7 +1113,7 @@ class _DtrReportsState extends State<DtrReports> {
                   vertical: 10,
                 ),
                 decoration: BoxDecoration(
-                  color: AppTheme.lightGray.withOpacity(0.5),
+                  color: AppTheme.lightGray.withValues(alpha: 0.5),
                   borderRadius: const BorderRadius.vertical(
                     top: Radius.circular(12),
                   ),
@@ -1238,7 +1239,7 @@ class _DtrReportsState extends State<DtrReports> {
                             decoration: BoxDecoration(
                               color: i % 2 == 0
                                   ? AppTheme.white
-                                  : AppTheme.lightGray.withOpacity(0.3),
+                                  : AppTheme.lightGray.withValues(alpha: 0.3),
                             ),
                             child: Row(
                               children: [
@@ -1399,9 +1400,9 @@ class _DtrReportsState extends State<DtrReports> {
           ? const BoxConstraints(maxHeight: 600)
           : const BoxConstraints(maxWidth: 200, maxHeight: 600),
       decoration: BoxDecoration(
-        color: AppTheme.lightGray.withOpacity(0.5),
+        color: AppTheme.lightGray.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.08)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
       ),
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -1411,7 +1412,7 @@ class _DtrReportsState extends State<DtrReports> {
           children: [
             CircleAvatar(
               radius: 32,
-              backgroundColor: AppTheme.primaryNavy.withOpacity(0.2),
+              backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.2),
               child: Icon(
                 Icons.person_rounded,
                 size: 32,
@@ -1762,7 +1763,7 @@ class _DtrReportsState extends State<DtrReports> {
       decoration: BoxDecoration(
         color: AppTheme.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.08)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1771,7 +1772,7 @@ class _DtrReportsState extends State<DtrReports> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: AppTheme.lightGray.withOpacity(0.5),
+              color: AppTheme.lightGray.withValues(alpha: 0.5),
               borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(12),
               ),

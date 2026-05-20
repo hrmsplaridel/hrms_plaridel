@@ -25,7 +25,7 @@ class ApiLeaveRepository implements LeaveRepository {
   static Map<String, dynamic> _toApiPayload(LeaveRequest request) {
     final json = request.toJson();
     // Backend expects leave_type as text name, and start/end dates in date-only string.
-    json['leave_type'] = request.leaveType.value;
+    json['leave_type'] = request.effectiveLeaveTypeName;
     return json;
   }
 
@@ -157,7 +157,10 @@ class ApiLeaveRepository implements LeaveRepository {
   }
 
   @override
-  Future<LeaveBalance> upsertBalance(LeaveBalance balance) async {
+  Future<LeaveBalance> upsertBalance(
+    LeaveBalance balance, {
+    String? remarks,
+  }) async {
     if (balance.userId.isEmpty) {
       throw Exception('Missing user id');
     }
@@ -176,6 +179,10 @@ class ApiLeaveRepository implements LeaveRepository {
       final lastAcc = balance.lastAccrualDate;
       if (lastAcc != null) {
         payload['last_accrual_date'] = _leaveDateOnly(lastAcc);
+      }
+      final cleanRemarks = remarks?.trim();
+      if (cleanRemarks != null && cleanRemarks.isNotEmpty) {
+        payload['remarks'] = cleanRemarks;
       }
       final res = await ApiClient.instance.put<Map<String, dynamic>>(
         '/api/leave/balances/${balance.userId}',
@@ -337,10 +344,13 @@ class ApiLeaveRepository implements LeaveRepository {
   }
 
   @override
-  Future<List<LeaveRequest>> listDepartmentHeadRequests() async {
+  Future<List<LeaveRequest>> listDepartmentHeadRequests({
+    LeaveRequestQuery query = const LeaveRequestQuery(),
+  }) async {
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/leave/department-head',
+        queryParameters: query.toQueryParams(),
       );
       return (res.data ?? [])
           .map((j) => LeaveRequest.fromJson(j as Map<String, dynamic>))
@@ -436,6 +446,29 @@ class ApiLeaveRepository implements LeaveRepository {
             ? DateTime.tryParse(data['applied_at'].toString())
             : null,
       );
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
+  Future<MonthlyLeaveAccrualResult> runMonthlyAccrual(
+    MonthlyLeaveAccrualInput input,
+  ) async {
+    try {
+      final targetMonth = input.targetMonth?.trim();
+      final res = await ApiClient.instance.post<Map<String, dynamic>>(
+        '/api/leave/admin/monthly-accrual',
+        data: {
+          'dry_run': input.dryRun,
+          if (targetMonth != null && targetMonth.isNotEmpty)
+            'target_month': targetMonth,
+          'max_catch_up_months': input.maxCatchUpMonths,
+        },
+      );
+      final data = res.data;
+      if (data == null) throw Exception('No data returned');
+      return MonthlyLeaveAccrualResult.fromJson(data);
     } on DioException catch (e) {
       throw Exception(_messageFromDio(e));
     }

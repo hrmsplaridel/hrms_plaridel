@@ -1,3 +1,5 @@
+const { broadcastAppEvent } = require('../websockets/appEvents');
+
 /**
  * @param {import('pg').Pool} db
  * @param {object} opts
@@ -27,7 +29,13 @@ async function insertNotification(db, opts) {
      RETURNING id, user_id, category, type, title, body, read_at, reference_type, reference_id, metadata, created_at`,
     [userId, category, type, title, body, referenceType, referenceId, metadata ? JSON.stringify(metadata) : null]
   );
-  return r.rows[0];
+  const row = r.rows[0];
+  broadcastAppEvent(
+    'notification_created',
+    { notification: mapRowToApi(row) },
+    { userIds: [row.user_id] }
+  );
+  return row;
 }
 
 /**

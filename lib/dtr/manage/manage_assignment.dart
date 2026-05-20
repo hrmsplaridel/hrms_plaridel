@@ -352,6 +352,15 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   String _timeStr(TimeOfDay t) =>
       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
+  String _dateStr(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  String _effectivePeriodStr(_AssignmentRecord assignment) {
+    final from = _dateStr(assignment.effectiveFrom);
+    final to = assignment.effectiveTo;
+    return to == null ? from : '$from → ${_dateStr(to)}';
+  }
+
   /// Calendar-day comparison (ignores time) so picker values stay valid across timezones.
   bool _isEffectiveRangeValid(DateTime from, DateTime? to) {
     if (to == null) return true;
@@ -632,12 +641,12 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
         ],
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -654,7 +663,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             decoration: BoxDecoration(
-              color: AppTheme.lightGray.withOpacity(0.4),
+              color: AppTheme.lightGray.withValues(alpha: 0.4),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Row(
@@ -696,7 +705,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               child: Text(
                 'No employees',
                 style: TextStyle(
-                  color: AppTheme.textSecondary.withOpacity(0.8),
+                  color: AppTheme.textSecondary.withValues(alpha: 0.8),
                   fontSize: 14,
                 ),
               ),
@@ -706,7 +715,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               final isSelected = _selectedEmployeeId == e.id;
               return Material(
                 color: isSelected
-                    ? AppTheme.primaryNavy.withOpacity(0.08)
+                    ? AppTheme.primaryNavy.withValues(alpha: 0.08)
                     : Colors.transparent,
                 child: InkWell(
                   onTap: () {
@@ -764,13 +773,13 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       decoration: InputDecoration(
         hintText: 'Search',
         hintStyle: TextStyle(
-          color: AppTheme.textSecondary.withOpacity(0.8),
+          color: AppTheme.textSecondary.withValues(alpha: 0.8),
           fontSize: 14,
         ),
         prefixIcon: Icon(
           Icons.search_rounded,
           size: 20,
-          color: AppTheme.textSecondary.withOpacity(0.7),
+          color: AppTheme.textSecondary.withValues(alpha: 0.7),
         ),
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(
@@ -778,7 +787,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           vertical: 12,
         ),
         filled: true,
-        fillColor: AppTheme.lightGray.withOpacity(0.5),
+        fillColor: AppTheme.lightGray.withValues(alpha: 0.5),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide.none,
@@ -791,7 +800,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
-        color: AppTheme.lightGray.withOpacity(0.5),
+        color: AppTheme.lightGray.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: Colors.transparent),
       ),
@@ -828,12 +837,12 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
         ],
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: SingleChildScrollView(
         child: Column(
@@ -847,7 +856,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                   child: Icon(
                     Icons.person_rounded,
                     size: 28,
-                    color: AppTheme.textSecondary.withOpacity(0.5),
+                    color: AppTheme.textSecondary.withValues(alpha: 0.5),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -880,7 +889,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
-        color: AppTheme.lightGray.withOpacity(0.5),
+        color: AppTheme.lightGray.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: Colors.transparent),
       ),
@@ -906,16 +915,16 @@ class _ManageAssignmentState extends State<ManageAssignment> {
 
     return Container(
       decoration: BoxDecoration(
-        color: AppTheme.lightGray.withOpacity(0.3),
+        color: AppTheme.lightGray.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
         children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             decoration: BoxDecoration(
-              color: AppTheme.lightGray.withOpacity(0.4),
+              color: AppTheme.lightGray.withValues(alpha: 0.4),
               borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(8),
               ),
@@ -964,7 +973,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               final isSelected = _selectedAssignment?.id == a.id;
               return Material(
                 color: isSelected
-                    ? AppTheme.primaryNavy.withOpacity(0.08)
+                    ? AppTheme.primaryNavy.withValues(alpha: 0.08)
                     : Colors.transparent,
                 child: InkWell(
                   onTap: () => _selectAssignment(a),
@@ -1007,10 +1016,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                         Expanded(
                           flex: 1,
                           child: Text(
-                            '${a.effectiveFrom.year}-${a.effectiveFrom.month.toString().padLeft(2, '0')}-${a.effectiveFrom.day.toString().padLeft(2, '0')}' +
-                                (a.effectiveTo != null
-                                    ? ' → ${a.effectiveTo!.year}-${a.effectiveTo!.month.toString().padLeft(2, '0')}-${a.effectiveTo!.day.toString().padLeft(2, '0')}'
-                                    : ''),
+                            _effectivePeriodStr(a),
                             style: _tableCellStyle,
                           ),
                         ),
@@ -1038,9 +1044,9 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppTheme.lightGray.withOpacity(0.2),
+        color: AppTheme.lightGray.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1281,7 +1287,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         ),
         const SizedBox(height: 6),
         DropdownButtonFormField<String>(
-          value: value,
+          initialValue: value,
           decoration: _inputDecoration('Select'),
           hint: const Text('Select'),
           isExpanded: true,
@@ -1362,7 +1368,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   InputDecoration _inputDecoration(String hint) => InputDecoration(
     hintText: hint,
     hintStyle: TextStyle(
-      color: AppTheme.textSecondary.withOpacity(0.7),
+      color: AppTheme.textSecondary.withValues(alpha: 0.7),
       fontSize: 14,
     ),
     filled: true,

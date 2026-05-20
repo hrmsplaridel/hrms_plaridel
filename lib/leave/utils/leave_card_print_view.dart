@@ -185,9 +185,6 @@ class LeaveCardPrintView {
           estimatedRows,
           16,
         ].reduce((a, b) => a > b ? a : b);
-        final dynamicRowHeight = targetRows > 0
-            ? (bodyHeight / targetRows).clamp(14.0, baseRowHeight)
-            : baseRowHeight;
         final filledRows = [
           ...rows,
           ...List.generate(
@@ -265,20 +262,21 @@ class LeaveCardPrintView {
                 ),
               ),
               ...filledRows.map(
-                (row) => _gridRow(
-                  cells: [
-                    _CellData(row.period, 17),
-                    _CellData(row.particulars, 22, align: pw.TextAlign.left),
-                    _CellData(row.vacEarned, 10),
-                    _CellData(row.vacWithPay, 12),
-                    _CellData(row.vacWithoutPay, 14),
-                    _CellData(row.slEarned, 10),
-                    _CellData(row.slWithPay, 12),
-                    _CellData(row.slWithoutPay, 14),
-                    _CellData(row.dateTakenOnApplication, 16),
-                  ],
-                  height: dynamicRowHeight,
-                  fontSize: 7.5,
+                (row) => pw.Expanded(
+                  child: _gridRow(
+                    cells: [
+                      _CellData(row.period, 17),
+                      _CellData(row.particulars, 22, align: pw.TextAlign.left),
+                      _CellData(row.vacEarned, 10),
+                      _CellData(row.vacWithPay, 12),
+                      _CellData(row.vacWithoutPay, 14),
+                      _CellData(row.slEarned, 10),
+                      _CellData(row.slWithPay, 12),
+                      _CellData(row.slWithoutPay, 14),
+                      _CellData(row.dateTakenOnApplication, 16),
+                    ],
+                    fontSize: 7.5,
+                  ),
                 ),
               ),
             ],
@@ -336,46 +334,44 @@ class LeaveCardPrintView {
 
   static pw.Widget _gridRow({
     required List<_CellData> cells,
-    required double height,
+    double? height,
     double fontSize = 8,
     bool bold = false,
   }) {
-    return pw.SizedBox(
-      height: height,
-      child: pw.Row(
-        children: cells
-            .map(
-              (cell) => pw.Expanded(
-                flex: cell.flex,
-                child: pw.Container(
-                  height: double.infinity,
-                  alignment: pw.Alignment.center,
-                  padding: const pw.EdgeInsets.symmetric(
-                    horizontal: 2,
-                    vertical: 1,
+    final row = pw.Row(
+      children: cells
+          .map(
+            (cell) => pw.Expanded(
+              flex: cell.flex,
+              child: pw.Container(
+                height: double.infinity,
+                alignment: pw.Alignment.center,
+                padding: const pw.EdgeInsets.symmetric(
+                  horizontal: 2,
+                  vertical: 1,
+                ),
+                decoration: const pw.BoxDecoration(
+                  border: pw.Border(
+                    left: pw.BorderSide(width: 0.8),
+                    top: pw.BorderSide(width: 0.8),
                   ),
-                  decoration: const pw.BoxDecoration(
-                    border: pw.Border(
-                      left: pw.BorderSide(width: 0.8),
-                      top: pw.BorderSide(width: 0.8),
-                    ),
-                  ),
-                  child: pw.Text(
-                    cell.text,
-                    textAlign: cell.align,
-                    style: pw.TextStyle(
-                      fontSize: fontSize,
-                      fontWeight: bold
-                          ? pw.FontWeight.bold
-                          : pw.FontWeight.normal,
-                    ),
+                ),
+                child: pw.Text(
+                  cell.text,
+                  textAlign: cell.align,
+                  style: pw.TextStyle(
+                    fontSize: fontSize,
+                    fontWeight: bold
+                        ? pw.FontWeight.bold
+                        : pw.FontWeight.normal,
                   ),
                 ),
               ),
-            )
-            .toList(),
-      ),
+            ),
+          )
+          .toList(),
     );
+    return height == null ? row : pw.SizedBox(height: height, child: row);
   }
 
   static pw.Widget _buildPreparedBy() {
@@ -428,7 +424,7 @@ class LeaveCardPrintView {
           request.leaveType == LeaveType.mandatoryForcedLeave;
       return _LeaveCardRow(
         period: period,
-        particulars: request.leaveType.displayName,
+        particulars: request.leaveTypeLabel,
         vacEarned: vacEarnedStr,
         vacWithPay: isVacation ? _fmtNum(withPay) : '',
         vacWithoutPay: isVacation ? _fmtNum(withoutPay) : '',

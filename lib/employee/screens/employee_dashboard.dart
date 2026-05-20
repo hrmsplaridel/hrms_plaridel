@@ -1,11 +1,7 @@
 import 'dart:async';
-
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../landingpage/constants/app_theme.dart';
-import '../../../landingpage/screens/landing_page.dart';
-import '../../../login/screens/login_page.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../dtr/dtr_provider.dart';
 import '../../../data/time_record.dart';
@@ -15,10 +11,12 @@ import '../../../docutracker/docutracker_main.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
 import '../../../leave/leave_provider.dart';
+import '../../../notifications/notification_provider.dart';
+import '../../../notifications/notification_tap_result.dart';
+import '../../../notifications/open_notifications_panel.dart';
 import '../../../leave/widgets/my_leave_loading_skeleton.dart';
 import '../../../locator/screens/employee_locator_slip_screen.dart';
 import '../../../leave/models/leave_type.dart';
-import '../../../widgets/user_avatar.dart';
 import '../../../ld/training_daily_report_employee_screen.dart';
 import '../widgets/attendance_overview/attendance_overview.dart';
 import '../widgets/employee_dashboard_skeletons.dart';
@@ -56,9 +54,13 @@ class EmployeeDashboard extends StatefulWidget {
   State<EmployeeDashboard> createState() => _EmployeeDashboardState();
 }
 
-class _EmployeeDashboardState extends State<EmployeeDashboard> {
+class _EmployeeDashboardState extends State<EmployeeDashboard>
+    with WidgetsBindingObserver {
   int _selectedNavIndex = 0;
   bool _sidebarCollapsed = false;
+  LeaveSection? _leaveInitialSection;
+  int _leaveNavKey = 0;
+  Timer? _notificationPollTimer;
 
   static const _navItems = [
     'Dashboard',
@@ -78,8 +80,80 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
   );
   final GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
 
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<NotificationProvider>().refreshUnreadCount();
+      _notificationPollTimer?.cancel();
+      _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+        if (!mounted) return;
+        context.read<NotificationProvider>().refreshUnreadCount();
+      });
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      context.read<NotificationProvider>().refreshUnreadCount();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _notificationPollTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _handleOpenNotifications() async {
+    final result = await openNotificationsPanel(context);
+    if (!mounted) return;
+    await context.read<NotificationProvider>().refreshUnreadCount();
+    if (!mounted) return;
+    _applyNotificationTapResult(result);
+  }
+
+  void _applyNotificationTapResult(NotificationTapResult? result) {
+    if (result == null || result.kind == NotificationTapKind.none) return;
+    switch (result.kind) {
+      case NotificationTapKind.employeeLeaveApprovals:
+      case NotificationTapKind.employeeLeaveRequests:
+        final section = result.employeeLeaveSection;
+        if (section == null) return;
+        setState(() {
+          _selectedNavIndex = 2;
+          _leaveInitialSection = section;
+          _leaveNavKey++;
+        });
+        DashboardContentNavigator.showHome(_contentNavKey);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) setState(() => _leaveInitialSection = null);
+        });
+        break;
+      case NotificationTapKind.employeeMyAttendance:
+        setState(() => _selectedNavIndex = 1);
+        DashboardContentNavigator.showHome(_contentNavKey);
+        break;
+      case NotificationTapKind.employeeLocatorApprovals:
+      case NotificationTapKind.employeeLocatorRequests:
+        setState(() => _selectedNavIndex = 3);
+        DashboardContentNavigator.showHome(_contentNavKey);
+        break;
+      case NotificationTapKind.adminDtrLocatorManagement:
+      case NotificationTapKind.adminDtrLeaveManagement:
+      case NotificationTapKind.none:
+        break;
+    }
+  }
+
   void _openMyProfile() {
-    if (DashboardContentNavigator.isSettingsOnTop(_contentNavKey.currentState)) {
+    if (DashboardContentNavigator.isSettingsOnTop(
+      _contentNavKey.currentState,
+    )) {
       setState(() => _selectedNavIndex = _profileNavIndex);
       return;
     }
@@ -109,7 +183,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
       case 1:
         return const _EmployeeAttendanceContent();
       case 2:
-        return const _EmployeeLeaveMainEntry();
+        return _EmployeeLeaveMainEntry(
+          key: ValueKey(_leaveNavKey),
+          initialSection: _leaveInitialSection,
+        );
       case 3:
         return const EmployeeLocatorSlipScreen();
       case 4:
@@ -119,9 +196,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
       case _profileNavIndex:
         return const SizedBox.shrink();
       default:
-        return _EmployeePlaceholderContent(
-          title: _navItems[_selectedNavIndex],
-        );
+        return _EmployeePlaceholderContent(title: _navItems[_selectedNavIndex]);
     }
   }
 
@@ -154,6 +229,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                   displayName: displayName,
                   avatarPath: avatarPath,
                   selectedIndex: _selectedNavIndex,
+                  showBrand: true,
                   onTap: (i) {
                     _onNavSelected(i);
                     if (context.mounted) Navigator.of(context).pop();
@@ -169,6 +245,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                   _EmployeeSidebar(
                     railMode: true,
                     collapsed: _sidebarCollapsed,
+                    showBrand: false,
                     displayName: displayName,
                     avatarPath: avatarPath,
                     selectedIndex: _selectedNavIndex,
@@ -184,6 +261,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                             () => _sidebarCollapsed = !_sidebarCollapsed,
                           ),
                           compactActions: width < 600,
+                          onViewAllNotifications: _handleOpenNotifications,
+                          onNotificationTap: _applyNotificationTapResult,
                           trailing: DashboardAccountMenuButton(
                             avatarPath: avatarPath,
                             compact: width < 600,
@@ -199,8 +278,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                               homeBuilder: () =>
                                   _employeeMainChild(displayName: displayName),
                               settingsPanel: _settingsPanel,
-                              homeScrollPadding:
-                                  _employeeMainScrollPadding(context),
+                              homeScrollPadding: _employeeMainScrollPadding(
+                                context,
+                              ),
                               settingsScrollPadding: const EdgeInsets.fromLTRB(
                                 12,
                                 8,
@@ -221,6 +301,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                     showMenuButton: true,
                     onMenuPressed: () => Scaffold.of(context).openDrawer(),
                     compactActions: width < 600,
+                    onViewAllNotifications: _handleOpenNotifications,
+                    onNotificationTap: _applyNotificationTapResult,
                     trailing: DashboardAccountMenuButton(
                       avatarPath: avatarPath,
                       compact: width < 600,
@@ -236,8 +318,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                         homeBuilder: () =>
                             _employeeMainChild(displayName: displayName),
                         settingsPanel: _settingsPanel,
-                        homeScrollPadding:
-                            _employeeMainScrollPadding(context),
+                        homeScrollPadding: _employeeMainScrollPadding(context),
                         settingsScrollPadding: const EdgeInsets.fromLTRB(
                           12,
                           8,
@@ -391,7 +472,9 @@ class EmployeeAttendanceDetailsSection extends StatelessWidget {
 }
 
 class _EmployeeLeaveMainEntry extends StatefulWidget {
-  const _EmployeeLeaveMainEntry();
+  const _EmployeeLeaveMainEntry({super.key, this.initialSection});
+
+  final LeaveSection? initialSection;
 
   @override
   State<_EmployeeLeaveMainEntry> createState() =>
@@ -436,7 +519,11 @@ class _EmployeeLeaveMainEntryState extends State<_EmployeeLeaveMainEntry> {
             ],
           );
         }
-        return LeaveMain(isAdmin: false, isDepartmentHead: isDeptHead);
+        return LeaveMain(
+          isAdmin: false,
+          isDepartmentHead: isDeptHead,
+          initialSection: widget.initialSection,
+        );
       },
     );
   }
@@ -558,8 +645,9 @@ class _EmployeeSidebar extends StatelessWidget {
               Text(
                 '© ${DateTime.now().year} HRMS',
                 style: TextStyle(
-                  color: AppTheme.dashTextSecondaryOf(context)
-                      .withValues(alpha: 0.85),
+                  color: AppTheme.dashTextSecondaryOf(
+                    context,
+                  ).withValues(alpha: 0.85),
                   fontSize: 11,
                 ),
               ),
@@ -616,10 +704,10 @@ class _EmployeeSidebar extends StatelessWidget {
   }
 
   Widget _buildRail({
+    required BuildContext context,
     required bool compact,
     required Color hairline,
     required Color canvas,
-    required BuildContext context,
   }) {
     return DashboardSidebarRailFrame(
       compact: compact,
@@ -712,6 +800,7 @@ class _EmployeeDashboardContent extends StatefulWidget {
 
 class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
   Timer? _pollingTimer;
+  StreamSubscription<DtrUpdateEvent>? _dtrUpdateSub;
 
   @override
   void initState() {
@@ -728,6 +817,14 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
       final start = DateTime(now.year, now.month, 1);
       final end = DateTime(now.year, now.month + 1, 0);
       dtr.loadTimeRecordsForUser(startDate: start, endDate: end);
+      _dtrUpdateSub = dtr.onDtrEvent.listen((event) {
+        if (!mounted) return;
+        final userId = context.read<AuthProvider>().user?.id;
+        if (!event.affectsUser(userId)) return;
+        final currentDtr = context.read<DtrProvider>();
+        if (currentDtr.loading) return;
+        currentDtr.loadTodayRecord();
+      });
     });
     _pollingTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (!mounted) return;
@@ -741,6 +838,7 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
 
   @override
   void dispose() {
+    _dtrUpdateSub?.cancel();
     _pollingTimer?.cancel();
     super.dispose();
   }
@@ -1904,9 +2002,9 @@ class _EmployeeAttendanceContentState
                       (i) => Text(
                         _attendanceMonths[i],
                         overflow: TextOverflow.ellipsis,
-                        style: AppTheme.dashFieldTextStyle(context).copyWith(
-                          fontSize: 14,
-                        ),
+                        style: AppTheme.dashFieldTextStyle(
+                          context,
+                        ).copyWith(fontSize: 14),
                       ),
                     ),
                     items: List.generate(12, (i) => i + 1)
@@ -1955,9 +2053,9 @@ class _EmployeeAttendanceContentState
                       (i) => Text(
                         '${DateTime.now().year - 5 + i}',
                         overflow: TextOverflow.ellipsis,
-                        style: AppTheme.dashFieldTextStyle(context).copyWith(
-                          fontSize: 14,
-                        ),
+                        style: AppTheme.dashFieldTextStyle(
+                          context,
+                        ).copyWith(fontSize: 14),
                       ),
                     ),
                     items: List.generate(11, (i) => DateTime.now().year - 5 + i)
@@ -1998,26 +2096,26 @@ class _EmployeeAttendanceContentState
                     hint: Text(
                       'All days',
                       overflow: TextOverflow.ellipsis,
-                      style: AppTheme.dashFieldTextStyle(context).copyWith(
-                        fontSize: 14,
-                      ),
+                      style: AppTheme.dashFieldTextStyle(
+                        context,
+                      ).copyWith(fontSize: 14),
                     ),
                     selectedItemBuilder: (context) => [
                       Text(
                         'All days',
                         overflow: TextOverflow.ellipsis,
-                        style: AppTheme.dashFieldTextStyle(context).copyWith(
-                          fontSize: 14,
-                        ),
+                        style: AppTheme.dashFieldTextStyle(
+                          context,
+                        ).copyWith(fontSize: 14),
                       ),
                       ...List.generate(
                         _maxSelectableCalendarDay,
                         (i) => Text(
                           'Day ${i + 1}',
                           overflow: TextOverflow.ellipsis,
-                          style: AppTheme.dashFieldTextStyle(context).copyWith(
-                            fontSize: 14,
-                          ),
+                          style: AppTheme.dashFieldTextStyle(
+                            context,
+                          ).copyWith(fontSize: 14),
                         ),
                       ),
                     ],

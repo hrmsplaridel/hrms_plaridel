@@ -6,8 +6,10 @@ import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../leave_provider.dart';
+import '../leave_type_definition_cache.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
+import '../models/leave_type_definition.dart';
 import '../widgets/leave_guidance_widgets.dart';
 
 typedef LeaveRequestAction = Future<bool> Function(LeaveRequest request);
@@ -33,6 +35,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   final _formKey = GlobalKey<FormState>();
 
   late LeaveType _leaveType;
+  late String _leaveTypeName;
+  List<LeaveTypeDefinition> _leaveTypeDefinitions = const [];
+  bool _loadingLeaveTypes = false;
   LeaveLocationOption? _locationOption;
   SickLeaveNature? _sickLeaveNature;
   StudyLeavePurpose? _studyPurpose;
@@ -60,6 +65,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     final initial = widget.initialRequest;
     _savedRequest = initial;
     _leaveType = initial?.leaveType ?? LeaveType.vacationLeave;
+    _leaveTypeName = initial?.effectiveLeaveTypeName ?? _leaveType.value;
     _locationOption = initial?.locationOption;
     _sickLeaveNature = initial?.sickLeaveNature;
     _studyPurpose = initial?.studyPurpose;
@@ -90,6 +96,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _workingDaysController = TextEditingController(
       text: initial?.workingDaysApplied?.toString() ?? '',
     );
+    _loadLeaveTypes();
   }
 
   @override
@@ -123,12 +130,131 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _otherPurposeDetailsController.clear();
   }
 
+  LeaveTypeDefinition? get _selectedLeaveTypeDefinition {
+    for (final item in _leaveTypeDefinitions) {
+      if (item.name == _leaveTypeName) return item;
+    }
+    return null;
+  }
+
+  String get _selectedLeaveTypeLabel {
+    final def = _selectedLeaveTypeDefinition;
+    if (def != null) return def.displayName;
+    if (_leaveType == LeaveType.others) {
+      final custom = _customLeaveTypeController.text.trim();
+      if (custom.isNotEmpty) return custom;
+    }
+    return _leaveType.displayName;
+  }
+
+  bool get _selectedRequiresAttachment {
+    final def = _selectedLeaveTypeDefinition;
+    return def?.requiresAttachment ?? _leaveType.requiresAttachment;
+  }
+
+  bool get _selectedAllowsPastDates {
+    final def = _selectedLeaveTypeDefinition;
+    return def?.allowsPastDates ?? _leaveType.allowsPastDates;
+  }
+
+  double? get _selectedMaxDays {
+    final def = _selectedLeaveTypeDefinition;
+    return def?.maxDays ?? _leaveType.maxDays?.toDouble();
+  }
+
+  Future<void> _loadLeaveTypes() async {
+    setState(() => _loadingLeaveTypes = true);
+    try {
+      final items = await LeaveTypeDefinitionCache.instance
+          .listActiveEmployeeTypes();
+      if (!mounted) return;
+      setState(() {
+        _leaveTypeDefinitions = items;
+        _loadingLeaveTypes = false;
+        final selectedExists = items.any((item) => item.name == _leaveTypeName);
+        if (!selectedExists && items.isNotEmpty) {
+          final fallback = items.firstWhere(
+            (item) => item.name == LeaveType.vacationLeave.value,
+            orElse: () => items.first,
+          );
+          _selectLeaveTypeDefinition(fallback, resetDetails: false);
+        }
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingLeaveTypes = false);
+    }
+  }
+
+  void _selectLeaveTypeDefinition(
+    LeaveTypeDefinition definition, {
+    bool resetDetails = true,
+  }) {
+    final nextType = leaveTypeFromString(definition.name);
+    _leaveTypeName = definition.name;
+    _leaveType = nextType;
+    if (nextType == LeaveType.others &&
+        definition.name != LeaveType.others.value) {
+      _customLeaveTypeController.text = definition.displayName;
+    } else if (nextType != LeaveType.others) {
+      _customLeaveTypeController.clear();
+    }
+    if (resetDetails) _resetConditionalSelectionsForType(nextType);
+    if (nextType == LeaveType.others &&
+        definition.name != LeaveType.others.value) {
+      _customLeaveTypeController.text = definition.displayName;
+    }
+  }
+
+  LeaveTypeDefinition? _definitionForName(String name) {
+    for (final item in _leaveTypeDefinitions) {
+      if (item.name == name) return item;
+    }
+    return null;
+  }
+
+  List<DropdownMenuItem<String>> _leaveTypeDropdownItems() {
+    if (_leaveTypeDefinitions.isNotEmpty) {
+      final items = _leaveTypeDefinitions
+          .where(
+            (item) =>
+                (item.employeeCanFile && !item.adminOnly) ||
+                item.name == _leaveTypeName,
+          )
+          .map(
+            (item) => DropdownMenuItem<String>(
+              value: item.name,
+              child: Text(item.displayName),
+            ),
+          )
+          .toList();
+      if (!items.any((item) => item.value == _leaveTypeName)) {
+        items.add(
+          DropdownMenuItem<String>(
+            value: _leaveTypeName,
+            child: Text(_selectedLeaveTypeLabel),
+          ),
+        );
+      }
+      return items;
+    }
+    return LeaveType.values
+        .where((t) => t.employeeCanFile || t == _leaveType)
+        .map(
+          (t) => DropdownMenuItem<String>(
+            value: t.value,
+            child: Text(t.displayName),
+          ),
+        )
+        .toList();
+  }
+
   Future<void> _saveDraft() async {
     if (!_formKey.currentState!.validate()) return;
     if (_startDate == null || _endDate == null) {
       _showMessage('Please select date(s)');
       return;
     }
+    if (!_validateSelectedDates()) return;
     await _submit(isDraft: true);
   }
 
@@ -138,6 +264,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       _showMessage('Please select start and end dates');
       return;
     }
+    if (!_validateSelectedDates()) return;
 
     // FIX #7: Validate that the working days field matches the computed value.
     final computed = _computeWorkingDays();
@@ -199,7 +326,29 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     if (_leaveType == LeaveType.sickLeave) {
       return (_computeWorkingDays() ?? 0) >= 5;
     }
-    return _leaveType.requiresAttachment;
+    return _selectedRequiresAttachment;
+  }
+
+  bool _validateSelectedDates() {
+    final start = _startDate;
+    final end = _endDate;
+    if (start == null || end == null) return false;
+    if (end.isBefore(start)) {
+      _showMessage('End date cannot be earlier than start date.');
+      return false;
+    }
+    if (!_selectedAllowsPastDates) {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final startOnly = DateTime(start.year, start.month, start.day);
+      if (startOnly.isBefore(today)) {
+        _showMessage(
+          'Past-date filing is not allowed for $_selectedLeaveTypeLabel.',
+        );
+        return false;
+      }
+    }
+    return true;
   }
 
   /// Fills CSC header fields (name, office, position, salary, date filed) from
@@ -315,8 +464,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         salary: prior?.salary ?? header.salary,
         dateFiled: header.dateFiled,
         leaveType: _leaveType,
+        leaveTypeName: _leaveTypeName,
+        leaveTypeDisplayName: _selectedLeaveTypeLabel,
         customLeaveTypeText: _leaveType == LeaveType.others
-            ? _customLeaveTypeController.text.trim()
+            ? _selectedLeaveTypeLabel
             : null,
         startDate: _startDate,
         endDate: _endDate,
@@ -432,36 +583,42 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                         children: [
                           _buildSectionTitle('1. Leave Type'),
                           const SizedBox(height: 16),
-                          DropdownButtonFormField<LeaveType>(
-                            value: _leaveType,
+                          DropdownButtonFormField<String>(
+                            value: _leaveTypeName,
                             isExpanded: true,
                             decoration: _inputDecoration('Select Leave Type'),
-                            items: LeaveType.values
-                                .where(
-                                  (t) => t.employeeCanFile || t == _leaveType,
-                                )
-                                .map(
-                                  (t) => DropdownMenuItem(
-                                    value: t,
-                                    child: Text(t.displayName),
-                                  ),
-                                )
-                                .toList(),
+                            items: _leaveTypeDropdownItems(),
                             onChanged: (val) {
                               if (val != null) {
                                 setState(() {
-                                  _leaveType = val;
-                                  _resetConditionalSelectionsForType(val);
+                                  final def = _definitionForName(val);
+                                  if (def != null) {
+                                    _selectLeaveTypeDefinition(def);
+                                  } else {
+                                    _leaveTypeName = val;
+                                    _leaveType = leaveTypeFromString(val);
+                                    _resetConditionalSelectionsForType(
+                                      _leaveType,
+                                    );
+                                  }
                                 });
                               }
                             },
                           ),
+                          if (_loadingLeaveTypes) ...[
+                            const SizedBox(height: 8),
+                            const LinearProgressIndicator(minHeight: 2),
+                          ],
 
                           // B. Dynamic leave-type guidance
                           const SizedBox(height: 14),
-                          LeaveTypeGuidanceCard(leaveType: _leaveType),
+                          LeaveTypeGuidanceCard(
+                            leaveType: _leaveType,
+                            definition: _selectedLeaveTypeDefinition,
+                          ),
 
-                          if (_leaveType == LeaveType.others) ...[
+                          if (_leaveType == LeaveType.others &&
+                              _leaveTypeName == LeaveType.others.value) ...[
                             const SizedBox(height: 16),
                             TextFormField(
                               controller: _customLeaveTypeController,
@@ -476,13 +633,6 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                           ],
                         ],
                       ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // C. Full guidelines button (below Card 1)
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: const ViewFullGuidelinesButton(),
                     ),
                     const SizedBox(height: 16),
 
@@ -563,9 +713,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                                     return 'Cannot exceed $computed computed working day(s) for this range';
                                   }
                                   // Warn about max days for leave type
-                                  final maxDays = _leaveType.maxDays;
+                                  final maxDays = _selectedMaxDays;
                                   if (maxDays != null && entered > maxDays) {
-                                    return '${_leaveType.displayName} allows max $maxDays days';
+                                    return '$_selectedLeaveTypeLabel allows max ${maxDays.toStringAsFixed(maxDays % 1 == 0 ? 0 : 1)} days';
                                   }
                                   return null;
                                 },
@@ -880,7 +1030,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
           _leaveType == LeaveType.sickLeave
               ? 'Medical certificate is required for sick leave exceeding 5 days. '
                     'PDF, JPG, PNG (max 10MB).'
-              : 'A supporting document is required for ${_leaveType.displayName} '
+              : 'A supporting document is required for $_selectedLeaveTypeLabel '
                     '(e.g. medical certificate, birth certificate). '
                     'PDF, JPG, PNG (max 10MB).',
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../landingpage/constants/app_theme.dart';
+import '../../notifications/notification_tap_result.dart';
 import 'dashboard_header_actions.dart';
 
 /// Sidebar width — keep in sync with dashboard sidebars.
@@ -138,10 +139,12 @@ class DashboardAppHeaderBar extends StatelessWidget {
     this.onSidebarToggle,
     this.compactActions = false,
     this.onViewAllNotifications,
+    this.onNotificationTap,
   });
 
   final Widget trailing;
   final VoidCallback? onViewAllNotifications;
+  final void Function(NotificationTapResult? result)? onNotificationTap;
   /// When false (desktop), brand lives in the sidebar rail; this bar is actions only.
   final bool showBrand;
   final bool showMenuButton;
@@ -213,6 +216,7 @@ class DashboardAppHeaderBar extends StatelessWidget {
           DashboardHeaderActions(
             compact: compact,
             onViewAllNotifications: onViewAllNotifications,
+            onNotificationTap: onNotificationTap,
           ),
           DashboardHeaderActionDivider(compact: compact, emphasized: true),
           trailing,

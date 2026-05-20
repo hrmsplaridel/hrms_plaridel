@@ -2,8 +2,8 @@ const WebSocket = require('ws');
 
 let wss = null;
 
-function initWebSocket(server) {
-  wss = new WebSocket.Server({ server, path: '/ws/biometrics' });
+function initWebSocket() {
+  wss = new WebSocket.Server({ noServer: true });
 
   wss.on('connection', (ws) => {
     // Optionally send initial connection success message

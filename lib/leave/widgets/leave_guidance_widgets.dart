@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../landingpage/constants/app_theme.dart';
+import '../leave_type_definition_cache.dart';
 import '../models/leave_type.dart';
+import '../models/leave_type_definition.dart';
 import '../utils/leave_guidance.dart';
 
 // ── A. General Instruction Panel ─────────────────────────────────────────────
@@ -93,15 +95,29 @@ class LeaveGeneralInstructionsPanel extends StatelessWidget {
 // ── B. Dynamic Leave-Type Guidance Card ──────────────────────────────────────
 
 /// Shows contextual, per-leave-type guidance below the leave type dropdown.
-/// Driven entirely by [LeaveGuidance.forType].
+/// Driven by the selected leave type definition when available, so custom
+/// leave types inherit their admin-configured filing rules.
 class LeaveTypeGuidanceCard extends StatelessWidget {
-  const LeaveTypeGuidanceCard({super.key, required this.leaveType});
+  const LeaveTypeGuidanceCard({
+    super.key,
+    required this.leaveType,
+    this.definition,
+  });
 
   final LeaveType leaveType;
+  final LeaveTypeDefinition? definition;
 
   @override
   Widget build(BuildContext context) {
-    final guidance = LeaveGuidance.forType(leaveType);
+    final selectedDefinition = definition;
+    final displayName =
+        selectedDefinition?.displayName ?? leaveType.displayName;
+    final guidance = selectedDefinition == null
+        ? LeaveGuidance.forType(leaveType)
+        : LeaveGuidance.forDefinition(
+            selectedDefinition,
+            fallbackType: leaveType,
+          );
 
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 260),
@@ -110,7 +126,7 @@ class LeaveTypeGuidanceCard extends StatelessWidget {
         child: SizeTransition(sizeFactor: animation, child: child),
       ),
       child: _GuidanceContainer(
-        key: ValueKey(leaveType),
+        key: ValueKey(selectedDefinition?.name ?? leaveType.value),
         color: const Color(0xFFF0F7FF),
         borderColor: AppTheme.primaryNavy.withOpacity(0.18),
         icon: Icons.lightbulb_outline_rounded,
@@ -129,7 +145,7 @@ class LeaveTypeGuidanceCard extends StatelessWidget {
                 const SizedBox(width: 7),
                 Expanded(
                   child: Text(
-                    '${leaveType.displayName} — Quick Guide',
+                    '$displayName — Quick Guide',
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
@@ -219,27 +235,6 @@ class _FullGuidelinesTextButton extends StatelessWidget {
   }
 }
 
-/// A prominently styled outlined button for "View Full Leave Guidelines".
-/// Suitable for placement anywhere in the form (e.g. below the guidance card).
-class ViewFullGuidelinesButton extends StatelessWidget {
-  const ViewFullGuidelinesButton({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return OutlinedButton.icon(
-      onPressed: () => LeaveFullGuidelinesSheet.show(context),
-      icon: const Icon(Icons.menu_book_rounded, size: 18),
-      label: const Text('View Full Leave Guidelines'),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: AppTheme.primaryNavy,
-        side: BorderSide(color: AppTheme.primaryNavy.withOpacity(0.5)),
-        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      ),
-    );
-  }
-}
-
 /// A modal bottom sheet that displays the complete leave filing guidelines,
 /// organized into collapsible sections.
 class LeaveFullGuidelinesSheet extends StatelessWidget {
@@ -306,7 +301,7 @@ class LeaveFullGuidelinesSheet extends StatelessWidget {
                               ),
                             ),
                             Text(
-                              'CSC-based government leave guidelines',
+                              'CSC-based and HR-configured leave guidelines',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: AppTheme.textSecondary,
@@ -449,10 +444,55 @@ class _GuidelineSectionTile extends StatelessWidget {
 }
 
 /// A compact scrollable table showing the max days per leave type.
-class _PerTypeQuickReferenceTable extends StatelessWidget {
+class _PerTypeQuickReferenceTable extends StatefulWidget {
+  @override
+  State<_PerTypeQuickReferenceTable> createState() =>
+      _PerTypeQuickReferenceTableState();
+}
+
+class _PerTypeQuickReferenceTableState
+    extends State<_PerTypeQuickReferenceTable> {
+  late final Future<List<LeaveTypeDefinition>> _definitionsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _definitionsFuture = LeaveTypeDefinitionCache.instance
+        .listActiveEmployeeTypes();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final rows = LeaveType.values.where((t) => t.employeeCanFile).map((t) {
+    return FutureBuilder<List<LeaveTypeDefinition>>(
+      future: _definitionsFuture,
+      builder: (context, snapshot) {
+        final definitions = snapshot.data ?? const <LeaveTypeDefinition>[];
+        final rows = definitions.isEmpty
+            ? _fallbackRows()
+            : definitions.map(_rowFromDefinition).toList();
+        return _buildTable(
+          rows: rows,
+          loading: snapshot.connectionState == ConnectionState.waiting,
+          usingFallback: definitions.isEmpty,
+        );
+      },
+    );
+  }
+
+  _TableRowData _rowFromDefinition(LeaveTypeDefinition definition) {
+    final fallbackType = leaveTypeFromString(definition.name);
+    return _TableRowData(
+      type: definition.displayName,
+      limit: LeaveGuidance.limitTextForDefinition(
+        definition,
+        fallbackType: fallbackType,
+      ),
+      needsDocs: LeaveGuidance.documentsNeededForDefinition(definition),
+    );
+  }
+
+  List<_TableRowData> _fallbackRows() {
+    return LeaveType.values.where((t) => t.employeeCanFile).map((t) {
       final g = LeaveGuidance.forType(t);
       final limit =
           g.limits ??
@@ -463,7 +503,13 @@ class _PerTypeQuickReferenceTable extends StatelessWidget {
         needsDocs: t.requiresAttachment,
       );
     }).toList();
+  }
 
+  Widget _buildTable({
+    required List<_TableRowData> rows,
+    required bool loading,
+    required bool usingFallback,
+  }) {
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.white,
@@ -491,6 +537,17 @@ class _PerTypeQuickReferenceTable extends StatelessWidget {
                     color: AppTheme.textPrimary,
                   ),
                 ),
+                if (loading) ...[
+                  const SizedBox(width: 10),
+                  SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppTheme.primaryNavy,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -587,6 +644,18 @@ class _PerTypeQuickReferenceTable extends StatelessWidget {
               ),
             );
           }),
+          if (usingFallback && loading)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Text(
+                'Loading configured leave type rules...',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 12,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ),
           const SizedBox(height: 8),
         ],
       ),

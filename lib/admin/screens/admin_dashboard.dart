@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../api/user_facing_api_error.dart';
 import 'package:provider/provider.dart';
@@ -9,15 +9,12 @@ import '../../../data/action_brainstorming_coaching.dart';
 import '../../../data/training_need_analysis.dart';
 import '../../../data/training_daily_report.dart';
 import '../../../landingpage/constants/app_theme.dart';
-import '../../../landingpage/screens/landing_page.dart';
-import '../../../login/screens/login_page.dart';
 import '../../../utils/form_pdf.dart';
 import '../../../widgets/read_only_saved_entry_dialog.dart';
 import '../../../widgets/rsp_form_header_footer.dart';
 import '../../../widgets/rsp_ld_saved_records_browser.dart';
 import '../../../widgets/training_daily_report_read_only_view.dart';
 import '../../../widgets/training_report_attachment_preview.dart';
-import '../../../widgets/user_avatar.dart';
 import '../../shared/screens/profile_page.dart' show DashboardProfilePanel;
 import '../../shared/widgets/dashboard_content_navigator.dart';
 import '../../shared/widgets/dashboard_header_actions.dart';
@@ -48,6 +45,9 @@ import '../../../locator/screens/admin_locator_management_screen.dart';
 import '../../../recruitment/screens/rsp_admin_screen.dart';
 import '../../../widgets/feature_card.dart';
 import '../../../employee/screens/employee_dashboard.dart';
+import '../../../notifications/notification_provider.dart';
+import '../../../notifications/notification_tap_result.dart';
+import '../../../notifications/open_notifications_panel.dart';
 
 /// Dashboard accent colors for summary cards and accents (orange theme).
 class _DashboardColors {
@@ -80,7 +80,8 @@ class AdminDashboard extends StatefulWidget {
   State<AdminDashboard> createState() => _AdminDashboardState();
 }
 
-class _AdminDashboardState extends State<AdminDashboard> {
+class _AdminDashboardState extends State<AdminDashboard>
+    with WidgetsBindingObserver {
   AdminMenu _selectedMenu = AdminMenu.dashboard;
   bool _sidebarCollapsed = false;
   final GlobalKey<_DtrContentState> _dtrContentKey =
@@ -90,6 +91,76 @@ class _AdminDashboardState extends State<AdminDashboard> {
     key: _settingsPanelKey,
   );
   final GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
+  Timer? _notificationPollTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<NotificationProvider>().refreshUnreadCount();
+      _notificationPollTimer?.cancel();
+      _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+        if (!mounted) return;
+        context.read<NotificationProvider>().refreshUnreadCount();
+      });
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      context.read<NotificationProvider>().refreshUnreadCount();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _notificationPollTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _handleOpenNotifications() async {
+    final result = await openNotificationsPanel(context);
+    if (!mounted) return;
+    await context.read<NotificationProvider>().refreshUnreadCount();
+    if (!mounted) return;
+    _applyNotificationTapResult(result);
+  }
+
+  void _applyNotificationTapResult(NotificationTapResult? result) {
+    if (result == null || result.kind == NotificationTapKind.none) return;
+    switch (result.kind) {
+      case NotificationTapKind.adminDtrLeaveManagement:
+        setState(() => _selectedMenu = AdminMenu.dtr);
+        DashboardContentNavigator.showHome(_contentNavKey);
+        // DTR mounts on the next frame(s) after the nested navigator rebuilds home.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _dtrContentKey.currentState?.openLeaveManagement();
+          });
+        });
+        break;
+      case NotificationTapKind.adminDtrLocatorManagement:
+        setState(() => _selectedMenu = AdminMenu.dtr);
+        DashboardContentNavigator.showHome(_contentNavKey);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _dtrContentKey.currentState?.openLocatorManagement();
+          });
+        });
+        break;
+      case NotificationTapKind.none:
+      case NotificationTapKind.employeeLeaveApprovals:
+      case NotificationTapKind.employeeLeaveRequests:
+      case NotificationTapKind.employeeLocatorApprovals:
+      case NotificationTapKind.employeeLocatorRequests:
+      case NotificationTapKind.employeeMyAttendance:
+        break;
+    }
+  }
 
   void _onMenuSelected(AdminMenu menu) {
     if (menu == AdminMenu.myProfile) {
@@ -220,6 +291,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   avatarPath: avatarPath,
                   email: email,
                   displayName: displayName,
+                  showBrand: true,
                   onTap: (menu) {
                     _onMenuSelected(menu);
                     if (context.mounted) Navigator.of(context).pop();
@@ -235,6 +307,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   _Sidebar(
                     railMode: true,
                     collapsed: _sidebarCollapsed,
+                    showBrand: false,
                     selectedMenu: _selectedMenu,
                     avatarPath: avatarPath,
                     email: email,
@@ -251,6 +324,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             () => _sidebarCollapsed = !_sidebarCollapsed,
                           ),
                           compactActions: width < 600,
+                          onViewAllNotifications: _handleOpenNotifications,
+                          onNotificationTap: _applyNotificationTapResult,
                           trailing: DashboardAccountMenuButton(
                             avatarPath: avatarPath,
                             compact: width < 600,
@@ -286,6 +361,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     showMenuButton: true,
                     onMenuPressed: () => Scaffold.of(context).openDrawer(),
                     compactActions: width < 600,
+                    onViewAllNotifications: _handleOpenNotifications,
+                    onNotificationTap: _applyNotificationTapResult,
                     trailing: DashboardAccountMenuButton(
                       avatarPath: avatarPath,
                       compact: width < 600,
@@ -628,37 +705,9 @@ class _DashboardContent extends StatelessWidget {
     return false;
   }
 
-  static String _formatDate(DateTime d) {
-    const days = [
-      'Monday',
-      'Tuesday',
-      'Wednesday',
-      'Thursday',
-      'Friday',
-      'Saturday',
-      'Sunday',
-    ];
-    const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    return '${days[d.weekday - 1]}, ${months[d.month - 1]} ${d.day}, ${d.year}';
-  }
-
   @override
   Widget build(BuildContext context) {
     final isNarrow = MediaQuery.of(context).size.width < 500;
-    final now = DateTime.now();
     const q = '';
 
     final showWelcome = _sectionVisible(q, [
@@ -782,36 +831,61 @@ class _DashboardContent extends StatelessWidget {
             decoration: AppTheme.dashSurfaceCard(context),
             child: isNarrow
                 ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        _formatDate(now),
-                        style: TextStyle(
-                          color: AppTheme.dashTextSecondaryOf(context),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
+                      const Align(
+                        alignment: Alignment.centerRight,
+                        child: RealTimeClock(),
                       ),
-                      const SizedBox(height: 10),
-                      Text(
-                        'Welcome back, Admin!',
-                        style: TextStyle(
-                          color: AppTheme.dashTextPrimaryOf(context),
-                          fontSize: 22,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.35,
-                          height: 1.2,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        "Here's the latest overview of the HR activities.",
-                        style: TextStyle(
-                          color: AppTheme.dashTextSecondaryOf(context),
-                          fontSize: 14,
-                          height: 1.45,
-                        ),
+                      const SizedBox(height: 14),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryNavy.withValues(
+                                alpha: 0.08,
+                              ),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(
+                              Icons.waving_hand_outlined,
+                              color: AppTheme.primaryNavy,
+                              size: 22,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Welcome back, Admin!',
+                                  style: TextStyle(
+                                    color: AppTheme.dashTextPrimaryOf(context),
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: -0.35,
+                                    height: 1.2,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  "Here's the latest overview of the HR activities.",
+                                  style: TextStyle(
+                                    color: AppTheme.dashTextSecondaryOf(
+                                      context,
+                                    ),
+                                    fontSize: 14,
+                                    height: 1.45,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   )
@@ -837,15 +911,6 @@ class _DashboardContent extends StatelessWidget {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
-                              _formatDate(now),
-                              style: TextStyle(
-                                color: AppTheme.dashTextSecondaryOf(context),
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
                               'Welcome back, Admin!',
                               style: TextStyle(
                                 color: AppTheme.dashTextPrimaryOf(context),
@@ -867,6 +932,7 @@ class _DashboardContent extends StatelessWidget {
                           ],
                         ),
                       ),
+                      const RealTimeClock(),
                     ],
                   ),
           ),
@@ -1735,29 +1801,64 @@ class _DtrContentState extends State<_DtrContent> {
   /// 9–10 = Holiday / Policy via [_ManageContent], 11 = Biometric Devices,
   /// 12 = Locator Slip Management
   int _dtrSectionIndex = 0;
+  int? _pendingDtrSectionIndex;
 
   /// When opening **Assignment** from Employees, pre-select this employee once.
   String? _prefillAssignmentEmployeeId;
 
   /// Opens **Leave Management** (same as tapping the DTR hub card). Used after notification taps.
   void openLeaveManagement() {
-    if (!mounted) return;
-    setState(() => _dtrSectionIndex = 8);
+    _openDtrSection(8);
   }
 
   /// Opens **Locator Slip Management** (notification deep-link).
   void openLocatorManagement() {
-    if (!mounted) return;
-    setState(() => _dtrSectionIndex = 12);
+    _openDtrSection(12);
   }
 
   void _goToAssignmentWithEmployee(String employeeId) {
     if (!mounted) return;
     setState(() {
       _prefillAssignmentEmployeeId = employeeId;
-      _dtrSectionIndex = 4;
+    });
+    _openDtrSection(4);
+  }
+
+  void _openDtrSection(int index) {
+    if (!mounted) return;
+    if (index == 0) {
+      setState(() {
+        _pendingDtrSectionIndex = null;
+        _dtrSectionIndex = 0;
+      });
+      return;
+    }
+    if (_dtrSectionIndex == index && _pendingDtrSectionIndex == null) return;
+    setState(() => _pendingDtrSectionIndex = index);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _pendingDtrSectionIndex != index) return;
+      setState(() {
+        _dtrSectionIndex = index;
+        _pendingDtrSectionIndex = null;
+      });
     });
   }
+
+  String _dtrSectionTitle(int index) => switch (index) {
+    1 => 'Time Logs',
+    2 => 'Reports',
+    3 => 'Employees',
+    4 => 'Assignment',
+    5 => 'Department',
+    6 => 'Position',
+    7 => 'Shift',
+    8 => 'Leave Management',
+    9 => 'Holiday Management',
+    10 => 'Attendance Policy',
+    11 => 'Biometric Devices',
+    12 => 'Locator Slip Management',
+    _ => 'DTR',
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -1769,11 +1870,11 @@ class _DtrContentState extends State<_DtrContent> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (_dtrSectionIndex != 0) ...[
+              if (_dtrSectionIndex != 0 || _pendingDtrSectionIndex != null) ...[
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
-                    onPressed: () => setState(() => _dtrSectionIndex = 0),
+                    onPressed: () => _openDtrSection(0),
                     icon: const Icon(Icons.arrow_back_rounded, size: 20),
                     label: const Text('Back to DTR'),
                     style: TextButton.styleFrom(
@@ -1783,7 +1884,11 @@ class _DtrContentState extends State<_DtrContent> {
                 ),
                 const SizedBox(height: 16),
               ],
-              if (_dtrSectionIndex == 0) ...[
+              if (_pendingDtrSectionIndex != null)
+                _DtrOpeningPanel(
+                  title: _dtrSectionTitle(_pendingDtrSectionIndex!),
+                )
+              else if (_dtrSectionIndex == 0) ...[
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1822,79 +1927,79 @@ class _DtrContentState extends State<_DtrContent> {
                       subtitle:
                           'Manage and correct daily time-in/out records. Add, edit, or delete entries.',
                       icon: Icons.schedule_rounded,
-                      onTap: () => setState(() => _dtrSectionIndex = 1),
+                      onTap: () => _openDtrSection(1),
                     ),
                     FeatureCard(
                       title: 'Reports',
                       subtitle: 'View attendance and tardiness reports.',
                       icon: Icons.summarize_rounded,
-                      onTap: () => setState(() => _dtrSectionIndex = 2),
+                      onTap: () => _openDtrSection(2),
                     ),
                     FeatureCard(
                       title: 'Employees',
                       subtitle: 'Manage employee profiles and accounts.',
                       icon: Icons.people_rounded,
-                      onTap: () => setState(() => _dtrSectionIndex = 3),
+                      onTap: () => _openDtrSection(3),
                     ),
                     FeatureCard(
                       title: 'Assignment',
                       subtitle:
                           'Assign employees to departments, positions, and shifts.',
                       icon: Icons.assignment_rounded,
-                      onTap: () => setState(() => _dtrSectionIndex = 4),
+                      onTap: () => _openDtrSection(4),
                     ),
                     FeatureCard(
                       title: 'Department',
                       subtitle: 'Manage departments.',
                       icon: Icons.business_rounded,
-                      onTap: () => setState(() => _dtrSectionIndex = 5),
+                      onTap: () => _openDtrSection(5),
                     ),
                     FeatureCard(
                       title: 'Position',
                       subtitle: 'Manage positions.',
                       icon: Icons.work_rounded,
-                      onTap: () => setState(() => _dtrSectionIndex = 6),
+                      onTap: () => _openDtrSection(6),
                     ),
                     FeatureCard(
                       title: 'Shift',
                       subtitle: 'Manage work shifts and schedules.',
                       icon: Icons.access_time_rounded,
-                      onTap: () => setState(() => _dtrSectionIndex = 7),
+                      onTap: () => _openDtrSection(7),
                     ),
                     FeatureCard(
                       title: 'Leave Management',
                       subtitle:
                           'Review employee leave requests, approvals, and leave-related records.',
                       icon: Icons.event_note_rounded,
-                      onTap: () => setState(() => _dtrSectionIndex = 8),
+                      onTap: () => _openDtrSection(8),
                     ),
                     FeatureCard(
                       title: 'Locator Slip Management',
                       subtitle:
                           'Review locator slip approvals, department-head endorsements, and HR final decisions.',
                       icon: Icons.pin_drop_rounded,
-                      onTap: () => setState(() => _dtrSectionIndex = 12),
+                      onTap: () => _openDtrSection(12),
                     ),
                     FeatureCard(
                       title: 'Holiday Management',
                       subtitle:
                           'Define regular, special, and local holidays for DTR and payroll.',
                       icon: Icons.calendar_today_rounded,
-                      onTap: () => setState(() => _dtrSectionIndex = 9),
+                      onTap: () => _openDtrSection(9),
                     ),
                     FeatureCard(
                       title: 'Attendance Policy',
                       subtitle:
                           'Set grace period, late/absent/undertime rules, and default policy.',
                       icon: Icons.policy_rounded,
-                      onTap: () => setState(() => _dtrSectionIndex = 10),
+                      onTap: () => _openDtrSection(10),
                     ),
                     FeatureCard(
                       title: 'Biometric Devices',
                       subtitle:
                           'Register and manage biometric time clocks linked to your database.',
                       icon: Icons.fingerprint_rounded,
-                      onTap: () => setState(() => _dtrSectionIndex = 11),
+                      onTap: () => _openDtrSection(11),
                     ),
                   ],
                 ),
@@ -1924,6 +2029,39 @@ class _DtrContentState extends State<_DtrContent> {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+class _DtrOpeningPanel extends StatelessWidget {
+  const _DtrOpeningPanel({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minHeight: 260),
+      alignment: Alignment.center,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 32,
+            height: 32,
+            child: CircularProgressIndicator(strokeWidth: 3),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Opening $title...',
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }

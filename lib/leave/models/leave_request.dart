@@ -104,6 +104,8 @@ class LeaveRequest {
     this.salary,
     this.dateFiled,
     required this.leaveType,
+    this.leaveTypeName,
+    this.leaveTypeDisplayName,
     this.customLeaveTypeText,
     this.startDate,
     this.endDate,
@@ -133,6 +135,11 @@ class LeaveRequest {
     this.reviewerRole,
     this.reviewerTitle,
     this.reviewedAt,
+    this.departmentHeadReviewerId,
+    this.departmentHeadReviewerName,
+    this.departmentHeadReviewedAt,
+    this.departmentHeadRemarks,
+    this.departmentHeadAction,
     this.createdAt,
     this.updatedAt,
   });
@@ -149,6 +156,8 @@ class LeaveRequest {
 
   /// Section 6.A and 6.B details.
   final LeaveType leaveType;
+  final String? leaveTypeName;
+  final String? leaveTypeDisplayName;
   final String? customLeaveTypeText;
   final DateTime? startDate;
   final DateTime? endDate;
@@ -183,6 +192,11 @@ class LeaveRequest {
   final String? reviewerRole;
   final String? reviewerTitle;
   final DateTime? reviewedAt;
+  final String? departmentHeadReviewerId;
+  final String? departmentHeadReviewerName;
+  final DateTime? departmentHeadReviewedAt;
+  final String? departmentHeadRemarks;
+  final String? departmentHeadAction;
 
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -200,6 +214,8 @@ class LeaveRequest {
       salary: _parseDouble(json['salary']),
       dateFiled: _parseDate(json['date_filed']),
       leaveType: leaveTypeFromString(json['leave_type']?.toString()),
+      leaveTypeName: json['leave_type']?.toString(),
+      leaveTypeDisplayName: json['leave_type_display_name']?.toString(),
       customLeaveTypeText: json['custom_leave_type_text']?.toString(),
       startDate: _parseDate(json['start_date']),
       endDate: _parseDate(json['end_date']),
@@ -239,6 +255,15 @@ class LeaveRequest {
       reviewerRole: json['reviewer_role']?.toString(),
       reviewerTitle: json['reviewer_title']?.toString(),
       reviewedAt: _parseDateTime(json['reviewed_at']),
+      departmentHeadReviewerId: json['department_head_reviewer_id']
+          ?.toString(),
+      departmentHeadReviewerName: json['department_head_reviewer_name']
+          ?.toString(),
+      departmentHeadReviewedAt: _parseDateTime(
+        json['department_head_reviewed_at'],
+      ),
+      departmentHeadRemarks: json['department_head_remarks']?.toString(),
+      departmentHeadAction: json['department_head_action']?.toString(),
       createdAt: _parseDateTime(json['created_at']),
       updatedAt: _parseDateTime(json['updated_at']),
     );
@@ -253,7 +278,8 @@ class LeaveRequest {
       'position_title': _trimOrNull(positionTitle),
       'salary': salary,
       'date_filed': _dateOnly(dateFiled),
-      'leave_type': leaveType.value,
+      'leave_type': effectiveLeaveTypeName,
+      'leave_type_display_name': _trimOrNull(leaveTypeLabel),
       'custom_leave_type_text': _trimOrNull(customLeaveTypeText),
       'start_date': _dateOnly(startDate),
       'end_date': _dateOnly(endDate),
@@ -283,6 +309,12 @@ class LeaveRequest {
       'reviewer_role': _trimOrNull(reviewerRole),
       'reviewer_title': _trimOrNull(reviewerTitle),
       'reviewed_at': reviewedAt?.toIso8601String(),
+      'department_head_reviewer_id': departmentHeadReviewerId,
+      'department_head_reviewer_name': _trimOrNull(departmentHeadReviewerName),
+      'department_head_reviewed_at': departmentHeadReviewedAt
+          ?.toIso8601String(),
+      'department_head_remarks': _trimOrNull(departmentHeadRemarks),
+      'department_head_action': _trimOrNull(departmentHeadAction),
       'updated_at': DateTime.now().toIso8601String(),
     };
   }
@@ -296,6 +328,8 @@ class LeaveRequest {
     double? salary,
     DateTime? dateFiled,
     LeaveType? leaveType,
+    String? leaveTypeName,
+    String? leaveTypeDisplayName,
     String? customLeaveTypeText,
     DateTime? startDate,
     DateTime? endDate,
@@ -325,6 +359,11 @@ class LeaveRequest {
     String? reviewerRole,
     String? reviewerTitle,
     DateTime? reviewedAt,
+    String? departmentHeadReviewerId,
+    String? departmentHeadReviewerName,
+    DateTime? departmentHeadReviewedAt,
+    String? departmentHeadRemarks,
+    String? departmentHeadAction,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -337,6 +376,8 @@ class LeaveRequest {
       salary: salary ?? this.salary,
       dateFiled: dateFiled ?? this.dateFiled,
       leaveType: leaveType ?? this.leaveType,
+      leaveTypeName: leaveTypeName ?? this.leaveTypeName,
+      leaveTypeDisplayName: leaveTypeDisplayName ?? this.leaveTypeDisplayName,
       customLeaveTypeText: customLeaveTypeText ?? this.customLeaveTypeText,
       startDate: startDate ?? this.startDate,
       endDate: endDate ?? this.endDate,
@@ -368,6 +409,15 @@ class LeaveRequest {
       reviewerRole: reviewerRole ?? this.reviewerRole,
       reviewerTitle: reviewerTitle ?? this.reviewerTitle,
       reviewedAt: reviewedAt ?? this.reviewedAt,
+      departmentHeadReviewerId:
+          departmentHeadReviewerId ?? this.departmentHeadReviewerId,
+      departmentHeadReviewerName:
+          departmentHeadReviewerName ?? this.departmentHeadReviewerName,
+      departmentHeadReviewedAt:
+          departmentHeadReviewedAt ?? this.departmentHeadReviewedAt,
+      departmentHeadRemarks:
+          departmentHeadRemarks ?? this.departmentHeadRemarks,
+      departmentHeadAction: departmentHeadAction ?? this.departmentHeadAction,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -376,6 +426,21 @@ class LeaveRequest {
   static String? _trimOrNull(String? value) {
     final trimmed = value?.trim();
     return (trimmed == null || trimmed.isEmpty) ? null : trimmed;
+  }
+
+  String get effectiveLeaveTypeName {
+    final raw = leaveTypeName?.trim();
+    return raw == null || raw.isEmpty ? leaveType.value : raw;
+  }
+
+  String get leaveTypeLabel {
+    final display = leaveTypeDisplayName?.trim();
+    if (display != null && display.isNotEmpty) return display;
+    if (leaveType == LeaveType.others) {
+      final custom = customLeaveTypeText?.trim();
+      if (custom != null && custom.isNotEmpty) return custom;
+    }
+    return leaveType.displayName;
   }
 
   static DateTime? _parseDate(dynamic value) {

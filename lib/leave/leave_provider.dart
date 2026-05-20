@@ -13,15 +13,22 @@ List<LeaveBalance> _filterDisplayBalances(List<LeaveBalance> raw) {
       .toList();
 }
 
+class _LeaveCacheEntry<T> {
+  const _LeaveCacheEntry(this.value, this.cachedAt);
+
+  final T value;
+  final DateTime cachedAt;
+
+  bool isFresh(Duration ttl) => DateTime.now().difference(cachedAt) < ttl;
+}
+
 /// State management for the leave module.
 ///
 /// The provider depends only on the [LeaveRepository] contract, so the UI can
 /// stay unchanged if the backend later switches from Supabase to a custom API.
 class LeaveProvider extends ChangeNotifier {
-  LeaveProvider({
-    required LeaveRepository repository,
-    this.onMutation,
-  }) : _repository = repository;
+  LeaveProvider({required LeaveRepository repository, this.onMutation})
+    : _repository = repository;
 
   final LeaveRepository _repository;
 
@@ -29,15 +36,25 @@ class LeaveProvider extends ChangeNotifier {
   final void Function()? onMutation;
 
   void _notifyMutation() {
+    invalidateCachedLeaveData();
     try {
       onMutation?.call();
     } catch (_) {}
   }
+
   LeaveRepository get repository => _repository;
 
   List<LeaveRequest> _requests = [];
   List<LeaveBalance> _balances = [];
   LeaveRequest? _selectedRequest;
+  static const Duration _requestCacheTtl = Duration(seconds: 30);
+  static const Duration _balanceCacheTtl = Duration(seconds: 60);
+  static const Duration _ledgerCacheTtl = Duration(seconds: 60);
+  static const Duration _referenceCacheTtl = Duration(minutes: 5);
+  final Map<String, _LeaveCacheEntry<List<LeaveRequest>>> _requestCache = {};
+  final Map<String, _LeaveCacheEntry<List<LeaveBalance>>> _balanceCache = {};
+  final Map<String, _LeaveCacheEntry<LeaveLedgerResult>> _ledgerCache = {};
+  _LeaveCacheEntry<Map<String, dynamic>>? _deptHeadCheckCache;
 
   bool _loading = false;
   bool _submitting = false;
@@ -109,10 +126,120 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
+  static String? _normalize(String? value) {
+    final text = value?.trim();
+    return text == null || text.isEmpty ? null : text;
+  }
+
+  static String _dateOnlyKey(DateTime? date) {
+    if (date == null) return '';
+    return '${date.year.toString().padLeft(4, '0')}-'
+        '${date.month.toString().padLeft(2, '0')}-'
+        '${date.day.toString().padLeft(2, '0')}';
+  }
+
+  static String _dateTimeKey(DateTime? date) =>
+      date == null ? '' : date.toUtc().toIso8601String();
+
+  static String _requestQueryKey(String scope, LeaveRequestQuery query) {
+    return [
+      scope,
+      _normalize(query.userId) ?? '',
+      query.status?.value ?? '',
+      _normalize(query.leaveTypeName) ?? query.leaveType?.value ?? '',
+      _dateOnlyKey(query.startDateFrom),
+      _dateOnlyKey(query.startDateTo),
+      _dateTimeKey(query.createdFrom),
+      _dateTimeKey(query.createdTo),
+      query.limit?.toString() ?? '',
+    ].join('|');
+  }
+
+  static String _myRequestsKey(String userId, LeaveRequestStatus? status) {
+    return ['my', _normalize(userId) ?? '', status?.value ?? ''].join('|');
+  }
+
+  static String _ledgerKey(LeaveLedgerQuery query) {
+    return [
+      _normalize(query.userId) ?? '',
+      _normalize(query.leaveType) ?? '',
+      _normalize(query.action) ?? '',
+      _normalize(query.from) ?? '',
+      _normalize(query.to) ?? '',
+      query.limit.toString(),
+      query.offset.toString(),
+    ].join('|');
+  }
+
+  List<T>? _readListCache<T>(
+    Map<String, _LeaveCacheEntry<List<T>>> cache,
+    String key,
+    Duration ttl,
+  ) {
+    final entry = cache[key];
+    if (entry == null || !entry.isFresh(ttl)) return null;
+    return List<T>.from(entry.value);
+  }
+
+  void _writeListCache<T>(
+    Map<String, _LeaveCacheEntry<List<T>>> cache,
+    String key,
+    List<T> value,
+  ) {
+    cache[key] = _LeaveCacheEntry<List<T>>(
+      List<T>.unmodifiable(value),
+      DateTime.now(),
+    );
+  }
+
+  void invalidateCachedLeaveData({bool notify = false}) {
+    _requestCache.clear();
+    _balanceCache.clear();
+    _ledgerCache.clear();
+    _deptHeadCheckCache = null;
+    if (notify) notifyListeners();
+  }
+
+  Future<List<LeaveRequest>> _getMyRequestsCached(
+    String userId, {
+    LeaveRequestStatus? status,
+    bool forceRefresh = false,
+  }) async {
+    final key = _myRequestsKey(userId, status);
+    final cached = forceRefresh
+        ? null
+        : _readListCache(_requestCache, key, _requestCacheTtl);
+    if (cached != null) return cached;
+    final fresh = await _repository.listMyRequests(userId, status: status);
+    _writeListCache(_requestCache, key, fresh);
+    return List<LeaveRequest>.from(fresh);
+  }
+
+  Future<List<LeaveBalance>> _getBalancesForUserCached(
+    String userId, {
+    bool forceRefresh = false,
+  }) async {
+    final key = _normalize(userId);
+    if (key == null) return const <LeaveBalance>[];
+    final cached = forceRefresh
+        ? null
+        : _readListCache(_balanceCache, key, _balanceCacheTtl);
+    if (cached != null) return cached;
+    final fresh = await _repository.getBalancesForUser(key);
+    _writeListCache(_balanceCache, key, fresh);
+    return List<LeaveBalance>.from(fresh);
+  }
+
   /// Fetches leave balances for a user (e.g. for admin approval dialog).
-  Future<List<LeaveBalance>> fetchBalancesForUser(String userId) async {
+  Future<List<LeaveBalance>> fetchBalancesForUser(
+    String userId, {
+    bool forceRefresh = false,
+  }) async {
     try {
-      return await _repository.getBalancesForUser(userId);
+      return await _getBalancesForUserCached(
+        userId,
+        forceRefresh: forceRefresh,
+      );
     } catch (_) {
       return [];
     }
@@ -121,12 +248,17 @@ class LeaveProvider extends ChangeNotifier {
   Future<void> loadMyRequests(
     String userId, {
     LeaveRequestStatus? status,
+    bool forceRefresh = false,
   }) async {
     _loading = true;
     _error = null;
     notifyListeners();
     try {
-      _requests = await _repository.listMyRequests(userId, status: status);
+      _requests = await _getMyRequestsCached(
+        userId,
+        status: status,
+        forceRefresh: forceRefresh,
+      );
     } catch (e) {
       _requests = [];
       _error = e.toString();
@@ -137,6 +269,7 @@ class LeaveProvider extends ChangeNotifier {
 
   Future<void> loadRequests({
     LeaveRequestQuery query = const LeaveRequestQuery(),
+    bool forceRefresh = false,
   }) async {
     _loading = true;
     _error = null;
@@ -144,7 +277,17 @@ class LeaveProvider extends ChangeNotifier {
     try {
       _filterStatus = query.status;
       _filterLeaveType = query.leaveType;
-      _requests = await _repository.listRequests(query: query);
+      final key = _requestQueryKey('admin', query);
+      final cached = forceRefresh
+          ? null
+          : _readListCache(_requestCache, key, _requestCacheTtl);
+      if (cached != null) {
+        _requests = cached;
+      } else {
+        final fresh = await _repository.listRequests(query: query);
+        _writeListCache(_requestCache, key, fresh);
+        _requests = List<LeaveRequest>.from(fresh);
+      }
     } catch (e) {
       _requests = [];
       _error = e.toString();
@@ -153,13 +296,23 @@ class LeaveProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> loadPendingRequests() async {
+  Future<void> loadPendingRequests({bool forceRefresh = false}) async {
     _loading = true;
     _error = null;
     notifyListeners();
     try {
       _filterStatus = LeaveRequestStatus.pending;
-      _requests = await _repository.listPendingRequests();
+      const key = 'pending';
+      final cached = forceRefresh
+          ? null
+          : _readListCache(_requestCache, key, _requestCacheTtl);
+      if (cached != null) {
+        _requests = cached;
+      } else {
+        final fresh = await _repository.listPendingRequests();
+        _writeListCache(_requestCache, key, fresh);
+        _requests = List<LeaveRequest>.from(fresh);
+      }
     } catch (e) {
       _requests = [];
       _error = e.toString();
@@ -168,12 +321,15 @@ class LeaveProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> loadBalances(String userId) async {
+  Future<void> loadBalances(String userId, {bool forceRefresh = false}) async {
     _loading = true;
     _error = null;
     notifyListeners();
     try {
-      final raw = await _repository.getBalancesForUser(userId);
+      final raw = await _getBalancesForUserCached(
+        userId,
+        forceRefresh: forceRefresh,
+      );
       _balances = _filterDisplayBalances(raw);
     } catch (e) {
       _balances = [];
@@ -183,16 +339,23 @@ class LeaveProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> loadMyLeaveData(String userId) async {
+  Future<void> loadMyLeaveData(
+    String userId, {
+    bool forceRefresh = false,
+  }) async {
     _loading = true;
     _error = null;
     notifyListeners();
     try {
-      final requestsFuture = _repository.listMyRequests(
+      final requestsFuture = _getMyRequestsCached(
         userId,
         status: _filterStatus,
+        forceRefresh: forceRefresh,
       );
-      final balancesFuture = _repository.getBalancesForUser(userId);
+      final balancesFuture = _getBalancesForUserCached(
+        userId,
+        forceRefresh: forceRefresh,
+      );
       final results = await Future.wait([requestsFuture, balancesFuture]);
       _requests = results[0] as List<LeaveRequest>;
       _balances = _filterDisplayBalances(results[1] as List<LeaveBalance>);
@@ -244,6 +407,7 @@ class LeaveProvider extends ChangeNotifier {
     notifyListeners();
     try {
       final saved = await _repository.saveDraft(request);
+      invalidateCachedLeaveData();
       _selectedRequest = saved;
       _upsertRequest(saved);
       return saved;
@@ -449,13 +613,37 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
+  Future<MonthlyLeaveAccrualResult?> runMonthlyAccrual(
+    MonthlyLeaveAccrualInput input,
+  ) async {
+    _reviewing = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final result = await _repository.runMonthlyAccrual(input);
+      if (!input.dryRun) _notifyMutation();
+      return result;
+    } catch (e) {
+      _error = e is Exception && e.toString().startsWith('Exception: ')
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
+      return null;
+    } finally {
+      _reviewing = false;
+      notifyListeners();
+    }
+  }
+
   /// Admin/HR: create or overwrite one [LeaveBalance] row for an employee.
-  Future<LeaveBalance?> upsertBalance(LeaveBalance balance) async {
+  Future<LeaveBalance?> upsertBalance(
+    LeaveBalance balance, {
+    String? remarks,
+  }) async {
     _submitting = true;
     _error = null;
     notifyListeners();
     try {
-      final saved = await _repository.upsertBalance(balance);
+      final saved = await _repository.upsertBalance(balance, remarks: remarks);
       _notifyMutation();
       return saved;
     } catch (e) {
@@ -483,6 +671,7 @@ class LeaveProvider extends ChangeNotifier {
         fileBytes: fileBytes,
         fileName: fileName,
       );
+      invalidateCachedLeaveData();
       _selectedRequest = updated;
       _upsertRequest(updated);
       return updated;
@@ -501,6 +690,7 @@ class LeaveProvider extends ChangeNotifier {
     notifyListeners();
     try {
       final updated = await _repository.removeAttachment(requestId);
+      invalidateCachedLeaveData();
       _selectedRequest = updated;
       _upsertRequest(updated);
       return updated;
@@ -538,9 +728,19 @@ class LeaveProvider extends ChangeNotifier {
   bool get isDeptHead => _deptHeadCheck?['isDeptHead'] == true;
 
   /// Check if the current user is a department head.
-  Future<bool> checkIsDepartmentHead() async {
+  Future<bool> checkIsDepartmentHead({bool forceRefresh = false}) async {
+    final cached = _deptHeadCheckCache;
+    if (!forceRefresh && cached != null && cached.isFresh(_referenceCacheTtl)) {
+      _deptHeadCheck = Map<String, dynamic>.from(cached.value);
+      notifyListeners();
+      return isDeptHead;
+    }
     try {
       _deptHeadCheck = await _repository.checkIsDepartmentHead();
+      _deptHeadCheckCache = _LeaveCacheEntry<Map<String, dynamic>>(
+        Map<String, dynamic>.unmodifiable(_deptHeadCheck!),
+        DateTime.now(),
+      );
       notifyListeners();
       return isDeptHead;
     } catch (_) {
@@ -550,13 +750,30 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
-  /// Load leave requests pending department head approval.
-  Future<void> loadDepartmentHeadRequests() async {
+  /// Load leave requests pending department head approval plus handled history.
+  Future<void> loadDepartmentHeadRequests({
+    LeaveRequestQuery query = const LeaveRequestQuery(),
+    bool forceRefresh = false,
+  }) async {
     _loading = true;
     _error = null;
     notifyListeners();
     try {
-      _requests = await _repository.listDepartmentHeadRequests();
+      _filterStatus = query.status;
+      _filterLeaveType = query.leaveType;
+      final key = _requestQueryKey('department-head', query);
+      final cached = forceRefresh
+          ? null
+          : _readListCache(_requestCache, key, _requestCacheTtl);
+      if (cached != null) {
+        _requests = cached;
+      } else {
+        final fresh = await _repository.listDepartmentHeadRequests(
+          query: query,
+        );
+        _writeListCache(_requestCache, key, fresh);
+        _requests = List<LeaveRequest>.from(fresh);
+      }
     } catch (e) {
       _requests = [];
       _error = e.toString();
@@ -565,7 +782,9 @@ class LeaveProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<LeaveRequest?> departmentHeadApprove(LeaveReviewDecisionInput input) async {
+  Future<LeaveRequest?> departmentHeadApprove(
+    LeaveReviewDecisionInput input,
+  ) async {
     _reviewing = true;
     _error = null;
     notifyListeners();
@@ -586,7 +805,9 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
-  Future<LeaveRequest?> departmentHeadReject(LeaveReviewDecisionInput input) async {
+  Future<LeaveRequest?> departmentHeadReject(
+    LeaveReviewDecisionInput input,
+  ) async {
     _reviewing = true;
     _error = null;
     notifyListeners();
@@ -607,7 +828,9 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
-  Future<LeaveRequest?> departmentHeadReturn(LeaveReviewDecisionInput input) async {
+  Future<LeaveRequest?> departmentHeadReturn(
+    LeaveReviewDecisionInput input,
+  ) async {
     _reviewing = true;
     _error = null;
     notifyListeners();
@@ -629,7 +852,31 @@ class LeaveProvider extends ChangeNotifier {
   }
 
   /// Balance movement audit (does not mutate provider list state).
-  Future<LeaveLedgerResult> fetchLeaveLedger(LeaveLedgerQuery query) async {
-    return _repository.getLeaveLedger(query);
+  Future<LeaveLedgerResult> fetchLeaveLedger(
+    LeaveLedgerQuery query, {
+    bool forceRefresh = false,
+  }) async {
+    final key = _ledgerKey(query);
+    final cached = _ledgerCache[key];
+    if (!forceRefresh && cached != null && cached.isFresh(_ledgerCacheTtl)) {
+      final value = cached.value;
+      return LeaveLedgerResult(
+        total: value.total,
+        limit: value.limit,
+        offset: value.offset,
+        rows: List<LeaveBalanceLedgerEntry>.from(value.rows),
+      );
+    }
+    final fresh = await _repository.getLeaveLedger(query);
+    _ledgerCache[key] = _LeaveCacheEntry<LeaveLedgerResult>(
+      LeaveLedgerResult(
+        total: fresh.total,
+        limit: fresh.limit,
+        offset: fresh.offset,
+        rows: List<LeaveBalanceLedgerEntry>.unmodifiable(fresh.rows),
+      ),
+      DateTime.now(),
+    );
+    return fresh;
   }
 }

@@ -122,33 +122,40 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
             runSpacing: 12,
             children: [
               SizedBox(width: 200, child: _buildSearchField()),
-              _buildFilterDropdown<String>(
-                'By User',
-                'By User',
-                ['By User'],
-                (v) {
-                  if (v != null) {
-                    setState(() {
-                      _filterBy = 'user';
-                      _selectedRoleId = null;
-                      _selectedUserId = null;
-                    });
-                    _load();
-                  }
-                },
-              ),
+              _buildFilterDropdown<String>('By User', 'By User', ['By User'], (
+                v,
+              ) {
+                if (v != null) {
+                  setState(() {
+                    _filterBy = 'user';
+                    _selectedRoleId = null;
+                    _selectedUserId = null;
+                  });
+                  _load();
+                }
+              }),
               if (_filterBy == 'role')
                 SizedBox(
                   width: 140,
                   child: _buildFilterDropdown<String?>(
-                    _selectedRoleId == null ? 'All roles' : (_selectedRoleId == 'admin' ? 'Admin' : _selectedRoleId ?? 'All'),
+                    _selectedRoleId == null
+                        ? 'All roles'
+                        : (_selectedRoleId == 'admin'
+                              ? 'Admin'
+                              : _selectedRoleId ?? 'All'),
                     _selectedRoleId,
                     [null, 'admin', 'hr_staff', 'dept_head', 'employee'],
                     (v) {
                       setState(() => _selectedRoleId = v);
                       _load();
                     },
-                    labels: const ['All roles', 'Admin', 'HR Staff', 'Dept Head', 'Employee'],
+                    labels: const [
+                      'All roles',
+                      'Admin',
+                      'HR Staff',
+                      'Dept Head',
+                      'Employee',
+                    ],
                   ),
                 ),
               if (_filterBy == 'user')
@@ -165,14 +172,22 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
               SizedBox(
                 width: 140,
                 child: _buildFilterDropdown<String?>(
-                  _selectedDocumentType == null ? 'All types' : (_selectedDocumentType == '*' ? 'All (*)' : _selectedDocumentType ?? 'All'),
+                  _selectedDocumentType == null
+                      ? 'All types'
+                      : (_selectedDocumentType == '*'
+                            ? 'All (*)'
+                            : _selectedDocumentType ?? 'All'),
                   _selectedDocumentType,
                   [null, '*', ...DocumentType.values.map((t) => t.value)],
                   (v) {
                     setState(() => _selectedDocumentType = v);
                     _load();
                   },
-                  labels: <String>['All types', 'All (*)', ...DocumentType.values.map((t) => t.displayName)],
+                  labels: <String>[
+                    'All types',
+                    'All (*)',
+                    ...DocumentType.values.map((t) => t.displayName),
+                  ],
                 ),
               ),
             ],
@@ -190,15 +205,44 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
               children: [
                 Expanded(
                   flex: 2,
-                  child: Text('Role/User', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppTheme.textPrimary)),
+                  child: Text(
+                    'Role/User',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
                 ),
-                Expanded(child: Text('Document Type', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppTheme.textPrimary))),
-                Expanded(child: Text('Action', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppTheme.textPrimary))),
+                Expanded(
+                  child: Text(
+                    'Document Type',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    'Action',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                ),
                 SizedBox(
                   width: 92,
                   child: Text(
                     'Granted',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppTheme.textPrimary),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      color: AppTheme.textPrimary,
+                    ),
                   ),
                 ),
               ],
@@ -206,14 +250,20 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
           ),
           const SizedBox(height: 8),
           if (provider.loading)
-            const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()))
+            const Padding(
+              padding: EdgeInsets.all(32),
+              child: Center(child: CircularProgressIndicator()),
+            )
           else if (filtered.isEmpty)
             Container(
               constraints: const BoxConstraints(minHeight: 120),
               alignment: Alignment.center,
               child: Text(
                 'No permissions yet',
-                style: TextStyle(color: AppTheme.textSecondary.withOpacity(0.8), fontSize: 14),
+                style: TextStyle(
+                  color: AppTheme.textSecondary.withValues(alpha: 0.8),
+                  fontSize: 14,
+                ),
               ),
             )
           else
@@ -234,18 +284,37 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
       onChanged: (_) => setState(() {}),
       decoration: InputDecoration(
         hintText: 'Search',
-        hintStyle: TextStyle(color: AppTheme.textSecondary.withOpacity(0.8), fontSize: 14),
-        prefixIcon: Icon(Icons.search_rounded, size: 20, color: AppTheme.textSecondary.withOpacity(0.7)),
+        hintStyle: TextStyle(
+          color: AppTheme.textSecondary.withOpacity(0.8),
+          fontSize: 14,
+        ),
+        prefixIcon: Icon(
+          Icons.search_rounded,
+          size: 20,
+          color: AppTheme.textSecondary.withOpacity(0.7),
+        ),
         isDense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
         filled: true,
         fillColor: AppTheme.lightGray.withOpacity(0.5),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide.none,
+        ),
       ),
     );
   }
 
-  Widget _buildFilterDropdown<T>(String displayValue, T? value, List<T> options, ValueChanged<T?> onChanged, {List<String>? labels}) {
+  Widget _buildFilterDropdown<T>(
+    String displayValue,
+    T? value,
+    List<T> options,
+    ValueChanged<T?> onChanged, {
+    List<String>? labels,
+  }) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
@@ -255,12 +324,17 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
       ),
       child: DropdownButton<T>(
         value: value,
-        hint: Text(displayValue, style: TextStyle(fontSize: 14, color: AppTheme.textPrimary)),
+        hint: Text(
+          displayValue,
+          style: TextStyle(fontSize: 14, color: AppTheme.textPrimary),
+        ),
         underline: const SizedBox.shrink(),
         isDense: true,
         isExpanded: true,
         items: options.asMap().entries.map((e) {
-          final label = labels != null && e.key < labels.length ? labels[e.key] : e.value?.toString() ?? 'All';
+          final label = labels != null && e.key < labels.length
+              ? labels[e.key]
+              : e.value?.toString() ?? 'All';
           return DropdownMenuItem(value: e.value, child: Text(label));
         }).toList(),
         onChanged: onChanged,
@@ -275,13 +349,26 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
       children: [
         Row(
           children: [
-            Icon(Icons.account_tree_rounded, color: AppTheme.primaryNavy, size: 20),
+            Icon(
+              Icons.account_tree_rounded,
+              color: AppTheme.primaryNavy,
+              size: 20,
+            ),
             const SizedBox(width: 8),
-            Text('Workflows', style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w700)),
+            Text(
+              'Workflows',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 8),
-        ...provider.routingConfigs.map((config) => _RoutingConfigCard(config: config)),
+        ...provider.routingConfigs.map(
+          (config) => _RoutingConfigCard(config: config),
+        ),
       ],
     );
   }
@@ -324,7 +411,9 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                 backgroundColor: const Color(0xFF4CAF50),
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
                 elevation: 0,
               ),
             ),
@@ -337,14 +426,18 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
               icon: Icon(
                 Icons.refresh_rounded,
                 size: 20,
-                color: provider.loading ? AppTheme.textSecondary.withOpacity(0.5) : AppTheme.textPrimary,
+                color: provider.loading
+                    ? AppTheme.textSecondary.withOpacity(0.5)
+                    : AppTheme.textPrimary,
               ),
               label: const Text('Refresh'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppTheme.textPrimary,
                 side: BorderSide(color: AppTheme.primaryNavy.withOpacity(0.6)),
                 padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
             ),
           ),
@@ -379,7 +472,10 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
   }
 
   // ignore: unused_element
-  void _showAddPermissionDialog(BuildContext context, DocuTrackerProvider provider) {
+  void _showAddPermissionDialog(
+    BuildContext context,
+    DocuTrackerProvider provider,
+  ) {
     DocumentAction action = DocumentAction.view;
     String documentType = '*';
     bool granted = true;
@@ -394,8 +490,13 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setState) => Dialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 48),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 48,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
           clipBehavior: Clip.antiAlias,
           child: ClipRRect(
             borderRadius: BorderRadius.circular(12),
@@ -433,12 +534,16 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                                   value: action,
                                   decoration: DocuTrackerStyles.dropdownDecoration(context, 'Select action'),
                                   items: DocumentAction.values
-                                      .map((a) => DropdownMenuItem(
-                                            value: a,
-                                            child: Text(a.displayName),
-                                          ))
+                                      .map(
+                                        (a) => DropdownMenuItem(
+                                          value: a,
+                                          child: Text(a.displayName),
+                                        ),
+                                      )
                                       .toList(),
-                                  onChanged: (v) => v != null ? setState(() => action = v) : null,
+                                  onChanged: (v) => v != null
+                                      ? setState(() => action = v)
+                                      : null,
                                 ),
                                 const SizedBox(height: 20),
                                 Text(
@@ -454,7 +559,10 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                                   value: documentType,
                                   decoration: DocuTrackerStyles.dropdownDecoration(context, 'Select type'),
                                   items: [
-                                    const DropdownMenuItem(value: '*', child: Text('All (*)')),
+                                    const DropdownMenuItem(
+                                      value: '*',
+                                      child: Text('All (*)'),
+                                    ),
                                     ...DocumentType.values.map(
                                       (t) => DropdownMenuItem(
                                         value: t.value,
@@ -462,18 +570,26 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                                       ),
                                     ),
                                   ],
-                                  onChanged: (v) => v != null ? setState(() => documentType = v) : null,
+                                  onChanged: (v) => v != null
+                                      ? setState(() => documentType = v)
+                                      : null,
                                 ),
                                 const SizedBox(height: 20),
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 12,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: AppTheme.offWhite,
                                     borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(color: Colors.black.withOpacity(0.08)),
+                                    border: Border.all(
+                                      color: Colors.black.withOpacity(0.08),
+                                    ),
                                   ),
                                   child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
                                     children: [
                                       Text(
                                         'Granted',
@@ -485,8 +601,10 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                                       ),
                                       Switch(
                                         value: granted,
-                                        onChanged: (v) => setState(() => granted = v),
-                                        activeTrackColor: AppTheme.primaryNavy.withOpacity(0.6),
+                                        onChanged: (v) =>
+                                            setState(() => granted = v),
+                                        activeTrackColor: AppTheme.primaryNavy
+                                            .withOpacity(0.6),
                                       ),
                                     ],
                                   ),
@@ -521,7 +639,9 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                     padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
                     decoration: BoxDecoration(
                       color: Colors.grey.shade50,
-                      border: Border(top: BorderSide(color: Colors.black.withOpacity(0.06))),
+                      border: Border(
+                        top: BorderSide(color: Colors.black.withOpacity(0.06)),
+                      ),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.end,
@@ -536,7 +656,9 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                           onPressed: () async {
                             if (roleId == null && userId == null) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Specify Role ID or User ID')),
+                                const SnackBar(
+                                  content: Text('Specify Role ID or User ID'),
+                                ),
                               );
                               return;
                             }
@@ -622,9 +744,7 @@ class _RestrictionItem {
 }
 
 class _UserPermissionsDialog extends StatefulWidget {
-  const _UserPermissionsDialog({
-    required this.onSaved,
-  });
+  const _UserPermissionsDialog({required this.onSaved});
 
   final Future<void> Function() onSaved;
 
@@ -655,13 +775,12 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
       documentType: '*',
     );
 
-    _existingByActionName = {
-      for (final p in perms) p.action.name: p,
-    };
+    _existingByActionName = {for (final p in perms) p.action.name: p};
 
     _grantedByActionName = {
       for (final item in _DocuTrackerAdminScreenState._restrictionItems)
-        item.action.name: _existingByActionName[item.action.name]?.granted ?? true,
+        item.action.name:
+            _existingByActionName[item.action.name]?.granted ?? true,
     };
 
     if (!mounted) return;
@@ -710,7 +829,9 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final roleLabel = _DocuTrackerAdminScreenState._userGroups[_selectedRoleId] ?? _selectedRoleId;
+    final roleLabel =
+        _DocuTrackerAdminScreenState._userGroups[_selectedRoleId] ??
+        _selectedRoleId;
 
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 48),
@@ -730,7 +851,8 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                     children: [
                       RspFormHeader(
                         formTitle: 'User Permissions',
-                        subtitle: 'Permission list will change when select user group',
+                        subtitle:
+                            'Permission list will change when select user group',
                       ),
                       const SizedBox(height: 16),
                       Text(
@@ -781,11 +903,16 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                         ..._DocuTrackerAdminScreenState._restrictionItems.map(
                           (item) => Container(
                             margin: const EdgeInsets.only(bottom: 12),
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
                             decoration: BoxDecoration(
                               color: AppTheme.lightGray.withOpacity(0.25),
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.black.withOpacity(0.06)),
+                              border: Border.all(
+                                color: Colors.black.withOpacity(0.06),
+                              ),
                             ),
                             child: Row(
                               children: [
@@ -793,7 +920,9 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                                   width: 34,
                                   height: 34,
                                   decoration: BoxDecoration(
-                                    color: AppTheme.primaryNavy.withOpacity(0.12),
+                                    color: AppTheme.primaryNavy.withOpacity(
+                                      0.12,
+                                    ),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
                                   child: Icon(
@@ -814,13 +943,17 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                                   ),
                                 ),
                                 Switch(
-                                  value: _grantedByActionName[item.action.name] ?? true,
+                                  value:
+                                      _grantedByActionName[item.action.name] ??
+                                      true,
                                   onChanged: (v) {
                                     setState(() {
-                                      _grantedByActionName[item.action.name] = v;
+                                      _grantedByActionName[item.action.name] =
+                                          v;
                                     });
                                   },
-                                  activeTrackColor: AppTheme.primaryNavy.withOpacity(0.6),
+                                  activeTrackColor: AppTheme.primaryNavy
+                                      .withOpacity(0.6),
                                 ),
                               ],
                             ),
@@ -835,13 +968,17 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
               padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
               decoration: BoxDecoration(
                 color: Colors.grey.shade50,
-                border: Border(top: BorderSide(color: Colors.black.withOpacity(0.06))),
+                border: Border(
+                  top: BorderSide(color: Colors.black.withOpacity(0.06)),
+                ),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   OutlinedButton(
-                    onPressed: _loading ? null : () => Navigator.of(context).pop(),
+                    onPressed: _loading
+                        ? null
+                        : () => Navigator.of(context).pop(),
                     style: DocuTrackerStyles.outlinedButtonStyle(),
                     child: const Text('Cancel'),
                   ),
@@ -851,8 +988,13 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                     style: FilledButton.styleFrom(
                       backgroundColor: const Color(0xFF4CAF50),
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 12,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
                     child: const Text('Save changes'),
                   ),
@@ -867,17 +1009,16 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
 }
 
 class _PermissionRow extends StatelessWidget {
-  const _PermissionRow({
-    required this.permission,
-    required this.onEdit,
-  });
+  const _PermissionRow({required this.permission, required this.onEdit});
 
   final DocumentPermission permission;
   final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
-    final target = permission.roleId != null ? 'Role: ${permission.roleId}' : 'User: ${permission.userId}';
+    final target = permission.roleId != null
+        ? 'Role: ${permission.roleId}'
+        : 'User: ${permission.userId}';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       child: Row(
@@ -967,21 +1108,26 @@ class _RoutingConfigCard extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: config.steps
-                .map((s) => Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: AppTheme.offWhite,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.black.withOpacity(0.06)),
+                .map(
+                  (s) => Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppTheme.offWhite,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.black.withOpacity(0.06)),
+                    ),
+                    child: Text(
+                      '${s.stepOrder}. ${s.label ?? s.assigneeType}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.textPrimary,
                       ),
-                      child: Text(
-                        '${s.stepOrder}. ${s.label ?? s.assigneeType}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
-                    ))
+                    ),
+                  ),
+                )
                 .toList(),
           ),
         ],

@@ -6,7 +6,11 @@ const { v4: uuidv4 } = require('uuid');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin, requireAdminOrHr } = require('../middleware/rbac');
-const { validateEmployeeLeaveRequest } = require('./leaveTypeRules');
+const {
+  LEAVE_TYPE_RULES,
+  SPECIAL_PROCESS_PURPOSES,
+  mustBlockMissingAttachment,
+} = require('./leaveTypeRules');
 const {
   validateEmployeeUpdateTransition,
   validateEmployeeCancelTransition,
@@ -32,6 +36,8 @@ const {
 } = require('../services/holidayRangeUtils');
 const leaveNotifications = require('../services/leaveNotifications');
 const { runLeaveMonthlyAccrual } = require('../services/leaveMonthlyAccrual');
+const { broadcastAppEvent } = require('../websockets/appEvents');
+const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
 
 const router = express.Router();
 
@@ -41,17 +47,142 @@ function notifySafe(fn) {
     .then(() => fn())
     .catch((e) => console.error('[leave notification]', e));
 }
+
+function leaveRowUserId(row = {}) {
+  return row.user_id || row.employee_id || row.userId || row.employeeId || null;
+}
+
+function broadcastLeaveUpdated(action, row = {}, extra = {}) {
+  try {
+    const requestId = row.id || extra.requestId || extra.leaveRequestId || null;
+    broadcastAppEvent('leave_updated', {
+      action,
+      requestId,
+      leaveRequestId: requestId,
+      userId: leaveRowUserId(row) || extra.userId || null,
+      status: row.status || extra.status || null,
+      updatedAt: new Date().toISOString(),
+      ...extra,
+    });
+  } catch (e) {
+    console.error('[leave websocket]', e);
+  }
+}
+
+function broadcastDtrLeaveRefresh(action, { userId, leaveRequestId, dateFrom, dateTo } = {}) {
+  try {
+    if (!userId) return;
+    const normalizedUserId = String(userId);
+    broadcastBiometricUpdate('dtr_refresh', {
+      action,
+      userId: normalizedUserId,
+      userIds: [normalizedUserId],
+      requestId: leaveRequestId || null,
+      leaveRequestId: leaveRequestId || null,
+      dateFrom: dateFrom || null,
+      dateTo: dateTo || null,
+    });
+  } catch (e) {
+    console.error('[leave dtr websocket]', e);
+  }
+}
 const protect = [authMiddleware];
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
 const LEAVE_ATTACHMENT_SUBDIR = 'leave-attachments';
+const SYSTEM_LEAVE_TYPE_NAMES = Object.freeze(Object.keys(LEAVE_TYPE_RULES));
+const BALANCE_LEDGER_LEAVE_TYPES = new Set([
+  'vacationLeave',
+  'mandatoryForcedLeave',
+  'sickLeave',
+  'maternityLeave',
+  'paternityLeave',
+  'specialPrivilegeLeave',
+  'soloParentLeave',
+  'studyLeave',
+  'tenDayVawcLeave',
+  'rehabilitationPrivilege',
+  'specialLeaveBenefitsForWomen',
+  'specialEmergencyCalamityLeave',
+  'adoptionLeave',
+  'others',
+]);
 
 initLeaveRequestHistory(pool);
 initLeaveBalanceLedger(pool);
 pool
   .query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`)
-  .then(() =>
-    pool.query(`
+  .then(async () => {
+    await pool.query(`
+      ALTER TABLE leave_types
+        ADD COLUMN IF NOT EXISTS display_name TEXT,
+        ADD COLUMN IF NOT EXISTS employee_can_file BOOLEAN NOT NULL DEFAULT true,
+        ADD COLUMN IF NOT EXISTS admin_only BOOLEAN NOT NULL DEFAULT false,
+        ADD COLUMN IF NOT EXISTS allows_past_dates BOOLEAN NOT NULL DEFAULT true,
+        ADD COLUMN IF NOT EXISTS requires_attachment BOOLEAN NOT NULL DEFAULT false,
+        ADD COLUMN IF NOT EXISTS requires_attachment_when_over_days NUMERIC,
+        ADD COLUMN IF NOT EXISTS max_days NUMERIC,
+        ADD COLUMN IF NOT EXISTS affects_dtr_normally BOOLEAN NOT NULL DEFAULT true,
+        ADD COLUMN IF NOT EXISTS balance_ledger_type TEXT NOT NULL DEFAULT 'others',
+        ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT false,
+        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+    `);
+
+    await pool.query(`
+      UPDATE leave_types
+      SET display_name = COALESCE(NULLIF(display_name, ''), description, name),
+          is_system = CASE
+            WHEN name = ANY($1::text[]) THEN true
+            ELSE is_system
+          END,
+          updated_at = COALESCE(updated_at, now());
+    `, [SYSTEM_LEAVE_TYPE_NAMES]);
+
+    await pool.query(`
+      UPDATE leave_types
+      SET employee_can_file = CASE WHEN name = 'mandatoryForcedLeave' THEN false ELSE true END,
+          admin_only = CASE WHEN name = 'mandatoryForcedLeave' THEN true ELSE false END,
+          allows_past_dates = CASE WHEN name IN ('vacationLeave', 'specialPrivilegeLeave') THEN false ELSE true END,
+          requires_attachment = CASE
+            WHEN name IN (
+              'maternityLeave',
+              'paternityLeave',
+              'soloParentLeave',
+              'studyLeave',
+              'tenDayVawcLeave',
+              'rehabilitationPrivilege',
+              'specialLeaveBenefitsForWomen',
+              'specialEmergencyCalamityLeave',
+              'adoptionLeave',
+              'others'
+            ) THEN true
+            ELSE false
+          END,
+          requires_attachment_when_over_days = CASE WHEN name = 'sickLeave' THEN 5 ELSE NULL END,
+          max_days = CASE
+            WHEN name = 'mandatoryForcedLeave' THEN 5
+            WHEN name = 'maternityLeave' THEN 105
+            WHEN name = 'paternityLeave' THEN 7
+            WHEN name = 'specialPrivilegeLeave' THEN 3
+            WHEN name = 'soloParentLeave' THEN 7
+            WHEN name = 'studyLeave' THEN 180
+            WHEN name = 'tenDayVawcLeave' THEN 10
+            WHEN name = 'rehabilitationPrivilege' THEN 180
+            WHEN name = 'specialLeaveBenefitsForWomen' THEN 60
+            WHEN name = 'specialEmergencyCalamityLeave' THEN 5
+            ELSE NULL
+          END,
+          affects_dtr_normally = true,
+          balance_ledger_type = CASE
+            WHEN name = 'mandatoryForcedLeave' THEN 'vacationLeave'
+            WHEN name = ANY($1::text[]) THEN name
+            ELSE 'others'
+          END,
+          is_active = true
+      WHERE name = ANY($1::text[]);
+    `, [SYSTEM_LEAVE_TYPE_NAMES]);
+
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS leave_balance_deduction_history (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -63,10 +194,13 @@ pool
         applied_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         metadata_json JSONB
       );
+    `);
+
+    await pool.query(`
       CREATE INDEX IF NOT EXISTS idx_leave_balance_deduction_history_user_applied
         ON leave_balance_deduction_history(user_id, applied_at DESC);
-    `)
-  )
+    `);
+  })
   .catch((err) =>
     console.error('[leave] failed to ensure leave_balance_deduction_history table', err)
   );
@@ -184,10 +318,175 @@ async function hasOverlappingLeaveRequest(client, userId, startStr, endStr, excl
   return q.rows.length > 0;
 }
 
+function systemLeaveTypeDisplayName(name) {
+  const labels = {
+    vacationLeave: 'Vacation Leave',
+    mandatoryForcedLeave: 'Mandatory/Forced Leave',
+    sickLeave: 'Sick Leave',
+    maternityLeave: 'Maternity Leave',
+    paternityLeave: 'Paternity Leave',
+    specialPrivilegeLeave: 'Special Privilege Leave',
+    soloParentLeave: 'Solo Parent Leave',
+    studyLeave: 'Study Leave',
+    tenDayVawcLeave: '10-Day VAWC Leave',
+    rehabilitationPrivilege: 'Rehabilitation Privilege',
+    specialLeaveBenefitsForWomen: 'Special Leave Benefits for Women',
+    specialEmergencyCalamityLeave: 'Special Emergency (Calamity) Leave',
+    adoptionLeave: 'Adoption Leave',
+    others: 'Others',
+  };
+  return labels[name] || name;
+}
+
+function slugLeaveTypeName(displayName) {
+  const source = (displayName || '').toString().trim();
+  const words = source.match(/[A-Za-z0-9]+/g) || [];
+  if (words.length === 0) return null;
+  const [first, ...rest] = words;
+  const base = [
+    first.toLowerCase(),
+    ...rest.map((w) => `${w[0].toUpperCase()}${w.slice(1).toLowerCase()}`),
+  ].join('');
+  return base.endsWith('Leave') ? base : `${base}Leave`;
+}
+
+function leaveTypeRuleDefaults(name) {
+  return LEAVE_TYPE_RULES[name] || {
+    employee_can_file: true,
+    admin_only: false,
+    allows_past_dates: true,
+    requires_attachment: true,
+    requires_attachment_when_over_days: null,
+    max_days: null,
+    affects_dtr_normally: true,
+  };
+}
+
+function normalizeLedgerType(value, leaveTypeName) {
+  const raw = (value || '').toString().trim();
+  if (BALANCE_LEDGER_LEAVE_TYPES.has(raw)) return raw;
+  if (leaveTypeName === 'mandatoryForcedLeave') return 'vacationLeave';
+  if (BALANCE_LEDGER_LEAVE_TYPES.has(leaveTypeName)) return leaveTypeName;
+  return 'others';
+}
+
+function leaveTypeRowToApi(row = {}) {
+  const name = (row.name || '').toString();
+  const fallback = leaveTypeRuleDefaults(name);
+  const displayName =
+    row.display_name || row.description || systemLeaveTypeDisplayName(name);
+  return {
+    id: row.id,
+    name,
+    display_name: displayName,
+    description: row.description || null,
+    is_active: row.is_active !== false,
+    is_system: row.is_system === true || SYSTEM_LEAVE_TYPE_NAMES.includes(name),
+    employee_can_file:
+      row.employee_can_file != null
+        ? row.employee_can_file === true
+        : fallback.employee_can_file !== false,
+    admin_only:
+      row.admin_only != null ? row.admin_only === true : fallback.admin_only === true,
+    allows_past_dates:
+      row.allows_past_dates != null
+        ? row.allows_past_dates === true
+        : fallback.allows_past_dates !== false,
+    requires_attachment:
+      row.requires_attachment != null
+        ? row.requires_attachment === true
+        : fallback.requires_attachment === true,
+    requires_attachment_when_over_days:
+      row.requires_attachment_when_over_days != null
+        ? parseFloat(row.requires_attachment_when_over_days)
+        : fallback.requires_attachment_when_over_days ?? null,
+    max_days:
+      row.max_days != null ? parseFloat(row.max_days) : fallback.max_days ?? null,
+    affects_dtr_normally:
+      row.affects_dtr_normally != null
+        ? row.affects_dtr_normally === true
+        : fallback.affects_dtr_normally !== false,
+    balance_ledger_type: normalizeLedgerType(row.balance_ledger_type, name),
+    created_at: row.created_at || null,
+    updated_at: row.updated_at || null,
+  };
+}
+
+async function getLeaveTypeDefinition(client, name) {
+  const trimmed = (name || '').toString().trim();
+  if (!trimmed) return null;
+  const found = await client.query(
+    `SELECT *
+     FROM leave_types
+     WHERE name = $1 AND (is_active IS NULL OR is_active = true)
+     LIMIT 1`,
+    [trimmed]
+  );
+  if (found.rows.length === 0) return null;
+  return leaveTypeRowToApi(found.rows[0]);
+}
+
+function validateEmployeeLeaveRequestWithRule(opts) {
+  const {
+    rule,
+    leaveType,
+    otherPurpose,
+    startDateStr,
+    numberOfDays,
+  } = opts;
+
+  if (!rule) return { valid: true };
+  if (rule.admin_only) {
+    return {
+      valid: false,
+      error: 'This leave type cannot be filed by employees. It is admin-assigned only.',
+    };
+  }
+  if (rule.employee_can_file === false) {
+    return {
+      valid: false,
+      error: 'This leave type is not available for employee filing.',
+    };
+  }
+  if (leaveType === 'others' && otherPurpose) {
+    const purpose = String(otherPurpose).trim().toLowerCase();
+    if (
+      SPECIAL_PROCESS_PURPOSES.some((p) =>
+        purpose.includes(p.toLowerCase().replace(/_/g, ''))
+      )
+    ) {
+      return {
+        valid: false,
+        error:
+          'Monetization of Leave Credits and Terminal Leave are HR/admin processes. Please contact HR.',
+      };
+    }
+  }
+  if (rule.allows_past_dates === false && startDateStr) {
+    const today = new Date().toISOString().slice(0, 10);
+    if (startDateStr < today) {
+      return {
+        valid: false,
+        error: 'Past-date filing is not allowed for this leave type. Please file in advance.',
+      };
+    }
+  }
+  if (rule.max_days != null && Number.isFinite(parseFloat(rule.max_days)) && numberOfDays != null) {
+    const days = parseFloat(numberOfDays);
+    const maxDays = parseFloat(rule.max_days);
+    if (!Number.isNaN(days) && days > maxDays) {
+      return {
+        valid: false,
+        error: `This leave type allows a maximum of ${maxDays} working days. Requested: ${days.toFixed(1)}.`,
+      };
+    }
+  }
+  return { valid: true };
+}
+
 async function ensureLeaveTypeIdByName(client, name) {
   const trimmed = (name || '').toString().trim();
   if (!trimmed) return null;
-  // IMPORTANT: leave_types are predefined; do NOT auto-insert.
   const found = await client.query(
     'SELECT id FROM leave_types WHERE name = $1 AND (is_active IS NULL OR is_active = true) LIMIT 1',
     [trimmed]
@@ -218,6 +517,14 @@ function mapLeaveRowToApi(row) {
     reason: row.reason || null,
     status: row.status,
     reviewer_id: row.reviewer_id || row.approved_by || null,
+    reviewer_name: row.reviewer_name || row.reviewer_full_name || null,
+    reviewer_role: row.reviewer_role || null,
+    reviewer_title: row.reviewer_title || null,
+    department_head_reviewer_id: row.department_head_reviewer_id || null,
+    department_head_reviewer_name: row.department_head_reviewer_name || null,
+    department_head_reviewed_at: row.department_head_reviewed_at || null,
+    department_head_remarks: row.department_head_remarks || null,
+    department_head_action: row.department_head_action || null,
     hr_remarks: row.reviewer_remarks || null,
     recommendation_remarks:
       row.recommendation_remarks ||
@@ -255,6 +562,14 @@ function mapLeaveRowToApi(row) {
     created_at: row.created_at || null,
     updated_at: row.updated_at || null,
     leave_type: row.leave_type_name || row.leave_type || null,
+    leave_type_display_name:
+      row.leave_type_display_name ||
+      details.leave_type_display_name ||
+      details.leaveTypeDisplayName ||
+      row.leave_type_description ||
+      details.custom_leave_type_text ||
+      details.customLeaveTypeText ||
+      systemLeaveTypeDisplayName(row.leave_type_name || row.leave_type),
     attachment_name: row.attachment_name || null,
     attachment_path: row.attachment_path || null,
     attachment_mime_type: row.attachment_mime_type || null,
@@ -311,6 +626,188 @@ function uploadLeaveAttachmentMw(req, res, next) {
   });
 }
 
+function leaveTypePayloadFromBody(body = {}, existing = null) {
+  const displayName = (body.display_name ?? body.displayName ?? body.description ?? '').toString().trim();
+  const rawName = (body.name ?? '').toString().trim();
+  const name = rawName || slugLeaveTypeName(displayName);
+  const base = leaveTypeRuleDefaults(name);
+
+  function camelKey(key) {
+    return key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+  }
+
+  function boolField(key, fallback) {
+    const value = body[key] ?? body[camelKey(key)];
+    if (value == null) return fallback;
+    if (typeof value === 'boolean') return value;
+    return ['true', '1', 'yes', 'y'].includes(String(value).trim().toLowerCase());
+  }
+
+  function numberField(key, fallback = null) {
+    const value = body[key] ?? body[camelKey(key)];
+    if (value == null || value === '') return fallback;
+    const n = parseFloat(value);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  return {
+    id: existing?.id || null,
+    name,
+    displayName: displayName || existing?.display_name || existing?.description || systemLeaveTypeDisplayName(name),
+    description: (body.description ?? existing?.description ?? displayName ?? '').toString().trim() || null,
+    isActive: boolField('is_active', existing?.is_active ?? true),
+    employeeCanFile: boolField('employee_can_file', existing?.employee_can_file ?? base.employee_can_file !== false),
+    adminOnly: boolField('admin_only', existing?.admin_only ?? base.admin_only === true),
+    allowsPastDates: boolField('allows_past_dates', existing?.allows_past_dates ?? base.allows_past_dates !== false),
+    requiresAttachment: boolField('requires_attachment', existing?.requires_attachment ?? base.requires_attachment === true),
+    requiresAttachmentWhenOverDays: numberField(
+      'requires_attachment_when_over_days',
+      existing?.requires_attachment_when_over_days ?? base.requires_attachment_when_over_days ?? null
+    ),
+    maxDays: numberField('max_days', existing?.max_days ?? base.max_days ?? null),
+    affectsDtrNormally: boolField('affects_dtr_normally', existing?.affects_dtr_normally ?? base.affects_dtr_normally !== false),
+    balanceLedgerType: normalizeLedgerType(body.balance_ledger_type ?? body.balanceLedgerType ?? existing?.balance_ledger_type, name),
+  };
+}
+
+// GET /api/leave/types — active leave types for forms, or all for admin management.
+router.get('/types', protect, async (req, res) => {
+  try {
+    const includeInactive =
+      String(req.query.include_inactive || req.query.includeInactive || '').toLowerCase() === 'true' ||
+      req.query.include_inactive === '1';
+    const q = await pool.query(
+      `SELECT *
+       FROM leave_types
+       WHERE ($1::boolean = true OR is_active = true)
+       ORDER BY is_system DESC, display_name NULLS LAST, description NULLS LAST, name`,
+      [includeInactive]
+    );
+    res.json(q.rows.map(leaveTypeRowToApi));
+  } catch (err) {
+    console.error('[leave GET /types]', err);
+    res.status(500).json({ error: 'Failed to fetch leave types' });
+  }
+});
+
+// POST /api/leave/types — admin/HR creates a custom leave type with rules.
+router.post('/types', protect, requireAdminOrHr, async (req, res) => {
+  try {
+    const payload = leaveTypePayloadFromBody(req.body || {});
+    if (!payload.name || !payload.displayName) {
+      return res.status(400).json({ error: 'Leave type name is required' });
+    }
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(payload.name)) {
+      return res.status(400).json({
+        error: 'Leave type key must start with a letter and contain only letters, numbers, or underscore.',
+      });
+    }
+    const q = await pool.query(
+      `INSERT INTO leave_types (
+          name, display_name, description, is_active, is_system,
+          employee_can_file, admin_only, allows_past_dates,
+          requires_attachment, requires_attachment_when_over_days,
+          max_days, affects_dtr_normally, balance_ledger_type,
+          created_at, updated_at
+        )
+        VALUES (
+          $1, $2, $3, $4, false,
+          $5, $6, $7,
+          $8, $9,
+          $10, $11, $12,
+          now(), now()
+        )
+        RETURNING *`,
+      [
+        payload.name,
+        payload.displayName,
+        payload.description,
+        payload.isActive,
+        payload.employeeCanFile,
+        payload.adminOnly,
+        payload.allowsPastDates,
+        payload.requiresAttachment,
+        payload.requiresAttachmentWhenOverDays,
+        payload.maxDays,
+        payload.affectsDtrNormally,
+        payload.balanceLedgerType,
+      ]
+    );
+    res.status(201).json(leaveTypeRowToApi(q.rows[0]));
+  } catch (err) {
+    console.error('[leave POST /types]', err);
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Leave type key already exists' });
+    }
+    res.status(500).json({ error: 'Failed to create leave type' });
+  }
+});
+
+// PUT /api/leave/types/:id — admin/HR updates display/rules.
+router.put('/types/:id', protect, requireAdminOrHr, async (req, res) => {
+  try {
+    const existingQ = await pool.query('SELECT * FROM leave_types WHERE id = $1::uuid', [req.params.id]);
+    if (existingQ.rows.length === 0) {
+      return res.status(404).json({ error: 'Leave type not found' });
+    }
+    const existing = existingQ.rows[0];
+    const isSystem = existing.is_system === true || SYSTEM_LEAVE_TYPE_NAMES.includes(existing.name);
+    const payload = leaveTypePayloadFromBody(req.body || {}, existing);
+    const nextName = isSystem ? existing.name : payload.name;
+    const nextActive = isSystem ? true : payload.isActive;
+    if (!nextName || !payload.displayName) {
+      return res.status(400).json({ error: 'Leave type name is required' });
+    }
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(nextName)) {
+      return res.status(400).json({
+        error: 'Leave type key must start with a letter and contain only letters, numbers, or underscore.',
+      });
+    }
+    const q = await pool.query(
+      `UPDATE leave_types
+       SET name = $1,
+           display_name = $2,
+           description = $3,
+           is_active = $4,
+           is_system = $5,
+           employee_can_file = $6,
+           admin_only = $7,
+           allows_past_dates = $8,
+           requires_attachment = $9,
+           requires_attachment_when_over_days = $10,
+           max_days = $11,
+           affects_dtr_normally = $12,
+           balance_ledger_type = $13,
+           updated_at = now()
+       WHERE id = $14::uuid
+       RETURNING *`,
+      [
+        nextName,
+        payload.displayName,
+        payload.description,
+        nextActive,
+        isSystem,
+        payload.employeeCanFile,
+        payload.adminOnly,
+        payload.allowsPastDates,
+        payload.requiresAttachment,
+        payload.requiresAttachmentWhenOverDays,
+        payload.maxDays,
+        payload.affectsDtrNormally,
+        payload.balanceLedgerType,
+        req.params.id,
+      ]
+    );
+    res.json(leaveTypeRowToApi(q.rows[0]));
+  } catch (err) {
+    console.error('[leave PUT /types/:id]', err);
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Leave type key already exists' });
+    }
+    res.status(500).json({ error: 'Failed to update leave type' });
+  }
+});
+
 /** Check if user can access leave request (owner or admin). */
 async function canAccessLeaveRequest(requestId, userId, isAdmin) {
   // FIX #10: prefer user_id first; employee_id kept as fallback for legacy rows.
@@ -340,7 +837,20 @@ function canModifyAttachment(status) {
  */
 function balanceLedgerLeaveType(leaveTypeName) {
   if (!leaveTypeName) return leaveTypeName;
-  return leaveTypeName === 'mandatoryForcedLeave' ? 'vacationLeave' : leaveTypeName;
+  if (leaveTypeName === 'mandatoryForcedLeave') return 'vacationLeave';
+  return BALANCE_LEDGER_LEAVE_TYPES.has(leaveTypeName) ? leaveTypeName : 'others';
+}
+
+async function resolveBalanceLedgerLeaveType(client, leaveTypeName) {
+  const fallback = balanceLedgerLeaveType(leaveTypeName);
+  if (!client || !leaveTypeName || BALANCE_LEDGER_LEAVE_TYPES.has(leaveTypeName)) {
+    return fallback;
+  }
+  const q = await client.query(
+    'SELECT balance_ledger_type FROM leave_types WHERE name = $1 LIMIT 1',
+    [leaveTypeName]
+  );
+  return normalizeLedgerType(q.rows[0]?.balance_ledger_type, leaveTypeName);
 }
 
 /** Matches Flutter LeaveBalance.remainingDays: earned - used + adjusted */
@@ -378,7 +888,7 @@ function balanceRowToSnapshot(row) {
 async function assertEnoughAvailableForPendingReservation(client, userId, leaveTypeName, deltaDays) {
   const d = deltaDays != null ? parseFloat(deltaDays) : 0;
   if (!userId || !leaveTypeName || !Number.isFinite(d) || d <= 0) return;
-  const ledgerType = balanceLedgerLeaveType(leaveTypeName);
+  const ledgerType = await resolveBalanceLedgerLeaveType(client, leaveTypeName);
   const bal = await client.query(
     `SELECT earned_days, used_days, pending_days, adjusted_days
      FROM leave_balances
@@ -413,7 +923,7 @@ async function upsertLeaveBalanceDeduction(
   /** When true (HR final approval only): clear the submit-time pending reservation before adding used_days. */
   const decrementPendingDays = options.decrementPendingDays === true;
 
-  const ledgerType = balanceLedgerLeaveType(leaveTypeName);
+  const ledgerType = await resolveBalanceLedgerLeaveType(client, leaveTypeName);
 
   const bal = await client.query(
     `SELECT earned_days, used_days, pending_days, adjusted_days
@@ -610,6 +1120,7 @@ router.post('/draft', protect, async (req, res) => {
       await client.query('BEGIN');
       // #12: Recompute with holiday awareness now that we have a DB client.
       const daysHolidayAware = await computeNumberOfDays(startStr, endStr, client);
+      const effectiveDaysDraft = daysHolidayAware ?? days;
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
       if (!leaveTypeId) {
         await client.query('ROLLBACK');
@@ -619,12 +1130,14 @@ router.post('/draft', protect, async (req, res) => {
         ? details
         : { ...rest, leave_type, start_date: startStr, end_date: endStr };
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
-      const validation = validateEmployeeLeaveRequest({
+      const leaveRule = await getLeaveTypeDefinition(client, leave_type);
+      const validation = validateEmployeeLeaveRequestWithRule({
+        rule: leaveRule,
         leaveType: leave_type,
         otherPurpose: otherPurpose || null,
         startDateStr: startStr,
         endDateStr: endStr,
-        numberOfDays: days,
+        numberOfDays: effectiveDaysDraft,
         hasAttachment: false,
       });
       if (!validation.valid) {
@@ -655,7 +1168,7 @@ router.post('/draft', protect, async (req, res) => {
           )
           VALUES ($1::uuid, $1::uuid, $2::uuid, $3::date, $4::date, $5::numeric, $5::numeric, $6::text, $7::jsonb, 'draft', now(), now())
           RETURNING *`,
-        [userId, leaveTypeId, startStr, endStr, daysHolidayAware ?? days, reason || null, payloadDetails]
+        [userId, leaveTypeId, startStr, endStr, effectiveDaysDraft, reason || null, payloadDetails]
       );
 
       const row = q.rows[0];
@@ -671,12 +1184,14 @@ router.post('/draft', protect, async (req, res) => {
           leave_type: leave_type || null,
           start_date: startStr,
           end_date: endStr,
-          number_of_days: daysHolidayAware ?? days,
+          number_of_days: effectiveDaysDraft,
         },
       });
       const typeName = leave_type ? String(leave_type) : null;
       await client.query('COMMIT');
-      res.status(201).json(mapLeaveRowToApi({ ...row, leave_type_name: typeName }));
+      const mapped = mapLeaveRowToApi({ ...row, leave_type_name: typeName });
+      broadcastLeaveUpdated('saved_draft', mapped);
+      res.status(201).json(mapped);
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
@@ -723,25 +1238,21 @@ router.post('/submit', protect, async (req, res) => {
         : { ...rest, leave_type, start_date: startStr, end_date: endStr };
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
 
-      // FIX #7 (backend): Validate numberOfDays is positive and <= computed (holiday-aware) days.
+      // Validate the server-computed, holiday-aware working day count.
       const effectiveDaysSubmit = daysHolidayAwareSubmit ?? days;
       if (effectiveDaysSubmit == null || effectiveDaysSubmit <= 0) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Number of working days must be greater than 0.' });
       }
-      if (effectiveDaysSubmit != null && days > effectiveDaysSubmit) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({
-          error: `Requested days (${days}) exceed the computed Mon–Fri working days for the selected range (${effectiveDaysSubmit}).`,
-        });
-      }
 
-      const validation = validateEmployeeLeaveRequest({
+      const leaveRule = await getLeaveTypeDefinition(client, leave_type);
+      const validation = validateEmployeeLeaveRequestWithRule({
+        rule: leaveRule,
         leaveType: leave_type,
         otherPurpose: otherPurpose || null,
         startDateStr: startStr,
         endDateStr: endStr,
-        numberOfDays: days,
+        numberOfDays: effectiveDaysSubmit,
         hasAttachment: false,
       });
       if (!validation.valid) {
@@ -751,10 +1262,7 @@ router.post('/submit', protect, async (req, res) => {
 
       // FIX #6 (backend): POST /submit creates a new record — no attachment yet.
       // Block when a required attachment is missing (incl. sick leave ≥5 working days → medical certificate).
-      const { mustBlockMissingAttachment, getRule: getLeaveRule } = require('./leaveTypeRules');
-      const submitRule = getLeaveRule(leave_type);
-      const effectiveDays = daysHolidayAwareSubmit ?? days;
-      if (mustBlockMissingAttachment(submitRule, leave_type, effectiveDays, false)) {
+      if (mustBlockMissingAttachment(leaveRule, leave_type, effectiveDaysSubmit, false)) {
         await client.query('ROLLBACK');
         return res.status(400).json({
           error: `${leave_type} requires a supporting document. Please save a draft, upload the document, then submit.`,
@@ -784,7 +1292,7 @@ router.post('/submit', protect, async (req, res) => {
           )
           VALUES ($1::uuid, $1::uuid, $2::uuid, $3::date, $4::date, $5::numeric, $5::numeric, $6::text, $7::jsonb, 'draft', now(), now())
           RETURNING *`,
-        [userId, leaveTypeId, startStr, endStr, daysHolidayAwareSubmit ?? days, reason || null, payloadDetails]
+        [userId, leaveTypeId, startStr, endStr, effectiveDaysSubmit, reason || null, payloadDetails]
       );
 
       const row = q.rows[0];
@@ -810,7 +1318,7 @@ router.post('/submit', protect, async (req, res) => {
           leave_type: leave_type || null,
           start_date: startStr,
           end_date: endStr,
-          number_of_days: days,
+          number_of_days: effectiveDaysSubmit,
           department_head: deptHeadInfo ? deptHeadInfo.departmentHeadUserId : null,
         },
       });
@@ -825,7 +1333,7 @@ router.post('/submit', protect, async (req, res) => {
             leaveTypeName,
             pendingDeltaSubmit
           );
-          const ledgerType = balanceLedgerLeaveType(leaveTypeName);
+          const ledgerType = await resolveBalanceLedgerLeaveType(client, leaveTypeName);
           const beforeSnapSubmit = await fetchBalanceSnapshot(client, userId, ledgerType);
           await client.query(
             `INSERT INTO leave_balances (user_id, leave_type, earned_days, used_days, pending_days, adjusted_days, as_of_date, last_accrual_date, created_at, updated_at)
@@ -868,7 +1376,9 @@ router.post('/submit', protect, async (req, res) => {
           departmentHeadUserId: deptHeadInfo?.departmentHeadUserId ?? null,
         })
       );
-      res.status(201).json(mapLeaveRowToApi({ ...row, leave_type_name: typeName }));
+      const mapped = mapLeaveRowToApi({ ...row, leave_type_name: typeName });
+      broadcastLeaveUpdated('submitted', mapped);
+      res.status(201).json(mapped);
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
@@ -909,6 +1419,7 @@ router.put('/:id', protect, async (req, res) => {
     const startStr = toIsoDateStr(start_date);
     const endStr = toIsoDateStr(end_date);
     const days = await computeNumberOfDays(startStr, endStr);
+    let effectiveDays = days;
 
     const client = await pool.connect();
     try {
@@ -923,26 +1434,27 @@ router.put('/:id', protect, async (req, res) => {
         ? details
         : { ...rest, leave_type, start_date: startStr, end_date: endStr };
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
-      if (leave_type && startStr && endStr && days != null) {
-        // FIX #7 (backend): Validate numberOfDays correctness on PUT.
-        if (days <= 0) {
+      if (startStr && endStr) {
+        const computedDays = await computeNumberOfDays(startStr, endStr, client);
+        effectiveDays = computedDays ?? days;
+
+        // Validate the server-computed, holiday-aware working day count.
+        if (effectiveDays == null || effectiveDays <= 0) {
           await client.query('ROLLBACK');
           return res.status(400).json({ error: 'Number of working days must be greater than 0.' });
         }
-        const computedDays = await computeNumberOfDays(startStr, endStr, client);
-        if (computedDays != null && days > computedDays) {
-          await client.query('ROLLBACK');
-          return res.status(400).json({
-            error: `Requested days (${days}) exceed the computed Mon–Fri working days for the selected range (${computedDays}).`,
-          });
-        }
+      }
 
-        const validation = validateEmployeeLeaveRequest({
+      if (leave_type && startStr && endStr) {
+
+        const leaveRule = await getLeaveTypeDefinition(client, leave_type);
+        const validation = validateEmployeeLeaveRequestWithRule({
+          rule: leaveRule,
           leaveType: leave_type,
           otherPurpose: otherPurpose || null,
           startDateStr: startStr,
           endDateStr: endStr,
-          numberOfDays: days,
+          numberOfDays: effectiveDays,
           hasAttachment: false,
         });
         if (!validation.valid) {
@@ -957,9 +1469,7 @@ router.put('/:id', protect, async (req, res) => {
             [id]
           );
           const hasAttachment = !!(existingRow.rows[0]?.attachment_path);
-          const { getRule, mustBlockMissingAttachment } = require('./leaveTypeRules');
-          const rule = getRule(leave_type);
-          if (mustBlockMissingAttachment(rule, leave_type, days, hasAttachment)) {
+          if (mustBlockMissingAttachment(leaveRule, leave_type, effectiveDays, hasAttachment)) {
             await client.query('ROLLBACK');
             return res.status(400).json({
               error: `${leave_type} requires a supporting document before submission. Please upload one first.`,
@@ -993,7 +1503,7 @@ router.put('/:id', protect, async (req, res) => {
              updated_at = now()
          WHERE id = $7 AND (user_id = $8 OR employee_id = $8)
          RETURNING *`,
-        [leaveTypeId, startStr, endStr, days, reason || null, payloadDetails, id, userId, nextStatus]
+        [leaveTypeId, startStr, endStr, effectiveDays, reason || null, payloadDetails, id, userId, nextStatus]
       );
       const row = q.rows[0];
       await insertLeaveRequestHistory(client, {
@@ -1007,18 +1517,18 @@ router.put('/:id', protect, async (req, res) => {
           leave_type: leave_type || null,
           start_date: startStr,
           end_date: endStr,
-          number_of_days: days,
+          number_of_days: effectiveDays,
         },
       });
       // FIX #5b: Update pending_days when status transitions to a pending status via PUT.
       const leaveTypeName = leave_type ? String(leave_type) : null;
       const isPendingTarget = nextStatus === 'pending' || nextStatus === 'pending_department_head' || nextStatus === 'pending_hr';
       const wasPending = status === 'pending' || status === 'pending_department_head' || status === 'pending_hr';
-      if (leaveTypeName && days != null && days > 0) {
+      if (leaveTypeName && effectiveDays != null && effectiveDays > 0) {
         if (isPendingTarget && !wasPending) {
           // Moving INTO a pending status: increment pending_days.
-          await assertEnoughAvailableForPendingReservation(client, userId, leaveTypeName, days);
-          const ledgerType = balanceLedgerLeaveType(leaveTypeName);
+          await assertEnoughAvailableForPendingReservation(client, userId, leaveTypeName, effectiveDays);
+          const ledgerType = await resolveBalanceLedgerLeaveType(client, leaveTypeName);
           const beforePut = await fetchBalanceSnapshot(client, userId, ledgerType);
           await client.query(
             `INSERT INTO leave_balances (user_id, leave_type, earned_days, used_days, pending_days, adjusted_days, as_of_date, last_accrual_date, created_at, updated_at)
@@ -1026,7 +1536,7 @@ router.put('/:id', protect, async (req, res) => {
              ON CONFLICT (user_id, leave_type)
              DO UPDATE SET pending_days = COALESCE(leave_balances.pending_days, 0) + EXCLUDED.pending_days,
                            updated_at = now()`,
-            [userId, ledgerType, days]
+            [userId, ledgerType, effectiveDays]
           );
           const afterPut = await fetchBalanceSnapshot(client, userId, ledgerType);
           const putAction =
@@ -1043,7 +1553,7 @@ router.put('/:id', protect, async (req, res) => {
             actorUserId: userId,
             actorKind: 'user',
             remarks: null,
-            metadataJson: { number_of_days: days, history_action: historyAction },
+            metadataJson: { number_of_days: effectiveDays, history_action: historyAction },
           });
         }
       }
@@ -1069,7 +1579,9 @@ router.put('/:id', protect, async (req, res) => {
           })
         );
       }
-      res.json(mapLeaveRowToApi({ ...row, leave_type_name: leaveTypeName }));
+      const mapped = mapLeaveRowToApi({ ...row, leave_type_name: leaveTypeName });
+      broadcastLeaveUpdated(historyAction || 'updated', mapped);
+      res.json(mapped);
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
@@ -1139,7 +1651,7 @@ router.patch('/:id/cancel', protect, async (req, res) => {
         );
         const ltName = ltRow.rows[0]?.name || null;
         if (ltName) {
-          const ledgerType = balanceLedgerLeaveType(ltName);
+          const ledgerType = await resolveBalanceLedgerLeaveType(client, ltName);
           const beforeCancel = await fetchBalanceSnapshot(client, cancelUserId, ledgerType);
           await client.query(
             `UPDATE leave_balances
@@ -1195,6 +1707,7 @@ router.patch('/:id/cancel', protect, async (req, res) => {
         });
       });
     }
+    broadcastLeaveUpdated('cancelled', mappedCancel, { previousStatus: status });
     res.json(mappedCancel);
   } catch (err) {
     try {
@@ -1248,11 +1761,18 @@ router.post('/admin/forced-leave-deduction', protect, requireAdminOrHr, async (r
   const userId = (req.body?.user_id || '').toString().trim();
   const daysRaw = req.body?.days_to_deduct ?? req.body?.daysToDeduct;
   const days = daysRaw != null && daysRaw !== '' ? parseFloat(daysRaw) : NaN;
+  const yearRaw = req.body?.year ?? req.body?.deduction_year ?? req.body?.deductionYear;
+  const yearText = yearRaw != null ? String(yearRaw).trim() : '';
+  const year = /^\d{4}$/.test(yearText) ? parseInt(yearText, 10) : NaN;
   const remarks = (req.body?.remarks || '').toString().trim() || null;
   const allowNegative = req.body?.allow_negative_balance === true;
   if (!userId) return res.status(400).json({ error: 'user_id is required' });
   if (!Number.isFinite(days) || days <= 0) {
     return res.status(400).json({ error: 'days_to_deduct must be greater than 0' });
+  }
+  const maxAllowedYear = new Date().getFullYear() + 1;
+  if (!Number.isInteger(year) || year < 1900 || year > maxAllowedYear) {
+    return res.status(400).json({ error: `year must be between 1900 and ${maxAllowedYear}` });
   }
 
   const client = await pool.connect();
@@ -1265,6 +1785,28 @@ router.post('/admin/forced-leave-deduction', protect, requireAdminOrHr, async (r
     if (userQ.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Target employee not found or inactive' });
+    }
+    const duplicateQ = await client.query(
+      `SELECT id, created_at
+       FROM leave_balance_ledger
+       WHERE user_id = $1::uuid
+         AND leave_type = 'vacationLeave'
+         AND action = 'forced_leave_deduction'
+         AND (
+           metadata_json->>'year' = $2::text
+           OR metadata_json->>'deduction_year' = $2::text
+         )
+       LIMIT 1`,
+      [userId, String(year)]
+    );
+    if (duplicateQ.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: `Year-end forced leave deduction for ${year} has already been applied for this employee.`,
+        year,
+        existing_ledger_id: duplicateQ.rows[0].id,
+        applied_at: duplicateQ.rows[0].created_at,
+      });
     }
     const remaining = await upsertLeaveBalanceDeduction(
       client,
@@ -1280,7 +1822,10 @@ router.post('/admin/forced-leave-deduction', protect, requireAdminOrHr, async (r
           remarks,
           metadataJson: {
             source: 'forced_leave_deduction',
+            year,
+            deduction_year: year,
             requested_leave_type: 'mandatoryForcedLeave',
+            deducted_days: days,
             allow_negative_balance: allowNegative,
           },
         },
@@ -1304,18 +1849,22 @@ router.post('/admin/forced-leave-deduction', protect, requireAdminOrHr, async (r
         employeeUserId: userId,
         deductedDays: days,
         remainingDays: availableAfter,
+        year,
         remarks,
       })
     );
-    res.status(201).json({
+    const response = {
       user_id: userId,
       leave_type: 'vacationLeave',
       deducted_days: days,
+      year,
       remaining_days: remainingAfter,
       available_days: availableAfter,
       remarks,
       applied_at: new Date().toISOString(),
-    });
+    };
+    broadcastLeaveUpdated('forced_leave_deduction', { user_id: userId }, response);
+    res.status(201).json(response);
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { }
     console.error('[leave POST /admin/forced-leave-deduction]', err);
@@ -1348,6 +1897,29 @@ router.post('/admin/monthly-accrual', protect, requireAdminOrHr, async (req, res
       maxCatchUpMonths: Number.isFinite(maxCatchUpMonths) ? maxCatchUpMonths : undefined,
       targetMonth: targetMonth ? String(targetMonth).trim() : undefined,
     });
+    if (!result.dryRun && (result.rowsUpdated > 0 || result.missingBalanceRowsCreated > 0)) {
+      const affectedUserIds = [
+        ...new Set(
+          (Array.isArray(result.details) ? result.details : [])
+            .filter((item) => item.action === 'applied' || item.created_balance_row === true)
+            .map((item) => item.user_id)
+            .filter(Boolean)
+            .map((id) => String(id))
+        ),
+      ];
+      if (affectedUserIds.length > 0) {
+        broadcastLeaveUpdated('monthly_accrual', { user_id: affectedUserIds[0] }, {
+          userIds: affectedUserIds,
+          user_ids: affectedUserIds,
+          targetYearMonth: result.targetYearMonth,
+          rowsUpdated: result.rowsUpdated,
+          rowsSkipped: result.rowsSkipped,
+          missingBalanceRowsCreated: result.missingBalanceRowsCreated || 0,
+          leaveTypes: result.leaveTypes,
+          balanceChanged: true,
+        });
+      }
+    }
     res.status(200).json(result);
   } catch (err) {
     console.error('[leave POST /admin/monthly-accrual]', err);
@@ -1439,6 +2011,7 @@ router.get('/department-head/check', protect, async (req, res) => {
 });
 
 // GET /api/leave/department-head — list requests pending dept head approval
+// plus requests already handled by the current department head.
 router.get('/department-head', protect, async (req, res) => {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
@@ -1448,18 +2021,74 @@ router.get('/department-head', protect, async (req, res) => {
     if (!deptInfo.isDeptHead) {
       return res.status(403).json({ error: 'You are not a department head' });
     }
+    const status = (req.query?.status || '').toString().trim() || null;
+    const leaveType = (req.query?.leave_type || '').toString().trim() || null;
+    const employeeUserId = (req.query?.user_id || '').toString().trim() || null;
+    const startDateFrom = (req.query?.start_date_from || '').toString().trim() || null;
+    const startDateTo = (req.query?.start_date_to || '').toString().trim() || null;
+    const createdFrom = (req.query?.created_from || '').toString().trim() || null;
+    const createdTo = (req.query?.created_to || '').toString().trim() || null;
+    const limitRaw = req.query?.limit ? parseInt(req.query.limit, 10) : 200;
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 500) : 200;
+
     const rows = await client.query(
-      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
+      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
+              d.name AS assignment_department_name,
+              rv.full_name AS reviewer_name,
+              rv.role AS reviewer_role,
+              dhh.department_head_action,
+              dhh.department_head_reviewer_id,
+              dhh.department_head_reviewer_name,
+              dhh.department_head_reviewed_at,
+              dhh.department_head_remarks
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
        LEFT JOIN users u ON u.id = COALESCE(lr.user_id, lr.employee_id)
-       LEFT JOIN assignments a ON a.employee_id = COALESCE(lr.user_id, lr.employee_id)
-                              AND (a.is_active IS NULL OR a.is_active = true)
-       WHERE lr.status = 'pending_department_head'
-         AND a.department_id = $1
+       ${SQL_LEAVE_ASSIGNMENT_DEPT_JOIN}
+       LEFT JOIN users rv ON rv.id = COALESCE(lr.reviewer_id, lr.approved_by)
+       LEFT JOIN LATERAL (
+         SELECT h.action AS department_head_action,
+                h.acted_by AS department_head_reviewer_id,
+                actor.full_name AS department_head_reviewer_name,
+                h.acted_at AS department_head_reviewed_at,
+                h.remarks AS department_head_remarks
+         FROM leave_request_history h
+         LEFT JOIN users actor ON actor.id = h.acted_by
+         WHERE h.leave_request_id = lr.id
+           AND h.acted_by = $2::uuid
+           AND h.action IN (
+             'department_head_approved',
+             'department_head_rejected',
+             'department_head_returned'
+           )
+         ORDER BY h.acted_at DESC
+         LIMIT 1
+       ) dhh ON true
+       WHERE a.department_id = $1
+         AND (
+           lr.status = 'pending_department_head'
+           OR dhh.department_head_reviewer_id IS NOT NULL
+         )
+         AND ($3::text IS NULL OR lr.status = $3)
+         AND ($4::text IS NULL OR lt.name = $4)
+         AND ($5::uuid IS NULL OR lr.user_id = $5 OR lr.employee_id = $5)
+         AND ($6::date IS NULL OR lr.start_date >= $6)
+         AND ($7::date IS NULL OR lr.start_date <= $7)
+         AND ($8::timestamptz IS NULL OR lr.created_at >= $8)
+         AND ($9::timestamptz IS NULL OR lr.created_at <= $9)
        ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC
-       LIMIT 200`,
-      [deptInfo.departmentId]
+       LIMIT ${limit}`,
+      [
+        deptInfo.departmentId,
+        userId,
+        status,
+        leaveType,
+        employeeUserId,
+        startDateFrom,
+        startDateTo,
+        createdFrom,
+        createdTo,
+      ]
     );
     res.json(rows.rows.map(mapLeaveRowToApi));
   } catch (err) {
@@ -1538,6 +2167,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
         endDateStr: mappedDhApprove.end_date,
       })
     );
+    broadcastLeaveUpdated('department_head_approved', mappedDhApprove);
     res.json(mappedDhApprove);
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { }
@@ -1603,7 +2233,7 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
     const rejectUserId = r.user_id || r.employee_id;
     const rejectLtName = r.leave_type_name || null;
     if (rejectDays && rejectDays > 0 && rejectUserId && rejectLtName) {
-      const ledgerType = balanceLedgerLeaveType(rejectLtName);
+      const ledgerType = await resolveBalanceLedgerLeaveType(client, rejectLtName);
       const beforeDhRej = await fetchBalanceSnapshot(client, rejectUserId, ledgerType);
       await client.query(
         `UPDATE leave_balances
@@ -1648,6 +2278,7 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
         metadata: { reviewer_remarks: remarks },
       })
     );
+    broadcastLeaveUpdated('department_head_rejected', mappedDhReject);
     res.json(mappedDhReject);
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { }
@@ -1713,7 +2344,7 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
     const returnUserId = r.user_id || r.employee_id;
     const returnLtName = r.leave_type_name || null;
     if (returnDays && returnDays > 0 && returnUserId && returnLtName) {
-      const ledgerType = balanceLedgerLeaveType(returnLtName);
+      const ledgerType = await resolveBalanceLedgerLeaveType(client, returnLtName);
       const beforeDhRet = await fetchBalanceSnapshot(client, returnUserId, ledgerType);
       await client.query(
         `UPDATE leave_balances
@@ -1758,6 +2389,7 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
         metadata: { reviewer_remarks: remarks },
       })
     );
+    broadcastLeaveUpdated('department_head_returned', mappedDhReturn);
     res.json(mappedDhReturn);
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { }
@@ -1871,8 +2503,13 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         },
       });
 
-      // DTR integration: mark each date as on_leave and link leave_request_id.
-      await applyApprovedLeaveToDtr(client, targetUserId, id, startStr, endStr);
+      // DTR integration: mark each date as on_leave and link leave_request_id when the leave type affects DTR.
+      const leaveTypeRuleForDtr = leaveTypeName
+        ? await getLeaveTypeDefinition(client, leaveTypeName)
+        : null;
+      if (leaveTypeRuleForDtr?.affects_dtr_normally !== false) {
+        await applyApprovedLeaveToDtr(client, targetUserId, id, startStr, endStr);
+      }
 
       await insertLeaveRequestHistory(client, {
         leaveRequestId: id,
@@ -1907,7 +2544,15 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
           },
         })
       );
-      res.json(mapLeaveRowToApi({ ...row, leave_type_name: leaveTypeName }));
+      const mapped = mapLeaveRowToApi({ ...row, leave_type_name: leaveTypeName });
+      broadcastDtrLeaveRefresh('leave_approved_applied_to_dtr', {
+        userId: targetUserId,
+        leaveRequestId: id,
+        dateFrom: startStr,
+        dateTo: endStr,
+      });
+      broadcastLeaveUpdated('approved', mapped);
+      res.json(mapped);
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
@@ -1987,7 +2632,7 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
     const rejectUserId = currentRow.user_id || currentRow.employee_id;
     const rejectLtName = currentRow.leave_type_name || null;
     if (rejectDays && rejectDays > 0 && rejectUserId && rejectLtName) {
-      const ledgerType = balanceLedgerLeaveType(rejectLtName);
+      const ledgerType = await resolveBalanceLedgerLeaveType(client, rejectLtName);
       const beforeHrRej = await fetchBalanceSnapshot(client, rejectUserId, ledgerType);
       await client.query(
         `UPDATE leave_balances
@@ -2042,6 +2687,7 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
         metadata: { reviewer_remarks: remarks, disapproval_reason: disapprovalReason },
       })
     );
+    broadcastLeaveUpdated('rejected', mappedReject);
     res.json(mappedReject);
   } catch (err) {
     try {
@@ -2112,7 +2758,7 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
     // 2. Restore used_days balance (reverse final approval). Pending was cleared on approve; do not re-add to pending
     //    — request status is 'returned', not a pending workflow; employee may resubmit (submit adds pending again).
     if (revokeDays && revokeDays > 0 && targetUserId && ltName) {
-      const ledgerType = balanceLedgerLeaveType(ltName);
+      const ledgerType = await resolveBalanceLedgerLeaveType(client, ltName);
       const beforeRev = await fetchBalanceSnapshot(client, targetUserId, ledgerType);
       await client.query(
         `UPDATE leave_balances
@@ -2187,6 +2833,13 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
         metadata: { reviewer_remarks: remarks },
       })
     );
+    broadcastDtrLeaveRefresh('leave_revoked_removed_from_dtr', {
+      userId: targetUserId,
+      leaveRequestId: id,
+      dateFrom: startStr,
+      dateTo: endStr,
+    });
+    broadcastLeaveUpdated('revoked', mappedRevoke);
     res.json(mappedRevoke);
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { }
@@ -2254,7 +2907,7 @@ router.patch('/:id/return', protect, requireAdminOrHr, async (req, res) => {
     const returnUserId = currentRow.user_id || currentRow.employee_id;
     const returnLtName = currentRow.leave_type_name || null;
     if (returnDays && returnDays > 0 && returnUserId && returnLtName) {
-      const ledgerType = balanceLedgerLeaveType(returnLtName);
+      const ledgerType = await resolveBalanceLedgerLeaveType(client, returnLtName);
       const beforeHrRet = await fetchBalanceSnapshot(client, returnUserId, ledgerType);
       await client.query(
         `UPDATE leave_balances
@@ -2304,6 +2957,7 @@ router.patch('/:id/return', protect, requireAdminOrHr, async (req, res) => {
         metadata: { reviewer_remarks: remarks },
       })
     );
+    broadcastLeaveUpdated('returned', mappedHrReturn);
     res.json(mappedHrReturn);
   } catch (err) {
     try {
@@ -2586,7 +3240,7 @@ router.put('/balances/:userId', protect, requireAdminOrHr, async (req, res) => {
 
     const nameRow = await pool.query('SELECT full_name FROM users WHERE id = $1::uuid', [targetId]);
     const employeeName = nameRow.rows[0]?.full_name || null;
-    res.json({
+    const response = {
       id: r.id,
       user_id: r.user_id,
       leave_type: r.leave_type,
@@ -2599,7 +3253,9 @@ router.put('/balances/:userId', protect, requireAdminOrHr, async (req, res) => {
       last_accrual_date: r.last_accrual_date ? String(r.last_accrual_date).slice(0, 10) : null,
       created_at: r.created_at,
       updated_at: r.updated_at,
-    });
+    };
+    broadcastLeaveUpdated('balance_updated', { user_id: targetId }, response);
+    res.json(response);
   } catch (err) {
     try {
       await client.query('ROLLBACK');
@@ -2654,7 +3310,9 @@ router.post('/:id/attachment', protect, uploadLeaveAttachmentMw, async (req, res
        WHERE lr.id = $1`,
       [id]
     );
-    res.json(mapLeaveRowToApi(out.rows[0]));
+    const mapped = mapLeaveRowToApi(out.rows[0]);
+    broadcastLeaveUpdated('attachment_uploaded', mapped);
+    res.json(mapped);
   } catch (err) {
     console.error('[leave POST /:id/attachment]', err);
     res.status(500).json({ error: 'Failed to upload attachment' });
@@ -2696,7 +3354,9 @@ router.delete('/:id/attachment', protect, async (req, res) => {
        WHERE lr.id = $1`,
       [id]
     );
-    res.json(mapLeaveRowToApi(out.rows[0]));
+    const mapped = mapLeaveRowToApi(out.rows[0]);
+    broadcastLeaveUpdated('attachment_removed', mapped);
+    res.json(mapped);
   } catch (err) {
     console.error('[leave DELETE /:id/attachment]', err);
     res.status(500).json({ error: 'Failed to remove attachment' });
@@ -2739,17 +3399,57 @@ router.get('/:id', protect, async (req, res) => {
   const { id } = req.params;
   try {
     const isAdmin = role === 'admin' || role === 'hr';
+    const deptInfo = isAdmin
+      ? { isDeptHead: false, departmentId: null }
+      : await isDepartmentHead(pool, userId);
     const rows = await pool.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
-              d.name AS assignment_department_name
+              d.name AS assignment_department_name,
+              rv.full_name AS reviewer_name,
+              rv.role AS reviewer_role,
+              dhh.department_head_action,
+              dhh.department_head_reviewer_id,
+              dhh.department_head_reviewer_name,
+              dhh.department_head_reviewed_at,
+              dhh.department_head_remarks
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
        LEFT JOIN users u ON u.id = COALESCE(lr.employee_id, lr.user_id)
        ${SQL_LEAVE_ASSIGNMENT_DEPT_JOIN}
+       LEFT JOIN users rv ON rv.id = COALESCE(lr.reviewer_id, lr.approved_by)
+       LEFT JOIN LATERAL (
+         SELECT h.action AS department_head_action,
+                h.acted_by AS department_head_reviewer_id,
+                actor.full_name AS department_head_reviewer_name,
+                h.acted_at AS department_head_reviewed_at,
+                h.remarks AS department_head_remarks
+         FROM leave_request_history h
+         LEFT JOIN users actor ON actor.id = h.acted_by
+         WHERE h.leave_request_id = lr.id
+           AND ($2::boolean = true OR h.acted_by = $3::uuid)
+           AND h.action IN (
+             'department_head_approved',
+             'department_head_rejected',
+             'department_head_returned'
+           )
+         ORDER BY h.acted_at DESC
+         LIMIT 1
+       ) dhh ON true
        WHERE lr.id = $1
-         AND ($2::boolean = true OR (lr.user_id = $3 OR lr.employee_id = $3))
+         AND (
+           $2::boolean = true
+           OR (lr.user_id = $3 OR lr.employee_id = $3)
+           OR (
+             $4::uuid IS NOT NULL
+             AND a.department_id = $4
+             AND (
+               lr.status = 'pending_department_head'
+               OR dhh.department_head_reviewer_id IS NOT NULL
+             )
+           )
+         )
        LIMIT 1`,
-      [id, isAdmin, userId]
+      [id, isAdmin, userId, deptInfo.departmentId]
     );
     if (rows.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
     res.json(mapLeaveRowToApi(rows.rows[0]));

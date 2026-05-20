@@ -319,12 +319,12 @@ class _ManageDepartmentState extends State<ManageDepartment> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
         ],
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -341,7 +341,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             decoration: BoxDecoration(
-              color: AppTheme.lightGray.withOpacity(0.4),
+              color: AppTheme.lightGray.withValues(alpha: 0.4),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Row(
@@ -369,7 +369,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
               child: Text(
                 'No departments',
                 style: TextStyle(
-                  color: AppTheme.textSecondary.withOpacity(0.8),
+                  color: AppTheme.textSecondary.withValues(alpha: 0.8),
                   fontSize: 14,
                 ),
               ),
@@ -386,7 +386,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
                 return TableRow(
                   decoration: BoxDecoration(
                     color: isSelected
-                        ? AppTheme.primaryNavy.withOpacity(0.08)
+                        ? AppTheme.primaryNavy.withValues(alpha: 0.08)
                         : null,
                   ),
                   children: [
@@ -454,13 +454,13 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       decoration: InputDecoration(
         hintText: 'Search',
         hintStyle: TextStyle(
-          color: AppTheme.textSecondary.withOpacity(0.8),
+          color: AppTheme.textSecondary.withValues(alpha: 0.8),
           fontSize: 14,
         ),
         prefixIcon: Icon(
           Icons.search_rounded,
           size: 20,
-          color: AppTheme.textSecondary.withOpacity(0.7),
+          color: AppTheme.textSecondary.withValues(alpha: 0.7),
         ),
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(
@@ -468,7 +468,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
           vertical: 12,
         ),
         filled: true,
-        fillColor: AppTheme.lightGray.withOpacity(0.5),
+        fillColor: AppTheme.lightGray.withValues(alpha: 0.5),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide.none,
@@ -481,7 +481,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
-        color: AppTheme.lightGray.withOpacity(0.5),
+        color: AppTheme.lightGray.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: Colors.transparent),
       ),
@@ -510,12 +510,12 @@ class _ManageDepartmentState extends State<ManageDepartment> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
         ],
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -617,7 +617,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
   InputDecoration _inputDecoration(String hint) => InputDecoration(
     hintText: hint,
     hintStyle: TextStyle(
-      color: AppTheme.textSecondary.withOpacity(0.7),
+      color: AppTheme.textSecondary.withValues(alpha: 0.7),
       fontSize: 14,
     ),
     filled: true,

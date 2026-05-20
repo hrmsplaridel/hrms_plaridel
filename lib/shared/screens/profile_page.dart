@@ -1015,7 +1015,7 @@ class _ProfileContentState extends State<ProfileContent> {
                 borderRadius: BorderRadius.circular(12),
               ),
               elevation: 1,
-              shadowColor: Colors.black.withOpacity(0.2),
+              shadowColor: Colors.black.withValues(alpha: 0.2),
             ),
           ),
         ),

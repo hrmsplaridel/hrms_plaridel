@@ -5,22 +5,25 @@ import 'package:provider/provider.dart';
 
 import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
-import '../utils/open_attachment_io.dart'
-    if (dart.library.html) '../utils/open_attachment_web.dart'
-    as open_attachment;
 import '../../providers/auth_provider.dart';
+import '../../realtime/app_realtime_provider.dart';
 import '../leave_provider.dart';
 import '../leave_repository.dart';
+import '../leave_type_definition_cache.dart';
 import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
 import '../utils/employee_leave_card_view_screen.dart';
 import 'leave_balance_history_screen.dart';
+import 'leave_type_management_screen.dart';
 import '../utils/leave_request_pdf.dart';
 import '../../utils/responsive_right_side_panel.dart';
-import '../widgets/admin_row.dart';
-import '../widgets/history_timeline.dart';
-import '../widgets/leave_status_chip.dart';
+import 'admin_leave_details_side_sheet.dart';
+import 'admin_leave_monthly_accrual_dialog.dart';
+import 'admin_leave_request_queue.dart';
+import 'admin_leave_review_dialogs.dart';
+import 'admin_leave_screen_utils.dart';
+import 'admin_leave_shared_widgets.dart';
 
 typedef LeaveApproveAction = Future<bool> Function(LeaveApprovalInput input);
 typedef LeaveDecisionAction =
@@ -53,13 +56,15 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   bool _initialized = false;
   LeaveRequest? _selectedRequest;
   LeaveRequestStatus? _statusFilter;
-  LeaveType? _leaveTypeFilter;
+  String? _leaveTypeFilter;
+  List<AdminLeaveLeaveTypeFilterOption> _configuredLeaveTypeOptions = const [];
   String? _departmentFilter;
   String? _employeeFilter;
   // #11: Date range filters.
   DateTime? _startDateFrom;
   DateTime? _startDateTo;
   Timer? _autoRefreshTimer;
+  StreamSubscription<AppRealtimeEvent>? _leaveRealtimeSub;
 
   Future<({String name, String? title})> _loadReviewerSignatureInfo(
     AuthProvider auth,
@@ -131,21 +136,34 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     if (_initialized) return;
     _initialized = true;
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadRequests());
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _loadLeaveTypeFilterOptions(),
+    );
     WidgetsBinding.instance.addObserver(this);
     _startAutoRefresh();
+    final leaveProvider = context.read<LeaveProvider>();
+    _leaveRealtimeSub ??= context.read<AppRealtimeProvider>().events.listen((
+      event,
+    ) {
+      if (event.name != 'leave_updated') return;
+      if (!mounted) return;
+      leaveProvider.invalidateCachedLeaveData();
+      unawaited(_safeAutoRefresh(forceRefresh: true));
+    });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _autoRefreshTimer?.cancel();
+    _leaveRealtimeSub?.cancel();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _safeAutoRefresh();
+      _safeAutoRefresh(forceRefresh: true);
     }
   }
 
@@ -156,11 +174,67 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     });
   }
 
-  Future<void> _safeAutoRefresh() async {
+  Future<void> _loadLeaveTypeFilterOptions({bool forceRefresh = false}) async {
+    try {
+      final definitions = await LeaveTypeDefinitionCache.instance.listAll(
+        includeInactive: true,
+        forceRefresh: forceRefresh,
+      );
+      final options =
+          definitions
+              .where((item) => item.name.trim().isNotEmpty)
+              .map(
+                (item) => AdminLeaveLeaveTypeFilterOption(
+                  value: item.name.trim(),
+                  label: item.displayName.trim().isNotEmpty
+                      ? item.displayName.trim()
+                      : item.name.trim(),
+                ),
+              )
+              .toList()
+            ..sort((a, b) => a.label.compareTo(b.label));
+      if (!mounted) return;
+      setState(() => _configuredLeaveTypeOptions = options);
+    } catch (_) {
+      // Request rows still supply used leave types if rules cannot be loaded.
+    }
+  }
+
+  List<AdminLeaveLeaveTypeFilterOption> _leaveTypeFilterOptions(
+    List<LeaveRequest> requests,
+  ) {
+    final byValue = <String, AdminLeaveLeaveTypeFilterOption>{};
+    for (final option in _configuredLeaveTypeOptions) {
+      byValue[option.value] = option;
+    }
+    for (final request in requests) {
+      final value = request.effectiveLeaveTypeName.trim();
+      if (value.isEmpty) continue;
+      byValue.putIfAbsent(
+        value,
+        () => AdminLeaveLeaveTypeFilterOption(
+          value: value,
+          label: request.leaveTypeLabel.trim().isNotEmpty
+              ? request.leaveTypeLabel.trim()
+              : value,
+        ),
+      );
+    }
+    final selected = _leaveTypeFilter?.trim();
+    if (selected != null && selected.isNotEmpty) {
+      byValue.putIfAbsent(
+        selected,
+        () => AdminLeaveLeaveTypeFilterOption(value: selected, label: selected),
+      );
+    }
+    return byValue.values.toList()..sort((a, b) => a.label.compareTo(b.label));
+  }
+
+  Future<void> _safeAutoRefresh({bool forceRefresh = false}) async {
     if (!mounted) return;
     final provider = context.read<LeaveProvider>();
     if (provider.reviewing || provider.submitting) return;
-    await _loadRequests();
+    await _loadRequests(forceRefresh: forceRefresh);
   }
 
   @override
@@ -195,6 +269,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
             (r) => (r.officeDepartment ?? '').trim() == _departmentFilter,
           );
         }).toList()..sort((a, b) => a.name.compareTo(b.name));
+    final leaveTypeOptions = _leaveTypeFilterOptions(requests);
 
     final filteredRequests = requests.where((r) {
       if (!widget.isDepartmentHead &&
@@ -204,7 +279,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       final statusOk = _statusFilter == null || r.status == _statusFilter;
       if (!statusOk) return false;
       final leaveTypeOk =
-          _leaveTypeFilter == null || r.leaveType == _leaveTypeFilter;
+          _leaveTypeFilter == null ||
+          r.effectiveLeaveTypeName == _leaveTypeFilter;
       if (!leaveTypeOk) return false;
       final fromOk =
           _startDateFrom == null ||
@@ -268,13 +344,18 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         _AdminHeaderCard(
           totalRequests: filteredRequests.length,
           pendingCount: filteredRequests
-              .where((r) => r.status.isPending)
+              .where(
+                (r) => widget.isDepartmentHead
+                    ? r.status == LeaveRequestStatus.pendingDepartmentHead
+                    : r.status.isPending,
+              )
               .length,
           reviewing: provider.reviewing,
-          onRefresh: _loadRequests,
+          onRefresh: () => _loadRequests(forceRefresh: true),
           onForcedLeaveDeduction: widget.isDepartmentHead
               ? null
               : _applyForcedLeaveDeduction,
+          onMonthlyAccrual: widget.isDepartmentHead ? null : _runMonthlyAccrual,
           onManualBalanceAdjustment: widget.isDepartmentHead
               ? null
               : _manualBalanceAdjustment,
@@ -282,29 +363,35 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
               ? null
               : _openEmployeeLeaveCard,
           onLeaveLedger: widget.isDepartmentHead ? null : _openLeaveLedger,
+          onLeaveTypeRules: widget.isDepartmentHead
+              ? null
+              : _openLeaveTypeRules,
         ),
         if (provider.error != null) ...[
           const SizedBox(height: 16),
-          _ErrorBanner(
+          AdminLeaveErrorBanner(
             message: provider.error!,
             onDismiss: provider.clearError,
           ),
         ],
         const SizedBox(height: 24),
-        _RequestQueuePanel(
+        AdminLeaveRequestQueuePanel(
           requests: filteredRequests,
           isDepartmentHead: widget.isDepartmentHead,
           loading: provider.loading,
           selectedRequest: selected,
-          filterBar: _FilterBar(
+          filterBar: AdminLeaveFilterBar(
             isDepartmentHead: widget.isDepartmentHead,
             status: _statusFilter,
             leaveType: _leaveTypeFilter,
+            leaveTypeOptions: leaveTypeOptions,
             department: _departmentFilter,
             departments: departments,
             employee: _employeeFilter,
             employees: employees
-                .map((e) => _EmployeeFilterOption(id: e.id, name: e.name))
+                .map(
+                  (e) => AdminLeaveEmployeeFilterOption(id: e.id, name: e.name),
+                )
                 .toList(),
             startDateFrom: _startDateFrom,
             startDateTo: _startDateTo,
@@ -351,21 +438,23 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     );
   }
 
-  Future<void> _loadRequests() async {
+  Future<void> _loadRequests({bool forceRefresh = false}) async {
     if (!mounted) return;
     final provider = context.read<LeaveProvider>();
+    final query = LeaveRequestQuery(
+      status: _statusFilter,
+      leaveTypeName: _leaveTypeFilter,
+      startDateFrom: _startDateFrom,
+      startDateTo: _startDateTo,
+      limit: 200,
+    );
     if (widget.isDepartmentHead) {
-      await provider.loadDepartmentHeadRequests();
-    } else {
-      await provider.loadRequests(
-        query: LeaveRequestQuery(
-          status: _statusFilter,
-          leaveType: _leaveTypeFilter,
-          startDateFrom: _startDateFrom,
-          startDateTo: _startDateTo,
-          limit: 200,
-        ),
+      await provider.loadDepartmentHeadRequests(
+        query: query,
+        forceRefresh: forceRefresh,
       );
+    } else {
+      await provider.loadRequests(query: query, forceRefresh: forceRefresh);
     }
     if (!mounted) return;
   }
@@ -384,13 +473,13 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         barrierLabel: 'Close request details',
         minWidth: 400,
         initialWidthFraction: 0.46,
-        builder: (ctx) => _AdminLeaveDetailsSideSheet(
+        builder: (ctx) => AdminLeaveDetailsSideSheet(
           initial: request,
           isDepartmentHead: widget.isDepartmentHead,
           onApprove: widget.isDepartmentHead ? _deptHeadApprove : _approve,
           onReturn: widget.isDepartmentHead ? _deptHeadReturn : _returnRequest,
           onReject: widget.isDepartmentHead ? _deptHeadReject : _rejectRequest,
-          onRevoke: _revokeApproval,
+          onRevoke: widget.isDepartmentHead ? null : _revokeApproval,
           onPrint: _printLeaveForm,
         ),
       );
@@ -432,7 +521,10 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         reviewerTitle: signerInfo.title,
       );
 
-      final balances = await provider.fetchBalancesForUser(target.userId);
+      final balances = await provider.fetchBalancesForUser(
+        target.userId,
+        forceRefresh: true,
+      );
 
       if (mounted) {
         ScaffoldMessenger.of(
@@ -454,13 +546,16 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   }
 
   Future<void> _approve(LeaveRequest request) async {
+    final leaveProvider = context.read<LeaveProvider>();
+    final auth = context.read<AuthProvider>();
     final userId = request.userId;
     if (userId.isEmpty) {
       _showMessage('Cannot determine employee for this request.');
       return;
     }
-    final balances = await context.read<LeaveProvider>().fetchBalancesForUser(
+    final balances = await leaveProvider.fetchBalancesForUser(
       userId,
+      forceRefresh: true,
     );
     LeaveBalance? leaveBalance;
     final ledgerType = request.leaveType.balanceLedgerType;
@@ -472,11 +567,10 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     final input = await showDialog<LeaveApprovalInput>(
       context: context,
       builder: (_) =>
-          _ApproveDialog(request: request, leaveBalance: leaveBalance),
+          AdminLeaveApproveDialog(request: request, leaveBalance: leaveBalance),
     );
-    if (input == null) return;
+    if (input == null || !mounted) return;
 
-    final auth = context.read<AuthProvider>();
     final reviewerId = auth.user?.id;
     final reviewerRole = auth.user?.role;
     if (reviewerId == null || reviewerId.isEmpty) {
@@ -484,6 +578,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       return;
     }
     final reviewerInfo = await _loadReviewerSignatureInfo(auth);
+    if (!mounted) return;
 
     final finalInput = LeaveApprovalInput(
       requestId: request.id ?? '',
@@ -501,17 +596,14 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     if (widget.onApprove != null) {
       ok = await widget.onApprove!(finalInput);
     } else {
-      final result = await context.read<LeaveProvider>().approveRequest(
-        finalInput,
-      );
+      final result = await leaveProvider.approveRequest(finalInput);
       ok = result != null;
     }
     if (!mounted) return;
-    final provider = context.read<LeaveProvider>();
     _showMessage(
       ok
           ? 'Leave request approved.'
-          : (provider.error ?? 'Approval could not be completed.'),
+          : (leaveProvider.error ?? 'Approval could not be completed.'),
     );
     if (ok) {
       await _loadRequests();
@@ -519,9 +611,11 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   }
 
   Future<void> _returnRequest(LeaveRequest request) async {
+    final leaveProvider = context.read<LeaveProvider>();
+    final auth = context.read<AuthProvider>();
     final input = await showDialog<LeaveReviewDecisionInput>(
       context: context,
-      builder: (_) => _DecisionDialog(
+      builder: (_) => AdminLeaveDecisionDialog(
         title: 'Return Request',
         subtitle:
             'Send this request back to the employee for correction or missing information.',
@@ -530,9 +624,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         request: request,
       ),
     );
-    if (input == null) return;
+    if (input == null || !mounted) return;
 
-    final auth = context.read<AuthProvider>();
     final reviewerId = auth.user?.id;
     final reviewerRole = auth.user?.role;
     if (reviewerId == null || reviewerId.isEmpty) {
@@ -540,6 +633,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       return;
     }
     final reviewerInfo = await _loadReviewerSignatureInfo(auth);
+    if (!mounted) return;
 
     final finalInput = LeaveReviewDecisionInput(
       requestId: request.id ?? '',
@@ -556,9 +650,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     if (widget.onReturnRequest != null) {
       ok = await widget.onReturnRequest!(finalInput);
     } else {
-      final result = await context.read<LeaveProvider>().returnRequest(
-        finalInput,
-      );
+      final result = await leaveProvider.returnRequest(finalInput);
       ok = result != null;
     }
     if (!mounted) return;
@@ -569,9 +661,11 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   }
 
   Future<void> _rejectRequest(LeaveRequest request) async {
+    final leaveProvider = context.read<LeaveProvider>();
+    final auth = context.read<AuthProvider>();
     final input = await showDialog<LeaveReviewDecisionInput>(
       context: context,
-      builder: (_) => _DecisionDialog(
+      builder: (_) => AdminLeaveDecisionDialog(
         title: 'Reject Request',
         subtitle:
             'Reject this request and provide a clear reason for the employee.',
@@ -580,9 +674,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         request: request,
       ),
     );
-    if (input == null) return;
+    if (input == null || !mounted) return;
 
-    final auth = context.read<AuthProvider>();
     final reviewerId = auth.user?.id;
     final reviewerRole = auth.user?.role;
     if (reviewerId == null || reviewerId.isEmpty) {
@@ -590,6 +683,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       return;
     }
     final reviewerInfo = await _loadReviewerSignatureInfo(auth);
+    if (!mounted) return;
 
     final finalInput = LeaveReviewDecisionInput(
       requestId: request.id ?? '',
@@ -606,9 +700,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     if (widget.onRejectRequest != null) {
       ok = await widget.onRejectRequest!(finalInput);
     } else {
-      final result = await context.read<LeaveProvider>().rejectRequest(
-        finalInput,
-      );
+      final result = await leaveProvider.rejectRequest(finalInput);
       ok = result != null;
     }
     if (!mounted) return;
@@ -620,9 +712,11 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
 
   // #15: Revoke approval.
   Future<void> _revokeApproval(LeaveRequest request) async {
+    final leaveProvider = context.read<LeaveProvider>();
+    final auth = context.read<AuthProvider>();
     final input = await showDialog<LeaveReviewDecisionInput>(
       context: context,
-      builder: (_) => _DecisionDialog(
+      builder: (_) => AdminLeaveDecisionDialog(
         title: 'Revoke Approval',
         subtitle:
             'This will reverse the approval: balance will be restored and DTR leave entries removed. The request returns to the employee for correction.',
@@ -631,9 +725,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         request: request,
       ),
     );
-    if (input == null) return;
+    if (input == null || !mounted) return;
 
-    final auth = context.read<AuthProvider>();
     final reviewerId = auth.user?.id;
     final reviewerRole = auth.user?.role;
     if (reviewerId == null || reviewerId.isEmpty) {
@@ -641,6 +734,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       return;
     }
     final reviewerInfo = await _loadReviewerSignatureInfo(auth);
+    if (!mounted) return;
 
     final finalInput = LeaveReviewDecisionInput(
       requestId: request.id ?? '',
@@ -653,16 +747,13 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       reviewedAt: DateTime.now(),
     );
 
-    final result = await context.read<LeaveProvider>().revokeApproval(
-      finalInput,
-    );
+    final result = await leaveProvider.revokeApproval(finalInput);
     final ok = result != null;
     if (!mounted) return;
-    final provider = context.read<LeaveProvider>();
     _showMessage(
       ok
           ? 'Approval revoked. Leave balance restored.'
-          : (provider.error ?? 'Revoke failed.'),
+          : (leaveProvider.error ?? 'Revoke failed.'),
     );
     if (ok) await _loadRequests();
   }
@@ -674,31 +765,43 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   }
 
   Future<void> _applyForcedLeaveDeduction() async {
+    final leaveProvider = context.read<LeaveProvider>();
     final input = await showDialog<_ForcedLeaveDeductionInput>(
       context: context,
       builder: (_) => const _ForcedLeaveDeductionDialog(),
     );
-    if (input == null) return;
+    if (input == null || !mounted) return;
 
-    final result = await context
-        .read<LeaveProvider>()
-        .applyForcedLeaveDeduction(
-          ForcedLeaveDeductionInput(
-            userId: input.userId,
-            daysToDeduct: input.daysToDeduct,
-            year: input.year,
-            remarks: input.remarks,
-          ),
-        );
+    final result = await leaveProvider.applyForcedLeaveDeduction(
+      ForcedLeaveDeductionInput(
+        userId: input.userId,
+        daysToDeduct: input.daysToDeduct,
+        year: input.year,
+        remarks: input.remarks,
+      ),
+    );
     if (!mounted) return;
     final ok = result != null;
-    final provider = context.read<LeaveProvider>();
     _showMessage(
       ok
           ? 'Year-end forced leave deduction applied.'
-          : (provider.error ?? 'Deduction action failed.'),
+          : (leaveProvider.error ?? 'Deduction action failed.'),
     );
     if (ok) await _loadRequests();
+  }
+
+  Future<void> _runMonthlyAccrual() async {
+    final result = await showDialog<MonthlyLeaveAccrualResult>(
+      context: context,
+      builder: (_) => const AdminMonthlyAccrualDialog(),
+    );
+    if (!mounted || result == null) return;
+    _showMessage(
+      result.rowsUpdated > 0
+          ? 'Monthly accrual applied for ${result.targetYearMonth}: ${result.rowsUpdated} balance rows updated.'
+          : 'Monthly accrual completed. No balances changed.',
+    );
+    await _loadRequests();
   }
 
   Future<void> _manualBalanceAdjustment() async {
@@ -741,6 +844,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   // ---- Department Head actions ----
 
   Future<void> _deptHeadApprove(LeaveRequest request) async {
+    final leaveProvider = context.read<LeaveProvider>();
     final auth = context.read<AuthProvider>();
     final reviewerId = auth.user?.id;
     if (reviewerId == null || reviewerId.isEmpty) {
@@ -753,24 +857,23 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       reviewerName: auth.displayName,
       reviewerRole: auth.user?.role,
     );
-    final result = await context.read<LeaveProvider>().departmentHeadApprove(
-      input,
-    );
+    final result = await leaveProvider.departmentHeadApprove(input);
     final ok = result != null;
     if (!mounted) return;
     _showMessage(
       ok
           ? 'Forwarded to HR for final approval.'
-          : (context.read<LeaveProvider>().error ??
-                'Department head approval failed.'),
+          : (leaveProvider.error ?? 'Department head approval failed.'),
     );
     if (ok) await _loadRequests();
   }
 
   Future<void> _deptHeadReject(LeaveRequest request) async {
+    final leaveProvider = context.read<LeaveProvider>();
+    final auth = context.read<AuthProvider>();
     final dialogResult = await showDialog<LeaveReviewDecisionInput>(
       context: context,
-      builder: (_) => _DecisionDialog(
+      builder: (_) => AdminLeaveDecisionDialog(
         title: 'Reject Request',
         subtitle: 'Reject this request as department head.',
         confirmLabel: 'Reject',
@@ -778,8 +881,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         request: request,
       ),
     );
-    if (dialogResult == null) return;
-    final auth = context.read<AuthProvider>();
+    if (dialogResult == null || !mounted) return;
+
     final reviewerId = auth.user?.id;
     if (reviewerId == null || reviewerId.isEmpty) {
       _showMessage('No logged-in reviewer found.');
@@ -793,9 +896,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       reason: dialogResult.reason,
       hrRemarks: dialogResult.hrRemarks,
     );
-    final result = await context.read<LeaveProvider>().departmentHeadReject(
-      input,
-    );
+    final result = await leaveProvider.departmentHeadReject(input);
     final ok = result != null;
     if (!mounted) return;
     _showMessage(ok ? 'Request rejected.' : 'Reject action failed.');
@@ -803,9 +904,11 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   }
 
   Future<void> _deptHeadReturn(LeaveRequest request) async {
+    final leaveProvider = context.read<LeaveProvider>();
+    final auth = context.read<AuthProvider>();
     final dialogResult = await showDialog<LeaveReviewDecisionInput>(
       context: context,
-      builder: (_) => _DecisionDialog(
+      builder: (_) => AdminLeaveDecisionDialog(
         title: 'Return Request',
         subtitle: 'Return this to the employee for corrections.',
         confirmLabel: 'Return',
@@ -813,8 +916,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         request: request,
       ),
     );
-    if (dialogResult == null) return;
-    final auth = context.read<AuthProvider>();
+    if (dialogResult == null || !mounted) return;
+
     final reviewerId = auth.user?.id;
     if (reviewerId == null || reviewerId.isEmpty) {
       _showMessage('No logged-in reviewer found.');
@@ -828,14 +931,38 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       reason: dialogResult.reason,
       hrRemarks: dialogResult.hrRemarks,
     );
-    final result = await context.read<LeaveProvider>().departmentHeadReturn(
-      input,
-    );
+    final result = await leaveProvider.departmentHeadReturn(input);
     final ok = result != null;
     if (!mounted) return;
     _showMessage(ok ? 'Request returned.' : 'Return action failed.');
     if (ok) await _loadRequests();
   }
+
+  Future<void> _openLeaveTypeRules() async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => Dialog(
+        insetPadding: const EdgeInsets.all(24),
+        child: const LeaveTypeManagementScreen(),
+      ),
+    );
+    if (!mounted) return;
+    await _loadLeaveTypeFilterOptions(forceRefresh: true);
+  }
+}
+
+class _HeaderMenuAction {
+  const _HeaderMenuAction({
+    required this.label,
+    required this.icon,
+    required this.onSelected,
+    this.separatedBefore = false,
+  });
+
+  final String label;
+  final IconData icon;
+  final FutureOr<void> Function() onSelected;
+  final bool separatedBefore;
 }
 
 class _AdminHeaderCard extends StatelessWidget {
@@ -845,9 +972,11 @@ class _AdminHeaderCard extends StatelessWidget {
     required this.reviewing,
     required this.onRefresh,
     this.onForcedLeaveDeduction,
+    this.onMonthlyAccrual,
     this.onManualBalanceAdjustment,
     this.onEmployeeLeaveCard,
     this.onLeaveLedger,
+    this.onLeaveTypeRules,
   });
 
   final int totalRequests;
@@ -855,17 +984,53 @@ class _AdminHeaderCard extends StatelessWidget {
   final bool reviewing;
   final Future<void> Function() onRefresh;
   final Future<void> Function()? onForcedLeaveDeduction;
+  final Future<void> Function()? onMonthlyAccrual;
   final Future<void> Function()? onManualBalanceAdjustment;
   final Future<void> Function()? onEmployeeLeaveCard;
   final VoidCallback? onLeaveLedger;
+  final Future<void> Function()? onLeaveTypeRules;
 
   @override
   Widget build(BuildContext context) {
-    final hasHrActions =
-        onForcedLeaveDeduction != null ||
-        onManualBalanceAdjustment != null ||
-        onEmployeeLeaveCard != null ||
-        onLeaveLedger != null;
+    final menuActions = <_HeaderMenuAction>[
+      if (onLeaveTypeRules != null)
+        _HeaderMenuAction(
+          label: 'Leave Type Rules',
+          icon: Icons.rule_rounded,
+          onSelected: onLeaveTypeRules!,
+        ),
+      if (onLeaveLedger != null)
+        _HeaderMenuAction(
+          label: 'Leave Ledger',
+          icon: Icons.receipt_long_outlined,
+          onSelected: onLeaveLedger!,
+        ),
+      if (onEmployeeLeaveCard != null)
+        _HeaderMenuAction(
+          label: "Employee's Leave Card",
+          icon: Icons.badge_outlined,
+          onSelected: onEmployeeLeaveCard!,
+        ),
+      if (onManualBalanceAdjustment != null)
+        _HeaderMenuAction(
+          label: 'Manual balance adjustment',
+          icon: Icons.account_balance_wallet_outlined,
+          onSelected: onManualBalanceAdjustment!,
+        ),
+      if (onMonthlyAccrual != null)
+        _HeaderMenuAction(
+          label: 'Run Monthly Accrual',
+          icon: Icons.event_repeat_rounded,
+          onSelected: onMonthlyAccrual!,
+        ),
+      if (onForcedLeaveDeduction != null)
+        _HeaderMenuAction(
+          label: 'Apply Year-End Forced Leave Deduction',
+          icon: Icons.assignment_turned_in_rounded,
+          onSelected: onForcedLeaveDeduction!,
+          separatedBefore: true,
+        ),
+    ];
 
     return Container(
       width: double.infinity,
@@ -873,10 +1038,10 @@ class _AdminHeaderCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
@@ -916,11 +1081,11 @@ class _AdminHeaderCard extends StatelessWidget {
                         spacing: 10,
                         runSpacing: 10,
                         children: [
-                          _HeaderChip(
+                          AdminLeaveHeaderChip(
                             label: 'Total Loaded',
                             value: '$totalRequests',
                           ),
-                          _HeaderChip(
+                          AdminLeaveHeaderChip(
                             label: 'Pending',
                             value: '$pendingCount',
                             emphasize: true,
@@ -930,54 +1095,51 @@ class _AdminHeaderCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (hasHrActions) ...[
-                  const SizedBox(height: 14),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      if (onForcedLeaveDeduction != null)
-                        OutlinedButton.icon(
-                          onPressed: reviewing ? null : onForcedLeaveDeduction,
-                          icon: const Icon(Icons.assignment_turned_in_rounded),
-                          label: const Text(
-                            'Apply Year-End Forced Leave Deduction',
-                          ),
-                        ),
-                      if (onManualBalanceAdjustment != null)
-                        OutlinedButton.icon(
-                          onPressed: reviewing
-                              ? null
-                              : onManualBalanceAdjustment,
-                          icon: const Icon(
-                            Icons.account_balance_wallet_outlined,
-                          ),
-                          label: const Text('Manual balance adjustment'),
-                        ),
-                      if (onEmployeeLeaveCard != null)
-                        OutlinedButton.icon(
-                          onPressed: reviewing ? null : onEmployeeLeaveCard,
-                          icon: const Icon(Icons.badge_outlined),
-                          label: const Text("Employee's Leave Card"),
-                        ),
-                      if (onLeaveLedger != null)
-                        OutlinedButton.icon(
-                          onPressed: reviewing ? null : onLeaveLedger,
-                          icon: const Icon(Icons.receipt_long_outlined),
-                          label: const Text('Leave Ledger'),
-                        ),
-                    ],
-                  ),
-                ],
               ],
             ),
           ),
           const SizedBox(width: 16),
-          FilledButton.icon(
-            onPressed: reviewing ? null : onRefresh,
-            icon: const Icon(Icons.refresh_rounded),
-            label: Text(reviewing ? 'Reviewing...' : 'Refresh'),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FilledButton.icon(
+                onPressed: reviewing ? null : onRefresh,
+                icon: const Icon(Icons.refresh_rounded),
+                label: Text(reviewing ? 'Reviewing...' : 'Refresh'),
+              ),
+              if (menuActions.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                PopupMenuButton<_HeaderMenuAction>(
+                  tooltip: 'More actions',
+                  enabled: !reviewing,
+                  icon: const Icon(Icons.more_vert_rounded),
+                  onSelected: (action) {
+                    action.onSelected();
+                  },
+                  itemBuilder: (context) {
+                    final entries = <PopupMenuEntry<_HeaderMenuAction>>[];
+                    for (final action in menuActions) {
+                      if (action.separatedBefore) {
+                        entries.add(const PopupMenuDivider());
+                      }
+                      entries.add(
+                        PopupMenuItem<_HeaderMenuAction>(
+                          value: action,
+                          child: Row(
+                            children: [
+                              Icon(action.icon, size: 18),
+                              const SizedBox(width: 10),
+                              Expanded(child: Text(action.label)),
+                            ],
+                          ),
+                        ),
+                      );
+                    }
+                    return entries;
+                  },
+                ),
+              ],
+            ],
           ),
         ],
       ),
@@ -1169,7 +1331,7 @@ class _EmployeeLeaveCardPickerDialogState
             width: 38,
             height: 38,
             decoration: BoxDecoration(
-              color: AppTheme.primaryNavy.withOpacity(0.12),
+              color: AppTheme.primaryNavy.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(
@@ -1209,12 +1371,14 @@ class _EmployeeLeaveCardPickerDialogState
                 decoration: BoxDecoration(
                   color: AppTheme.offWhite,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.black.withOpacity(0.06)),
+                  border: Border.all(
+                    color: Colors.black.withValues(alpha: 0.06),
+                  ),
                 ),
                 child: Column(
                   children: [
                     DropdownButtonFormField<String>(
-                      value: _selectedDepartment,
+                      initialValue: _selectedDepartment,
                       isExpanded: true,
                       decoration: const InputDecoration(
                         labelText: 'Department',
@@ -1237,7 +1401,7 @@ class _EmployeeLeaveCardPickerDialogState
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      value: _selectedUserId,
+                      initialValue: _selectedUserId,
                       isExpanded: true,
                       decoration: InputDecoration(
                         labelText: 'Employee',
@@ -1361,9 +1525,47 @@ class _ForcedLeaveDeductionDialogState
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Apply Year-End Forced Leave Deduction'),
+      titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+      contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+      actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+      title: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.assignment_turned_in_rounded,
+              color: AppTheme.primaryNavy,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Apply Year-End Forced Leave Deduction'),
+                const SizedBox(height: 4),
+                Text(
+                  'Deduct unused forced leave from vacation leave credits.',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
       content: SizedBox(
-        width: 520,
+        width: 640,
         child: Form(
           key: _formKey,
           child: SingleChildScrollView(
@@ -1382,8 +1584,12 @@ class _ForcedLeaveDeductionDialogState
                   )
                 else
                   DropdownButtonFormField<String>(
-                    value: _selectedUserId,
-                    decoration: _inputDecoration('Employee'),
+                    initialValue: _selectedUserId,
+                    isExpanded: true,
+                    menuMaxHeight: 360,
+                    decoration: adminLeaveInputDecoration(
+                      'Employee',
+                    ).copyWith(prefixIcon: const Icon(Icons.person_outline)),
                     items: _employees
                         .map(
                           (e) => DropdownMenuItem<String>(
@@ -1397,31 +1603,59 @@ class _ForcedLeaveDeductionDialogState
                         (v == null || v.isEmpty) ? 'Select an employee' : null,
                   ),
                 const SizedBox(height: 12),
-                TextFormField(
-                  controller: _daysController,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  decoration: _inputDecoration('Days to Deduct'),
-                  validator: (value) {
-                    final parsed = _parseDouble(value ?? '');
-                    if (parsed == null) return 'Enter deduction days';
-                    if (parsed <= 0) return 'Days must be greater than 0';
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _yearController,
-                  keyboardType: TextInputType.number,
-                  decoration: _inputDecoration('Year'),
-                  validator: (value) {
-                    final parsed = int.tryParse((value ?? '').trim());
-                    if (parsed == null) return 'Enter a valid year';
-                    if (parsed < 2000 || parsed > 2100) {
-                      return 'Year must be between 2000 and 2100';
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final fields = [
+                      TextFormField(
+                        controller: _daysController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: adminLeaveInputDecoration('Days to Deduct')
+                            .copyWith(
+                              prefixIcon: const Icon(
+                                Icons.remove_circle_outline,
+                              ),
+                            ),
+                        validator: (value) {
+                          final parsed = parseAdminLeaveDouble(value ?? '');
+                          if (parsed == null) return 'Enter deduction days';
+                          if (parsed <= 0) return 'Days must be greater than 0';
+                          return null;
+                        },
+                      ),
+                      TextFormField(
+                        controller: _yearController,
+                        keyboardType: TextInputType.number,
+                        decoration: adminLeaveInputDecoration('Year').copyWith(
+                          prefixIcon: const Icon(Icons.calendar_today_outlined),
+                        ),
+                        validator: (value) {
+                          final parsed = int.tryParse((value ?? '').trim());
+                          if (parsed == null) return 'Enter a valid year';
+                          if (parsed < 2000 || parsed > 2100) {
+                            return 'Year must be between 2000 and 2100';
+                          }
+                          return null;
+                        },
+                      ),
+                    ];
+                    if (constraints.maxWidth < 560) {
+                      return Column(
+                        children: [
+                          fields[0],
+                          const SizedBox(height: 12),
+                          fields[1],
+                        ],
+                      );
                     }
-                    return null;
+                    return Row(
+                      children: [
+                        Expanded(child: fields[0]),
+                        const SizedBox(width: 12),
+                        SizedBox(width: 190, child: fields[1]),
+                      ],
+                    );
                   },
                 ),
                 const SizedBox(height: 12),
@@ -1429,13 +1663,45 @@ class _ForcedLeaveDeductionDialogState
                   controller: _remarksController,
                   minLines: 2,
                   maxLines: null,
-                  decoration: _inputDecoration('Remarks (Optional)'),
+                  decoration: adminLeaveInputDecoration('Remarks (Optional)')
+                      .copyWith(
+                        alignLabelWithHint: true,
+                        prefixIcon: const Icon(Icons.notes_outlined),
+                      ),
                 ),
-                const SizedBox(height: 10),
-                Text(
-                  'Fallback action for unused forced leave. This deducts vacation leave credits directly '
-                  'and records an audit trail; it does not create a leave request.',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.offWhite,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: Colors.black.withValues(alpha: 0.06),
+                    ),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.info_outline_rounded,
+                        size: 18,
+                        color: AppTheme.textSecondary,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Fallback action for unused forced leave. This deducts vacation leave credits directly '
+                          'and records an audit trail; it does not create a leave request.',
+                          style: TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 12.5,
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -1447,10 +1713,10 @@ class _ForcedLeaveDeductionDialogState
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
         ),
-        FilledButton(
+        FilledButton.icon(
           onPressed: () {
             if (!(_formKey.currentState?.validate() ?? false)) return;
-            final days = _parseDouble(_daysController.text);
+            final days = parseAdminLeaveDouble(_daysController.text);
             if (days == null || days <= 0) return;
             final year = int.tryParse(_yearController.text.trim());
             if (year == null) return;
@@ -1459,11 +1725,12 @@ class _ForcedLeaveDeductionDialogState
                 userId: _selectedUserId!,
                 daysToDeduct: days,
                 year: year,
-                remarks: _trimOrNull(_remarksController.text),
+                remarks: trimAdminLeaveOrNull(_remarksController.text),
               ),
             );
           },
-          child: const Text('Apply Deduction'),
+          icon: const Icon(Icons.check_circle_outline_rounded),
+          label: const Text('Apply Deduction'),
         ),
       ],
     );
@@ -1485,29 +1752,49 @@ class _ManualBalanceAdjustmentDialogState
   final _usedController = TextEditingController();
   final _pendingController = TextEditingController();
   final _adjustedController = TextEditingController();
+  final _remarksController = TextEditingController();
 
   bool _loadingEmployees = true;
   bool _loadingBalances = false;
   String? _employeesError;
   List<Map<String, String>> _employees = const [];
   String? _selectedUserId;
+  DateTime _asOfDate = DateTime.now();
 
   LeaveType _selectedLeaveType = LeaveType.vacationLeave;
   List<LeaveBalance> _balances = const [];
 
+  List<TextEditingController> get _balanceControllers => [
+    _earnedController,
+    _usedController,
+    _pendingController,
+    _adjustedController,
+  ];
+
   @override
   void dispose() {
+    for (final controller in _balanceControllers) {
+      controller.removeListener(_refreshPreview);
+    }
     _earnedController.dispose();
     _usedController.dispose();
     _pendingController.dispose();
     _adjustedController.dispose();
+    _remarksController.dispose();
     super.dispose();
   }
 
   @override
   void initState() {
     super.initState();
+    for (final controller in _balanceControllers) {
+      controller.addListener(_refreshPreview);
+    }
     _loadEmployees();
+  }
+
+  void _refreshPreview() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadEmployees() async {
@@ -1516,11 +1803,16 @@ class _ManualBalanceAdjustmentDialogState
       _employeesError = null;
     });
     try {
-      final res = await ApiClient.instance.get<List<dynamic>>(
-        '/api/employees?status=Active',
+      final res = await ApiClient.instance.get<dynamic>(
+        '/api/employees',
+        queryParameters: const {'status': 'Active', 'limit': 1000, 'offset': 0},
       );
+      final payload = res.data;
+      final employeeRows = payload is Map
+          ? (payload['employees'] as List<dynamic>? ?? const <dynamic>[])
+          : (payload is List ? payload : const <dynamic>[]);
       final rows =
-          (res.data ?? const [])
+          employeeRows
               .whereType<Map>()
               .map((e) => Map<String, dynamic>.from(e))
               .map(
@@ -1533,6 +1825,7 @@ class _ManualBalanceAdjustmentDialogState
               .toList()
             ..sort((a, b) => (a['name']!).compareTo(b['name']!));
       final firstId = rows.isNotEmpty ? rows.first['id'] : null;
+      if (!mounted) return;
       setState(() {
         _employees = rows;
         _selectedUserId = firstId;
@@ -1542,6 +1835,7 @@ class _ManualBalanceAdjustmentDialogState
         await _loadBalancesFor(firstId);
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _employeesError = e.toString();
         _loadingEmployees = false;
@@ -1550,19 +1844,22 @@ class _ManualBalanceAdjustmentDialogState
   }
 
   Future<void> _loadBalancesFor(String userId) async {
-    setState(() => _loadingBalances = true);
+    setState(() {
+      _loadingBalances = true;
+      _balances = const [];
+    });
     try {
       final list = await context.read<LeaveProvider>().fetchBalancesForUser(
         userId,
       );
-      if (!mounted) return;
+      if (!mounted || _selectedUserId != userId) return;
       setState(() {
         _balances = list;
         _loadingBalances = false;
       });
       _applyBalanceToFields();
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || _selectedUserId != userId) return;
       setState(() {
         _balances = const [];
         _loadingBalances = false;
@@ -1572,24 +1869,34 @@ class _ManualBalanceAdjustmentDialogState
   }
 
   void _applyBalanceToFields() {
-    LeaveBalance? row;
-    for (final b in _balances) {
-      if (b.leaveType == _selectedLeaveType) {
-        row = b;
-        break;
-      }
-    }
-    _earnedController.text = (row?.earnedDays ?? 0).toString();
-    _usedController.text = (row?.usedDays ?? 0).toString();
-    _pendingController.text = (row?.pendingDays ?? 0).toString();
-    _adjustedController.text = (row?.adjustedDays ?? 0).toString();
+    final row = _selectedBalance;
+    _earnedController.text = _formatDays(row?.earnedDays ?? 0);
+    _usedController.text = _formatDays(row?.usedDays ?? 0);
+    _pendingController.text = _formatDays(row?.pendingDays ?? 0);
+    _adjustedController.text = _formatDays(row?.adjustedDays ?? 0);
+    _asOfDate = row?.asOfDate ?? DateTime.now();
+    _refreshPreview();
   }
 
   Future<void> _onEmployeeChanged(String? id) async {
-    setState(() => _selectedUserId = id);
+    setState(() {
+      _selectedUserId = id;
+      _balances = const [];
+    });
     if (id != null && id.isNotEmpty) {
       await _loadBalancesFor(id);
     }
+  }
+
+  Future<void> _pickAsOfDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _asOfDate,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _asOfDate = picked);
   }
 
   Future<void> _onSave() async {
@@ -1600,13 +1907,17 @@ class _ManualBalanceAdjustmentDialogState
     final balance = LeaveBalance(
       userId: uid,
       leaveType: _selectedLeaveType,
-      earnedDays: _parseDouble(_earnedController.text) ?? 0,
-      usedDays: _parseDouble(_usedController.text) ?? 0,
-      pendingDays: _parseDouble(_pendingController.text) ?? 0,
-      adjustedDays: _parseDouble(_adjustedController.text) ?? 0,
+      earnedDays: parseAdminLeaveDouble(_earnedController.text) ?? 0,
+      usedDays: parseAdminLeaveDouble(_usedController.text) ?? 0,
+      pendingDays: parseAdminLeaveDouble(_pendingController.text) ?? 0,
+      adjustedDays: parseAdminLeaveDouble(_adjustedController.text) ?? 0,
+      asOfDate: _asOfDate,
     );
 
-    final saved = await context.read<LeaveProvider>().upsertBalance(balance);
+    final saved = await context.read<LeaveProvider>().upsertBalance(
+      balance,
+      remarks: trimAdminLeaveOrNull(_remarksController.text),
+    );
     if (!mounted) return;
     if (saved != null) {
       Navigator.of(context).pop(true);
@@ -1616,16 +1927,90 @@ class _ManualBalanceAdjustmentDialogState
     }
   }
 
+  LeaveBalance? get _selectedBalance {
+    for (final balance in _balances) {
+      if (balance.leaveType == _selectedLeaveType) return balance;
+    }
+    return null;
+  }
+
+  LeaveBalance get _draftBalance {
+    return LeaveBalance(
+      userId: _selectedUserId ?? '',
+      leaveType: _selectedLeaveType,
+      earnedDays: parseAdminLeaveDouble(_earnedController.text) ?? 0,
+      usedDays: parseAdminLeaveDouble(_usedController.text) ?? 0,
+      pendingDays: parseAdminLeaveDouble(_pendingController.text) ?? 0,
+      adjustedDays: parseAdminLeaveDouble(_adjustedController.text) ?? 0,
+      asOfDate: _asOfDate,
+    );
+  }
+
+  String get _selectedEmployeeName {
+    for (final employee in _employees) {
+      if (employee['id'] == _selectedUserId) {
+        return employee['name'] ?? 'Selected employee';
+      }
+    }
+    return 'Selected employee';
+  }
+
   @override
   Widget build(BuildContext context) {
     final saving = context.watch<LeaveProvider>().submitting;
+    final hasEmployees = _employees.isNotEmpty;
+    final canSave =
+        !saving &&
+        !_loadingEmployees &&
+        !_loadingBalances &&
+        _employeesError == null &&
+        hasEmployees;
 
     return AlertDialog(
-      title: const Text('Manual balance adjustment'),
+      titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+      contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+      actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+      title: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.account_balance_wallet_outlined,
+              color: AppTheme.primaryNavy,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Manual Balance Adjustment'),
+                const SizedBox(height: 4),
+                Text(
+                  'Update leave credit buckets and record an audit note.',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
       content: SizedBox(
-        width: 520,
+        width: 640,
         child: Form(
           key: _formKey,
+          autovalidateMode: AutovalidateMode.onUserInteraction,
           child: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1640,10 +2025,25 @@ class _ManualBalanceAdjustmentDialogState
                     'Failed to load employees: $_employeesError',
                     style: TextStyle(color: Colors.red.shade700),
                   )
+                else if (!hasEmployees)
+                  _statusPanel(
+                    icon: Icons.person_off_outlined,
+                    message:
+                        'No active employees are available for adjustment.',
+                  )
                 else ...[
+                  _sectionHeader(
+                    icon: Icons.person_search_outlined,
+                    title: 'Employee and Leave Type',
+                  ),
+                  const SizedBox(height: 10),
                   DropdownButtonFormField<String>(
-                    value: _selectedUserId,
-                    decoration: _inputDecoration('Employee'),
+                    initialValue: _selectedUserId,
+                    isExpanded: true,
+                    menuMaxHeight: 360,
+                    decoration: adminLeaveInputDecoration(
+                      'Employee',
+                    ).copyWith(prefixIcon: const Icon(Icons.person_outline)),
                     items: _employees
                         .map(
                           (e) => DropdownMenuItem<String>(
@@ -1661,101 +2061,111 @@ class _ManualBalanceAdjustmentDialogState
                         (v == null || v.isEmpty) ? 'Select an employee' : null,
                   ),
                   const SizedBox(height: 12),
-                  if (_loadingBalances)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 8),
-                      child: Center(
-                        child: SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      ),
-                    ),
-                  DropdownButtonFormField<LeaveType>(
-                    value: _selectedLeaveType,
-                    decoration: _inputDecoration('Leave type'),
-                    items: LeaveType.values
-                        .map(
-                          (t) => DropdownMenuItem<LeaveType>(
-                            value: t,
-                            child: Text(t.displayName),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final narrow = constraints.maxWidth < 560;
+                      final leaveTypeField = DropdownButtonFormField<LeaveType>(
+                        initialValue: _selectedLeaveType,
+                        isExpanded: true,
+                        menuMaxHeight: 360,
+                        decoration: adminLeaveInputDecoration('Leave type')
+                            .copyWith(
+                              prefixIcon: const Icon(Icons.event_note_outlined),
+                            ),
+                        items: LeaveType.values
+                            .map(
+                              (t) => DropdownMenuItem<LeaveType>(
+                                value: t,
+                                child: Text(t.displayName),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: saving || _loadingBalances
+                            ? null
+                            : (v) {
+                                if (v == null) return;
+                                setState(() => _selectedLeaveType = v);
+                                _applyBalanceToFields();
+                              },
+                      );
+                      final asOfField = _asOfDateField(saving);
+                      if (narrow) {
+                        return Column(
+                          children: [
+                            leaveTypeField,
+                            const SizedBox(height: 12),
+                            asOfField,
+                          ],
+                        );
+                      }
+                      return Row(
+                        children: [
+                          Expanded(child: leaveTypeField),
+                          const SizedBox(width: 12),
+                          SizedBox(width: 210, child: asOfField),
+                        ],
+                      );
+                    },
+                  ),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 180),
+                    child: _loadingBalances
+                        ? const Padding(
+                            key: ValueKey('balance-loading'),
+                            padding: EdgeInsets.only(top: 12),
+                            child: LinearProgressIndicator(minHeight: 2),
+                          )
+                        : const SizedBox(
+                            key: ValueKey('balance-idle'),
+                            height: 12,
                           ),
-                        )
-                        .toList(),
-                    onChanged: saving || _loadingBalances
-                        ? null
-                        : (v) {
-                            if (v == null) return;
-                            setState(() => _selectedLeaveType = v);
-                            _applyBalanceToFields();
-                          },
                   ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _earnedController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: _inputDecoration('Earned days'),
-                    validator: (value) {
-                      final parsed = _parseDouble(value ?? '');
-                      if (parsed == null) return 'Enter earned days';
-                      if (parsed < 0) return 'Must be ≥ 0';
-                      return null;
-                    },
+                  _balancePreviewPanel(
+                    current: _selectedBalance,
+                    draft: _draftBalance,
                   ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _usedController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
+                  const SizedBox(height: 18),
+                  _sectionHeader(
+                    icon: Icons.tune_outlined,
+                    title: 'Balance Buckets',
+                    trailing: IconButton(
+                      onPressed: saving || _loadingBalances
+                          ? null
+                          : _applyBalanceToFields,
+                      icon: const Icon(Icons.restore_rounded),
+                      tooltip: 'Reset loaded values',
                     ),
-                    decoration: _inputDecoration('Used days'),
-                    validator: (value) {
-                      final parsed = _parseDouble(value ?? '');
-                      if (parsed == null) return 'Enter used days';
-                      if (parsed < 0) return 'Must be ≥ 0';
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _pendingController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: _inputDecoration('Pending days'),
-                    validator: (value) {
-                      final parsed = _parseDouble(value ?? '');
-                      if (parsed == null) return 'Enter pending days';
-                      if (parsed < 0) return 'Must be ≥ 0';
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _adjustedController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                      signed: true,
-                    ),
-                    decoration: _inputDecoration('Adjusted days'),
-                    validator: (value) {
-                      final parsed = _parseDouble(value ?? '');
-                      if (parsed == null)
-                        return 'Enter adjusted days (use 0 if none)';
-                      return null;
-                    },
                   ),
                   const SizedBox(height: 10),
-                  Text(
-                    'Creates or overwrites the balance row for this employee and leave type. '
-                    'Use for HR corrections; normal approvals still update balances automatically.',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 12,
-                    ),
+                  _balanceFieldGrid(enabled: !saving && !_loadingBalances),
+                  const SizedBox(height: 16),
+                  _sectionHeader(
+                    icon: Icons.history_edu_outlined,
+                    title: 'Audit Note',
+                  ),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    controller: _remarksController,
+                    enabled: !saving,
+                    minLines: 2,
+                    maxLines: 4,
+                    decoration: adminLeaveInputDecoration('Reason / remarks')
+                        .copyWith(
+                          alignLabelWithHint: true,
+                          prefixIcon: const Icon(Icons.notes_outlined),
+                          hintText:
+                              'Example: Corrected imported opening balance',
+                        ),
+                  ),
+                  const SizedBox(height: 12),
+                  _statusPanel(
+                    icon: _draftBalance.availableDays < 0
+                        ? Icons.warning_amber_rounded
+                        : Icons.info_outline_rounded,
+                    message: _draftBalance.availableDays < 0
+                        ? 'Resulting available balance is negative. Save only if this reflects the intended HR correction.'
+                        : 'Approvals continue to update used and pending days automatically after this adjustment.',
+                    warning: _draftBalance.availableDays < 0,
                   ),
                 ],
               ],
@@ -1768,1517 +2178,350 @@ class _ManualBalanceAdjustmentDialogState
           onPressed: saving ? null : () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
         ),
-        FilledButton(
-          onPressed:
-              saving ||
-                  _loadingEmployees ||
-                  _loadingBalances ||
-                  _employeesError != null
-              ? null
-              : _onSave,
-          child: Text(saving ? 'Saving…' : 'Save balance'),
+        FilledButton.icon(
+          onPressed: canSave ? _onSave : null,
+          icon: saving
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.save_outlined),
+          label: Text(saving ? 'Saving...' : 'Update balance'),
         ),
       ],
     );
   }
-}
 
-class _FilterBar extends StatelessWidget {
-  const _FilterBar({
-    required this.isDepartmentHead,
-    required this.status,
-    required this.leaveType,
-    required this.department,
-    required this.departments,
-    required this.employee,
-    required this.employees,
-    required this.onStatusChanged,
-    required this.onLeaveTypeChanged,
-    required this.onDepartmentChanged,
-    required this.onEmployeeChanged,
-    required this.onReset,
-    this.startDateFrom,
-    this.startDateTo,
-    this.onStartDateFromChanged,
-    this.onStartDateToChanged,
-  });
-
-  final bool isDepartmentHead;
-  final LeaveRequestStatus? status;
-  final LeaveType? leaveType;
-  final String? department;
-  final List<String> departments;
-  final String? employee;
-  final List<_EmployeeFilterOption> employees;
-  final ValueChanged<LeaveRequestStatus?> onStatusChanged;
-  final ValueChanged<LeaveType?> onLeaveTypeChanged;
-  final ValueChanged<String?> onDepartmentChanged;
-  final ValueChanged<String?> onEmployeeChanged;
-  final VoidCallback onReset;
-  // #11: Date range filters.
-  final DateTime? startDateFrom;
-  final DateTime? startDateTo;
-  final ValueChanged<DateTime?>? onStartDateFromChanged;
-  final ValueChanged<DateTime?>? onStartDateToChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final statusOptions = isDepartmentHead
-        ? const <LeaveRequestStatus?>[
-            null,
-            LeaveRequestStatus.pendingDepartmentHead,
-            LeaveRequestStatus.returned,
-            LeaveRequestStatus.rejectedByDepartmentHead,
-          ]
-        : const <LeaveRequestStatus?>[
-            null,
-            LeaveRequestStatus.pendingHr,
-            LeaveRequestStatus.returned,
-            LeaveRequestStatus.approved,
-            LeaveRequestStatus.rejectedByHr,
-            LeaveRequestStatus.cancelled,
-          ];
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          return ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: constraints.maxWidth),
-            child: Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                SizedBox(
-                  width: 160,
-                  child: DropdownButtonFormField<LeaveRequestStatus?>(
-                    isExpanded: true,
-                    initialValue: status,
-                    decoration: _inputDecoration('Status'),
-                    items: [
-                      ...statusOptions.map(
-                        (value) => DropdownMenuItem<LeaveRequestStatus?>(
-                          value: value,
-                          child: Text(_statusLabel(value)),
-                        ),
-                      ),
-                    ],
-                    onChanged: onStatusChanged,
-                  ),
-                ),
-                SizedBox(
-                  width: 180,
-                  child: DropdownButtonFormField<LeaveType?>(
-                    isExpanded: true,
-                    initialValue: leaveType,
-                    decoration: _inputDecoration('Leave Type'),
-                    items: [
-                      const DropdownMenuItem<LeaveType?>(
-                        value: null,
-                        child: Text('All leave types'),
-                      ),
-                      ...LeaveType.values.map(
-                        (value) => DropdownMenuItem<LeaveType?>(
-                          value: value,
-                          child: Text(value.displayName),
-                        ),
-                      ),
-                    ],
-                    onChanged: onLeaveTypeChanged,
-                  ),
-                ),
-                if (!isDepartmentHead)
-                  SizedBox(
-                    width: 180,
-                    child: DropdownButtonFormField<String?>(
-                      isExpanded: true,
-                      initialValue: department,
-                      decoration: _inputDecoration('Department'),
-                      items: [
-                        const DropdownMenuItem<String?>(
-                          value: null,
-                          child: Text('All departments'),
-                        ),
-                        ...departments.map(
-                          (value) => DropdownMenuItem<String?>(
-                            value: value,
-                            child: Text(value),
-                          ),
-                        ),
-                      ],
-                      onChanged: onDepartmentChanged,
-                    ),
-                  ),
-                SizedBox(
-                  width: 220,
-                  child: DropdownButtonFormField<String?>(
-                    isExpanded: true,
-                    initialValue: employee,
-                    decoration: _inputDecoration(
-                      isDepartmentHead ? 'Employee' : 'Employee',
-                    ),
-                    items: [
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('All employees'),
-                      ),
-                      ...employees.map(
-                        (e) => DropdownMenuItem<String?>(
-                          value: e.id,
-                          child: Text(e.name),
-                        ),
-                      ),
-                    ],
-                    onChanged: (!isDepartmentHead && department == null)
-                        ? null
-                        : onEmployeeChanged,
-                    hint: (!isDepartmentHead && department == null)
-                        ? const Text('Select department first')
-                        : null,
-                  ),
-                ),
-                // #11: Date range pickers.
-                _DateFilterChip(
-                  label: 'From',
-                  date: startDateFrom,
-                  onChanged: onStartDateFromChanged,
-                ),
-                _DateFilterChip(
-                  label: 'To',
-                  date: startDateTo,
-                  onChanged: onStartDateToChanged,
-                ),
-                TextButton.icon(
-                  onPressed: onReset,
-                  icon: const Icon(Icons.filter_alt_off_rounded),
-                  label: const Text('Reset Filters'),
-                ),
-              ],
+  Widget _asOfDateField(bool saving) {
+    return InkWell(
+      onTap: saving ? null : _pickAsOfDate,
+      borderRadius: BorderRadius.circular(12),
+      child: InputDecorator(
+        decoration: adminLeaveInputDecoration(
+          'As of date',
+        ).copyWith(prefixIcon: const Icon(Icons.calendar_month_outlined)),
+        child: Row(
+          children: [
+            Expanded(child: Text(formatAdminLeaveDate(_asOfDate))),
+            Icon(
+              Icons.expand_more_rounded,
+              color: saving ? Colors.black26 : AppTheme.textSecondary,
             ),
-          );
-        },
+          ],
+        ),
       ),
     );
   }
 
-  String _statusLabel(LeaveRequestStatus? value) {
-    if (value == null) return 'All statuses';
-    if (!isDepartmentHead) return value.displayName;
-    return switch (value) {
-      LeaveRequestStatus.pendingDepartmentHead => 'Pending',
-      LeaveRequestStatus.rejectedByDepartmentHead => 'Rejected',
-      LeaveRequestStatus.returned => 'Returned',
-      _ => value.displayName,
-    };
-  }
-}
-
-class _EmployeeFilterOption {
-  const _EmployeeFilterOption({required this.id, required this.name});
-
-  final String id;
-  final String name;
-}
-
-/// Small chip-style date picker for filter bar.
-class _DateFilterChip extends StatelessWidget {
-  const _DateFilterChip({
-    required this.label,
-    required this.date,
-    required this.onChanged,
-  });
-
-  final String label;
-  final DateTime? date;
-  final ValueChanged<DateTime?>? onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final hasDate = date != null;
-    final text = hasDate
-        ? '$label: ${date!.year}-${date!.month.toString().padLeft(2, '0')}-${date!.day.toString().padLeft(2, '0')}'
-        : label;
-    return InputChip(
-      label: Text(text, style: const TextStyle(fontSize: 13)),
-      avatar: Icon(
-        hasDate ? Icons.event_available_rounded : Icons.calendar_today_rounded,
-        size: 16,
+  Widget _balanceFieldGrid({required bool enabled}) {
+    final fields = [
+      _numberField(
+        controller: _earnedController,
+        label: 'Earned days',
+        icon: Icons.add_circle_outline,
+        helperText: 'Credits accrued or imported.',
+        enabled: enabled,
+        allowNegative: false,
       ),
-      deleteIcon: hasDate ? const Icon(Icons.close_rounded, size: 14) : null,
-      onDeleted: hasDate ? () => onChanged?.call(null) : null,
-      onPressed: () async {
-        final picked = await showDatePicker(
-          context: context,
-          initialDate: date ?? DateTime.now(),
-          firstDate: DateTime(2020),
-          lastDate: DateTime(2030),
-          helpText: 'Select $label date',
+      _numberField(
+        controller: _usedController,
+        label: 'Used days',
+        icon: Icons.remove_circle_outline,
+        helperText: 'Approved leave already consumed.',
+        enabled: enabled,
+        allowNegative: false,
+      ),
+      _numberField(
+        controller: _pendingController,
+        label: 'Pending days',
+        icon: Icons.hourglass_empty_rounded,
+        helperText: 'Filed requests awaiting final action.',
+        enabled: enabled,
+        allowNegative: false,
+      ),
+      _numberField(
+        controller: _adjustedController,
+        label: 'Adjusted days',
+        icon: Icons.exposure_outlined,
+        helperText: 'Use negative values to reduce credits.',
+        enabled: enabled,
+        allowNegative: true,
+      ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 560) {
+          return Column(
+            children: [
+              for (var i = 0; i < fields.length; i++) ...[
+                if (i > 0) const SizedBox(height: 12),
+                fields[i],
+              ],
+            ],
+          );
+        }
+        return Column(
+          children: [
+            Row(
+              children: [
+                Expanded(child: fields[0]),
+                const SizedBox(width: 12),
+                Expanded(child: fields[1]),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(child: fields[2]),
+                const SizedBox(width: 12),
+                Expanded(child: fields[3]),
+              ],
+            ),
+          ],
         );
-        if (picked != null) onChanged?.call(picked);
       },
     );
   }
-}
 
-class _RequestQueuePanel extends StatelessWidget {
-  const _RequestQueuePanel({
-    required this.requests,
-    required this.isDepartmentHead,
-    required this.loading,
-    required this.selectedRequest,
-    required this.filterBar,
-    required this.onSelect,
-  });
-
-  final List<LeaveRequest> requests;
-  final bool isDepartmentHead;
-  final bool loading;
-  final LeaveRequest? selectedRequest;
-  final Widget filterBar;
-  final ValueChanged<LeaveRequest> onSelect;
-
-  @override
-  Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.sizeOf(context).height;
-    final screenWidth = MediaQuery.sizeOf(context).width;
-    final maxQueueHeight = screenWidth < 600
-        ? (screenHeight * 0.42).clamp(260.0, 420.0)
-        : screenWidth < 1024
-        ? (screenHeight * 0.52).clamp(320.0, 580.0)
-        : (screenHeight * 0.6).clamp(380.0, 760.0);
-
-    return _SectionCard(
-      title: 'Request Queue',
-      subtitle:
-          'Tap a row to open details (side panel on wide screens, full screen on small).',
-      child: loading && requests.isEmpty
-          ? const _CenteredState(message: 'Loading leave requests...')
-          : requests.isEmpty
-          ? const _CenteredState(
-              message: 'No leave requests matched the filters.',
-            )
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                filterBar,
-                const SizedBox(height: 14),
-                Container(
-                  width: double.infinity,
-                  constraints: BoxConstraints(maxHeight: maxQueueHeight),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.black.withOpacity(0.08)),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final maxW = constraints.maxWidth;
-                      final tableWidth = !maxW.isFinite || maxW <= 0
-                          ? kAdminTableMinWidth
-                          : (maxW < kAdminTableMinWidth
-                                ? kAdminTableMinWidth
-                                : maxW);
-                      return Scrollbar(
-                        thumbVisibility: true,
-                        child: SingleChildScrollView(
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: SizedBox(
-                              width: tableWidth,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  const AdminTableHeader(),
-                                  ...requests.map(
-                                    (request) => AdminRow(
-                                      request: request,
-                                      statusLabel: _statusLabel(
-                                        request.status,
-                                        isDepartmentHead: isDepartmentHead,
-                                      ),
-                                      highlighted:
-                                          request.id == selectedRequest?.id,
-                                      onView: () => onSelect(request),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-    );
-  }
-}
-
-/// Leave review details shown over the queue (matches [openResponsiveLeaveFormHost] behavior).
-class _AdminLeaveDetailsSideSheet extends StatelessWidget {
-  const _AdminLeaveDetailsSideSheet({
-    required this.initial,
-    required this.isDepartmentHead,
-    required this.onApprove,
-    required this.onReturn,
-    required this.onReject,
-    required this.onRevoke,
-    required this.onPrint,
-  });
-
-  final LeaveRequest initial;
-  final bool isDepartmentHead;
-  final Future<void> Function(LeaveRequest) onApprove;
-  final Future<void> Function(LeaveRequest) onReturn;
-  final Future<void> Function(LeaveRequest) onReject;
-  final Future<void> Function(LeaveRequest) onRevoke;
-  final Future<void> Function(LeaveRequest) onPrint;
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Material(
-            elevation: 1,
-            color: AppTheme.offWhite,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Request details',
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Close',
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close_rounded),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Expanded(
-            child: Consumer<LeaveProvider>(
-              builder: (context, provider, _) {
-                var req = initial;
-                final id = initial.id;
-                if (id != null && id.isNotEmpty) {
-                  final hit = provider.requests
-                      .where((r) => r.id == id)
-                      .toList();
-                  if (hit.isNotEmpty) req = hit.first;
-                }
-                final pending = req.status.isPending;
-                final approved = req.status == LeaveRequestStatus.approved;
-                return SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                  child: _RequestDetailsPanel(
-                    request: req,
-                    isDepartmentHead: isDepartmentHead,
-                    reviewing: provider.reviewing,
-                    onApprove: pending ? () => onApprove(req) : null,
-                    onReturn: pending ? () => onReturn(req) : null,
-                    onReject: pending ? () => onReject(req) : null,
-                    onRevoke: approved ? () => onRevoke(req) : null,
-                    onPrint: () => onPrint(req),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
+  Widget _numberField({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    required String helperText,
+    required bool enabled,
+    required bool allowNegative,
+  }) {
+    return TextFormField(
+      controller: controller,
+      enabled: enabled,
+      keyboardType: TextInputType.numberWithOptions(
+        decimal: true,
+        signed: allowNegative,
       ),
+      decoration: adminLeaveInputDecoration(
+        label,
+      ).copyWith(prefixIcon: Icon(icon), helperText: helperText),
+      validator: (value) {
+        final parsed = parseAdminLeaveDouble(value ?? '');
+        if (parsed == null) return 'Enter $label';
+        if (!allowNegative && parsed < 0) return 'Must be 0 or more';
+        return null;
+      },
     );
   }
-}
 
-class _RequestDetailsPanel extends StatelessWidget {
-  const _RequestDetailsPanel({
-    required this.request,
-    required this.isDepartmentHead,
-    required this.reviewing,
-    this.onApprove,
-    this.onReturn,
-    this.onReject,
-    this.onRevoke, // #15
-    this.onPrint,
-  });
-
-  final LeaveRequest? request;
-  final bool isDepartmentHead;
-  final bool reviewing;
-  final VoidCallback? onApprove;
-  final VoidCallback? onReturn;
-  final VoidCallback? onReject;
-  final VoidCallback? onRevoke; // #15
-  final VoidCallback? onPrint;
-
-  @override
-  Widget build(BuildContext context) {
-    if (request == null) {
-      return const _SectionCard(
-        title: 'Request Details',
-        subtitle: 'Select a request from the queue to review it.',
-        child: _CenteredState(message: 'No request selected.'),
-      );
-    }
-
-    return _SectionCard(
-      title: 'Request Details',
-      subtitle: 'Review the employee application before taking action.',
+  Widget _balancePreviewPanel({
+    required LeaveBalance? current,
+    required LeaveBalance draft,
+  }) {
+    final hasCurrent = current != null;
+    final availableColor = draft.availableDays < 0
+        ? Colors.red.shade700
+        : AppTheme.primaryNavy;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      request!.employeeName ?? 'Unknown employee',
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      request!.leaveType.displayName,
-                      style: TextStyle(
-                        color: AppTheme.primaryNavyDark,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              LeaveStatusChip(
-                status: request!.status,
-                label: _statusLabel(
-                  request!.status,
-                  isDepartmentHead: isDepartmentHead,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              _DetailPill(
-                label: 'Date Filed',
-                value: request!.dateFiled != null
-                    ? _formatDate(request!.dateFiled!)
-                    : '—',
-              ),
-              _DetailPill(
-                label: 'Inclusive Dates',
-                value: _formatRange(request!),
-              ),
-              _DetailPill(
-                label: 'Working Days',
-                value: request!.workingDaysApplied?.toStringAsFixed(1) ?? '—',
-              ),
-              _DetailPill(
-                label: 'Commutation',
-                value: request!.commutation.displayName,
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          _DetailGrid(request: request!),
-          const SizedBox(height: 20),
-          if ((request!.reason ?? '').trim().isNotEmpty) ...[
-            _SubsectionTitle(title: 'Reason / Details'),
-            _BodyCard(content: request!.reason!.trim()),
-            const SizedBox(height: 16),
-          ],
-          _SubsectionTitle(title: 'Approval History'),
-          const SizedBox(height: 8),
-          HistoryTimeline(events: _buildHistoryEvents(request!)),
-          const SizedBox(height: 10),
-          _SubsectionTitle(title: 'Review Actions'),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              if (onApprove != null)
-                FilledButton.icon(
-                  onPressed: reviewing ? null : onApprove,
-                  icon: const Icon(Icons.check_circle_rounded),
-                  label: const Text('Approve'),
-                ),
-              if (onReturn != null)
-                OutlinedButton.icon(
-                  onPressed: reviewing ? null : onReturn,
-                  icon: const Icon(Icons.reply_rounded),
-                  label: const Text('Return'),
-                ),
-              if (onReject != null)
-                OutlinedButton.icon(
-                  onPressed: reviewing ? null : onReject,
-                  icon: const Icon(Icons.cancel_rounded),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.red.shade700,
-                    side: BorderSide(color: Colors.red.shade300),
-                  ),
-                  label: const Text('Reject'),
-                ),
-              // #15: Revoke — shown only when status is approved.
-              if (onRevoke != null)
-                OutlinedButton.icon(
-                  onPressed: reviewing ? null : onRevoke,
-                  icon: const Icon(Icons.undo_rounded),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.orange.shade800,
-                    side: BorderSide(color: Colors.orange.shade300),
-                  ),
-                  label: const Text('Revoke Approval'),
-                ),
-              if (onPrint != null)
-                OutlinedButton.icon(
-                  onPressed: reviewing ? null : onPrint,
-                  icon: const Icon(Icons.print_rounded),
-                  label: const Text('Print Form'),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _formatRange(LeaveRequest request) {
-    if (request.startDate == null || request.endDate == null) return '—';
-    return '${_formatDate(request.startDate!)} to ${_formatDate(request.endDate!)}';
-  }
-
-  List<LeaveHistoryEvent> _buildHistoryEvents(LeaveRequest request) {
-    final reviewer = (request.reviewerName ?? '').trim().isNotEmpty
-        ? request.reviewerName!.trim()
-        : 'Approver';
-    final submittedAt = request.dateFiled ?? request.createdAt;
-    final reviewedAt = request.reviewedAt;
-    final status = request.status;
-
-    final deptHeadApprovedStage =
-        status == LeaveRequestStatus.pendingHr ||
-        status == LeaveRequestStatus.approved ||
-        status == LeaveRequestStatus.rejected ||
-        status == LeaveRequestStatus.rejectedByHr;
-
-    final deptHeadRejected =
-        status == LeaveRequestStatus.rejectedByDepartmentHead;
-    final hrApproved = status == LeaveRequestStatus.approved;
-    final hrRejected =
-        status == LeaveRequestStatus.rejected ||
-        status == LeaveRequestStatus.rejectedByHr;
-
-    return [
-      LeaveHistoryEvent(
-        label: 'Submitted',
-        dateTime: submittedAt,
-        actor: request.employeeName ?? 'Employee',
-        remarks: request.reason,
-      ),
-      if (deptHeadApprovedStage)
-        LeaveHistoryEvent(
-          label: 'Approved by Department Head',
-          dateTime: reviewedAt,
-          actor: reviewer,
-          completed: true,
-        ),
-      if (deptHeadApprovedStage)
-        LeaveHistoryEvent(
-          label: 'Forwarded to HR',
-          dateTime: reviewedAt,
-          actor: reviewer,
-          completed: true,
-        ),
-      if (deptHeadRejected)
-        LeaveHistoryEvent(
-          label: 'Rejected by Department Head',
-          dateTime: reviewedAt,
-          actor: reviewer,
-          remarks:
-              (request.disapprovalReason ?? request.hrRemarks)
-                      ?.trim()
-                      .isNotEmpty ==
-                  true
-              ? (request.disapprovalReason ?? request.hrRemarks)
-              : null,
-          completed: true,
-        ),
-      if (status == LeaveRequestStatus.pendingHr)
-        LeaveHistoryEvent(
-          label: 'Approved by HR',
-          dateTime: null,
-          actor: reviewer,
-          completed: false,
-        ),
-      if (hrApproved)
-        LeaveHistoryEvent(
-          label: 'Approved by HR',
-          dateTime: reviewedAt,
-          actor: reviewer,
-          remarks: request.hrRemarks,
-          completed: true,
-        ),
-      if (hrRejected)
-        LeaveHistoryEvent(
-          label: 'Rejected by HR',
-          dateTime: reviewedAt,
-          actor: reviewer,
-          remarks:
-              (request.disapprovalReason ?? request.hrRemarks)
-                      ?.trim()
-                      .isNotEmpty ==
-                  true
-              ? (request.disapprovalReason ?? request.hrRemarks)
-              : null,
-          completed: true,
-        ),
-    ];
-  }
-}
-
-class _DetailGrid extends StatelessWidget {
-  const _DetailGrid({required this.request});
-
-  final LeaveRequest request;
-
-  @override
-  Widget build(BuildContext context) {
-    final rows = <({String label, String value})>[
-      (label: 'Office/Department', value: request.officeDepartment ?? '—'),
-      (label: 'Position Title', value: request.positionTitle ?? '—'),
-      (
-        label: 'Salary',
-        value: request.salary != null
-            ? request.salary!.toStringAsFixed(2)
-            : '—',
-      ),
-      (label: 'Custom Leave Type', value: request.customLeaveTypeText ?? '—'),
-      (label: 'Location', value: request.locationOption?.displayName ?? '—'),
-      (label: 'Location Details', value: request.locationDetails ?? '—'),
-      (
-        label: 'Sick Leave Nature',
-        value: request.sickLeaveNature?.displayName ?? '—',
-      ),
-      (label: 'Sick Illness Details', value: request.sickIllnessDetails ?? '—'),
-      (
-        label: 'Women Illness Details',
-        value: request.womenIllnessDetails ?? '—',
-      ),
-      (label: 'Study Purpose', value: request.studyPurpose?.displayName ?? '—'),
-      (
-        label: 'Study Purpose Details',
-        value: request.studyPurposeDetails ?? '—',
-      ),
-      (label: 'Other Purpose', value: request.otherPurpose?.displayName ?? '—'),
-      (
-        label: 'Other Purpose Details',
-        value: request.otherPurposeDetails ?? '—',
-      ),
-    ];
-
-    final attachmentName = request.attachmentName?.trim();
-    final hasAttachment = attachmentName != null && attachmentName.isNotEmpty;
-    final requestId = request.id;
-
-    return Wrap(
-      spacing: 12,
-      runSpacing: 12,
-      children: [
-        ...rows
-            .where((r) => r.label != 'Attachment')
-            .map(
-              (item) => SizedBox(
-                width: 260,
-                child: _InfoTile(label: item.label, value: item.value),
-              ),
-            ),
-        SizedBox(
-          width: 260,
-          child: _AttachmentTile(
-            requestId: requestId,
-            attachmentName: attachmentName,
-            hasAttachment: hasAttachment,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _AttachmentTile extends StatelessWidget {
-  const _AttachmentTile({
-    required this.requestId,
-    required this.attachmentName,
-    required this.hasAttachment,
-  });
-
-  final String? requestId;
-  final String? attachmentName;
-  final bool hasAttachment;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppTheme.offWhite,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Attachment',
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 6),
-          if (!hasAttachment)
-            Text(
-              'No attachment linked yet',
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
-            )
-          else
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    attachmentName!,
-                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                TextButton.icon(
-                  onPressed: requestId != null && requestId!.isNotEmpty
-                      ? () => _openOrDownloadAttachment(context)
-                      : null,
-                  icon: const Icon(Icons.download_rounded, size: 18),
-                  label: const Text('View'),
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                ),
-              ],
-            ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _openOrDownloadAttachment(BuildContext context) async {
-    if (requestId == null || requestId!.isEmpty) return;
-
-    final provider = context.read<LeaveProvider>();
-    final snackbar = ScaffoldMessenger.of(context);
-
-    try {
-      snackbar.showSnackBar(
-        const SnackBar(content: Text('Downloading attachment...')),
-      );
-      final bytes = await provider.getAttachmentBytes(requestId!);
-      if (!context.mounted) return;
-      if (bytes == null || bytes.isEmpty) {
-        snackbar.showSnackBar(
-          const SnackBar(content: Text('Attachment could not be loaded.')),
-        );
-        return;
-      }
-
-      snackbar.clearSnackBars();
-      snackbar.showSnackBar(
-        const SnackBar(content: Text('Opening attachment...')),
-      );
-
-      final name = attachmentName ?? 'attachment';
-      await open_attachment.openAttachmentBytes(bytes, name);
-      if (context.mounted) {
-        snackbar.showSnackBar(
-          const SnackBar(content: Text('Attachment opened.')),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        snackbar.showSnackBar(
-          SnackBar(content: Text('Could not open attachment: $e')),
-        );
-      }
-    }
-  }
-}
-
-class _ApproveDialog extends StatefulWidget {
-  const _ApproveDialog({required this.request, this.leaveBalance});
-
-  final LeaveRequest request;
-  final LeaveBalance? leaveBalance;
-
-  @override
-  State<_ApproveDialog> createState() => _ApproveDialogState();
-}
-
-class _ApproveDialogState extends State<_ApproveDialog> {
-  final _formKey = GlobalKey<FormState>();
-  late final TextEditingController _withPayController;
-  late final TextEditingController _withoutPayController;
-  late final TextEditingController _remarksController;
-
-  double get _totalRequested => widget.request.workingDaysApplied ?? 0.0;
-
-  @override
-  void initState() {
-    super.initState();
-    _withPayController = TextEditingController(
-      text: _totalRequested.toStringAsFixed(1),
-    );
-    _withoutPayController = TextEditingController(text: '0.0');
-    _remarksController = TextEditingController();
-  }
-
-  @override
-  void dispose() {
-    _withPayController.dispose();
-    _withoutPayController.dispose();
-    _remarksController.dispose();
-    super.dispose();
-  }
-
-  String? _validateApprovedDays(String? value) {
-    final withPay = _parseDouble(_withPayController.text) ?? 0;
-    final withoutPay = _parseDouble(_withoutPayController.text) ?? 0;
-    if (withPay < 0 || withoutPay < 0) {
-      return 'Days cannot be negative.';
-    }
-    final sum = withPay + withoutPay;
-    if (sum > _totalRequested) {
-      return 'Approved with pay + without pay must not exceed total requested ($_totalRequested days).';
-    }
-    if (sum != _totalRequested) {
-      return 'Approved days must equal total requested ($_totalRequested days).';
-    }
-    return null;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final balanceLabel = widget.leaveBalance != null
-        ? '${widget.leaveBalance!.leaveType.displayName}: '
-              '${widget.leaveBalance!.availableDays.toStringAsFixed(1)} available '
-              '(${widget.leaveBalance!.remainingDays.toStringAsFixed(1)} remaining excl. pending)'
-        : 'No balance record for this leave type';
-
-    return AlertDialog(
-      title: const Text('Approve Leave Request'),
-      content: SizedBox(
-        width: 440,
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Total Requested: ${_totalRequested.toStringAsFixed(1)} days',
+                child: Text(
+                  hasCurrent ? 'Editing existing balance' : 'Creating balance',
                   style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
                     color: AppTheme.textPrimary,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 20),
-                _DialogField(
-                  controller: _withPayController,
-                  label: 'Approved Days With Pay',
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  validator: (_) => _validateApprovedDays(null),
-                ),
-                const SizedBox(height: 12),
-                _DialogField(
-                  controller: _withoutPayController,
-                  label: 'Approved Days Without Pay',
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  validator: (_) => _validateApprovedDays(null),
-                ),
-                const SizedBox(height: 12),
-                _DialogField(
-                  controller: _remarksController,
-                  label: 'Remarks',
-                  maxLines: null,
-                  minLines: 2,
-                ),
-                const SizedBox(height: 16),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 12,
-                    horizontal: 14,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppTheme.offWhite,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.black.withOpacity(0.08)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Current Leave Balance:',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        balanceLabel,
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () {
-            if (!(_formKey.currentState?.validate() ?? false)) return;
-            Navigator.of(context).pop(
-              LeaveApprovalInput(
-                requestId: widget.request.id ?? '',
-                reviewerId: '',
-                approvedDaysWithPay: _parseDouble(_withPayController.text),
-                approvedDaysWithoutPay: _parseDouble(
-                  _withoutPayController.text,
-                ),
-                hrRemarks: _trimOrNull(_remarksController.text),
               ),
-            );
-          },
-          child: const Text('Approve'),
-        ),
-      ],
-    );
-  }
-}
-
-class _DecisionDialog extends StatefulWidget {
-  const _DecisionDialog({
-    required this.title,
-    required this.subtitle,
-    required this.confirmLabel,
-    required this.requireReason,
-    required this.request,
-  });
-
-  final String title;
-  final String subtitle;
-  final String confirmLabel;
-  final bool requireReason;
-  final LeaveRequest request;
-
-  @override
-  State<_DecisionDialog> createState() => _DecisionDialogState();
-}
-
-class _DecisionDialogState extends State<_DecisionDialog> {
-  final _formKey = GlobalKey<FormState>();
-  late final TextEditingController _reasonController;
-  late final TextEditingController _remarksController;
-
-  @override
-  void initState() {
-    super.initState();
-    _reasonController = TextEditingController();
-    _remarksController = TextEditingController();
-  }
-
-  @override
-  void dispose() {
-    _reasonController.dispose();
-    _remarksController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.title),
-      content: SizedBox(
-        width: 500,
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.subtitle,
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: hasCurrent
+                      ? AppTheme.primaryNavy.withValues(alpha: 0.1)
+                      : Colors.blueGrey.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  hasCurrent ? 'Loaded' : 'New row',
                   style: TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 13,
-                    height: 1.4,
+                    color: hasCurrent
+                        ? AppTheme.primaryNavyDark
+                        : AppTheme.textSecondary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 16),
-                _DialogField(
-                  controller: _reasonController,
-                  label: 'Reason',
-                  maxLines: null,
-                  minLines: 3,
-                  validator: widget.requireReason
-                      ? (value) {
-                          if ((value ?? '').trim().isEmpty) {
-                            return 'Reason is required.';
-                          }
-                          return null;
-                        }
-                      : null,
-                ),
-                const SizedBox(height: 12),
-                _DialogField(
-                  controller: _remarksController,
-                  label: 'HR Remarks',
-                  maxLines: null,
-                  minLines: 3,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () {
-            if (!(_formKey.currentState?.validate() ?? false)) return;
-            Navigator.of(context).pop(
-              LeaveReviewDecisionInput(
-                requestId: widget.request.id ?? '',
-                reviewerId: '',
-                reason: _trimOrNull(_reasonController.text),
-                hrRemarks: _trimOrNull(_remarksController.text),
               ),
-            );
-          },
-          child: Text(widget.confirmLabel),
-        ),
-      ],
-    );
-  }
-}
-
-class _DialogField extends StatelessWidget {
-  const _DialogField({
-    required this.controller,
-    required this.label,
-    this.maxLines = 1,
-    this.minLines,
-    this.keyboardType,
-    this.validator,
-  });
-
-  final TextEditingController controller;
-  final String label;
-  final int? maxLines;
-  final int? minLines;
-  final TextInputType? keyboardType;
-  final String? Function(String?)? validator;
-
-  @override
-  Widget build(BuildContext context) {
-    return TextFormField(
-      controller: controller,
-      maxLines: maxLines,
-      minLines: minLines,
-      keyboardType: keyboardType,
-      validator: validator,
-      decoration: _inputDecoration(label),
-    );
-  }
-}
-
-class _SectionCard extends StatelessWidget {
-  const _SectionCard({
-    required this.title,
-    required this.subtitle,
-    required this.child,
-  });
-
-  final String title;
-  final String subtitle;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '$_selectedEmployeeName - ${_selectedLeaveType.displayName}',
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _BalanceMetric(
+                label: 'Current available',
+                value: current == null
+                    ? '--'
+                    : _formatDays(current.availableDays),
+                color: AppTheme.textSecondary,
+              ),
+              _BalanceMetric(
+                label: 'New remaining',
+                value: _formatDays(draft.remainingDays),
+                color: AppTheme.textPrimary,
+              ),
+              _BalanceMetric(
+                label: 'New available',
+                value: _formatDays(draft.availableDays),
+                color: availableColor,
+                emphasize: true,
+              ),
+              _BalanceMetric(
+                label: 'Pending reserve',
+                value: _formatDays(draft.pendingDays),
+                color: AppTheme.textPrimary,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Available = earned - used + adjusted - pending',
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
+    );
+  }
+
+  Widget _sectionHeader({
+    required IconData icon,
+    required String title,
+    Widget? trailing,
+  }) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: AppTheme.primaryNavy),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
             title,
             style: TextStyle(
               color: AppTheme.textPrimary,
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w800,
             ),
           ),
-          const SizedBox(height: 6),
-          Text(
-            subtitle,
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 13,
-              height: 1.4,
+        ),
+        if (trailing != null) trailing,
+      ],
+    );
+  }
+
+  Widget _statusPanel({
+    required IconData icon,
+    required String message,
+    bool warning = false,
+  }) {
+    final color = warning ? Colors.red.shade700 : AppTheme.textSecondary;
+    final background = warning ? Colors.red.shade50 : AppTheme.offWhite;
+    final border = warning
+        ? Colors.red.shade100
+        : Colors.black.withValues(alpha: 0.06);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(color: color, fontSize: 12.5, height: 1.35),
             ),
           ),
-          const SizedBox(height: 18),
-          child,
         ],
       ),
     );
   }
+
+  String _formatDays(double value) {
+    final normalized = value.abs() < 0.005 ? 0.0 : value;
+    final fixed = normalized.toStringAsFixed(2);
+    if (fixed.endsWith('.00')) return fixed.substring(0, fixed.length - 3);
+    if (fixed.endsWith('0')) return fixed.substring(0, fixed.length - 1);
+    return fixed;
+  }
 }
 
-class _InfoTile extends StatelessWidget {
-  const _InfoTile({required this.label, required this.value});
+class _BalanceMetric extends StatelessWidget {
+  const _BalanceMetric({
+    required this.label,
+    required this.value,
+    required this.color,
+    this.emphasize = false,
+  });
 
   final String label;
   final String value;
+  final Color color;
+  final bool emphasize;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      width: 136,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: AppTheme.offWhite,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        color: color.withValues(alpha: emphasize ? 0.1 : 0.06),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.14)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             label,
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
           ),
           const SizedBox(height: 6),
           Text(
             value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              height: 1.35,
+              color: color,
+              fontSize: emphasize ? 20 : 18,
+              fontWeight: FontWeight.w800,
             ),
           ),
         ],
       ),
     );
   }
-}
-
-class _DetailPill extends StatelessWidget {
-  const _DetailPill({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppTheme.offWhite,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-      ),
-      child: RichText(
-        text: TextSpan(
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-          children: [
-            TextSpan(
-              text: '$label: ',
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-            TextSpan(text: value),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _HeaderChip extends StatelessWidget {
-  const _HeaderChip({
-    required this.label,
-    required this.value,
-    this.emphasize = false,
-  });
-
-  final String label;
-  final String value;
-  final bool emphasize;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: emphasize
-            ? AppTheme.primaryNavy.withOpacity(0.10)
-            : AppTheme.offWhite,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: RichText(
-        text: TextSpan(
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-          children: [
-            TextSpan(
-              text: '$label: ',
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                color: emphasize
-                    ? AppTheme.primaryNavyDark
-                    : AppTheme.textPrimary,
-              ),
-            ),
-            TextSpan(text: value),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SubsectionTitle extends StatelessWidget {
-  const _SubsectionTitle({required this.title});
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      title,
-      style: TextStyle(
-        color: AppTheme.textPrimary,
-        fontSize: 15,
-        fontWeight: FontWeight.w700,
-      ),
-    );
-  }
-}
-
-class _BodyCard extends StatelessWidget {
-  const _BodyCard({required this.content});
-
-  final String content;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppTheme.offWhite,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-      ),
-      child: Text(
-        content,
-        style: TextStyle(
-          color: AppTheme.textSecondary,
-          fontSize: 14,
-          height: 1.45,
-        ),
-      ),
-    );
-  }
-}
-
-class _CenteredState extends StatelessWidget {
-  const _CenteredState({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 28),
-      decoration: BoxDecoration(
-        color: AppTheme.offWhite,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-      ),
-      child: Text(
-        message,
-        textAlign: TextAlign.center,
-        style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-      ),
-    );
-  }
-}
-
-class _ErrorBanner extends StatelessWidget {
-  const _ErrorBanner({required this.message, required this.onDismiss});
-
-  final String message;
-  final VoidCallback onDismiss;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.red.shade50,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.red.shade100),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.error_outline_rounded, color: Colors.red.shade700),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              message,
-              style: TextStyle(color: Colors.red.shade900, fontSize: 13),
-            ),
-          ),
-          IconButton(
-            onPressed: onDismiss,
-            icon: Icon(Icons.close_rounded, color: Colors.red.shade700),
-            tooltip: 'Dismiss',
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-InputDecoration _inputDecoration(String label) {
-  return InputDecoration(
-    labelText: label,
-    filled: true,
-    fillColor: AppTheme.offWhite,
-    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: BorderSide(color: Colors.black.withOpacity(0.08)),
-    ),
-  );
-}
-
-double? _parseDouble(String value) {
-  final trimmed = value.trim();
-  if (trimmed.isEmpty) return null;
-  return double.tryParse(trimmed);
-}
-
-String? _trimOrNull(String value) {
-  final trimmed = value.trim();
-  return trimmed.isEmpty ? null : trimmed;
-}
-
-String _formatDate(DateTime value) {
-  const months = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ];
-  return '${months[value.month - 1]} ${value.day}, ${value.year}';
-}
-
-String _statusLabel(
-  LeaveRequestStatus status, {
-  required bool isDepartmentHead,
-}) {
-  if (!isDepartmentHead) return status.displayName;
-  return switch (status) {
-    LeaveRequestStatus.pendingDepartmentHead => 'Pending',
-    LeaveRequestStatus.rejectedByDepartmentHead => 'Rejected',
-    _ => status.displayName,
-  };
 }

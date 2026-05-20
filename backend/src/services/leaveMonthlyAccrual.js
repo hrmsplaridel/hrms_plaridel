@@ -89,6 +89,58 @@ function toDateStr(d) {
   return `${y}-${m}-${day}`;
 }
 
+function isValidDate(d) {
+  return d instanceof Date && !Number.isNaN(d.getTime());
+}
+
+function parseTargetMonth(input) {
+  if (input == null) return startOfMonth(new Date());
+  if (typeof input === 'string') {
+    const m = /^(\d{4})-(\d{2})$/.exec(input.trim());
+    if (!m) {
+      throw new Error('targetMonth must be YYYY-MM');
+    }
+    const year = parseInt(m[1], 10);
+    const month = parseInt(m[2], 10);
+    if (month < 1 || month > 12) {
+      throw new Error('targetMonth month must be between 01 and 12');
+    }
+    return new Date(year, month - 1, 1);
+  }
+
+  const parsed = startOfMonth(new Date(input));
+  if (!isValidDate(parsed)) {
+    throw new Error('targetMonth must be a valid date or YYYY-MM');
+  }
+  return parsed;
+}
+
+function monthStartInTimeZone(input = new Date(), timeZone = 'Asia/Manila') {
+  const d = input instanceof Date ? input : new Date(input);
+  if (!isValidDate(d)) {
+    throw new Error('now must be a valid date');
+  }
+
+  let fmt;
+  try {
+    fmt = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+    });
+  } catch (_) {
+    throw new Error('timeZone must be a valid IANA time zone');
+  }
+
+  const parts = fmt.formatToParts(d);
+  const year = parts.find((p) => p.type === 'year')?.value;
+  const month = parts.find((p) => p.type === 'month')?.value;
+  if (!year || !month) {
+    throw new Error('Could not resolve current accrual month');
+  }
+  return parseTargetMonth(`${year}-${month}`);
+}
+
 /** Round to 2 decimal places (policy for earned days). */
 function round2(n) {
   return Math.round(Number(n) * 100) / 100;
@@ -208,28 +260,28 @@ function firstMonthAccrualAmount(targetMonthStart, dateHiredRaw, daysPerMonth) {
 /**
  * @param {import('pg').Pool} pgPool
  * @param {object} [options]
- * @param {Date|string} [options.targetMonth] - Defaults to current local month (server).
+ * @param {Date|string} [options.targetMonth] - Defaults to current Asia/Manila month.
  * @param {number} [options.maxCatchUpMonths=1] - Max months to credit per row per run (catch-up cap).
  * @param {boolean} [options.dryRun=false]
+ * @param {boolean} [options.allowFutureTargetMonth=false] - Explicit override for simulations/backfills.
+ * @param {Date|string} [options.now] - Testing hook for the current month guard.
+ * @param {string} [options.timeZone='Asia/Manila'] - Time zone used for the current month guard.
  * @returns {Promise<{ targetYearMonth: string, rate: number, dryRun: boolean, rowsUpdated: number, rowsSkipped: number, details: Array<object> }>}
  */
 async function runLeaveMonthlyAccrual(pgPool, options = {}) {
   const dryRun = options.dryRun === true;
   const maxCatchUpMonths = options.maxCatchUpMonths != null ? options.maxCatchUpMonths : 1;
-
-  let targetMonth;
-  if (options.targetMonth != null) {
-    if (typeof options.targetMonth === 'string') {
-      const m = /^(\d{4})-(\d{2})$/.exec(options.targetMonth.trim());
-      if (!m) {
-        throw new Error('targetMonth must be YYYY-MM');
-      }
-      targetMonth = new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, 1);
-    } else {
-      targetMonth = startOfMonth(new Date(options.targetMonth));
-    }
-  } else {
-    targetMonth = startOfMonth(new Date());
+  const allowFutureTargetMonth = options.allowFutureTargetMonth === true;
+  const accrualTimeZone = options.timeZone || 'Asia/Manila';
+  const nowMonth = monthStartInTimeZone(
+    options.now != null ? options.now : new Date(),
+    accrualTimeZone
+  );
+  const targetMonth = options.targetMonth == null
+    ? nowMonth
+    : parseTargetMonth(options.targetMonth);
+  if (!allowFutureTargetMonth && monthKey(targetMonth) > monthKey(nowMonth)) {
+    throw new Error('targetMonth cannot be in the future');
   }
 
   const targetYearMonth = `${targetMonth.getFullYear()}-${String(targetMonth.getMonth() + 1).padStart(2, '0')}`;
@@ -245,6 +297,40 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
     if (!dryRun) {
       await client.query('BEGIN');
     }
+    const missingBalanceResult = await client.query(
+      `SELECT u.id AS user_id, u.full_name, u.date_hired, t.leave_type
+       FROM users u
+       CROSS JOIN unnest($1::text[]) AS t(leave_type)
+       LEFT JOIN leave_balances lb
+         ON lb.user_id = u.id
+        AND lb.leave_type = t.leave_type
+       WHERE (u.is_active IS NULL OR u.is_active = true)
+         AND lb.id IS NULL`,
+      [ACCRUAL_LEAVE_TYPES]
+    );
+    const missingBalanceKeys = new Set(
+      missingBalanceResult.rows.map((row) => `${row.user_id}|${row.leave_type}`)
+    );
+
+    if (!dryRun && missingBalanceResult.rows.length > 0) {
+      await client.query(
+        `INSERT INTO leave_balances (
+           user_id, leave_type, earned_days, used_days, pending_days,
+           adjusted_days, as_of_date, created_at, updated_at
+         )
+         SELECT u.id, t.leave_type, 0, 0, 0, 0, CURRENT_DATE, now(), now()
+         FROM users u
+         CROSS JOIN unnest($1::text[]) AS t(leave_type)
+         LEFT JOIN leave_balances lb
+           ON lb.user_id = u.id
+          AND lb.leave_type = t.leave_type
+         WHERE (u.is_active IS NULL OR u.is_active = true)
+           AND lb.id IS NULL
+         ON CONFLICT (user_id, leave_type) DO NOTHING`,
+        [ACCRUAL_LEAVE_TYPES]
+      );
+    }
+
     const { rows } = await client.query(
       `SELECT lb.id, lb.user_id, lb.leave_type, lb.earned_days, lb.last_accrual_date, u.full_name, u.date_hired
        FROM leave_balances lb
@@ -253,8 +339,22 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
          AND (u.is_active IS NULL OR u.is_active = true)`,
       [ACCRUAL_LEAVE_TYPES]
     );
+    if (dryRun && missingBalanceResult.rows.length > 0) {
+      rows.push(
+        ...missingBalanceResult.rows.map((row) => ({
+          id: null,
+          user_id: row.user_id,
+          leave_type: row.leave_type,
+          earned_days: 0,
+          last_accrual_date: null,
+          full_name: row.full_name,
+          date_hired: row.date_hired,
+        }))
+      );
+    }
 
     for (const row of rows) {
+      const createdBalanceRow = missingBalanceKeys.has(`${row.user_id}|${row.leave_type}`);
       const lastAccrual = row.last_accrual_date ? new Date(row.last_accrual_date) : null;
       const months = countMonthsToCredit(lastAccrual, targetMonth, maxCatchUpMonths);
 
@@ -272,6 +372,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
           leave_type: row.leave_type,
           action: 'skipped',
           reason,
+          created_balance_row: createdBalanceRow,
         });
         continue;
       }
@@ -300,6 +401,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
             leave_type: row.leave_type,
             action: 'skipped',
             reason: firstMonthInfo.reason || 'first_month_skip',
+            created_balance_row: createdBalanceRow,
           });
           continue;
         }
@@ -318,6 +420,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
           months_credited: months,
           days_added: addDays,
           last_accrual_date: lastAccrualStr,
+          created_balance_row: createdBalanceRow,
           hire_prorated: !!(firstMonthInfo && firstMonthInfo.prorated),
           ...(firstMonthInfo && firstMonthInfo.days_worked != null
             ? {
@@ -377,6 +480,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
         months_credited: months,
         days_added: addDays,
         last_accrual_date: lastAccrualStr,
+        created_balance_row: createdBalanceRow,
         hire_prorated: !!(firstMonthInfo && firstMonthInfo.prorated),
         ...(firstMonthInfo && firstMonthInfo.days_worked != null
           ? {
@@ -399,6 +503,8 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
       dryRun,
       rowsUpdated,
       rowsSkipped,
+      missingBalanceRowsCreated: dryRun ? 0 : missingBalanceResult.rows.length,
+      missingBalanceRowsDetected: missingBalanceResult.rows.length,
       details,
     };
   } catch (e) {
@@ -421,5 +527,7 @@ module.exports = {
   countMonthsToCredit,
   startOfMonth,
   firstMonthAccrualAmount,
+  parseTargetMonth,
+  monthStartInTimeZone,
   round2,
 };

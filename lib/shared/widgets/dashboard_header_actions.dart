@@ -8,6 +8,7 @@ import '../../landingpage/screens/landing_page.dart';
 import '../../login/screens/login_page.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/theme_mode_provider.dart';
+import '../../notifications/notification_tap_result.dart';
 import '../../widgets/user_avatar.dart';
 import 'collapsible_dashboard_sidebar.dart';
 import 'dashboard_notifications_dropdown.dart';
@@ -26,10 +27,12 @@ class DashboardHeaderActions extends StatelessWidget {
     super.key,
     this.compact = false,
     this.onViewAllNotifications,
+    this.onNotificationTap,
   });
 
   final bool compact;
   final VoidCallback? onViewAllNotifications;
+  final void Function(NotificationTapResult? result)? onNotificationTap;
 
   static const Color _moonCircleNavy = Color(0xFF1A237E);
   static const Color _moonIconBlue = Color(0xFF90CAF9);
@@ -69,6 +72,7 @@ class DashboardHeaderActions extends StatelessWidget {
         DashboardNotificationBellButton(
           compact: compact,
           onViewAll: onViewAllNotifications,
+          onNotificationTap: onNotificationTap,
         ),
       ],
     );

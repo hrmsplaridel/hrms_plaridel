@@ -131,10 +131,8 @@ class AttendanceTrendLineChart extends StatelessWidget {
                 show: true,
                 drawVerticalLine: false,
                 horizontalInterval: maxY > 20 ? 5 : (maxY / 5).ceilToDouble(),
-                getDrawingHorizontalLine: (v) => FlLine(
-                  color: gridColor,
-                  strokeWidth: 1,
-                ),
+                getDrawingHorizontalLine: (v) =>
+                    FlLine(color: gridColor, strokeWidth: 1),
               ),
               titlesData: FlTitlesData(
                 topTitles: const AxisTitles(
@@ -150,10 +148,7 @@ class AttendanceTrendLineChart extends StatelessWidget {
                     interval: maxY > 20 ? 5 : 1,
                     getTitlesWidget: (v, m) => Text(
                       v.toInt().toString(),
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: AppTheme.textSecondary,
-                      ),
+                      style: TextStyle(fontSize: 10, color: axisLabelColor),
                     ),
                   ),
                 ),
@@ -171,7 +166,7 @@ class AttendanceTrendLineChart extends StatelessWidget {
                             '$n',
                             style: TextStyle(
                               fontSize: 10,
-                              color: AppTheme.textSecondary,
+                              color: axisLabelColor,
                             ),
                           ),
                         );
@@ -184,10 +179,8 @@ class AttendanceTrendLineChart extends StatelessWidget {
               borderData: FlBorderData(
                 show: true,
                 border: Border(
-                  bottom: BorderSide(
-                    color: Colors.black.withValues(alpha: 0.12),
-                  ),
-                  left: BorderSide(color: Colors.black.withValues(alpha: 0.12)),
+                  bottom: BorderSide(color: borderColor),
+                  left: BorderSide(color: borderColor),
                 ),
               ),
               lineTouchData: LineTouchData(
@@ -409,10 +402,8 @@ class DepartmentIssueBarChart extends StatelessWidget {
                 show: true,
                 drawVerticalLine: false,
                 horizontalInterval: maxY > 15 ? 5 : 2,
-                getDrawingHorizontalLine: (v) => FlLine(
-                  color: gridColor,
-                  strokeWidth: 1,
-                ),
+                getDrawingHorizontalLine: (v) =>
+                    FlLine(color: gridColor, strokeWidth: 1),
               ),
               borderData: FlBorderData(
                 show: true,

@@ -4,6 +4,13 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
+const {
+  authLoginLimiter,
+  authRegisterLimiter,
+  authPasswordResetLimiter,
+  authTokenLimiter,
+  authPasswordChangeLimiter,
+} = require('../middleware/rateLimiters');
 
 const router = express.Router();
 
@@ -70,7 +77,7 @@ async function issueTokensForUser(user, req) {
  * POST /auth/register
  * Body: { email, password, fullName?, role? }
  */
-router.post('/register', async (req, res) => {
+router.post('/register', authRegisterLimiter, async (req, res) => {
   try {
     const { email, password, fullName, role = 'employee' } = req.body;
     if (!email || !password) {
@@ -129,7 +136,7 @@ router.post('/register', async (req, res) => {
  * POST /auth/login
  * Body: { email, password }
  */
-router.post('/login', async (req, res) => {
+router.post('/login', authLoginLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
@@ -180,7 +187,7 @@ router.post('/login', async (req, res) => {
  * Body: { refreshToken: string }
  * Returns new { token, refreshToken } (rotates refresh token).
  */
-router.post('/refresh', async (req, res) => {
+router.post('/refresh', authTokenLimiter, async (req, res) => {
   const raw = req.body?.refreshToken;
   if (!raw || typeof raw !== 'string') {
     return res.status(400).json({ error: 'refreshToken is required' });
@@ -245,7 +252,7 @@ router.post('/refresh', async (req, res) => {
  * Body: { refreshToken: string }
  * Revokes the refresh token row (optional client cleanup).
  */
-router.post('/logout', async (req, res) => {
+router.post('/logout', authTokenLimiter, async (req, res) => {
   const raw = req.body?.refreshToken;
   if (!raw || typeof raw !== 'string') {
     return res.status(400).json({ error: 'refreshToken is required' });
@@ -499,43 +506,48 @@ router.patch('/me', authMiddleware, async (req, res) => {
  * POST /auth/change-password
  * Body: { current_password, new_password }
  */
-router.post('/change-password', authMiddleware, async (req, res) => {
-  try {
-    const { current_password, new_password } = req.body;
-    if (!current_password || !new_password) {
-      return res.status(400).json({ error: 'Current and new password required' });
+router.post(
+  '/change-password',
+  authMiddleware,
+  authPasswordChangeLimiter,
+  async (req, res) => {
+    try {
+      const { current_password, new_password } = req.body;
+      if (!current_password || !new_password) {
+        return res.status(400).json({ error: 'Current and new password required' });
+      }
+
+      const result = await pool.query(
+        'SELECT password_hash FROM users WHERE id = $1',
+        [req.user.id]
+      );
+      const user = result.rows[0];
+      if (!user) return res.status(404).json({ error: 'User not found' });
+
+      const match = await bcrypt.compare(current_password, user.password_hash);
+      if (!match) {
+        return res.status(401).json({ error: 'Current password is incorrect' });
+      }
+
+      const hash = await bcrypt.hash(new_password, SALT_ROUNDS);
+      await pool.query(
+        'UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2',
+        [hash, req.user.id]
+      );
+      res.json({ message: 'Password updated' });
+    } catch (err) {
+      console.error('[auth/change-password]', err);
+      res.status(500).json({ error: 'Failed to change password' });
     }
-
-    const result = await pool.query(
-      'SELECT password_hash FROM users WHERE id = $1',
-      [req.user.id]
-    );
-    const user = result.rows[0];
-    if (!user) return res.status(404).json({ error: 'User not found' });
-
-    const match = await bcrypt.compare(current_password, user.password_hash);
-    if (!match) {
-      return res.status(401).json({ error: 'Current password is incorrect' });
-    }
-
-    const hash = await bcrypt.hash(new_password, SALT_ROUNDS);
-    await pool.query(
-      'UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2',
-      [hash, req.user.id]
-    );
-    res.json({ message: 'Password updated' });
-  } catch (err) {
-    console.error('[auth/change-password]', err);
-    res.status(500).json({ error: 'Failed to change password' });
   }
-});
+);
 
 /**
  * POST /auth/forgot-password
  * Body: { email }
  * Stub: returns 200 with message. Implement email service (nodemailer, SendGrid, etc.) later.
  */
-router.post('/forgot-password', async (req, res) => {
+router.post('/forgot-password', authPasswordResetLimiter, async (req, res) => {
   const { email } = req.body;
   if (!email) {
     return res.status(400).json({ error: 'Email is required' });

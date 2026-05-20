@@ -1,4 +1,5 @@
 import '../models/leave_type.dart';
+import '../models/leave_type_definition.dart';
 
 /// A single piece of guidance for a specific leave type.
 class LeaveTypeGuidance {
@@ -198,6 +199,91 @@ class LeaveGuidance {
           requirements:
               'Attach relevant supporting documents as advised by HR.',
         );
+  }
+
+  /// Builds filing guidance from the admin-configured leave type rules.
+  ///
+  /// This keeps newly added custom leave types visible in employee guidance
+  /// without requiring another code change for each type.
+  static LeaveTypeGuidance forDefinition(
+    LeaveTypeDefinition definition, {
+    LeaveType? fallbackType,
+  }) {
+    final resolvedType = fallbackType ?? leaveTypeFromString(definition.name);
+    final isKnownStandardType =
+        resolvedType != LeaveType.others ||
+        definition.name == LeaveType.others.value;
+    final base = isKnownStandardType ? forType(resolvedType) : null;
+    final descriptionText = definition.description?.trim();
+    final hasUsefulDescription =
+        descriptionText != null &&
+        descriptionText.isNotEmpty &&
+        descriptionText.toLowerCase() !=
+            definition.displayName.trim().toLowerCase();
+    final notes = <String>[
+      if (base?.notes != null) base!.notes!,
+      if (!definition.affectsDtrNormally)
+        'Approved requests for this type do not automatically mark DTR records as on leave.',
+      if (!definition.allowsPastDates)
+        'Past-date filing is disabled for this leave type.',
+    ];
+
+    return LeaveTypeGuidance(
+      description: hasUsefulDescription
+          ? descriptionText
+          : base?.description ??
+                'Custom leave type configured by HR/Admin. Use this when your request matches the office rule for ${definition.displayName}.',
+      requirements: _requirementsForDefinition(definition, base),
+      limits: _limitForDefinition(definition, base),
+      advanceFiling: definition.allowsPastDates
+          ? base?.advanceFiling
+          : 'File before the intended leave date.',
+      notes: notes.isEmpty ? null : notes.join(' '),
+    );
+  }
+
+  static String limitTextForDefinition(
+    LeaveTypeDefinition definition, {
+    LeaveType? fallbackType,
+  }) {
+    final guidance = forDefinition(definition, fallbackType: fallbackType);
+    return guidance.limits ?? 'No fixed limit';
+  }
+
+  static bool documentsNeededForDefinition(LeaveTypeDefinition definition) {
+    return definition.requiresAttachment ||
+        definition.requiresAttachmentWhenOverDays != null;
+  }
+
+  static String _requirementsForDefinition(
+    LeaveTypeDefinition definition,
+    LeaveTypeGuidance? base,
+  ) {
+    final threshold = definition.requiresAttachmentWhenOverDays;
+    if (threshold != null) {
+      return 'Supporting document required when the request reaches ${_formatDays(threshold)} working day(s).';
+    }
+    if (definition.requiresAttachment) {
+      return base?.requirements ??
+          'Supporting document is required for this leave type.';
+    }
+    return 'No supporting document is required by default. HR may still request documents during review.';
+  }
+
+  static String? _limitForDefinition(
+    LeaveTypeDefinition definition,
+    LeaveTypeGuidance? base,
+  ) {
+    final maxDays = definition.maxDays;
+    if (maxDays != null) {
+      return 'Maximum ${_formatDays(maxDays)} working day(s).';
+    }
+    return base?.limits;
+  }
+
+  static String _formatDays(num value) {
+    final days = value % 1 == 0 ? value.toInt().toString() : value.toString();
+    return days;
   }
 
   // ── Full guidelines text (for modal/bottom-sheet viewer) ────────────────────
