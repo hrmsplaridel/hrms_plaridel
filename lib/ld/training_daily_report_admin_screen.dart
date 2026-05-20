@@ -111,21 +111,22 @@ class _TrainingDailyReportAdminScreenState
 
   Future<void> _markSeen(TrainingDailyReport report) async {
     try {
-      final updated =
-          await TrainingDailyReportRepo.instance.markAsSeen(report.id);
+      final updated = await TrainingDailyReportRepo.instance.markAsSeen(
+        report.id,
+      );
       if (!mounted) return;
       setState(() {
         final idx = _reports.indexWhere((r) => r.id == report.id);
         if (idx != -1) _reports[idx] = updated;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Marked as seen.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Marked as seen.')));
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to mark as seen: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to mark as seen: $e')));
       }
     }
   }
@@ -164,15 +165,13 @@ class _TrainingDailyReportAdminScreenState
       setState(() {
         _reports.removeWhere((r) => r.id == report.id);
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Report deleted.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Report deleted.')));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not delete: ${userFacingApiError(e)}'),
-          ),
+          SnackBar(content: Text('Could not delete: ${userFacingApiError(e)}')),
         );
       }
     }
@@ -232,8 +231,9 @@ class _TrainingDailyReportAdminScreenState
         ),
         child: Center(
           child: ConstrainedBox(
-            constraints:
-                BoxConstraints(maxWidth: isWide ? 1100 : double.infinity),
+            constraints: BoxConstraints(
+              maxWidth: isWide ? 1100 : double.infinity,
+            ),
             child: Container(
               padding: EdgeInsets.symmetric(
                 horizontal: isWide ? 24 : 16,
@@ -313,8 +313,9 @@ class _TrainingDailyReportAdminScreenState
                                       .withValues(alpha: 0.1),
                                   foregroundColor: AppTheme.primaryNavy,
                                   side: BorderSide(
-                                    color: AppTheme.primaryNavy
-                                        .withValues(alpha: 0.35),
+                                    color: AppTheme.primaryNavy.withValues(
+                                      alpha: 0.35,
+                                    ),
                                   ),
                                   padding: const EdgeInsets.all(14),
                                   shape: RoundedRectangleBorder(
@@ -346,8 +347,9 @@ class _TrainingDailyReportAdminScreenState
                                     .withValues(alpha: 0.1),
                                 foregroundColor: AppTheme.primaryNavy,
                                 side: BorderSide(
-                                  color: AppTheme.primaryNavy
-                                      .withValues(alpha: 0.35),
+                                  color: AppTheme.primaryNavy.withValues(
+                                    alpha: 0.35,
+                                  ),
                                 ),
                                 padding: const EdgeInsets.all(14),
                                 shape: RoundedRectangleBorder(
@@ -362,57 +364,57 @@ class _TrainingDailyReportAdminScreenState
                   Expanded(
                     child: _loading
                         ? const Center(child: CircularProgressIndicator())
-                            : _reports.isEmpty
-                            ? Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 40,
+                        : _reports.isEmpty
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 40),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(20),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.primaryNavy.withValues(
+                                        alpha: 0.08,
+                                      ),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Icon(
+                                      Icons.assignment_outlined,
+                                      size: 40,
+                                      color: AppTheme.primaryNavy.withValues(
+                                        alpha: 0.75,
+                                      ),
+                                    ),
                                   ),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Container(
-                                        padding: const EdgeInsets.all(20),
-                                        decoration: BoxDecoration(
-                                          color: AppTheme.primaryNavy
-                                              .withValues(alpha: 0.08),
-                                          shape: BoxShape.circle,
-                                        ),
-                                        child: Icon(
-                                          Icons.assignment_outlined,
-                                          size: 40,
-                                          color: AppTheme.primaryNavy
-                                              .withValues(alpha: 0.75),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 20),
-                                      Text(
-                                        'No reports match your search',
-                                        style: TextStyle(
-                                          color: AppTheme.textPrimary,
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        'Try another keyword or refresh after employees submit.',
-                                        textAlign: TextAlign.center,
-                                        style: TextStyle(
-                                          color: AppTheme.textSecondary,
-                                          fontSize: 14,
-                                          height: 1.4,
-                                        ),
-                                      ),
-                                    ],
+                                  const SizedBox(height: 20),
+                                  Text(
+                                    'No reports match your search',
+                                    style: TextStyle(
+                                      color: AppTheme.textPrimary,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
+                                    ),
                                   ),
-                                ),
-                              )
-                            : _ReportsList(
-                                reports: _reports,
-                                onMarkSeen: _markSeen,
-                                onDelete: _confirmAndDelete,
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Try another keyword or refresh after employees submit.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: AppTheme.textSecondary,
+                                      fontSize: 14,
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ],
                               ),
+                            ),
+                          )
+                        : _ReportsList(
+                            reports: _reports,
+                            onMarkSeen: _markSeen,
+                            onDelete: _confirmAndDelete,
+                          ),
                   ),
                 ],
               ),
@@ -446,11 +448,11 @@ class _ReportsList extends StatelessWidget {
           report: r,
           onViewFile: r.attachmentUrl != null
               ? () => showTrainingReportAttachmentPreview(
-                    context,
-                    url: r.attachmentUrl!,
-                    fileName: r.attachmentName,
-                    mimeType: r.attachmentType,
-                  )
+                  context,
+                  url: r.attachmentUrl!,
+                  fileName: r.attachmentName,
+                  mimeType: r.attachmentType,
+                )
               : null,
           onMarkSeen: () => onMarkSeen(r),
           onDelete: () => onDelete(r),
@@ -483,9 +485,7 @@ class _ReportCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: AppTheme.lightGray.withValues(alpha: 0.85),
-        ),
+        border: Border.all(color: AppTheme.lightGray.withValues(alpha: 0.85)),
         boxShadow: AppTheme.cardShadow,
       ),
       clipBehavior: Clip.antiAlias,
@@ -511,8 +511,7 @@ class _ReportCard extends StatelessWidget {
               children: [
                 CircleAvatar(
                   radius: 22,
-                  backgroundColor:
-                      AppTheme.primaryNavy.withValues(alpha: 0.12),
+                  backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.12),
                   child: Icon(
                     Icons.person_outline_rounded,
                     color: AppTheme.primaryNavy.withValues(alpha: 0.9),
@@ -547,8 +546,9 @@ class _ReportCard extends StatelessWidget {
                                     Icon(
                                       Icons.topic_rounded,
                                       size: 15,
-                                      color: AppTheme.textSecondary
-                                          .withValues(alpha: 0.75),
+                                      color: AppTheme.textSecondary.withValues(
+                                        alpha: 0.75,
+                                      ),
                                     ),
                                     const SizedBox(width: 6),
                                     Expanded(
@@ -587,16 +587,12 @@ class _ReportCard extends StatelessWidget {
                           ),
                         ),
                         child: Text(
-                          desc.isEmpty
-                              ? 'No description provided.'
-                              : desc,
+                          desc.isEmpty ? 'No description provided.' : desc,
                           maxLines: 4,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: desc.isEmpty
-                                ? AppTheme.textSecondary.withValues(
-                                    alpha: 0.65,
-                                  )
+                                ? AppTheme.textSecondary.withValues(alpha: 0.65)
                                 : AppTheme.textPrimary.withValues(alpha: 0.88),
                             fontSize: 13.5,
                             height: 1.45,
@@ -625,7 +621,9 @@ class _ReportCard extends StatelessWidget {
                               ),
                               fontSize: 12,
                               fontWeight: FontWeight.w500,
-                              fontFeatures: const [FontFeature.tabularFigures()],
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
                             ),
                           ),
                         ],
@@ -645,8 +643,7 @@ class _ReportCard extends StatelessWidget {
                               runSpacing: 4,
                               children: [
                                 TextButton.icon(
-                                  onPressed: () =>
-                                      showReadOnlySavedEntryDialog(
+                                  onPressed: () => showReadOnlySavedEntryDialog(
                                     context,
                                     title: 'Training daily report',
                                     previewBuilder: () =>
@@ -790,4 +787,3 @@ class _StatusChip extends StatelessWidget {
     );
   }
 }
-

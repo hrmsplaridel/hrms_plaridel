@@ -174,9 +174,7 @@ class JobVacanciesSection extends StatelessWidget {
                   final closed = v.isClosed == true;
                   return _VacancyCard(
                     headline: headlineText,
-                    body: structured != null
-                        ? ''
-                        : _displayBody(v.body),
+                    body: structured != null ? '' : _displayBody(v.body),
                     bodyChild: structured,
                     hasVacancies: hasVacancies,
                     minTall: twoColumns,
@@ -394,6 +392,7 @@ class _VacancyCard extends StatelessWidget {
 
   final String headline;
   final String body;
+
   /// When set (e.g. education / experience / training), replaces [body] text in the open card.
   final Widget? bodyChild;
   final bool hasVacancies;
@@ -461,7 +460,8 @@ class _VacancyCard extends StatelessWidget {
               border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
               boxShadow: AppTheme.cardShadow,
             ),
-            child: bodyChild ??
+            child:
+                bodyChild ??
                 Text(
                   body,
                   style: TextStyle(

@@ -43,7 +43,8 @@ class TrainingDailyReport {
       employeeName: json['employee_name'] as String?,
       title: json['title'] as String? ?? '',
       description: json['description'] as String?,
-      submittedAt: DateTime.tryParse(json['submitted_at'] as String? ?? '') ??
+      submittedAt:
+          DateTime.tryParse(json['submitted_at'] as String? ?? '') ??
           DateTime.now(),
       status: json['status'] as String? ?? 'submitted',
       attachmentId: json['attachment_id'] as String?,
@@ -97,13 +98,14 @@ class TrainingDailyReportRepo {
 
   /// List reports for the current employee.
   Future<List<TrainingDailyReport>> listMyReports() async {
-    final res = await ApiClient.instance.get('/api/training-daily-reports/mine');
+    final res = await ApiClient.instance.get(
+      '/api/training-daily-reports/mine',
+    );
     final list = res.data as List<dynamic>? ?? [];
     return list
         .map(
-          (e) => TrainingDailyReport.fromJson(
-            Map<String, dynamic>.from(e as Map),
-          ),
+          (e) =>
+              TrainingDailyReport.fromJson(Map<String, dynamic>.from(e as Map)),
         )
         .toList();
   }
@@ -127,9 +129,8 @@ class TrainingDailyReportRepo {
     final list = res.data as List<dynamic>? ?? [];
     return list
         .map(
-          (e) => TrainingDailyReport.fromJson(
-            Map<String, dynamic>.from(e as Map),
-          ),
+          (e) =>
+              TrainingDailyReport.fromJson(Map<String, dynamic>.from(e as Map)),
         )
         .toList();
   }
@@ -149,4 +150,3 @@ class TrainingDailyReportRepo {
     await ApiClient.instance.delete<void>('/api/training-daily-reports/$id');
   }
 }
-

@@ -4,7 +4,6 @@ const cors = require('cors');
 const { pool } = require('./config/db');
 const { initWebSocket } = require('./websockets/biometricStream');
 const { scheduleLeaveMonthlyAccrualCron } = require('./jobs/leaveMonthlyAccrualScheduler');
-
 const authRoutes = require('./routes/auth');
 const departmentsRoutes = require('./routes/departments');
 const positionsRoutes = require('./routes/positions');

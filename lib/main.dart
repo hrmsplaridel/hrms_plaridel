@@ -63,7 +63,6 @@ Future<void> main() async {
 
   final auth = AuthProvider();
   await auth.restoreSession();
-
   final prefs = await SharedPreferences.getInstance();
   final storedLoginAs = prefs.getString(kLoginAsKey) ?? 'Admin';
   final themeNotifier = await ThemeModeNotifier.load();
@@ -79,17 +78,16 @@ Future<void> main() async {
 
 /// Isolated [MaterialApp] so theme changes only rebuild this subtree.
 class _HrmsMaterialApp extends StatelessWidget {
-  const _HrmsMaterialApp({
-    required this.auth,
-    required this.storedLoginAs,
-  });
+  const _HrmsMaterialApp({required this.auth, required this.storedLoginAs});
 
   final AuthProvider auth;
   final String storedLoginAs;
 
   @override
   Widget build(BuildContext context) {
-    final themeMode = context.select<ThemeModeNotifier, ThemeMode>((n) => n.mode);
+    final themeMode = context.select<ThemeModeNotifier, ThemeMode>(
+      (n) => n.mode,
+    );
 
     return MaterialApp(
       title: 'HRMS Plaridel',
@@ -136,10 +134,7 @@ class MyApp extends StatelessWidget {
         ),
         ChangeNotifierProvider(create: (_) => RecruitmentHirePrefill()),
       ],
-      child: _HrmsMaterialApp(
-        auth: auth,
-        storedLoginAs: storedLoginAs,
-      ),
+      child: _HrmsMaterialApp(auth: auth, storedLoginAs: storedLoginAs),
     );
   }
 }

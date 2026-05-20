@@ -17,27 +17,18 @@ final Uri _plaridelMunicipalHallMapsUri = Uri(
   scheme: 'https',
   host: 'www.google.com',
   path: '/maps/search/',
-  queryParameters: {
-    'api': '1',
-    'query': _plaridelMunicipalHallMapsQuery,
-  },
+  queryParameters: {'api': '1', 'query': _plaridelMunicipalHallMapsQuery},
 );
 
 /// In-app preview: same query as [_plaridelMunicipalHallMapsUri], embed output.
 final Uri _plaridelMunicipalHallMapEmbedUri = Uri.https(
   'maps.google.com',
   '/maps',
-  {
-    'q': _plaridelMunicipalHallMapsQuery,
-    'output': 'embed',
-    'z': '17',
-  },
+  {'q': _plaridelMunicipalHallMapsQuery, 'output': 'embed', 'z': '17'},
 );
 
-const _officeAddress =
-    'Municipal Hall of Plaridel, Misamis Occidental';
-const _officialEmails =
-    'plaridel_misocc@yahoo.com / asensoplaridel@gmail.com';
+const _officeAddress = 'Municipal Hall of Plaridel, Misamis Occidental';
+const _officialEmails = 'plaridel_misocc@yahoo.com / asensoplaridel@gmail.com';
 
 Future<void> _openPlaridelMunicipalHallMaps() {
   return launchUrl(
@@ -133,8 +124,7 @@ class ContactSection extends StatelessWidget {
                                 _ContactItem(
                                   icon: Icons.access_time_outlined,
                                   label: 'Office Hours',
-                                  value:
-                                      'Monday - Friday, 8:00 AM - 5:00 PM',
+                                  value: 'Monday - Friday, 8:00 AM - 5:00 PM',
                                 ),
                               ],
                             ),
@@ -170,8 +160,7 @@ class ContactSection extends StatelessWidget {
                               const _ContactItem(
                                 icon: Icons.access_time_outlined,
                                 label: 'Office Hours',
-                                value:
-                                    'Monday - Friday, 8:00 AM - 5:00 PM',
+                                value: 'Monday - Friday, 8:00 AM - 5:00 PM',
                               ),
                             ],
                           ),
@@ -188,13 +177,13 @@ class ContactSection extends StatelessWidget {
   }
 
   static Widget _contactDivider() => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Divider(
-          height: 1,
-          thickness: 1,
-          color: AppTheme.lightGray.withValues(alpha: 0.85),
-        ),
-      );
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Divider(
+      height: 1,
+      thickness: 1,
+      color: AppTheme.lightGray.withValues(alpha: 0.85),
+    ),
+  );
 }
 
 /// White panel wrapping contact rows for clearer grouping.
@@ -210,9 +199,7 @@ class _ContactDetailsCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: const Color(0xFFE2E6EA),
-        ),
+        border: Border.all(color: const Color(0xFFE2E6EA)),
         boxShadow: [
           BoxShadow(
             color: AppTheme.primaryNavy.withValues(alpha: 0.08),
@@ -286,11 +273,7 @@ class _ContactItem extends StatelessWidget {
                 ),
               ],
             ),
-            child: Icon(
-              icon,
-              color: AppTheme.primaryNavy,
-              size: 24,
-            ),
+            child: Icon(icon, color: AppTheme.primaryNavy, size: 24),
           ),
           const SizedBox(width: 16),
           Expanded(

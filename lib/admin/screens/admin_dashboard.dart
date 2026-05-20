@@ -100,7 +100,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   void _openMyProfile() {
-    if (DashboardContentNavigator.isSettingsOnTop(_contentNavKey.currentState)) {
+    if (DashboardContentNavigator.isSettingsOnTop(
+      _contentNavKey.currentState,
+    )) {
       setState(() => _selectedMenu = AdminMenu.myProfile);
       return;
     }
@@ -257,8 +259,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               navigatorKey: _contentNavKey,
                               homeBuilder: () => _buildContent(displayName),
                               settingsPanel: _settingsPanel,
-                              homeScrollPadding:
-                                  EdgeInsets.all(contentPadding),
+                              homeScrollPadding: EdgeInsets.all(contentPadding),
                               settingsScrollPadding: const EdgeInsets.fromLTRB(
                                 12,
                                 8,
@@ -327,6 +328,7 @@ class _Sidebar extends StatelessWidget {
   final String displayName;
   final ValueChanged<AdminMenu> onTap;
   final bool showBrand;
+
   /// Full-height rail with one straight right edge through header + nav.
   final bool railMode;
 
@@ -341,64 +343,64 @@ class _Sidebar extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         SizedBox(height: railMode ? 12 : (showBrand ? 4 : 12)),
-                  _NavTile(
-                    icon: Icons.dashboard_outlined,
-                    label: 'Dashboard',
-                    selected: selectedMenu == AdminMenu.dashboard,
-                    onTap: () => onTap(AdminMenu.dashboard),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-                    child: Divider(
-                      height: 1,
-                      thickness: 1,
-                      color: AppTheme.dashHairlineOf(context),
-                    ),
-                  ),
-                  const _SidebarSectionLabel('MY PORTAL'),
-                  _NavTile(
-                    icon: Icons.schedule_outlined,
-                    label: 'My Attendance',
-                    selected: selectedMenu == AdminMenu.myAttendance,
-                    onTap: () => onTap(AdminMenu.myAttendance),
-                  ),
-                  _NavTile(
-                    icon: Icons.event_note_outlined,
-                    label: 'My Leave',
-                    selected: selectedMenu == AdminMenu.myLeave,
-                    onTap: () => onTap(AdminMenu.myLeave),
-                  ),
-                  const _SidebarSectionLabel('MANAGEMENT'),
-                  _NavTile(
-                    icon: Icons.how_to_reg_outlined,
-                    label: 'RSP',
-                    selected: selectedMenu == AdminMenu.rsp,
-                    onTap: () => onTap(AdminMenu.rsp),
-                  ),
-                  _NavTile(
-                    icon: Icons.school_outlined,
-                    label: 'L&D',
-                    selected: selectedMenu == AdminMenu.ld,
-                    onTap: () => onTap(AdminMenu.ld),
-                  ),
-                  _NavTile(
-                    icon: Icons.access_time_outlined,
-                    label: 'DTR',
-                    selected: selectedMenu == AdminMenu.dtr,
-                    onTap: () => onTap(AdminMenu.dtr),
-                  ),
-                  _NavTile(
-                    icon: Icons.folder_outlined,
-                    label: 'DocuTracker',
-                    selected: selectedMenu == AdminMenu.docutracker,
-                    onTap: () => onTap(AdminMenu.docutracker),
-                  ),
-                  _NavTile(
-                    icon: Icons.person_add_outlined,
-                    label: 'Create Account',
-                    selected: selectedMenu == AdminMenu.createAccount,
-                    onTap: () => onTap(AdminMenu.createAccount),
-                  ),
+        _NavTile(
+          icon: Icons.dashboard_outlined,
+          label: 'Dashboard',
+          selected: selectedMenu == AdminMenu.dashboard,
+          onTap: () => onTap(AdminMenu.dashboard),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+          child: Divider(
+            height: 1,
+            thickness: 1,
+            color: AppTheme.dashHairlineOf(context),
+          ),
+        ),
+        const _SidebarSectionLabel('MY PORTAL'),
+        _NavTile(
+          icon: Icons.schedule_outlined,
+          label: 'My Attendance',
+          selected: selectedMenu == AdminMenu.myAttendance,
+          onTap: () => onTap(AdminMenu.myAttendance),
+        ),
+        _NavTile(
+          icon: Icons.event_note_outlined,
+          label: 'My Leave',
+          selected: selectedMenu == AdminMenu.myLeave,
+          onTap: () => onTap(AdminMenu.myLeave),
+        ),
+        const _SidebarSectionLabel('MANAGEMENT'),
+        _NavTile(
+          icon: Icons.how_to_reg_outlined,
+          label: 'RSP',
+          selected: selectedMenu == AdminMenu.rsp,
+          onTap: () => onTap(AdminMenu.rsp),
+        ),
+        _NavTile(
+          icon: Icons.school_outlined,
+          label: 'L&D',
+          selected: selectedMenu == AdminMenu.ld,
+          onTap: () => onTap(AdminMenu.ld),
+        ),
+        _NavTile(
+          icon: Icons.access_time_outlined,
+          label: 'DTR',
+          selected: selectedMenu == AdminMenu.dtr,
+          onTap: () => onTap(AdminMenu.dtr),
+        ),
+        _NavTile(
+          icon: Icons.folder_outlined,
+          label: 'DocuTracker',
+          selected: selectedMenu == AdminMenu.docutracker,
+          onTap: () => onTap(AdminMenu.docutracker),
+        ),
+        _NavTile(
+          icon: Icons.person_add_outlined,
+          label: 'Create Account',
+          selected: selectedMenu == AdminMenu.createAccount,
+          onTap: () => onTap(AdminMenu.createAccount),
+        ),
         const SizedBox(height: 12),
       ],
     );
@@ -424,82 +426,82 @@ class _Sidebar extends StatelessWidget {
             avatarPath: avatarPath,
           ),
         ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
-            child: Wrap(
-              alignment: WrapAlignment.center,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 0,
-              children: [
-                Text(
-                  '\u00a9 $year HRMS',
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
+          child: Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 0,
+            children: [
+              Text(
+                '\u00a9 $year HRMS',
+                style: TextStyle(
+                  color: AppTheme.dashTextSecondaryOf(context),
+                  fontSize: 11,
+                  height: 1.2,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: Text(
+                  '\u00b7',
                   style: TextStyle(
-                    color: AppTheme.dashTextSecondaryOf(context),
                     fontSize: 11,
-                    height: 1.2,
+                    color: AppTheme.textSecondary.withValues(alpha: 0.7),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: Text(
-                    '\u00b7',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.textSecondary.withValues(alpha: 0.7),
-                    ),
+              ),
+              TextButton(
+                onPressed: () {},
+                style: TextButton.styleFrom(
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 2,
+                    vertical: 0,
                   ),
                 ),
-                TextButton(
-                  onPressed: () {},
-                  style: TextButton.styleFrom(
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 2,
-                      vertical: 0,
-                    ),
-                  ),
-                  child: Text(
-                    'Privacy',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.primaryNavy,
-                    ),
+                child: Text(
+                  'Privacy',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.primaryNavy,
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: Text(
-                    '\u00b7',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.textSecondary.withValues(alpha: 0.7),
-                    ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: Text(
+                  '\u00b7',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppTheme.textSecondary.withValues(alpha: 0.7),
                   ),
                 ),
-                TextButton(
-                  onPressed: () {},
-                  style: TextButton.styleFrom(
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 2,
-                      vertical: 0,
-                    ),
-                  ),
-                  child: Text(
-                    'Terms',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.primaryNavy,
-                    ),
+              ),
+              TextButton(
+                onPressed: () {},
+                style: TextButton.styleFrom(
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 2,
+                    vertical: 0,
                   ),
                 ),
-              ],
-            ),
+                child: Text(
+                  'Terms',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.primaryNavy,
+                  ),
+                ),
+              ),
+            ],
           ),
+        ),
       ],
     );
 
@@ -518,9 +520,7 @@ class _Sidebar extends StatelessWidget {
                 color: canvas,
                 child: Column(
                   children: [
-                    Expanded(
-                      child: SingleChildScrollView(child: navList),
-                    ),
+                    Expanded(child: SingleChildScrollView(child: navList)),
                     footer,
                   ],
                 ),
@@ -547,9 +547,7 @@ class _Sidebar extends StatelessWidget {
       child: Column(
         children: [
           if (showBrand) const PortalSidebarBrand(),
-          Expanded(
-            child: SingleChildScrollView(child: navList),
-          ),
+          Expanded(child: SingleChildScrollView(child: navList)),
           footer,
         ],
       ),
@@ -1461,8 +1459,9 @@ class _RecruitmentOverviewCard extends StatelessWidget {
                   Icon(
                     Icons.analytics_outlined,
                     size: 56,
-                    color: AppTheme.dashTextSecondaryOf(context)
-                        .withValues(alpha: 0.5),
+                    color: AppTheme.dashTextSecondaryOf(
+                      context,
+                    ).withValues(alpha: 0.5),
                   ),
                   const SizedBox(height: 16),
                   Text(

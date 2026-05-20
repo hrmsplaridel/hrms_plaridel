@@ -17,6 +17,7 @@ class SectionContainer extends StatelessWidget {
   final Color? backgroundColor;
   final EdgeInsetsGeometry? padding;
   final double? borderRadius;
+
   /// When true and background is not fully transparent, draws [AppTheme.panelShadow].
   final bool withShadow;
   final EdgeInsetsGeometry? margin;
@@ -33,14 +34,17 @@ class SectionContainer extends StatelessWidget {
     return Container(
       width: double.infinity,
       margin: margin,
-      padding: padding ??
+      padding:
+          padding ??
           EdgeInsets.symmetric(
             horizontal: horizontalPadding,
             vertical: verticalPadding,
           ),
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: borderRadius != null ? BorderRadius.circular(borderRadius!) : null,
+        borderRadius: borderRadius != null
+            ? BorderRadius.circular(borderRadius!)
+            : null,
         boxShadow: showShadow ? AppTheme.panelShadow : null,
       ),
       child: child,

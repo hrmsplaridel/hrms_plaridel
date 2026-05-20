@@ -135,10 +135,7 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  HeroSection(
-                    key: _heroKey,
-                    onRecruitmentTap: _onApplyForJob,
-                  ),
+                  HeroSection(key: _heroKey, onRecruitmentTap: _onApplyForJob),
                   const SizedBox(height: 18),
                   FutureBuilder<JobVacancyAnnouncement>(
                     future: _announcementFuture,
@@ -151,12 +148,15 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
                             child: SizedBox(
                               width: 28,
                               height: 28,
-                              child: CircularProgressIndicator(strokeWidth: 2.5),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                              ),
                             ),
                           ),
                         );
                       }
-                      final a = snapshot.data ??
+                      final a =
+                          snapshot.data ??
                           const JobVacancyAnnouncement(hasVacancies: false);
                       return JobVacanciesSection(
                         key: _jobVacanciesKey,

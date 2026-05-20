@@ -11,10 +11,16 @@ import '../../providers/theme_mode_provider.dart';
 import '../../widgets/user_avatar.dart';
 import 'dashboard_notifications_dropdown.dart';
 
-/// Label for account menu / profile hero (always Employee ID, never auth UUID).
+/// Label for account menu ID row (employee number preferred).
 String? dashboardAccountIdLabel(AppUser? user) {
   if (user == null) return null;
-  return 'Employee ID · ${user.displayEmployeeId}';
+  if (user.employeeNumber != null) {
+    final n = user.employeeNumber!;
+    final padded = n < 10000 ? n.toString().padLeft(4, '0') : n.toString();
+    return 'Employee ID · $padded';
+  }
+  if (user.id.isNotEmpty) return 'User ID · ${user.id}';
+  return null;
 }
 
 /// Theme toggle + notifications bell for admin/employee dashboard top bars.
@@ -33,8 +39,7 @@ class DashboardHeaderActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.watch<ThemeModeNotifier>();
-    final isDark = theme.isDark;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final iconSize = compact ? 20.0 : 22.0;
     final pad = compact ? 8.0 : 10.0;
 
@@ -50,38 +55,14 @@ class DashboardHeaderActions extends StatelessWidget {
             clipBehavior: Clip.antiAlias,
             elevation: 0,
             child: InkWell(
-              onTap: theme.toggle,
+              onTap: () => context.read<ThemeModeNotifier>().toggle(),
               customBorder: const CircleBorder(),
-              splashColor: _moonIconBlue.withValues(alpha: 0.35),
-              highlightColor: Colors.white.withValues(alpha: 0.12),
               child: Padding(
                 padding: EdgeInsets.all(pad),
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 380),
-                  switchInCurve: Curves.easeOutCubic,
-                  switchOutCurve: Curves.easeInCubic,
-                  transitionBuilder: (child, animation) {
-                    return RotationTransition(
-                      turns: Tween<double>(begin: 0.65, end: 1).animate(
-                        CurvedAnimation(
-                          parent: animation,
-                          curve: Curves.easeOutCubic,
-                        ),
-                      ),
-                      child: FadeTransition(
-                        opacity: animation,
-                        child: child,
-                      ),
-                    );
-                  },
-                  child: Icon(
-                    isDark
-                        ? Icons.light_mode_rounded
-                        : Icons.dark_mode_rounded,
-                    key: ValueKey<bool>(isDark),
-                    color: _moonIconBlue,
-                    size: iconSize,
-                  ),
+                child: Icon(
+                  isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                  color: _moonIconBlue,
+                  size: iconSize,
                 ),
               ),
             ),
@@ -106,6 +87,7 @@ class DashboardHeaderActionDivider extends StatelessWidget {
   });
 
   final bool compact;
+
   /// Stronger line before the profile avatar (easier to see).
   final bool emphasized;
 
@@ -143,7 +125,8 @@ class DashboardHeaderProfileAvatar extends StatefulWidget {
       _DashboardHeaderProfileAvatarState();
 }
 
-class _DashboardHeaderProfileAvatarState extends State<DashboardHeaderProfileAvatar>
+class _DashboardHeaderProfileAvatarState
+    extends State<DashboardHeaderProfileAvatar>
     with SingleTickerProviderStateMixin {
   bool _hovered = false;
   late final AnimationController _pulseController;
@@ -156,10 +139,7 @@ class _DashboardHeaderProfileAvatarState extends State<DashboardHeaderProfileAva
       vsync: this,
       duration: const Duration(milliseconds: 2400),
     )..repeat(reverse: true);
-    _pulse = CurvedAnimation(
-      parent: _pulseController,
-      curve: Curves.easeInOut,
-    );
+    _pulse = CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut);
   }
 
   @override
@@ -195,7 +175,9 @@ class _DashboardHeaderProfileAvatarState extends State<DashboardHeaderProfileAva
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
-                      color: AppTheme.primaryNavy.withValues(alpha: glowOpacity),
+                      color: AppTheme.primaryNavy.withValues(
+                        alpha: glowOpacity,
+                      ),
                       blurRadius: _hovered ? 16 : 10,
                       spreadRadius: _hovered ? 2 : 0.5,
                     ),
@@ -212,7 +194,9 @@ class _DashboardHeaderProfileAvatarState extends State<DashboardHeaderProfileAva
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: AppTheme.primaryNavy.withValues(alpha: ringOpacity),
+                      color: AppTheme.primaryNavy.withValues(
+                        alpha: ringOpacity,
+                      ),
                       width: 2.5,
                     ),
                     gradient: LinearGradient(
@@ -259,7 +243,8 @@ class DashboardSidebarProfileCard extends StatefulWidget {
       _DashboardSidebarProfileCardState();
 }
 
-class _DashboardSidebarProfileCardState extends State<DashboardSidebarProfileCard>
+class _DashboardSidebarProfileCardState
+    extends State<DashboardSidebarProfileCard>
     with SingleTickerProviderStateMixin {
   bool _hovered = false;
   late final AnimationController _pulseController;
@@ -272,10 +257,7 @@ class _DashboardSidebarProfileCardState extends State<DashboardSidebarProfileCar
       vsync: this,
       duration: const Duration(milliseconds: 2600),
     )..repeat(reverse: true);
-    _pulse = CurvedAnimation(
-      parent: _pulseController,
-      curve: Curves.easeInOut,
-    );
+    _pulse = CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut);
   }
 
   @override
@@ -463,8 +445,6 @@ class DashboardAccountMenuButton extends StatelessWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       color: AppTheme.dashPanelOf(context),
       padding: EdgeInsets.zero,
-      splashRadius: 0.001,
-      enableFeedback: true,
       child: DashboardHeaderProfileAvatar(
         avatarPath: avatarPath,
         compact: compact,
@@ -485,35 +465,25 @@ class DashboardAccountMenuButton extends StatelessWidget {
         const PopupMenuDivider(height: 1),
         PopupMenuItem<String>(
           value: 'profile',
-          padding: EdgeInsets.zero,
-          height: 56,
-          child: _AccountMenuPopupTile(
-            child: _AccountMenuActionTile(
-              icon: Icons.settings_outlined,
-              label: 'Settings',
-              iconBackground: AppTheme.primaryNavy.withValues(alpha: 0.12),
-              iconColor: AppTheme.primaryNavy,
-            ),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          child: _AccountMenuActionRow(
+            icon: Icons.settings_outlined,
+            label: 'Settings',
+            iconBackground: AppTheme.primaryNavy.withValues(alpha: 0.12),
+            iconColor: AppTheme.primaryNavy,
           ),
         ),
         const PopupMenuDivider(height: 1),
         PopupMenuItem<String>(
           value: 'signout',
-          padding: const EdgeInsets.fromLTRB(0, 0, 0, 8),
-          height: 56,
-          child: _AccountMenuPopupTile(
-            destructive: true,
-            child: _AccountMenuActionTile(
-              icon: Icons.logout_rounded,
-              label: 'Sign out',
-              iconBackground: AppTheme.dashIsDark(context)
-                  ? const Color(0xFFC62828).withValues(alpha: 0.2)
-                  : const Color(0xFFFFEBEE),
-              iconColor: const Color(0xFFC62828),
-              labelColor: const Color(0xFFC62828),
-              labelWeight: FontWeight.w600,
-              destructive: true,
-            ),
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+          child: _AccountMenuActionRow(
+            icon: Icons.logout_rounded,
+            label: 'Sign out',
+            iconBackground: const Color(0xFFFFEBEE),
+            iconColor: const Color(0xFFC62828),
+            labelColor: const Color(0xFFC62828),
+            labelWeight: FontWeight.w600,
           ),
         ),
       ],
@@ -652,7 +622,10 @@ class _AccountMenuHeader extends StatelessWidget {
             Tooltip(
               message: idLabel!,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 7,
+                ),
                 decoration: BoxDecoration(
                   color: AppTheme.dashPanelOf(context).withValues(alpha: 0.85),
                   borderRadius: BorderRadius.circular(24),
@@ -705,43 +678,14 @@ class _AccountMenuHeader extends StatelessWidget {
   }
 }
 
-/// Softer ink splash on [PopupMenuItem] rows.
-class _AccountMenuPopupTile extends StatelessWidget {
-  const _AccountMenuPopupTile({
-    required this.child,
-    this.destructive = false,
-  });
-
-  final Widget child;
-  final bool destructive;
-
-  @override
-  Widget build(BuildContext context) {
-    return Theme(
-      data: Theme.of(context).copyWith(
-        splashFactory: InkRipple.splashFactory,
-        highlightColor: destructive
-            ? const Color(0xFFC62828).withValues(alpha: 0.07)
-            : AppTheme.primaryNavy.withValues(alpha: 0.06),
-        splashColor: destructive
-            ? const Color(0xFFC62828).withValues(alpha: 0.14)
-            : AppTheme.primaryNavy.withValues(alpha: 0.12),
-      ),
-      child: child,
-    );
-  }
-}
-
-/// Tappable account menu row with hover, press, and ripple feedback.
-class _AccountMenuActionTile extends StatefulWidget {
-  const _AccountMenuActionTile({
+class _AccountMenuActionRow extends StatelessWidget {
+  const _AccountMenuActionRow({
     required this.icon,
     required this.label,
     required this.iconBackground,
     required this.iconColor,
     this.labelColor,
     this.labelWeight = FontWeight.w500,
-    this.destructive = false,
   });
 
   final IconData icon;
@@ -750,115 +694,39 @@ class _AccountMenuActionTile extends StatefulWidget {
   final Color iconColor;
   final Color? labelColor;
   final FontWeight labelWeight;
-  final bool destructive;
-
-  @override
-  State<_AccountMenuActionTile> createState() => _AccountMenuActionTileState();
-}
-
-class _AccountMenuActionTileState extends State<_AccountMenuActionTile> {
-  bool _hovered = false;
-  bool _pressed = false;
-
-  Color _highlightColor(BuildContext context) {
-    if (widget.destructive) {
-      return const Color(0xFFC62828).withValues(
-        alpha: _pressed ? 0.16 : (_hovered ? 0.1 : 0.0),
-      );
-    }
-    return AppTheme.primaryNavy.withValues(
-      alpha: _pressed ? 0.14 : (_hovered ? 0.09 : 0.0),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
-    final chevronColor = AppTheme.dashTextSecondaryOf(context).withValues(
-      alpha: _hovered ? 0.9 : 0.55,
-    );
-
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() {
-        _hovered = false;
-        _pressed = false;
-      }),
-      child: Listener(
-        onPointerDown: (_) => setState(() => _pressed = true),
-        onPointerUp: (_) => setState(() => _pressed = false),
-        onPointerCancel: (_) => setState(() => _pressed = false),
-        child: AnimatedScale(
-          scale: _pressed ? 0.985 : 1.0,
-          duration: const Duration(milliseconds: 110),
-          curve: Curves.easeOutCubic,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeOutCubic,
-            margin: const EdgeInsets.symmetric(horizontal: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            decoration: BoxDecoration(
-              color: _highlightColor(context),
-              borderRadius: BorderRadius.circular(14),
-              border: _hovered
-                  ? Border.all(
-                      color: widget.destructive
-                          ? const Color(0xFFC62828).withValues(alpha: 0.22)
-                          : AppTheme.primaryNavy.withValues(alpha: 0.18),
-                    )
-                  : null,
-            ),
-            child: Row(
-              children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeOutCubic,
-                  width: 42,
-                  height: 42,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: widget.iconBackground,
-                    borderRadius: BorderRadius.circular(13),
-                    boxShadow: _hovered
-                        ? [
-                            BoxShadow(
-                              color: widget.iconColor.withValues(alpha: 0.25),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2),
-                            ),
-                          ]
-                        : null,
-                  ),
-                  child: Icon(widget.icon, size: 22, color: widget.iconColor),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Text(
-                    widget.label,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: widget.labelWeight,
-                      color: widget.labelColor ??
-                          AppTheme.dashTextPrimaryOf(context),
-                      letterSpacing: -0.1,
-                    ),
-                  ),
-                ),
-                AnimatedSlide(
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeOutCubic,
-                  offset: _hovered ? const Offset(0.06, 0) : Offset.zero,
-                  child: Icon(
-                    Icons.chevron_right_rounded,
-                    size: 22,
-                    color: chevronColor,
-                  ),
-                ),
-              ],
+    return Row(
+      children: [
+        Container(
+          width: 42,
+          height: 42,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: iconBackground,
+            borderRadius: BorderRadius.circular(13),
+          ),
+          child: Icon(icon, size: 22, color: iconColor),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: labelWeight,
+              color: labelColor ?? AppTheme.dashTextPrimaryOf(context),
+              letterSpacing: -0.1,
             ),
           ),
         ),
-      ),
+        Icon(
+          Icons.chevron_right_rounded,
+          size: 22,
+          color: AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.65),
+        ),
+      ],
     );
   }
 }
