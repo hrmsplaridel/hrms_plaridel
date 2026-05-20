@@ -111,7 +111,11 @@ class AuthProvider extends ChangeNotifier {
       if (e.type == DioExceptionType.connectionError ||
           e.type == DioExceptionType.connectionTimeout ||
           e.type == DioExceptionType.receiveTimeout) {
-        return 'Cannot reach server. Is the backend running on ${ApiConfig.baseUrl}?';
+        return 'Cannot reach server at ${ApiConfig.baseUrl}. '
+            'On PC: start backend (npm start in backend/). '
+            'Phone on Wi‑Fi: same network as PC, allow port 3000 in Windows Firewall '
+            '(run scripts/allow-backend-firewall-windows.ps1 as Admin), '
+            'or use USB: scripts/run_flutter_mobile_usb.ps1.';
       }
       return 'Login failed. Please try again.';
     } catch (e) {
