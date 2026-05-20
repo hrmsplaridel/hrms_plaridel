@@ -41,6 +41,26 @@ class _ManageDepartmentState extends State<ManageDepartment> {
   bool _loading = false;
   _DepartmentRecord? _selectedDepartment;
 
+  bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
+
+  Color _headingColor(BuildContext context) =>
+      AppTheme.dashTextPrimaryOf(context);
+
+  Color _mutedColor(BuildContext context) =>
+      AppTheme.dashTextSecondaryOf(context);
+
+  BoxDecoration _filterDecoration(BuildContext context) => BoxDecoration(
+        color: _isDark(context)
+            ? AppTheme.dashMutedSurfaceOf(context)
+            : AppTheme.lightGray.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: _isDark(context)
+              ? AppTheme.dashHairlineOf(context)
+              : Colors.transparent,
+        ),
+      );
+
   @override
   void initState() {
     super.initState();
@@ -269,7 +289,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
         Text(
           'Department',
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: _headingColor(context),
             fontSize: 24,
             fontWeight: FontWeight.w800,
           ),
@@ -303,6 +323,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
   }
 
   Widget _buildLeftPanel() {
+    final dark = _isDark(context);
     final search = _searchController.text.toLowerCase();
     final filtered = search.isEmpty
         ? _departments
@@ -314,18 +335,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
 
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -341,8 +351,11 @@ class _ManageDepartmentState extends State<ManageDepartment> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             decoration: BoxDecoration(
-              color: AppTheme.lightGray.withValues(alpha: 0.4),
+              color: AppTheme.dashMutedSurfaceOf(context),
               borderRadius: BorderRadius.circular(8),
+              border: Border(
+                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+              ),
             ),
             child: Row(
               children: [
@@ -369,7 +382,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
               child: Text(
                 'No departments',
                 style: TextStyle(
-                  color: AppTheme.textSecondary.withValues(alpha: 0.8),
+                  color: _mutedColor(context).withValues(alpha: 0.8),
                   fontSize: 14,
                 ),
               ),
@@ -386,7 +399,9 @@ class _ManageDepartmentState extends State<ManageDepartment> {
                 return TableRow(
                   decoration: BoxDecoration(
                     color: isSelected
-                        ? AppTheme.primaryNavy.withValues(alpha: 0.08)
+                        ? (dark
+                            ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                            : AppTheme.primaryNavy.withValues(alpha: 0.08))
                         : null,
                   ),
                   children: [
@@ -415,7 +430,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       style: TextStyle(
         fontWeight: FontWeight.w700,
         fontSize: 13,
-        color: AppTheme.textPrimary,
+        color: _headingColor(context),
       ),
       overflow: TextOverflow.ellipsis,
       maxLines: 1,
@@ -437,7 +452,9 @@ class _ManageDepartmentState extends State<ManageDepartment> {
             text,
             style: TextStyle(
               fontSize: secondary ? 12 : 13,
-              color: secondary ? AppTheme.textSecondary : AppTheme.textPrimary,
+              color: secondary
+                  ? _mutedColor(context)
+                  : _headingColor(context),
             ),
             overflow: TextOverflow.ellipsis,
             maxLines: 1,
@@ -451,28 +468,20 @@ class _ManageDepartmentState extends State<ManageDepartment> {
     return TextField(
       controller: _searchController,
       onChanged: (_) => setState(() {}),
-      decoration: InputDecoration(
+      style: AppTheme.dashFieldTextStyle(context),
+      decoration: AppTheme.dashInputDecoration(
+        context,
         hintText: 'Search',
-        hintStyle: TextStyle(
-          color: AppTheme.textSecondary.withValues(alpha: 0.8),
-          fontSize: 14,
-        ),
         prefixIcon: Icon(
           Icons.search_rounded,
           size: 20,
-          color: AppTheme.textSecondary.withValues(alpha: 0.7),
+          color: _mutedColor(context).withValues(alpha: 0.7),
         ),
-        isDense: true,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 14,
           vertical: 12,
         ),
-        filled: true,
-        fillColor: AppTheme.lightGray.withValues(alpha: 0.5),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide.none,
-        ),
+        radius: 10,
       ),
     );
   }
@@ -480,20 +489,21 @@ class _ManageDepartmentState extends State<ManageDepartment> {
   Widget _buildStatusDropdown() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppTheme.lightGray.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.transparent),
-      ),
+      decoration: _filterDecoration(context),
       child: DropdownButton<String>(
         value: _statusFilter,
+        dropdownColor: AppTheme.dashPanelOf(context),
+        style: AppTheme.dashFieldTextStyle(context),
         underline: const SizedBox.shrink(),
         isDense: true,
-        items: [
-          'Active',
-          'Inactive',
-          'All',
-        ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+        items: ['Active', 'Inactive', 'All']
+            .map(
+              (o) => DropdownMenuItem(
+                value: o,
+                child: Text(o, style: AppTheme.dashFieldTextStyle(context)),
+              ),
+            )
+            .toList(),
         onChanged: (v) {
           setState(() => _statusFilter = v ?? 'Active');
           _loadDepartments();
@@ -505,18 +515,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
   Widget _buildRightPanel() {
     return Container(
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -525,12 +524,13 @@ class _ManageDepartmentState extends State<ManageDepartment> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
+              color: _mutedColor(context),
             ),
           ),
           const SizedBox(height: 6),
           TextFormField(
             controller: _nameController,
+            style: AppTheme.dashFieldTextStyle(context),
             decoration: _inputDecoration('Department Name'),
           ),
           const SizedBox(height: 20),
@@ -539,12 +539,13 @@ class _ManageDepartmentState extends State<ManageDepartment> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
+              color: _mutedColor(context),
             ),
           ),
           const SizedBox(height: 6),
           TextFormField(
             controller: _descriptionController,
+            style: AppTheme.dashFieldTextStyle(context),
             decoration: _inputDecoration('Description'),
             maxLines: 4,
           ),
@@ -614,26 +615,13 @@ class _ManageDepartmentState extends State<ManageDepartment> {
     );
   }
 
-  InputDecoration _inputDecoration(String hint) => InputDecoration(
-    hintText: hint,
-    hintStyle: TextStyle(
-      color: AppTheme.textSecondary.withValues(alpha: 0.7),
-      fontSize: 14,
-    ),
-    filled: true,
-    fillColor: AppTheme.white,
-    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: AppTheme.lightGray),
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: AppTheme.lightGray),
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: const BorderSide(color: Color(0xFF4CAF50), width: 1.5),
-    ),
-  );
+  InputDecoration _inputDecoration(String hint) => AppTheme.dashInputDecoration(
+        context,
+        hintText: hint,
+        radius: 8,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
+      );
 }

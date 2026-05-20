@@ -20,9 +20,12 @@ class AdminRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
     final rowBg = highlighted
-        ? AppTheme.primaryNavy.withOpacity(0.05)
-        : AppTheme.white;
+        ? (dark
+            ? AppTheme.primaryNavy.withValues(alpha: 0.28)
+            : AppTheme.primaryNavy.withValues(alpha: 0.05))
+        : Colors.transparent;
     return Material(
       color: rowBg,
       child: InkWell(
@@ -31,24 +34,33 @@ class AdminRow extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
             border: Border(
-              bottom: BorderSide(color: Colors.black.withOpacity(0.06)),
+              bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
             ),
           ),
           child: Row(
             children: [
               _flexCell(
                 _kFlexEmployee,
-                _cell(request.employeeName ?? 'Unknown'),
+                _cell(context, request.employeeName ?? 'Unknown'),
               ),
               _flexCell(
                 _kFlexDepartment,
-                _cell(request.officeDepartment ?? '—'),
+                _cell(context, request.officeDepartment ?? '—'),
               ),
-              _flexCell(_kFlexLeaveType, _cell(request.leaveTypeLabel)),
-              _flexCell(_kFlexDateRange, _cell(_rangeText(request))),
+              _flexCell(
+                _kFlexLeaveType,
+                _cell(context, request.leaveTypeLabel),
+              ),
+              _flexCell(
+                _kFlexDateRange,
+                _cell(context, _rangeText(request)),
+              ),
               _flexCell(
                 _kFlexDays,
-                _cell(request.workingDaysApplied?.toStringAsFixed(1) ?? '—'),
+                _cell(
+                  context,
+                  request.workingDaysApplied?.toStringAsFixed(1) ?? '—',
+                ),
               ),
               _flexCell(
                 _kFlexStatus,
@@ -63,6 +75,7 @@ class AdminRow extends StatelessWidget {
               _flexCell(
                 _kFlexSubmitted,
                 _cell(
+                  context,
                   request.dateFiled != null
                       ? _formatDate(request.dateFiled!)
                       : '—',
@@ -79,12 +92,15 @@ class AdminRow extends StatelessWidget {
     return Expanded(flex: flex, child: child);
   }
 
-  Widget _cell(String text) {
+  Widget _cell(BuildContext context, String text) {
     return Text(
       text,
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
-      style: TextStyle(color: AppTheme.textPrimary, fontSize: 12),
+      style: TextStyle(
+        color: AppTheme.dashTextPrimaryOf(context),
+        fontSize: 12,
+      ),
     );
   }
 
@@ -99,8 +115,8 @@ class AdminTableHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    TextStyle style = TextStyle(
-      color: AppTheme.textSecondary,
+    final style = TextStyle(
+      color: AppTheme.dashTextSecondaryOf(context),
       fontSize: 11,
       fontWeight: FontWeight.w700,
     );
@@ -108,9 +124,9 @@ class AdminTableHeader extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: AppTheme.offWhite,
+        color: AppTheme.dashMutedSurfaceOf(context),
         border: Border(
-          bottom: BorderSide(color: Colors.black.withOpacity(0.08)),
+          bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
         ),
       ),
       child: Row(

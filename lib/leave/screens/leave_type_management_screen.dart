@@ -35,6 +35,16 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   bool _affectsDtrNormally = true;
   String _balanceLedgerType = 'others';
 
+  bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
+
+  Color _headingColor(BuildContext context) =>
+      AppTheme.dashTextPrimaryOf(context);
+
+  Color _mutedColor(BuildContext context) =>
+      AppTheme.dashTextSecondaryOf(context);
+
+  Color _hairline(BuildContext context) => AppTheme.dashHairlineOf(context);
+
   static const _ledgerTypes = <String, String>{
     'vacationLeave': 'Vacation Leave',
     'sickLeave': 'Sick Leave',
@@ -295,7 +305,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       width: 1180,
       height: 720,
       child: ColoredBox(
-        color: const Color(0xFFF8FAFC),
+        color: AppTheme.dashCanvasOf(context),
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Column(
@@ -307,7 +317,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     child: Text(
                       'Leave Type Rules',
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: _headingColor(context),
                         fontSize: 22,
                         fontWeight: FontWeight.w800,
                       ),
@@ -322,7 +332,10 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                   IconButton(
                     tooltip: 'Close',
                     onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close_rounded),
+                    icon: Icon(
+                      Icons.close_rounded,
+                      color: _mutedColor(context),
+                    ),
                   ),
                 ],
               ),
@@ -361,7 +374,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                 Text(
                   '${_items.length} leave types',
                   style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: _headingColor(context),
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
                   ),
@@ -369,47 +382,49 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                 const SizedBox(height: 10),
                 TextField(
                   controller: _searchController,
-                  decoration: InputDecoration(
+                  style: AppTheme.dashFieldTextStyle(context),
+                  decoration: AppTheme.dashInputDecoration(
+                    context,
                     hintText: 'Search type or key',
-                    prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                    prefixIcon: Icon(
+                      Icons.search_rounded,
+                      size: 20,
+                      color: _mutedColor(context).withValues(alpha: 0.7),
+                    ),
                     suffixIcon: _searchController.text.isEmpty
                         ? null
                         : IconButton(
                             tooltip: 'Clear search',
                             onPressed: _searchController.clear,
-                            icon: const Icon(Icons.close_rounded, size: 18),
+                            icon: Icon(
+                              Icons.close_rounded,
+                              size: 18,
+                              color: _mutedColor(context),
+                            ),
                           ),
-                    isDense: true,
-                    filled: true,
-                    fillColor: const Color(0xFFF8FAFC),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide.none,
-                    ),
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 12,
                       vertical: 12,
                     ),
+                    radius: 8,
                   ),
                 ),
               ],
             ),
           ),
-          Divider(height: 1, color: Colors.black.withValues(alpha: 0.06)),
+          Divider(height: 1, color: _hairline(context)),
           Expanded(
             child: items.isEmpty
                 ? Center(
                     child: Text(
                       'No leave types found',
-                      style: TextStyle(color: AppTheme.textSecondary),
+                      style: TextStyle(color: _mutedColor(context)),
                     ),
                   )
                 : ListView.separated(
                     itemCount: items.length,
-                    separatorBuilder: (_, __) => Divider(
-                      height: 1,
-                      color: Colors.black.withValues(alpha: 0.06),
-                    ),
+                    separatorBuilder: (_, __) =>
+                        Divider(height: 1, color: _hairline(context)),
                     itemBuilder: (context, index) {
                       final item = items[index];
                       final selected = item.id == _selected?.id;
@@ -455,7 +470,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                                   ? 'New custom leave type'
                                   : selected.displayName,
                               style: TextStyle(
-                                color: AppTheme.textPrimary,
+                                color: _headingColor(context),
                                 fontSize: 19,
                                 fontWeight: FontWeight.w800,
                               ),
@@ -483,7 +498,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                               _statusPill(
                                 label: 'Inactive',
                                 icon: Icons.pause_circle_outline_rounded,
-                                color: AppTheme.textSecondary,
+                                color: _mutedColor(context),
                               ),
                           ],
                         ),
@@ -493,7 +508,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                               ? 'Built-in CSC rule. Review only.'
                               : 'Configure filing, balance, and DTR behavior.',
                           style: TextStyle(
-                            color: AppTheme.textSecondary,
+                            color: _mutedColor(context),
                             fontSize: 13,
                           ),
                         ),
@@ -503,7 +518,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                 ],
               ),
             ),
-            Divider(height: 1, color: Colors.black.withValues(alpha: 0.06)),
+            Divider(height: 1, color: _hairline(context)),
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(22, 18, 22, 22),
@@ -518,6 +533,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                   TextFormField(
                     controller: _displayNameController,
                     readOnly: _saving || systemLocked,
+                    style: AppTheme.dashFieldTextStyle(context),
                     decoration: _inputDecoration('Display name'),
                     validator: (v) =>
                         v == null || v.trim().isEmpty ? 'Required' : null,
@@ -526,6 +542,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                   TextFormField(
                     controller: _nameController,
                     readOnly: _saving || systemLocked,
+                    style: AppTheme.dashFieldTextStyle(context),
                     decoration: _inputDecoration(
                       'System key',
                       helperText: 'Example: bereavementLeave',
@@ -543,6 +560,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                   TextFormField(
                     controller: _descriptionController,
                     readOnly: _saving || systemLocked,
+                    style: AppTheme.dashFieldTextStyle(context),
                     decoration: _inputDecoration('Description'),
                     maxLines: 2,
                   ),
@@ -591,6 +609,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                         child: TextFormField(
                           controller: _maxDaysController,
                           readOnly: _saving || systemLocked,
+                          style: AppTheme.dashFieldTextStyle(context),
                           keyboardType: const TextInputType.numberWithOptions(
                             decimal: true,
                           ),
@@ -608,6 +627,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                               systemLocked || (!_saving && _requiresAttachment),
                           readOnly:
                               _saving || systemLocked || !_requiresAttachment,
+                          style: AppTheme.dashFieldTextStyle(context),
                           keyboardType: const TextInputType.numberWithOptions(
                             decimal: true,
                           ),
@@ -642,6 +662,8 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                       key: ValueKey(_balanceLedgerType),
                       initialValue: _balanceLedgerType,
                       isExpanded: true,
+                      dropdownColor: AppTheme.dashPanelOf(context),
+                      style: AppTheme.dashFieldTextStyle(context),
                       decoration: _inputDecoration(
                         'Balance ledger bucket',
                         helperText:
@@ -651,7 +673,10 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                           .map(
                             (entry) => DropdownMenuItem(
                               value: entry.key,
-                              child: Text(entry.value),
+                              child: Text(
+                                entry.value,
+                                style: AppTheme.dashFieldTextStyle(context),
+                              ),
                             ),
                           )
                           .toList(),
@@ -679,16 +704,18 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     return Container(
       padding: const EdgeInsets.fromLTRB(22, 14, 22, 16),
       decoration: BoxDecoration(
-        color: AppTheme.white,
-        border: Border(
-          top: BorderSide(color: Colors.black.withValues(alpha: 0.06)),
-        ),
+        color: AppTheme.dashPanelOf(context),
+        border: Border(top: BorderSide(color: _hairline(context))),
       ),
       child: Row(
         children: [
           Icon(
             systemLocked ? Icons.lock_rounded : Icons.info_outline_rounded,
-            color: systemLocked ? AppTheme.primaryNavy : AppTheme.textSecondary,
+            color: systemLocked
+                ? (_isDark(context)
+                      ? AppTheme.primaryNavyLight
+                      : AppTheme.primaryNavy)
+                : _mutedColor(context),
             size: 18,
           ),
           const SizedBox(width: 8),
@@ -699,7 +726,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                   : isSelectedActive
                   ? 'Changes affect future filing rules after saving.'
                   : 'Inactive types stay in history, but employees cannot file them.',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+              style: TextStyle(color: _mutedColor(context), fontSize: 13),
             ),
           ),
           const SizedBox(width: 12),
@@ -730,37 +757,30 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   }
 
   InputDecoration _inputDecoration(String label, {String? helperText}) {
-    return InputDecoration(
+    return AppTheme.dashInputDecoration(
+      context,
       labelText: label,
       helperText: helperText,
-      filled: true,
-      fillColor: const Color(0xFFF8FAFC),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.08)),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.08)),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: BorderSide(color: AppTheme.primaryNavy, width: 1.4),
-      ),
+      radius: 8,
     );
   }
 
   Widget _sectionTitle(IconData icon, String label) {
+    final dark = _isDark(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
         children: [
-          Icon(icon, size: 18, color: AppTheme.primaryNavy),
+          Icon(
+            icon,
+            size: 18,
+            color: dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy,
+          ),
           const SizedBox(width: 8),
           Text(
             label,
             style: TextStyle(
-              color: AppTheme.textPrimary,
+              color: _headingColor(context),
               fontSize: 13,
               fontWeight: FontWeight.w800,
             ),
@@ -776,8 +796,15 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     required bool editable,
     required ValueChanged<bool> onChanged,
   }) {
-    final color = value ? const Color(0xFF2E7D32) : AppTheme.textSecondary;
-    final bg = value ? const Color(0xFFE8F5E9) : const Color(0xFFF3F4F6);
+    final dark = _isDark(context);
+    final color = value
+        ? (dark ? Colors.green.shade300 : const Color(0xFF2E7D32))
+        : _mutedColor(context);
+    final bg = value
+        ? (dark
+              ? Colors.green.shade900.withValues(alpha: 0.35)
+              : const Color(0xFFE8F5E9))
+        : AppTheme.dashMutedSurfaceOf(context);
     return InkWell(
       borderRadius: BorderRadius.circular(8),
       onTap: editable ? () => onChanged(!value) : null,
@@ -800,7 +827,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
             Text(
               label,
               style: TextStyle(
-                color: value ? const Color(0xFF1B5E20) : AppTheme.textPrimary,
+                color: value
+                    ? (dark ? Colors.green.shade100 : const Color(0xFF1B5E20))
+                    : _headingColor(context),
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -841,11 +870,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   }
 
   BoxDecoration _panelDecoration() {
-    return BoxDecoration(
-      color: AppTheme.white,
-      borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-    );
+    return AppTheme.dashSurfaceCard(context, radius: 8);
   }
 
   double? _numberOrNull(String value) {
@@ -881,10 +906,19 @@ class _LeaveTypeListTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = selected ? AppTheme.primaryNavy : Colors.transparent;
-    final iconColor = selected ? AppTheme.primaryNavy : AppTheme.textSecondary;
+    final dark = AppTheme.dashIsDark(context);
+    final accent = selected
+        ? (dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy)
+        : Colors.transparent;
+    final iconColor = selected
+        ? (dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy)
+        : AppTheme.dashTextSecondaryOf(context);
     return Material(
-      color: selected ? AppTheme.primaryNavy.withValues(alpha: 0.07) : null,
+      color: selected
+          ? (dark
+                ? AppTheme.primaryNavy.withValues(alpha: 0.28)
+                : AppTheme.primaryNavy.withValues(alpha: 0.07))
+          : null,
       child: InkWell(
         onTap: onTap,
         child: Container(
@@ -917,8 +951,10 @@ class _LeaveTypeListTile extends StatelessWidget {
                       item.displayName,
                       style: TextStyle(
                         color: selected
-                            ? AppTheme.primaryNavy
-                            : AppTheme.textPrimary,
+                            ? (dark
+                                  ? AppTheme.primaryNavyLight
+                                  : AppTheme.primaryNavy)
+                            : AppTheme.dashTextPrimaryOf(context),
                         fontSize: 14.5,
                         fontWeight: FontWeight.w800,
                       ),
@@ -929,7 +965,7 @@ class _LeaveTypeListTile extends StatelessWidget {
                     Text(
                       item.name,
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 12.5,
                       ),
                       maxLines: 1,
@@ -942,8 +978,8 @@ class _LeaveTypeListTile extends StatelessWidget {
               _ListStatusBadge(
                 label: item.isActive ? 'Active' : 'Off',
                 color: item.isActive
-                    ? const Color(0xFF2E7D32)
-                    : AppTheme.textSecondary,
+                    ? (dark ? Colors.green.shade300 : const Color(0xFF2E7D32))
+                    : AppTheme.dashTextSecondaryOf(context),
               ),
             ],
           ),
@@ -993,24 +1029,16 @@ class _ReadOnlyValue extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InputDecorator(
-      decoration: InputDecoration(
+      decoration: AppTheme.dashInputDecoration(
+        context,
         labelText: label,
         helperText: helperText,
-        filled: true,
-        fillColor: const Color(0xFFF8FAFC),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.08)),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.08)),
-        ),
+        radius: 8,
       ),
       child: Text(
         value,
         style: TextStyle(
-          color: AppTheme.textPrimary,
+          color: AppTheme.dashTextPrimaryOf(context),
           fontWeight: FontWeight.w700,
         ),
       ),
@@ -1026,21 +1054,31 @@ class _InfoPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppTheme.primaryNavy.withValues(alpha: 0.06),
+        color: dark
+            ? AppTheme.primaryNavy.withValues(alpha: 0.28)
+            : AppTheme.primaryNavy.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Row(
         children: [
-          Icon(icon, color: AppTheme.primaryNavy),
+          Icon(
+            icon,
+            color: dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               text,
-              style: TextStyle(color: AppTheme.textPrimary, height: 1.35),
+              style: TextStyle(
+                color: AppTheme.dashTextPrimaryOf(context),
+                height: 1.35,
+              ),
             ),
           ),
         ],

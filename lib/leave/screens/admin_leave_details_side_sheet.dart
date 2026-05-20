@@ -42,7 +42,7 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
         children: [
           Material(
             elevation: 1,
-            color: AppTheme.offWhite,
+            color: AppTheme.dashPanelOf(context),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
               child: Row(
@@ -51,7 +51,7 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
                     child: Text(
                       'Request details',
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
                       ),
@@ -60,7 +60,10 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
                   IconButton(
                     tooltip: 'Close',
                     onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close_rounded),
+                    icon: Icon(
+                      Icons.close_rounded,
+                      color: AppTheme.dashTextSecondaryOf(context),
+                    ),
                   ),
                 ],
               ),
@@ -152,7 +155,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
                     Text(
                       request!.employeeName ?? 'Unknown employee',
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         fontSize: 20,
                         fontWeight: FontWeight.w700,
                       ),
@@ -161,7 +164,9 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
                     Text(
                       request!.leaveTypeLabel,
                       style: TextStyle(
-                        color: AppTheme.primaryNavyDark,
+                        color: AppTheme.dashIsDark(context)
+                            ? AppTheme.primaryNavyLight
+                            : AppTheme.primaryNavyDark,
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
                       ),
@@ -494,9 +499,9 @@ class _AdminLeaveAttachmentTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppTheme.offWhite,
+        color: AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -504,7 +509,7 @@ class _AdminLeaveAttachmentTile extends StatelessWidget {
           Text(
             'Attachment',
             style: TextStyle(
-              color: AppTheme.textSecondary,
+              color: AppTheme.dashTextSecondaryOf(context),
               fontSize: 12,
               fontWeight: FontWeight.w600,
             ),
@@ -513,7 +518,10 @@ class _AdminLeaveAttachmentTile extends StatelessWidget {
           if (!hasAttachment)
             Text(
               'No attachment linked yet',
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
+              style: TextStyle(
+                color: AppTheme.dashTextPrimaryOf(context),
+                fontSize: 14,
+              ),
             )
           else
             Row(
@@ -521,7 +529,10 @@ class _AdminLeaveAttachmentTile extends StatelessWidget {
                 Expanded(
                   child: Text(
                     attachmentName!,
-                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
+                    style: TextStyle(
+                      color: AppTheme.dashTextPrimaryOf(context),
+                      fontSize: 14,
+                    ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),

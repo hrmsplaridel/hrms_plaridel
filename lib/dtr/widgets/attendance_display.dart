@@ -8,12 +8,15 @@ import '../../landingpage/constants/app_theme.dart';
 /// Single attendance remark. Prefer record.attendanceRemark (backend); fallback for hardcoded/preview.
 /// For holidays, uses holiday name when available.
 String getAttendanceRemark(TimeRecord r) {
-  if (r.attendanceRemark != null && r.attendanceRemark!.isNotEmpty)
+  if (r.attendanceRemark != null && r.attendanceRemark!.isNotEmpty) {
     return r.attendanceRemark!;
-  if (r.status == 'holiday' || r.holidayId != null)
+  }
+  if (r.status == 'holiday' || r.holidayId != null) {
     return r.holidayName ?? 'Holiday';
-  if (r.status == 'on_leave' || r.leaveRequestId != null)
+  }
+  if (r.status == 'on_leave' || r.leaveRequestId != null) {
     return r.leaveTypeName ?? 'Leave';
+  }
   final hasAnyLog =
       r.timeIn != null ||
       r.breakOut != null ||
@@ -40,17 +43,23 @@ String formatLateMinutes(TimeRecord r) {
   if (r.status == 'holiday' ||
       r.holidayId != null ||
       r.status == 'on_leave' ||
-      r.leaveRequestId != null)
+      r.leaveRequestId != null) {
     return '—';
+  }
   final m = r.lateMinutes ?? 0;
   return m == 0 ? '0 min' : '$m min';
 }
 
 /// Text color for an attendance remark (for plain text display, e.g. DTR reports table).
-Color colorForRemarkText(String remark, {bool isHoliday = false}) {
+Color colorForRemarkText(
+  BuildContext context,
+  String remark, {
+  bool isHoliday = false,
+}) {
   final (color, _) = AttendanceRemarksChip.colorsForRemark(
     remark,
     isHoliday: isHoliday,
+    dark: AppTheme.dashIsDark(context),
   );
   return color;
 }
@@ -60,8 +69,9 @@ String formatUndertimeMinutes(TimeRecord r) {
   if (r.status == 'holiday' ||
       r.holidayId != null ||
       r.status == 'on_leave' ||
-      r.leaveRequestId != null)
+      r.leaveRequestId != null) {
     return '—';
+  }
   final m = r.undertimeMinutes ?? 0;
   return m == 0 ? '0 min' : '$m min';
 }
@@ -79,13 +89,18 @@ class AttendanceRemarksChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (color, bg) = colorsForRemark(remark, isHoliday: isHoliday);
+    final dark = AppTheme.dashIsDark(context);
+    final (color, bg) = colorsForRemark(
+      remark,
+      isHoliday: isHoliday,
+      dark: dark,
+    );
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withOpacity(0.5), width: 1),
+        border: Border.all(color: color.withValues(alpha: 0.5), width: 1),
       ),
       child: Text(
         remark,
@@ -99,34 +114,80 @@ class AttendanceRemarksChip extends StatelessWidget {
     );
   }
 
+  static (Color color, Color bg) _chipPair(
+    Color fg,
+    Color lightBg, {
+    required bool dark,
+  }) => dark
+      ? (fg.withValues(alpha: 0.92), fg.withValues(alpha: 0.24))
+      : (fg, lightBg);
+
   static (Color color, Color bg) colorsForRemark(
     String r, {
     bool isHoliday = false,
+    bool dark = false,
   }) {
-    if (isHoliday) return (Colors.purple.shade700, Colors.purple.shade50);
+    if (isHoliday) {
+      return _chipPair(
+        Colors.purple.shade700,
+        Colors.purple.shade50,
+        dark: dark,
+      );
+    }
     switch (r) {
       case 'On Time':
-        return (Colors.green.shade800, Colors.green.shade50);
+        return _chipPair(
+          Colors.green.shade800,
+          Colors.green.shade50,
+          dark: dark,
+        );
       case 'Late':
-        return (Colors.red.shade800, Colors.red.shade50);
+        return _chipPair(Colors.red.shade800, Colors.red.shade50, dark: dark);
       case 'Undertime':
-        return (Colors.orange.shade800, Colors.orange.shade50);
+        return _chipPair(
+          Colors.orange.shade800,
+          Colors.orange.shade50,
+          dark: dark,
+        );
       case 'Late + Undertime':
-        return (Colors.deepOrange.shade800, Colors.deepOrange.shade50);
+        return _chipPair(
+          Colors.deepOrange.shade800,
+          Colors.deepOrange.shade50,
+          dark: dark,
+        );
       case 'Absent':
-        return (Colors.orange.shade700, Colors.orange.shade50);
+        return _chipPair(
+          Colors.orange.shade700,
+          Colors.orange.shade50,
+          dark: dark,
+        );
       case 'Holiday':
-        return (Colors.purple.shade700, Colors.purple.shade50);
+        return _chipPair(
+          Colors.purple.shade700,
+          Colors.purple.shade50,
+          dark: dark,
+        );
       case 'Leave':
-        return (Colors.blue.shade700, Colors.blue.shade50);
+        return _chipPair(Colors.blue.shade700, Colors.blue.shade50, dark: dark);
       case 'Incomplete':
-        return (Colors.amber.shade800, Colors.amber.shade50);
+        return _chipPair(
+          Colors.amber.shade800,
+          Colors.amber.shade50,
+          dark: dark,
+        );
       case 'Invalid Log':
-        return (Colors.red.shade900, Colors.red.shade100);
+        return _chipPair(Colors.red.shade900, Colors.red.shade100, dark: dark);
       default:
-        if (r.toLowerCase().contains('leave'))
-          return (Colors.blue.shade700, Colors.blue.shade50);
-        return (AppTheme.textPrimary, AppTheme.lightGray.withOpacity(0.5));
+        if (r.toLowerCase().contains('leave')) {
+          return _chipPair(
+            Colors.blue.shade700,
+            Colors.blue.shade50,
+            dark: dark,
+          );
+        }
+        return dark
+            ? (const Color(0xFFB0B8C4), const Color(0xFF343B4A))
+            : (AppTheme.textPrimary, AppTheme.lightGray.withValues(alpha: 0.5));
     }
   }
 }

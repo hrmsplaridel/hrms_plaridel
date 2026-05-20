@@ -162,6 +162,36 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
   bool _loading = false;
   _DeviceRecord? _selectedDevice;
 
+  bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
+
+  Color _headingColor(BuildContext context) =>
+      AppTheme.dashTextPrimaryOf(context);
+
+  Color _mutedColor(BuildContext context) =>
+      AppTheme.dashTextSecondaryOf(context);
+
+  BoxDecoration _filterDecoration(BuildContext context) => BoxDecoration(
+        color: _isDark(context)
+            ? AppTheme.dashMutedSurfaceOf(context)
+            : AppTheme.lightGray.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: _isDark(context)
+              ? AppTheme.dashHairlineOf(context)
+              : Colors.transparent,
+        ),
+      );
+
+  InputDecoration _inputDecoration(String hint) => AppTheme.dashInputDecoration(
+        context,
+        hintText: hint,
+        radius: 8,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
+      );
+
   @override
   void initState() {
     super.initState();
@@ -397,7 +427,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
         Text(
           'Biometric Devices',
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: _headingColor(context),
             fontSize: 24,
             fontWeight: FontWeight.w800,
           ),
@@ -405,7 +435,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
         const SizedBox(height: 8),
         Text(
           'Register and manage biometric devices for time logging. (Optional)',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          style: TextStyle(color: _mutedColor(context), fontSize: 14),
         ),
         const SizedBox(height: 20),
         isNarrow
@@ -430,20 +460,10 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
   }
 
   Widget _buildListPanel(List<_DeviceRecord> filtered) {
+    final dark = _isDark(context);
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -456,31 +476,43 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
                 child: TextField(
                   controller: _searchController,
                   onChanged: (_) => setState(() {}),
-                  decoration: InputDecoration(
+                  style: AppTheme.dashFieldTextStyle(context),
+                  decoration: AppTheme.dashInputDecoration(
+                    context,
                     hintText: 'Search',
-                    isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 14,
                       vertical: 12,
                     ),
-                    filled: true,
-                    fillColor: AppTheme.lightGray.withValues(alpha: 0.5),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide.none,
-                    ),
+                    radius: 10,
                   ),
                 ),
               ),
-              DropdownButton<String>(
-                value: _statusFilter,
-                items: ['Active', 'Inactive', 'All']
-                    .map((o) => DropdownMenuItem(value: o, child: Text(o)))
-                    .toList(),
-                onChanged: (v) {
-                  setState(() => _statusFilter = v ?? 'Active');
-                  _loadDevices();
-                },
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: _filterDecoration(context),
+                child: DropdownButton<String>(
+                  value: _statusFilter,
+                  dropdownColor: AppTheme.dashPanelOf(context),
+                  style: AppTheme.dashFieldTextStyle(context),
+                  underline: const SizedBox.shrink(),
+                  isDense: true,
+                  items: ['Active', 'Inactive', 'All']
+                      .map(
+                        (o) => DropdownMenuItem(
+                          value: o,
+                          child: Text(
+                            o,
+                            style: AppTheme.dashFieldTextStyle(context),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) {
+                    setState(() => _statusFilter = v ?? 'Active');
+                    _loadDevices();
+                  },
+                ),
               ),
             ],
           ),
@@ -498,7 +530,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
                 padding: const EdgeInsets.all(32),
                 child: Text(
                   'No devices',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                  style: TextStyle(color: _mutedColor(context), fontSize: 14),
                 ),
               ),
             )
@@ -514,9 +546,9 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
                 final health = _biometricSyncHealth(d.lastSyncAt, now);
                 return ListTile(
                   selected: isSelected,
-                  selectedTileColor: AppTheme.primaryNavy.withValues(
-                    alpha: 0.08,
-                  ),
+                  selectedTileColor: dark
+                      ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                      : AppTheme.primaryNavy.withValues(alpha: 0.08),
                   leading: Icon(
                     Icons.fingerprint_rounded,
                     color: AppTheme.primaryNavy.withValues(alpha: 0.8),
@@ -525,7 +557,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
                     d.name,
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary,
+                      color: _headingColor(context),
                     ),
                   ),
                   subtitle: Column(
@@ -536,7 +568,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
                         '${d.deviceId ?? '—'} · ${d.location ?? '—'}${d.ipAddress != null && d.ipAddress!.isNotEmpty ? ' · ${d.ipAddress}' : ''}',
                         style: TextStyle(
                           fontSize: 12,
-                          color: AppTheme.textSecondary,
+                          color: _mutedColor(context),
                         ),
                       ),
                       const SizedBox(height: 6),
@@ -557,7 +589,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
                             : 'No sync recorded yet',
                         style: TextStyle(
                           fontSize: 11,
-                          color: AppTheme.textSecondary,
+                          color: _mutedColor(context),
                         ),
                       ),
                     ],
@@ -573,20 +605,10 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
   }
 
   Widget _buildFormPanel() {
+    final dark = _isDark(context);
     return Container(
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -596,7 +618,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color: AppTheme.textSecondary,
+                color: _mutedColor(context),
               ),
             ),
             const SizedBox(height: 8),
@@ -608,11 +630,11 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
                 return Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: AppTheme.lightGray.withValues(alpha: 0.4),
+                    color: dark
+                        ? AppTheme.dashMutedSurfaceOf(context)
+                        : AppTheme.lightGray.withValues(alpha: 0.4),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: Colors.black.withValues(alpha: 0.06),
-                    ),
+                    border: Border.all(color: AppTheme.dashHairlineOf(context)),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -628,7 +650,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
                                   : 'No sync recorded yet — device has not posted logs to the server.',
                               style: TextStyle(
                                 fontSize: 13,
-                                color: AppTheme.textPrimary,
+                                color: _headingColor(context),
                                 height: 1.35,
                               ),
                             ),
@@ -640,7 +662,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
                         'Sync OK = last sync within ${_kBiometricStaleAfter.inHours} hour(s). Reload list to refresh.',
                         style: TextStyle(
                           fontSize: 11,
-                          color: AppTheme.textSecondary,
+                          color: _mutedColor(context),
                         ),
                       ),
                     ],
@@ -655,23 +677,14 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
+              color: _mutedColor(context),
             ),
           ),
           const SizedBox(height: 6),
           TextFormField(
             controller: _nameController,
-            decoration: InputDecoration(
-              hintText: 'e.g. Main entrance',
-              filled: true,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 12,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
+            style: AppTheme.dashFieldTextStyle(context),
+            decoration: _inputDecoration('e.g. Main entrance'),
           ),
           const SizedBox(height: 16),
           Text(
@@ -679,23 +692,14 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
+              color: _mutedColor(context),
             ),
           ),
           const SizedBox(height: 6),
           TextFormField(
             controller: _deviceIdController,
-            decoration: InputDecoration(
-              hintText: 'Optional – from device',
-              filled: true,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 12,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
+            style: AppTheme.dashFieldTextStyle(context),
+            decoration: _inputDecoration('Optional – from device'),
           ),
           const SizedBox(height: 16),
           Text(
@@ -703,23 +707,14 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
+              color: _mutedColor(context),
             ),
           ),
           const SizedBox(height: 6),
           TextFormField(
             controller: _locationController,
-            decoration: InputDecoration(
-              hintText: 'Optional',
-              filled: true,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 12,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
+            style: AppTheme.dashFieldTextStyle(context),
+            decoration: _inputDecoration('Optional'),
           ),
           const SizedBox(height: 16),
           Text(
@@ -727,23 +722,14 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
+              color: _mutedColor(context),
             ),
           ),
           const SizedBox(height: 6),
           TextFormField(
             controller: _ipAddressController,
-            decoration: InputDecoration(
-              hintText: 'e.g. 192.168.1.10',
-              filled: true,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 12,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
+            style: AppTheme.dashFieldTextStyle(context),
+            decoration: _inputDecoration('e.g. 192.168.1.10'),
           ),
           const SizedBox(height: 24),
           Wrap(

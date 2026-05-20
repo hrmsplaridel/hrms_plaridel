@@ -115,6 +115,26 @@ class _ManageAssignmentState extends State<ManageAssignment> {
 
   bool _initialPrefillApplied = false;
 
+  bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
+
+  Color _headingColor(BuildContext context) =>
+      AppTheme.dashTextPrimaryOf(context);
+
+  Color _mutedColor(BuildContext context) =>
+      AppTheme.dashTextSecondaryOf(context);
+
+  BoxDecoration _filterDecoration(BuildContext context) => BoxDecoration(
+    color: _isDark(context)
+        ? AppTheme.dashMutedSurfaceOf(context)
+        : AppTheme.lightGray.withValues(alpha: 0.5),
+    borderRadius: BorderRadius.circular(10),
+    border: Border.all(
+      color: _isDark(context)
+          ? AppTheme.dashHairlineOf(context)
+          : Colors.transparent,
+    ),
+  );
+
   @override
   void initState() {
     super.initState();
@@ -593,7 +613,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         Text(
           'Assignment',
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: _headingColor(context),
             fontSize: 24,
             fontWeight: FontWeight.w800,
           ),
@@ -627,6 +647,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   }
 
   Widget _buildLeftPanel() {
+    final dark = _isDark(context);
     final search = _searchController.text.toLowerCase();
     final filtered = search.isEmpty
         ? _employees
@@ -636,18 +657,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
 
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -663,8 +673,11 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             decoration: BoxDecoration(
-              color: AppTheme.lightGray.withValues(alpha: 0.4),
+              color: AppTheme.dashMutedSurfaceOf(context),
               borderRadius: BorderRadius.circular(8),
+              border: Border(
+                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+              ),
             ),
             child: Row(
               children: [
@@ -675,7 +688,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 13,
-                      color: AppTheme.textPrimary,
+                      color: _headingColor(context),
                     ),
                   ),
                 ),
@@ -685,7 +698,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 13,
-                      color: AppTheme.textPrimary,
+                      color: _headingColor(context),
                     ),
                   ),
                 ),
@@ -705,7 +718,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               child: Text(
                 'No employees',
                 style: TextStyle(
-                  color: AppTheme.textSecondary.withValues(alpha: 0.8),
+                  color: _mutedColor(context).withValues(alpha: 0.8),
                   fontSize: 14,
                 ),
               ),
@@ -715,7 +728,9 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               final isSelected = _selectedEmployeeId == e.id;
               return Material(
                 color: isSelected
-                    ? AppTheme.primaryNavy.withValues(alpha: 0.08)
+                    ? (dark
+                          ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                          : AppTheme.primaryNavy.withValues(alpha: 0.08))
                     : Colors.transparent,
                 child: InkWell(
                   onTap: () {
@@ -738,7 +753,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                             e.displayEmployeeNo,
                             style: TextStyle(
                               fontSize: 12,
-                              color: AppTheme.textSecondary,
+                              color: _mutedColor(context),
                             ),
                             overflow: TextOverflow.ellipsis,
                             maxLines: 1,
@@ -749,7 +764,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                             e.fullName,
                             style: TextStyle(
                               fontSize: 13,
-                              color: AppTheme.textPrimary,
+                              color: _headingColor(context),
                             ),
                             overflow: TextOverflow.ellipsis,
                             maxLines: 1,
@@ -770,28 +785,20 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     return TextField(
       controller: _searchController,
       onChanged: (_) => setState(() {}),
-      decoration: InputDecoration(
+      style: AppTheme.dashFieldTextStyle(context),
+      decoration: AppTheme.dashInputDecoration(
+        context,
         hintText: 'Search',
-        hintStyle: TextStyle(
-          color: AppTheme.textSecondary.withValues(alpha: 0.8),
-          fontSize: 14,
-        ),
         prefixIcon: Icon(
           Icons.search_rounded,
           size: 20,
-          color: AppTheme.textSecondary.withValues(alpha: 0.7),
+          color: _mutedColor(context).withValues(alpha: 0.7),
         ),
-        isDense: true,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 14,
           vertical: 12,
         ),
-        filled: true,
-        fillColor: AppTheme.lightGray.withValues(alpha: 0.5),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide.none,
-        ),
+        radius: 10,
       ),
     );
   }
@@ -799,20 +806,21 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   Widget _buildFilterDropdown() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppTheme.lightGray.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.transparent),
-      ),
+      decoration: _filterDecoration(context),
       child: DropdownButton<String>(
         value: _employeeStatusFilter,
+        dropdownColor: AppTheme.dashPanelOf(context),
+        style: AppTheme.dashFieldTextStyle(context),
         underline: const SizedBox.shrink(),
         isDense: true,
-        items: [
-          'All',
-          'Active',
-          'Inactive',
-        ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+        items: ['All', 'Active', 'Inactive']
+            .map(
+              (o) => DropdownMenuItem(
+                value: o,
+                child: Text(o, style: AppTheme.dashFieldTextStyle(context)),
+              ),
+            )
+            .toList(),
         onChanged: (v) {
           setState(() => _employeeStatusFilter = v ?? 'All');
           _loadEmployees();
@@ -832,18 +840,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
 
     return Container(
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -852,11 +849,11 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               children: [
                 CircleAvatar(
                   radius: 24,
-                  backgroundColor: AppTheme.lightGray,
+                  backgroundColor: AppTheme.dashMutedSurfaceOf(context),
                   child: Icon(
                     Icons.person_rounded,
                     size: 28,
-                    color: AppTheme.textSecondary.withValues(alpha: 0.5),
+                    color: _mutedColor(context).withValues(alpha: 0.5),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -864,7 +861,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                   child: Text(
                     'Manage Assignments for ${hasSelection ? sel.fullName : 'Select an employee'}',
                     style: TextStyle(
-                      color: AppTheme.textPrimary,
+                      color: _headingColor(context),
                       fontSize: 16,
                       fontWeight: hasSelection
                           ? FontWeight.w700
@@ -888,20 +885,21 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   Widget _buildStatusDropdown() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppTheme.lightGray.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.transparent),
-      ),
+      decoration: _filterDecoration(context),
       child: DropdownButton<String>(
         value: _assignmentStatusFilter,
+        dropdownColor: AppTheme.dashPanelOf(context),
+        style: AppTheme.dashFieldTextStyle(context),
         underline: const SizedBox.shrink(),
         isDense: true,
-        items: [
-          'Active',
-          'Inactive',
-          'All',
-        ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+        items: ['Active', 'Inactive', 'All']
+            .map(
+              (o) => DropdownMenuItem(
+                value: o,
+                child: Text(o, style: AppTheme.dashFieldTextStyle(context)),
+              ),
+            )
+            .toList(),
         onChanged: (v) {
           setState(() => _assignmentStatusFilter = v ?? 'Active');
           _loadAssignments();
@@ -912,48 +910,57 @@ class _ManageAssignmentState extends State<ManageAssignment> {
 
   Widget _buildAssignmentsTable(bool hasSelection) {
     if (!hasSelection) return const SizedBox.shrink();
+    final dark = _isDark(context);
 
     return Container(
       decoration: BoxDecoration(
-        color: AppTheme.lightGray.withValues(alpha: 0.3),
+        color: dark
+            ? AppTheme.dashMutedSurfaceOf(context).withValues(alpha: 0.65)
+            : AppTheme.lightGray.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Column(
         children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             decoration: BoxDecoration(
-              color: AppTheme.lightGray.withValues(alpha: 0.4),
+              color: AppTheme.dashMutedSurfaceOf(context),
               borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(8),
+              ),
+              border: Border(
+                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
               ),
             ),
             child: Row(
               children: [
                 Expanded(
                   flex: 2,
-                  child: Text('Department', style: _tableHeaderStyle),
+                  child: Text('Department', style: _tableHeaderStyle(context)),
                 ),
                 Expanded(
                   flex: 2,
-                  child: Text('Position', style: _tableHeaderStyle),
+                  child: Text('Position', style: _tableHeaderStyle(context)),
                 ),
                 Expanded(
                   flex: 1,
-                  child: Text('Shift', style: _tableHeaderStyle),
+                  child: Text('Shift', style: _tableHeaderStyle(context)),
                 ),
                 Expanded(
                   flex: 2,
-                  child: Text('Policy', style: _tableHeaderStyle),
+                  child: Text('Policy', style: _tableHeaderStyle(context)),
                 ),
                 Expanded(
                   flex: 1,
-                  child: Text('Time', style: _tableHeaderStyle),
+                  child: Text('Time', style: _tableHeaderStyle(context)),
                 ),
                 Expanded(
                   flex: 1,
-                  child: Text('Effective period', style: _tableHeaderStyle),
+                  child: Text(
+                    'Effective period',
+                    style: _tableHeaderStyle(context),
+                  ),
                 ),
               ],
             ),
@@ -964,16 +971,23 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               child: Center(child: CircularProgressIndicator()),
             )
           else if (_assignments.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 48),
-              child: Center(child: Text('No content in table')),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 48),
+              child: Center(
+                child: Text(
+                  'No content in table',
+                  style: TextStyle(color: _mutedColor(context)),
+                ),
+              ),
             )
           else
             ..._assignments.map((a) {
               final isSelected = _selectedAssignment?.id == a.id;
               return Material(
                 color: isSelected
-                    ? AppTheme.primaryNavy.withValues(alpha: 0.08)
+                    ? (dark
+                          ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                          : AppTheme.primaryNavy.withValues(alpha: 0.08))
                     : Colors.transparent,
                 child: InkWell(
                   onTap: () => _selectAssignment(a),
@@ -986,15 +1000,24 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                       children: [
                         Expanded(
                           flex: 2,
-                          child: Text(a.departmentName, style: _tableCellStyle),
+                          child: Text(
+                            a.departmentName,
+                            style: _tableCellStyle(context),
+                          ),
                         ),
                         Expanded(
                           flex: 2,
-                          child: Text(a.positionName, style: _tableCellStyle),
+                          child: Text(
+                            a.positionName,
+                            style: _tableCellStyle(context),
+                          ),
                         ),
                         Expanded(
                           flex: 1,
-                          child: Text(a.shiftName, style: _tableCellStyle),
+                          child: Text(
+                            a.shiftName,
+                            style: _tableCellStyle(context),
+                          ),
                         ),
                         Expanded(
                           flex: 2,
@@ -1003,21 +1026,21 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                                     a.policyName!.trim().isNotEmpty)
                                 ? a.policyName!
                                 : 'Default policy',
-                            style: _tableCellStyle,
+                            style: _tableCellStyle(context),
                           ),
                         ),
                         Expanded(
                           flex: 1,
                           child: Text(
                             '${_timeStr(a.startTime)} - ${_timeStr(a.endTime)}',
-                            style: _tableCellStyle,
+                            style: _tableCellStyle(context),
                           ),
                         ),
                         Expanded(
                           flex: 1,
                           child: Text(
                             _effectivePeriodStr(a),
-                            style: _tableCellStyle,
+                            style: _tableCellStyle(context),
                           ),
                         ),
                       ],
@@ -1031,22 +1054,24 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     );
   }
 
-  TextStyle get _tableHeaderStyle => TextStyle(
+  TextStyle _tableHeaderStyle(BuildContext context) => TextStyle(
     fontWeight: FontWeight.w700,
     fontSize: 13,
-    color: AppTheme.textPrimary,
+    color: _headingColor(context),
   );
 
-  TextStyle get _tableCellStyle =>
-      TextStyle(fontSize: 13, color: AppTheme.textPrimary);
+  TextStyle _tableCellStyle(BuildContext context) =>
+      TextStyle(fontSize: 13, color: _headingColor(context));
 
   Widget _buildAssignmentForm() {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppTheme.lightGray.withValues(alpha: 0.2),
+        color: _isDark(context)
+            ? AppTheme.dashMutedSurfaceOf(context)
+            : AppTheme.lightGray.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1182,22 +1207,21 @@ class _ManageAssignmentState extends State<ManageAssignment> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
+              color: _mutedColor(context),
             ),
           ),
           const SizedBox(height: 6),
           TextFormField(
             controller: _remarksController,
-            decoration: InputDecoration(
+            style: AppTheme.dashFieldTextStyle(context),
+            decoration: AppTheme.dashInputDecoration(
+              context,
               hintText: 'Notes about this assignment',
-              filled: true,
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 14,
                 vertical: 12,
               ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
+              radius: 8,
             ),
             maxLines: 2,
           ),
@@ -1282,23 +1306,32 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w600,
-            color: AppTheme.textSecondary,
+            color: _mutedColor(context),
           ),
         ),
         const SizedBox(height: 6),
         DropdownButtonFormField<String>(
           initialValue: value,
+          dropdownColor: AppTheme.dashPanelOf(context),
+          style: AppTheme.dashFieldTextStyle(context),
           decoration: _inputDecoration('Select'),
-          hint: const Text('Select'),
+          hint: Text('Select', style: TextStyle(color: _mutedColor(context))),
           isExpanded: true,
           items: [
-            const DropdownMenuItem(value: null, child: Text('Select')),
+            DropdownMenuItem(
+              value: null,
+              child: Text(
+                'Select',
+                style: AppTheme.dashFieldTextStyle(context),
+              ),
+            ),
             ...items.map(
               (e) => DropdownMenuItem(
                 value: e['id'] as String?,
                 child: Text(
                   e['name'] as String? ?? '',
                   overflow: TextOverflow.ellipsis,
+                  style: AppTheme.dashFieldTextStyle(context),
                 ),
               ),
             ),
@@ -1324,7 +1357,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
+              color: _mutedColor(context),
             ),
           ),
           const SizedBox(height: 6),
@@ -1344,7 +1377,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                 suffixIcon: Icon(
                   Icons.calendar_today_rounded,
                   size: 20,
-                  color: AppTheme.textSecondary,
+                  color: _mutedColor(context),
                 ),
               ),
               child: Text(
@@ -1354,8 +1387,8 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                 style: TextStyle(
                   fontSize: 14,
                   color: value != null
-                      ? AppTheme.textPrimary
-                      : AppTheme.textSecondary,
+                      ? _headingColor(context)
+                      : _mutedColor(context),
                 ),
               ),
             ),
@@ -1365,26 +1398,10 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     );
   }
 
-  InputDecoration _inputDecoration(String hint) => InputDecoration(
+  InputDecoration _inputDecoration(String hint) => AppTheme.dashInputDecoration(
+    context,
     hintText: hint,
-    hintStyle: TextStyle(
-      color: AppTheme.textSecondary.withValues(alpha: 0.7),
-      fontSize: 14,
-    ),
-    filled: true,
-    fillColor: AppTheme.white,
+    radius: 8,
     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: AppTheme.lightGray),
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: AppTheme.lightGray),
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: const BorderSide(color: Color(0xFF4CAF50), width: 1.5),
-    ),
   );
 }

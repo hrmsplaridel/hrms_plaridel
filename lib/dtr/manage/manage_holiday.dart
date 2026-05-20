@@ -53,6 +53,24 @@ class _ManageHolidayState extends State<ManageHoliday> {
   bool _loading = false;
   _HolidayRecord? _selectedHoliday;
 
+  bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
+
+  Color _headingColor(BuildContext context) =>
+      AppTheme.dashTextPrimaryOf(context);
+
+  Color _mutedColor(BuildContext context) =>
+      AppTheme.dashTextSecondaryOf(context);
+
+  InputDecoration _inputDecoration(String hint) => AppTheme.dashInputDecoration(
+        context,
+        hintText: hint,
+        radius: 8,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
+      );
+
   @override
   void initState() {
     super.initState();
@@ -347,7 +365,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
         Text(
           'Holiday Management',
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: _headingColor(context),
             fontSize: 24,
             fontWeight: FontWeight.w800,
           ),
@@ -375,48 +393,30 @@ class _ManageHolidayState extends State<ManageHoliday> {
   }
 
   Widget _buildListPanel(List<_HolidayRecord> filtered) {
+    final dark = _isDark(context);
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           TextField(
             controller: _searchController,
             onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(
+            style: AppTheme.dashFieldTextStyle(context),
+            decoration: AppTheme.dashInputDecoration(
+              context,
               hintText: 'Search by name or date',
-              hintStyle: TextStyle(
-                color: AppTheme.textSecondary.withValues(alpha: 0.8),
-                fontSize: 14,
-              ),
               prefixIcon: Icon(
                 Icons.search_rounded,
                 size: 20,
-                color: AppTheme.textSecondary.withValues(alpha: 0.7),
+                color: _mutedColor(context).withValues(alpha: 0.7),
               ),
-              isDense: true,
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 14,
                 vertical: 12,
               ),
-              filled: true,
-              fillColor: AppTheme.lightGray.withValues(alpha: 0.5),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide.none,
-              ),
+              radius: 10,
             ),
           ),
           const SizedBox(height: 16),
@@ -433,7 +433,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
                 padding: const EdgeInsets.all(32),
                 child: Text(
                   'No holidays',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                  style: TextStyle(color: _mutedColor(context), fontSize: 14),
                 ),
               ),
             )
@@ -447,21 +447,21 @@ class _ManageHolidayState extends State<ManageHoliday> {
                 final isSelected = _selectedHoliday?.id == h.id;
                 return ListTile(
                   selected: isSelected,
-                  selectedTileColor: AppTheme.primaryNavy.withValues(
-                    alpha: 0.08,
-                  ),
+                  selectedTileColor: dark
+                      ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                      : AppTheme.primaryNavy.withValues(alpha: 0.08),
                   title: Text(
                     h.name,
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary,
+                      color: _headingColor(context),
                     ),
                   ),
                   subtitle: Text(
                     _holidayListSubtitle(h),
                     style: TextStyle(
                       fontSize: 12,
-                      color: AppTheme.textSecondary,
+                      color: _mutedColor(context),
                     ),
                   ),
                   onTap: () => _selectHoliday(h),
@@ -476,18 +476,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
   Widget _buildFormPanel() {
     return Container(
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -496,23 +485,14 @@ class _ManageHolidayState extends State<ManageHoliday> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
+              color: _mutedColor(context),
             ),
           ),
           const SizedBox(height: 6),
           TextFormField(
             controller: _nameController,
-            decoration: InputDecoration(
-              hintText: 'e.g. New Year\'s Day',
-              filled: true,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 12,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
+            style: AppTheme.dashFieldTextStyle(context),
+            decoration: _inputDecoration('e.g. New Year\'s Day'),
           ),
           const SizedBox(height: 16),
           Text(
@@ -520,7 +500,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
+              color: _mutedColor(context),
             ),
           ),
           if (_isRecurring)
@@ -528,7 +508,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
               padding: const EdgeInsets.only(bottom: 6),
               child: Text(
                 'Same month/day range repeats every year (e.g. Holy Week).',
-                style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                style: TextStyle(fontSize: 11, color: _mutedColor(context)),
               ),
             ),
           const SizedBox(height: 6),
@@ -543,7 +523,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
                       'Start',
                       style: TextStyle(
                         fontSize: 11,
-                        color: AppTheme.textSecondary,
+                        color: _mutedColor(context),
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -565,24 +545,15 @@ class _ManageHolidayState extends State<ManageHoliday> {
                         }
                       },
                       child: InputDecorator(
-                        decoration: InputDecoration(
-                          filled: true,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 12,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
+                        decoration: _inputDecoration(''),
                         child: Text(
                           _dateFrom != null
                               ? _dateToYyyyMmDd(_dateFrom!)
                               : 'Select',
                           style: TextStyle(
                             color: _dateFrom != null
-                                ? AppTheme.textPrimary
-                                : AppTheme.textSecondary,
+                                ? _headingColor(context)
+                                : _mutedColor(context),
                           ),
                         ),
                       ),
@@ -599,7 +570,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
                       'End',
                       style: TextStyle(
                         fontSize: 11,
-                        color: AppTheme.textSecondary,
+                        color: _mutedColor(context),
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -614,24 +585,15 @@ class _ManageHolidayState extends State<ManageHoliday> {
                         if (d != null) setState(() => _dateTo = d);
                       },
                       child: InputDecorator(
-                        decoration: InputDecoration(
-                          filled: true,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 12,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
+                        decoration: _inputDecoration(''),
                         child: Text(
                           _dateTo != null
                               ? _dateToYyyyMmDd(_dateTo!)
                               : 'Select',
                           style: TextStyle(
                             color: _dateTo != null
-                                ? AppTheme.textPrimary
-                                : AppTheme.textSecondary,
+                                ? _headingColor(context)
+                                : _mutedColor(context),
                           ),
                         ),
                       ),
@@ -649,7 +611,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
                 onChanged: (v) => setState(() => _isRecurring = v ?? false),
                 activeColor: AppTheme.primaryNavy,
               ),
-              const Text('Repeat every year'),
+              Text('Repeat every year', style: TextStyle(color: _headingColor(context))),
             ],
           ),
           const SizedBox(height: 16),
@@ -658,22 +620,15 @@ class _ManageHolidayState extends State<ManageHoliday> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
+              color: _mutedColor(context),
             ),
           ),
           const SizedBox(height: 6),
           DropdownButtonFormField<String>(
             initialValue: _holidayType,
-            decoration: InputDecoration(
-              filled: true,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 12,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
+            dropdownColor: AppTheme.dashPanelOf(context),
+            style: AppTheme.dashFieldTextStyle(context),
+            decoration: _inputDecoration(''),
             items: const [
               DropdownMenuItem(value: 'regular', child: Text('Regular')),
               DropdownMenuItem(value: 'special', child: Text('Special')),
@@ -697,22 +652,15 @@ class _ManageHolidayState extends State<ManageHoliday> {
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color: AppTheme.textSecondary,
+                color: _mutedColor(context),
               ),
             ),
             const SizedBox(height: 6),
             DropdownButtonFormField<String>(
               initialValue: _coverage,
-              decoration: InputDecoration(
-                filled: true,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 12,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
+              dropdownColor: AppTheme.dashPanelOf(context),
+              style: AppTheme.dashFieldTextStyle(context),
+              decoration: _inputDecoration(''),
               items: const [
                 DropdownMenuItem(value: 'whole_day', child: Text('Whole day')),
                 DropdownMenuItem(value: 'am_only', child: Text('AM only')),
@@ -727,23 +675,14 @@ class _ManageHolidayState extends State<ManageHoliday> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
+              color: _mutedColor(context),
             ),
           ),
           const SizedBox(height: 6),
           TextFormField(
             controller: _descriptionController,
-            decoration: InputDecoration(
-              hintText: 'Short description',
-              filled: true,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 12,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
+            style: AppTheme.dashFieldTextStyle(context),
+            decoration: _inputDecoration('Short description'),
             maxLines: 2,
           ),
           const SizedBox(height: 12),
@@ -754,7 +693,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
                 onChanged: (v) => setState(() => _isActive = v ?? true),
                 activeColor: AppTheme.primaryNavy,
               ),
-              const Text('Active'),
+              Text('Active', style: TextStyle(color: _headingColor(context))),
             ],
           ),
           const SizedBox(height: 24),

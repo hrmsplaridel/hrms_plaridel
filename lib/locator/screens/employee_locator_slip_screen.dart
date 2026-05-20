@@ -54,6 +54,14 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
   String? _selectedApprovalSlipId;
   StreamSubscription<AppRealtimeEvent>? _locatorRealtimeSub;
 
+  bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
+
+  Color _headingColor(BuildContext context) =>
+      AppTheme.dashTextPrimaryOf(context);
+
+  Color _mutedColor(BuildContext context) =>
+      AppTheme.dashTextSecondaryOf(context);
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -405,8 +413,8 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
 
     showDialog<void>(
       context: context,
-      builder: (_) => Dialog(
-        backgroundColor: Colors.white,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: AppTheme.dashPanelOf(dialogContext),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 880),
@@ -421,20 +429,23 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
                       child: Text(
                         'Locator Slip History',
                         style: TextStyle(
-                          color: AppTheme.textPrimary,
+                          color: _headingColor(dialogContext),
                           fontSize: 40 * 0.5,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
                     ),
                     IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: Icon(Icons.close, color: AppTheme.textSecondary),
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      icon: Icon(
+                        Icons.close,
+                        color: _mutedColor(dialogContext),
+                      ),
                     ),
                   ],
                 ),
               ),
-              Divider(height: 1, color: AppTheme.lightGray),
+              Divider(height: 1, color: AppTheme.dashHairlineOf(dialogContext)),
               Flexible(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
@@ -503,7 +514,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
                                     Text(
                                       step.title,
                                       style: TextStyle(
-                                        color: AppTheme.textPrimary,
+                                        color: _headingColor(dialogContext),
                                         fontSize: 18,
                                         fontWeight: FontWeight.w700,
                                       ),
@@ -512,7 +523,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
                                     Text(
                                       subtitle,
                                       style: TextStyle(
-                                        color: AppTheme.textSecondary,
+                                        color: _mutedColor(dialogContext),
                                         fontSize: 14,
                                         fontWeight: FontWeight.w600,
                                       ),
@@ -523,7 +534,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
                                         child: Text(
                                           step.remarks!.trim(),
                                           style: TextStyle(
-                                            color: AppTheme.textSecondary,
+                                            color: _mutedColor(dialogContext),
                                             fontSize: 13,
                                             height: 1.35,
                                           ),
@@ -540,14 +551,14 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
                   ),
                 ),
               ),
-              Divider(height: 1, color: AppTheme.lightGray),
+              Divider(height: 1, color: AppTheme.dashHairlineOf(dialogContext)),
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 12, 20, 16),
                 child: Row(
                   children: [
                     const Spacer(),
                     FilledButton(
-                      onPressed: () => Navigator.of(context).pop(),
+                      onPressed: () => Navigator.of(dialogContext).pop(),
                       style: FilledButton.styleFrom(
                         backgroundColor: accent.withValues(alpha: 0.15),
                         foregroundColor: accent,
@@ -684,9 +695,10 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
           width: tableWidth,
           child: Column(
             children: [
-              _approvalTableHeader(purposeWidth),
+              _approvalTableHeader(context, purposeWidth),
               for (var index = 0; index < items.length; index++)
                 _approvalTableRow(
+                  context,
                   items[index],
                   purposeWidth: purposeWidth,
                   isLast: index == items.length - 1,
@@ -703,7 +715,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
           borderRadius: BorderRadius.circular(12),
           child: DecoratedBox(
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+              border: Border.all(color: AppTheme.dashHairlineOf(context)),
               borderRadius: BorderRadius.circular(12),
             ),
             child: SingleChildScrollView(
@@ -732,32 +744,40 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
     );
   }
 
-  Widget _approvalTableHeader(double purposeWidth) {
+  Widget _approvalTableHeader(BuildContext context, double purposeWidth) {
     return Container(
       height: 44,
-      color: AppTheme.offWhite,
+      color: AppTheme.dashMutedSurfaceOf(context),
       child: Row(
         children: [
-          _approvalHeaderCell('Employee', width: 190),
-          _approvalHeaderCell('Date', width: 120),
-          _approvalHeaderCell('Purpose / Location', width: purposeWidth),
-          _approvalHeaderCell('Time', width: 120),
-          _approvalHeaderCell('Status', width: 150),
+          _approvalHeaderCell(context, 'Employee', width: 190),
+          _approvalHeaderCell(context, 'Date', width: 120),
+          _approvalHeaderCell(
+            context,
+            'Purpose / Location',
+            width: purposeWidth,
+          ),
+          _approvalHeaderCell(context, 'Time', width: 120),
+          _approvalHeaderCell(context, 'Status', width: 150),
         ],
       ),
     );
   }
 
   Widget _approvalTableRow(
+    BuildContext context,
     _LocatorSlipDraft item, {
     required double purposeWidth,
     required bool isLast,
     required bool isSelected,
     required VoidCallback onTap,
   }) {
-    final borderColor = Colors.black.withValues(alpha: 0.06);
+    final dark = _isDark(context);
+    final borderColor = AppTheme.dashHairlineOf(context);
     final rowColor = isSelected
-        ? AppTheme.primaryNavy.withValues(alpha: 0.08)
+        ? (dark
+              ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+              : AppTheme.primaryNavy.withValues(alpha: 0.08))
         : Colors.transparent;
     final leftBorderColor = isSelected
         ? AppTheme.primaryNavy
@@ -780,11 +800,15 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
             children: [
               _approvalBodyCell(
                 width: 186,
-                child: _approvalCellText(item.employeeName, strong: true),
+                child: _approvalCellText(
+                  context,
+                  item.employeeName,
+                  strong: true,
+                ),
               ),
               _approvalBodyCell(
                 width: 120,
-                child: _approvalCellText(_formatDate(item.date)),
+                child: _approvalCellText(context, _formatDate(item.date)),
               ),
               _approvalBodyCell(
                 width: purposeWidth,
@@ -792,12 +816,13 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _approvalCellText(item.office, strong: true),
+                    _approvalCellText(context, item.office, strong: true),
                     if (item.remarks.trim().isNotEmpty) ...[
                       const SizedBox(height: 3),
                       _approvalCellText(
+                        context,
                         item.remarks,
-                        color: AppTheme.textSecondary,
+                        color: _mutedColor(context),
                         fontSize: 12,
                       ),
                     ],
@@ -806,7 +831,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
               ),
               _approvalBodyCell(
                 width: 120,
-                child: _approvalCellText(_approvalSegmentsText(item)),
+                child: _approvalCellText(context, _approvalSegmentsText(item)),
               ),
               _approvalBodyCell(width: 150, child: _approvalStatusPill(item)),
             ],
@@ -816,7 +841,11 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
     );
   }
 
-  Widget _approvalHeaderCell(String label, {required double width}) {
+  Widget _approvalHeaderCell(
+    BuildContext context,
+    String label, {
+    required double width,
+  }) {
     return SizedBox(
       width: width,
       child: Padding(
@@ -828,7 +857,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: AppTheme.textSecondary,
+              color: _mutedColor(context),
               fontSize: 12,
               fontWeight: FontWeight.w700,
             ),
@@ -849,6 +878,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
   }
 
   Widget _approvalCellText(
+    BuildContext context,
     String text, {
     bool strong = false,
     Color? color,
@@ -859,7 +889,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       style: TextStyle(
-        color: color ?? AppTheme.textPrimary,
+        color: color ?? _headingColor(context),
         fontSize: fontSize,
         fontWeight: strong ? FontWeight.w700 : FontWeight.w500,
       ),
@@ -1416,7 +1446,7 @@ class _LocatorHeader extends StatelessWidget {
                 Text(
                   'Locator Slip',
                   style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.dashTextPrimaryOf(context),
                     fontSize: 24,
                     fontWeight: FontWeight.w700,
                   ),
@@ -1425,7 +1455,7 @@ class _LocatorHeader extends StatelessWidget {
                 Text(
                   'File your movement log when you will be away from your workstation during office hours, $employeeName.',
                   style: TextStyle(
-                    color: AppTheme.textSecondary,
+                    color: AppTheme.dashTextSecondaryOf(context),
                     fontSize: 14,
                     height: 1.45,
                   ),
@@ -1475,16 +1505,16 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   Widget build(BuildContext context) {
     const accent = Color(0xFFF57C00);
     return AlertDialog(
-      backgroundColor: const Color(0xFFFFFDF7),
+      backgroundColor: AppTheme.dashPanelOf(context),
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
       contentPadding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
       actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-      title: const Text(
+      title: Text(
         'File Locator Slip',
         style: TextStyle(
-          color: Color(0xFF111111),
+          color: AppTheme.dashTextPrimaryOf(context),
           fontSize: 17,
           fontWeight: FontWeight.w700,
         ),
@@ -1689,28 +1719,25 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
       padding: const EdgeInsets.only(bottom: 6),
       child: Text(
         text,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w600,
-          color: Color(0xFF1F1F1F),
+          color: AppTheme.dashTextSecondaryOf(context),
         ),
       ),
     );
   }
 
   InputDecoration _inputDecoration() {
-    return InputDecoration(
+    return AppTheme.dashInputDecoration(
+      context,
+      radius: 10,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+    ).copyWith(
       isDense: true,
-      hintStyle: const TextStyle(color: Color(0xFFA7A7A7), fontSize: 14),
-      filled: true,
-      fillColor: Colors.white,
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: const BorderSide(color: Color(0xFFCFCFCF), width: 1.2),
-      ),
       disabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
-        borderSide: const BorderSide(color: Color(0xFFCFCFCF), width: 1.2),
+        borderSide: BorderSide(color: AppTheme.dashInputBorderOf(context)),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
@@ -1960,12 +1987,12 @@ class _LocatorSlipCard extends StatelessWidget {
           width: double.infinity,
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: AppTheme.white,
+            color: AppTheme.dashPanelOf(context),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: isSelected
                   ? AppTheme.primaryNavy.withValues(alpha: 0.25)
-                  : Colors.black.withValues(alpha: 0.08),
+                  : AppTheme.dashHairlineOf(context),
             ),
           ),
           child: Column(
@@ -1983,7 +2010,7 @@ class _LocatorSlipCard extends StatelessWidget {
                     child: Text(
                       _formatDate(item.date),
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -1994,17 +2021,17 @@ class _LocatorSlipCard extends StatelessWidget {
               const SizedBox(height: 10),
               Text(
                 'Office: ${item.office}',
-                style: TextStyle(color: AppTheme.textSecondary),
+                style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
               ),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
                 children: [
-                  if (item.amIn) _timeChip('AM IN'),
-                  if (item.amOut) _timeChip('AM OUT'),
-                  if (item.pmIn) _timeChip('PM IN'),
-                  if (item.pmOut) _timeChip('PM OUT'),
+                  if (item.amIn) _timeChip(context, 'AM IN'),
+                  if (item.amOut) _timeChip(context, 'AM OUT'),
+                  if (item.pmIn) _timeChip(context, 'PM IN'),
+                  if (item.pmOut) _timeChip(context, 'PM OUT'),
                 ],
               ),
               const SizedBox(height: 10),
@@ -2012,7 +2039,10 @@ class _LocatorSlipCard extends StatelessWidget {
                 item.remarks,
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: AppTheme.textSecondary, height: 1.4),
+                style: TextStyle(
+                  color: AppTheme.dashTextSecondaryOf(context),
+                  height: 1.4,
+                ),
               ),
             ],
           ),
@@ -2041,18 +2071,18 @@ class _LocatorSlipCard extends StatelessWidget {
     );
   }
 
-  Widget _timeChip(String label) {
+  Widget _timeChip(BuildContext context, String label) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: AppTheme.offWhite,
+        color: AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Text(
         label,
         style: TextStyle(
-          color: AppTheme.textPrimary,
+          color: AppTheme.dashTextPrimaryOf(context),
           fontSize: 11,
           fontWeight: FontWeight.w600,
         ),
@@ -2074,12 +2104,14 @@ class _LocatorSectionTabs extends StatelessWidget {
       runSpacing: 8,
       children: [
         _tab(
+          context,
           label: 'My Requests',
           icon: Icons.event_note_rounded,
           selected: current == _LocatorSection.requests,
           onTap: () => onChanged(_LocatorSection.requests),
         ),
         _tab(
+          context,
           label: 'Approvals / History',
           icon: Icons.fact_check_rounded,
           selected: current == _LocatorSection.approvals,
@@ -2089,16 +2121,22 @@ class _LocatorSectionTabs extends StatelessWidget {
     );
   }
 
-  Widget _tab({
+  Widget _tab(
+    BuildContext context, {
     required String label,
     required IconData icon,
     required bool selected,
     required VoidCallback onTap,
   }) {
+    final dark = AppTheme.dashIsDark(context);
     return Material(
       color: selected
-          ? AppTheme.primaryNavy.withValues(alpha: 0.12)
-          : AppTheme.lightGray.withValues(alpha: 0.6),
+          ? (dark
+                ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                : AppTheme.primaryNavy.withValues(alpha: 0.12))
+          : (dark
+                ? AppTheme.dashMutedSurfaceOf(context)
+                : AppTheme.lightGray.withValues(alpha: 0.6)),
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
@@ -2111,13 +2149,17 @@ class _LocatorSectionTabs extends StatelessWidget {
               Icon(
                 icon,
                 size: 20,
-                color: selected ? AppTheme.primaryNavy : AppTheme.textSecondary,
+                color: selected
+                    ? AppTheme.primaryNavy
+                    : AppTheme.dashTextSecondaryOf(context),
               ),
               const SizedBox(width: 8),
               Text(
                 label,
                 style: TextStyle(
-                  color: selected ? AppTheme.primaryNavy : AppTheme.textPrimary,
+                  color: selected
+                      ? AppTheme.primaryNavy
+                      : AppTheme.dashTextPrimaryOf(context),
                   fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                 ),
               ),
@@ -2139,18 +2181,7 @@ class _InfoCard extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 16),
       child: child,
     );
   }
@@ -2193,7 +2224,7 @@ class _SectionCard extends StatelessWidget {
                     Text(
                       title,
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         fontWeight: FontWeight.w700,
                         fontSize: 18,
                       ),
@@ -2202,7 +2233,7 @@ class _SectionCard extends StatelessWidget {
                     Text(
                       subtitle,
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 13,
                       ),
                     ),
@@ -2300,14 +2331,17 @@ class _EmptyState extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 28),
       decoration: BoxDecoration(
-        color: AppTheme.offWhite,
+        color: AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Text(
         message,
         textAlign: TextAlign.center,
-        style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+        style: TextStyle(
+          color: AppTheme.dashTextSecondaryOf(context),
+          fontSize: 14,
+        ),
       ),
     );
   }

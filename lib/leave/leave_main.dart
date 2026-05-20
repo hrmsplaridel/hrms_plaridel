@@ -95,7 +95,7 @@ class _LeaveMainState extends State<LeaveMain> {
         Text(
           'Leave Management',
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: AppTheme.dashTextPrimaryOf(context),
             fontSize: 22,
             fontWeight: FontWeight.w700,
           ),
@@ -105,7 +105,10 @@ class _LeaveMainState extends State<LeaveMain> {
           (widget.isAdmin || widget.isDepartmentHead)
               ? 'Review employee leave requests, balances, and approvals.'
               : 'View leave balances, file requests, and track approvals.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          style: TextStyle(
+            color: AppTheme.dashTextSecondaryOf(context),
+            fontSize: 14,
+          ),
         ),
         if (!useSidebarNav) ...[const SizedBox(height: 24), _buildSectionNav()],
         const SizedBox(height: 24),
@@ -128,10 +131,15 @@ class _LeaveMainState extends State<LeaveMain> {
       runSpacing: 8,
       children: sections.map((section) {
         final isSelected = _currentSection == section;
+        final dark = AppTheme.dashIsDark(context);
         return Material(
           color: isSelected
-              ? AppTheme.primaryNavy.withOpacity(0.12)
-              : AppTheme.lightGray.withOpacity(0.6),
+              ? (dark
+                    ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                    : AppTheme.primaryNavy.withValues(alpha: 0.12))
+              : (dark
+                    ? AppTheme.dashMutedSurfaceOf(context)
+                    : AppTheme.lightGray.withValues(alpha: 0.6)),
           borderRadius: BorderRadius.circular(10),
           child: InkWell(
             onTap: () => setState(() => _currentSection = section),
@@ -146,7 +154,7 @@ class _LeaveMainState extends State<LeaveMain> {
                     size: 20,
                     color: isSelected
                         ? AppTheme.primaryNavy
-                        : AppTheme.textSecondary,
+                        : AppTheme.dashTextSecondaryOf(context),
                   ),
                   const SizedBox(width: 8),
                   Text(
@@ -154,7 +162,7 @@ class _LeaveMainState extends State<LeaveMain> {
                     style: TextStyle(
                       color: isSelected
                           ? AppTheme.primaryNavy
-                          : AppTheme.textPrimary,
+                          : AppTheme.dashTextPrimaryOf(context),
                       fontWeight: isSelected
                           ? FontWeight.w600
                           : FontWeight.w500,
@@ -262,25 +270,14 @@ class _LeavePlaceholderCard extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 16),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: AppTheme.primaryNavy.withOpacity(0.08),
+              color: AppTheme.primaryNavy.withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(icon, color: AppTheme.primaryNavy, size: 24),
@@ -293,7 +290,7 @@ class _LeavePlaceholderCard extends StatelessWidget {
                 Text(
                   title,
                   style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.dashTextPrimaryOf(context),
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
                   ),
@@ -302,7 +299,7 @@ class _LeavePlaceholderCard extends StatelessWidget {
                 Text(
                   subtitle,
                   style: TextStyle(
-                    color: AppTheme.textSecondary,
+                    color: AppTheme.dashTextSecondaryOf(context),
                     fontSize: 14,
                     height: 1.45,
                   ),

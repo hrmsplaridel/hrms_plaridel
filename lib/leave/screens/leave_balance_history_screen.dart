@@ -10,6 +10,7 @@ import '../../realtime/app_realtime_provider.dart';
 import '../leave_provider.dart';
 import '../models/leave_balance_ledger.dart';
 import '../models/leave_type.dart';
+import 'admin_leave_screen_utils.dart';
 
 /// Balance movement audit from GET /api/leave/ledger.
 ///
@@ -237,11 +238,11 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
 
   Widget _buildEmployeeScaffold(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.offWhite,
+      backgroundColor: AppTheme.dashCanvasOf(context),
       appBar: AppBar(
         title: const Text('Balance History'),
-        backgroundColor: AppTheme.white,
-        foregroundColor: AppTheme.textPrimary,
+        backgroundColor: AppTheme.dashPanelOf(context),
+        foregroundColor: AppTheme.dashTextPrimaryOf(context),
         elevation: 0,
         actions: [
           IconButton(
@@ -277,7 +278,10 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
           child: Text(
             _error ?? 'No data.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 15),
+            style: TextStyle(
+              color: AppTheme.dashTextSecondaryOf(context),
+              fontSize: 15,
+            ),
           ),
         ),
       );
@@ -329,11 +333,11 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
 
   Widget _buildAdminScaffold(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.offWhite,
+      backgroundColor: AppTheme.dashCanvasOf(context),
       appBar: AppBar(
         title: const Text('Leave Ledger'),
-        backgroundColor: AppTheme.white,
-        foregroundColor: AppTheme.textPrimary,
+        backgroundColor: AppTheme.dashPanelOf(context),
+        foregroundColor: AppTheme.dashTextPrimaryOf(context),
         elevation: 0,
         actions: [
           IconButton(
@@ -364,18 +368,28 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
   }
 
   Widget _errorBanner() {
+    final dark = AppTheme.dashIsDark(context);
     return Material(
-      color: Colors.red.shade50,
+      color: dark
+          ? Colors.red.shade900.withValues(alpha: 0.35)
+          : Colors.red.shade50,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(
           children: [
-            Icon(Icons.error_outline, color: Colors.red.shade800, size: 20),
+            Icon(
+              Icons.error_outline,
+              color: dark ? Colors.red.shade300 : Colors.red.shade800,
+              size: 20,
+            ),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
                 _error!,
-                style: TextStyle(color: Colors.red.shade900, fontSize: 14),
+                style: TextStyle(
+                  color: dark ? Colors.red.shade100 : Colors.red.shade900,
+                  fontSize: 14,
+                ),
               ),
             ),
           ],
@@ -393,7 +407,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
           Text(
             'Manage employee leave balances and transaction history.',
             style: TextStyle(
-              color: AppTheme.textSecondary,
+              color: AppTheme.dashTextSecondaryOf(context),
               fontSize: 14,
               height: 1.45,
             ),
@@ -408,7 +422,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
             'use "Load more" to include additional history). They are activity totals for '
             'those entries only—not the employee\'s current leave balances.',
             style: TextStyle(
-              color: AppTheme.textSecondary,
+              color: AppTheme.dashTextSecondaryOf(context),
               fontSize: 11,
               height: 1.35,
             ),
@@ -442,7 +456,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
       return Center(
         child: Text(
           _error ?? 'No data.',
-          style: TextStyle(color: AppTheme.textSecondary),
+          style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
         ),
       );
     }
@@ -493,9 +507,10 @@ class _EmployeeSummaryBand extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
     return Container(
       width: double.infinity,
-      color: AppTheme.sectionAlt,
+      color: AppTheme.sectionAltOf(context),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -505,22 +520,30 @@ class _EmployeeSummaryBand extends StatelessWidget {
               amountLabel: _fmtDays(stats.totalEarned),
               caption: 'Earned',
               icon: Icons.arrow_upward_rounded,
-              circleColor: const Color(0xFFE8F5E9),
-              iconColor: const Color(0xFF2E7D32),
+              circleColor: dark
+                  ? Colors.green.shade900.withValues(alpha: 0.4)
+                  : const Color(0xFFE8F5E9),
+              iconColor: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
             ),
             _EmployeeSummaryChip(
               amountLabel: _fmtDays(stats.totalUsed),
               caption: 'Used',
               icon: Icons.arrow_downward_rounded,
-              circleColor: const Color(0xFFFFEBEE),
-              iconColor: const Color(0xFFC62828),
+              circleColor: dark
+                  ? Colors.red.shade900.withValues(alpha: 0.4)
+                  : const Color(0xFFFFEBEE),
+              iconColor: dark ? Colors.red.shade300 : const Color(0xFFC62828),
             ),
             _EmployeeSummaryChip(
               amountLabel: _fmtDays(stats.totalPending),
               caption: 'Pending',
               icon: Icons.schedule_rounded,
-              circleColor: const Color(0xFFECEFF1),
-              iconColor: const Color(0xFF607D8B),
+              circleColor: dark
+                  ? AppTheme.dashMutedSurfaceOf(context)
+                  : const Color(0xFFECEFF1),
+              iconColor: dark
+                  ? Colors.blueGrey.shade300
+                  : const Color(0xFF607D8B),
             ),
           ];
           if (narrow) {
@@ -563,24 +586,11 @@ class _EmployeeSummaryChip extends StatelessWidget {
   final Color circleColor;
   final Color iconColor;
 
-  static const Color _border = Color(0xFFE0E0E0);
-
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _border),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 6,
-            offset: const Offset(0, 1),
-          ),
-        ],
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 10),
       child: Row(
         children: [
           Container(
@@ -600,11 +610,11 @@ class _EmployeeSummaryChip extends StatelessWidget {
               children: [
                 Text(
                   amountLabel,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 15,
                     height: 1.15,
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.dashTextPrimaryOf(context),
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -614,7 +624,7 @@ class _EmployeeSummaryChip extends StatelessWidget {
                   caption,
                   style: TextStyle(
                     fontSize: 12,
-                    color: AppTheme.textSecondary,
+                    color: AppTheme.dashTextSecondaryOf(context),
                     height: 1.2,
                   ),
                 ),
@@ -641,14 +651,16 @@ class _EmployeeEmptyState extends StatelessWidget {
             Icon(
               Icons.inbox_outlined,
               size: 56,
-              color: AppTheme.textSecondary.withValues(alpha: 0.45),
+              color: AppTheme.dashTextSecondaryOf(
+                context,
+              ).withValues(alpha: 0.45),
             ),
             const SizedBox(height: 16),
             Text(
               'No leave activity yet.',
               textAlign: TextAlign.center,
               style: TextStyle(
-                color: AppTheme.textPrimary,
+                color: AppTheme.dashTextPrimaryOf(context),
                 fontSize: 17,
                 fontWeight: FontWeight.w600,
               ),
@@ -658,7 +670,7 @@ class _EmployeeEmptyState extends StatelessWidget {
               'Your leave accruals and requests will appear here once available.',
               textAlign: TextAlign.center,
               style: TextStyle(
-                color: AppTheme.textSecondary,
+                color: AppTheme.dashTextSecondaryOf(context),
                 fontSize: 14,
                 height: 1.45,
               ),
@@ -708,22 +720,27 @@ class _EmployeeLedgerRow extends StatelessWidget {
     return '$sign$n Days';
   }
 
-  ({Color bg, Color fg, IconData icon}) _circleStyle() {
+  ({Color bg, Color fg, IconData icon}) _circleStyle(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
     final a = entry.action.toLowerCase();
     final b = entry.affectedBucket.toLowerCase();
     final d = entry.daysChanged;
 
     if (a == 'monthly_accrual' || a == 'applied' || (d > 0 && b == 'earned')) {
       return (
-        bg: const Color(0xFFE8F5E9),
-        fg: const Color(0xFF2E7D32),
+        bg: dark
+            ? Colors.green.shade900.withValues(alpha: 0.4)
+            : const Color(0xFFE8F5E9),
+        fg: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
         icon: Icons.arrow_upward_rounded,
       );
     }
     if (a == 'admin_adjustment' || a.contains('adjust')) {
       return (
-        bg: const Color(0xFFECEFF1),
-        fg: const Color(0xFF546E7A),
+        bg: dark
+            ? AppTheme.dashMutedSurfaceOf(context)
+            : const Color(0xFFECEFF1),
+        fg: dark ? Colors.blueGrey.shade300 : const Color(0xFF546E7A),
         icon: Icons.tune_rounded,
       );
     }
@@ -731,28 +748,34 @@ class _EmployeeLedgerRow extends StatelessWidget {
         a.contains('deduction') ||
         (d < 0 && b == 'used')) {
       return (
-        bg: const Color(0xFFFFEBEE),
-        fg: const Color(0xFFC62828),
+        bg: dark
+            ? Colors.red.shade900.withValues(alpha: 0.4)
+            : const Color(0xFFFFEBEE),
+        fg: dark ? Colors.red.shade300 : const Color(0xFFC62828),
         icon: Icons.arrow_downward_rounded,
       );
     }
     if (d < 0) {
       return (
-        bg: const Color(0xFFFFEBEE),
-        fg: const Color(0xFFC62828),
+        bg: dark
+            ? Colors.red.shade900.withValues(alpha: 0.4)
+            : const Color(0xFFFFEBEE),
+        fg: dark ? Colors.red.shade300 : const Color(0xFFC62828),
         icon: Icons.arrow_downward_rounded,
       );
     }
     if (d > 0) {
       return (
-        bg: const Color(0xFFE8F5E9),
-        fg: const Color(0xFF2E7D32),
+        bg: dark
+            ? Colors.green.shade900.withValues(alpha: 0.4)
+            : const Color(0xFFE8F5E9),
+        fg: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
         icon: Icons.arrow_upward_rounded,
       );
     }
     return (
-      bg: const Color(0xFFECEFF1),
-      fg: const Color(0xFF607D8B),
+      bg: dark ? AppTheme.dashMutedSurfaceOf(context) : const Color(0xFFECEFF1),
+      fg: dark ? Colors.blueGrey.shade300 : const Color(0xFF607D8B),
       icon: Icons.schedule_rounded,
     );
   }
@@ -793,10 +816,11 @@ class _EmployeeLedgerRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final st = _circleStyle();
+    final dark = AppTheme.dashIsDark(context);
+    final st = _circleStyle(context);
     final amountColor = entry.daysChanged >= 0
-        ? const Color(0xFF2E7D32)
-        : const Color(0xFFC62828);
+        ? (dark ? Colors.green.shade300 : const Color(0xFF2E7D32))
+        : (dark ? Colors.red.shade300 : const Color(0xFFC62828));
     final lt = _leaveTypeLabel(entry.leaveType);
     final metaBrief =
         entry.metadataJson != null && entry.metadataJson!.isNotEmpty
@@ -808,18 +832,7 @@ class _EmployeeLedgerRow extends StatelessWidget {
 
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE0E0E0)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 6,
-            offset: const Offset(0, 1),
-          ),
-        ],
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -836,17 +849,20 @@ class _EmployeeLedgerRow extends StatelessWidget {
               children: [
                 Text(
                   _actionTitle(entry.action),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 15,
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.dashTextPrimaryOf(context),
                     height: 1.25,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   _shortDate(entry.createdAt),
-                  style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.dashTextSecondaryOf(context),
+                  ),
                 ),
                 if (lt.isNotEmpty) ...[
                   const SizedBox(height: 4),
@@ -854,7 +870,7 @@ class _EmployeeLedgerRow extends StatelessWidget {
                     lt,
                     style: TextStyle(
                       fontSize: 13,
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                     ),
                   ),
                 ],
@@ -863,9 +879,9 @@ class _EmployeeLedgerRow extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     entry.remarks!,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
-                      color: AppTheme.textPrimary,
+                      color: AppTheme.dashTextPrimaryOf(context),
                       height: 1.35,
                     ),
                   ),
@@ -876,7 +892,9 @@ class _EmployeeLedgerRow extends StatelessWidget {
                     entry.affectedBucket,
                     style: TextStyle(
                       fontSize: 12,
-                      color: AppTheme.textSecondary.withValues(alpha: 0.9),
+                      color: AppTheme.dashTextSecondaryOf(
+                        context,
+                      ).withValues(alpha: 0.9),
                     ),
                   ),
                 ],
@@ -888,7 +906,7 @@ class _EmployeeLedgerRow extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 11,
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                       height: 1.25,
                     ),
                   ),
@@ -965,6 +983,7 @@ class _AdminSummaryChips extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
     return LayoutBuilder(
       builder: (context, constraints) {
         final narrow = constraints.maxWidth < 520;
@@ -973,25 +992,31 @@ class _AdminSummaryChips extends StatelessWidget {
             label: 'Total Earned',
             value: _fmt(stats.totalEarned),
             icon: Icons.add_rounded,
-            iconBoxColor: const Color(0xFFE8F5E9),
-            iconColor: const Color(0xFF2E7D32),
-            valueColor: const Color(0xFF2E7D32),
+            iconBoxColor: dark
+                ? Colors.green.shade900.withValues(alpha: 0.4)
+                : const Color(0xFFE8F5E9),
+            iconColor: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
+            valueColor: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
           ),
           _SummaryChip(
             label: 'Total Used',
             value: _fmt(stats.totalUsed),
             icon: Icons.remove_rounded,
-            iconBoxColor: const Color(0xFFFFEBEE),
-            iconColor: const Color(0xFFC62828),
-            valueColor: AppTheme.textPrimary,
+            iconBoxColor: dark
+                ? Colors.red.shade900.withValues(alpha: 0.4)
+                : const Color(0xFFFFEBEE),
+            iconColor: dark ? Colors.red.shade300 : const Color(0xFFC62828),
+            valueColor: AppTheme.dashTextPrimaryOf(context),
           ),
           _SummaryChip(
             label: 'Total Pending',
             value: _fmt(stats.totalPending),
             icon: Icons.schedule_rounded,
-            iconBoxColor: const Color(0xFFFFF8E1),
-            iconColor: const Color(0xFFF9A825),
-            valueColor: const Color(0xFFF57F17),
+            iconBoxColor: dark
+                ? Colors.amber.shade900.withValues(alpha: 0.35)
+                : const Color(0xFFFFF8E1),
+            iconColor: dark ? Colors.amber.shade300 : const Color(0xFFF9A825),
+            valueColor: dark ? Colors.amber.shade200 : const Color(0xFFF57F17),
           ),
         ];
         if (narrow) {
@@ -1028,24 +1053,11 @@ class _SummaryChip extends StatelessWidget {
   final Color iconColor;
   final Color valueColor;
 
-  static const Color _cardBorder = Color(0xFFE0E0E0);
-
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _cardBorder),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 6,
-            offset: const Offset(0, 1),
-          ),
-        ],
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -1065,7 +1077,7 @@ class _SummaryChip extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 14,
                   height: 1.25,
-                  color: AppTheme.textPrimary,
+                  color: AppTheme.dashTextPrimaryOf(context),
                 ),
                 children: [
                   TextSpan(text: '$label: '),
@@ -1122,28 +1134,17 @@ class _AdminFilterCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 12,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final row = constraints.maxWidth >= 720;
-          final employeeField = _employeeDropdown();
-          final leaveField = _leaveTypeDropdown();
+          final employeeField = _employeeDropdown(context);
+          final leaveField = _leaveTypeDropdown(context);
           final applyBtn = FilledButton(
             onPressed: applyEnabled ? onApply : null,
             style: FilledButton.styleFrom(
               backgroundColor: AppTheme.primaryNavy,
-              foregroundColor: AppTheme.white,
+              foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
@@ -1158,7 +1159,7 @@ class _AdminFilterCard extends StatelessWidget {
               Text(
                 'Filter',
                 style: TextStyle(
-                  color: AppTheme.textPrimary,
+                  color: AppTheme.dashTextPrimaryOf(context),
                   fontWeight: FontWeight.w700,
                   fontSize: 15,
                 ),
@@ -1193,44 +1194,52 @@ class _AdminFilterCard extends StatelessWidget {
     );
   }
 
-  Widget _employeeDropdown() {
+  Widget _employeeDropdown(BuildContext context) {
     if (employeesLoading) {
-      return const InputDecorator(
-        decoration: InputDecoration(
-          labelText: 'Employee',
-          border: OutlineInputBorder(),
-          isDense: true,
-        ),
+      return InputDecorator(
+        decoration: adminLeaveInputDecoration(
+          context,
+          'Employee',
+        ).copyWith(isDense: true),
         child: Row(
           children: [
-            SizedBox(
+            const SizedBox(
               width: 18,
               height: 18,
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
-            SizedBox(width: 10),
-            Text('Loading employees…'),
+            const SizedBox(width: 10),
+            Text(
+              'Loading employees…',
+              style: AppTheme.dashFieldTextStyle(context),
+            ),
           ],
         ),
       );
     }
     if (employeesError != null) {
+      final dark = AppTheme.dashIsDark(context);
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             'Employees: $employeesError',
-            style: TextStyle(color: Colors.red.shade800, fontSize: 12),
+            style: TextStyle(
+              color: dark ? Colors.red.shade300 : Colors.red.shade800,
+              fontSize: 12,
+            ),
           ),
           const SizedBox(height: 6),
           DropdownButtonFormField<String?>(
             value: draftEmployeeId,
-            decoration: const InputDecoration(
-              labelText: 'Employee',
-              border: OutlineInputBorder(),
-              isDense: true,
+            decoration: adminLeaveInputDecoration(
+              context,
+              'Employee',
+            ).copyWith(isDense: true),
+            hint: Text(
+              'Select employee…',
+              style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
             ),
-            hint: const Text('Select employee…'),
             items: const [],
             onChanged: null,
           ),
@@ -1240,22 +1249,33 @@ class _AdminFilterCard extends StatelessWidget {
 
     return DropdownButtonFormField<String?>(
       value: _safeEmployeeValue(draftEmployeeId, employees),
-      decoration: const InputDecoration(
-        labelText: 'Employee',
-        border: OutlineInputBorder(),
-        isDense: true,
+      dropdownColor: AppTheme.dashPanelOf(context),
+      style: AppTheme.dashFieldTextStyle(context),
+      decoration: adminLeaveInputDecoration(
+        context,
+        'Employee',
+      ).copyWith(isDense: true),
+      hint: Text(
+        'Select employee…',
+        style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
       ),
-      hint: const Text('Select employee…'),
       isExpanded: true,
       items: [
-        const DropdownMenuItem<String?>(
+        DropdownMenuItem<String?>(
           value: null,
-          child: Text('All employees'),
+          child: Text(
+            'All employees',
+            style: AppTheme.dashFieldTextStyle(context),
+          ),
         ),
         ...employees.map(
           (e) => DropdownMenuItem<String?>(
             value: e.id,
-            child: Text(e.name, overflow: TextOverflow.ellipsis),
+            child: Text(
+              e.name,
+              overflow: TextOverflow.ellipsis,
+              style: AppTheme.dashFieldTextStyle(context),
+            ),
           ),
         ),
       ],
@@ -1270,25 +1290,36 @@ class _AdminFilterCard extends StatelessWidget {
     return ok ? id : null;
   }
 
-  Widget _leaveTypeDropdown() {
+  Widget _leaveTypeDropdown(BuildContext context) {
     return DropdownButtonFormField<String?>(
       value: draftLeaveType,
-      decoration: const InputDecoration(
-        labelText: 'Leave type',
-        border: OutlineInputBorder(),
-        isDense: true,
+      dropdownColor: AppTheme.dashPanelOf(context),
+      style: AppTheme.dashFieldTextStyle(context),
+      decoration: adminLeaveInputDecoration(
+        context,
+        'Leave type',
+      ).copyWith(isDense: true),
+      hint: Text(
+        'Select leave type…',
+        style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
       ),
-      hint: const Text('Select leave type…'),
       isExpanded: true,
       items: [
-        const DropdownMenuItem<String?>(
+        DropdownMenuItem<String?>(
           value: null,
-          child: Text('All leave types'),
+          child: Text(
+            'All leave types',
+            style: AppTheme.dashFieldTextStyle(context),
+          ),
         ),
         ...LeaveType.values.map(
           (t) => DropdownMenuItem<String?>(
             value: t.value,
-            child: Text(t.displayName, overflow: TextOverflow.ellipsis),
+            child: Text(
+              t.displayName,
+              overflow: TextOverflow.ellipsis,
+              style: AppTheme.dashFieldTextStyle(context),
+            ),
           ),
         ),
       ],
@@ -1311,14 +1342,16 @@ class _AdminEmptyState extends StatelessWidget {
             Icon(
               Icons.inbox_outlined,
               size: 56,
-              color: AppTheme.textSecondary.withValues(alpha: 0.45),
+              color: AppTheme.dashTextSecondaryOf(
+                context,
+              ).withValues(alpha: 0.45),
             ),
             const SizedBox(height: 16),
             Text(
               'No leave activity yet.',
               textAlign: TextAlign.center,
               style: TextStyle(
-                color: AppTheme.textPrimary,
+                color: AppTheme.dashTextPrimaryOf(context),
                 fontSize: 17,
                 fontWeight: FontWeight.w600,
               ),
@@ -1328,7 +1361,7 @@ class _AdminEmptyState extends StatelessWidget {
               'Leave accruals, approvals, and adjustments will appear here once available.',
               textAlign: TextAlign.center,
               style: TextStyle(
-                color: AppTheme.textSecondary,
+                color: AppTheme.dashTextSecondaryOf(context),
                 fontSize: 14,
                 height: 1.4,
               ),
@@ -1368,7 +1401,8 @@ class _AdminLedgerTile extends StatelessWidget {
     return '$sign$t';
   }
 
-  ({Color bg, Color fg, IconData icon}) _styleForEntry() {
+  ({Color bg, Color fg, IconData icon}) _styleForEntry(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
     final a = entry.action.toLowerCase();
     final d = entry.daysChanged;
 
@@ -1376,15 +1410,19 @@ class _AdminLedgerTile extends StatelessWidget {
         a == 'applied' ||
         (d > 0 && entry.affectedBucket.toLowerCase() == 'earned')) {
       return (
-        bg: const Color(0xFFE8F5E9),
-        fg: const Color(0xFF2E7D32),
+        bg: dark
+            ? Colors.green.shade900.withValues(alpha: 0.4)
+            : const Color(0xFFE8F5E9),
+        fg: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
         icon: Icons.add_rounded,
       );
     }
     if (a == 'admin_adjustment' || a.contains('adjust')) {
       return (
-        bg: const Color(0xFFE3F2FD),
-        fg: const Color(0xFF1565C0),
+        bg: dark
+            ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+            : const Color(0xFFE3F2FD),
+        fg: dark ? AppTheme.primaryNavyLight : const Color(0xFF1565C0),
         icon: Icons.edit_outlined,
       );
     }
@@ -1392,21 +1430,25 @@ class _AdminLedgerTile extends StatelessWidget {
         a.contains('deduction') ||
         (d < 0 && entry.affectedBucket.toLowerCase() == 'used')) {
       return (
-        bg: const Color(0xFFFFEBEE),
-        fg: const Color(0xFFC62828),
+        bg: dark
+            ? Colors.red.shade900.withValues(alpha: 0.4)
+            : const Color(0xFFFFEBEE),
+        fg: dark ? Colors.red.shade300 : const Color(0xFFC62828),
         icon: Icons.remove_rounded,
       );
     }
     if (d < 0) {
       return (
-        bg: const Color(0xFFFFEBEE),
-        fg: const Color(0xFFC62828),
+        bg: dark
+            ? Colors.red.shade900.withValues(alpha: 0.4)
+            : const Color(0xFFFFEBEE),
+        fg: dark ? Colors.red.shade300 : const Color(0xFFC62828),
         icon: Icons.remove_rounded,
       );
     }
     return (
-      bg: AppTheme.primaryNavy.withValues(alpha: 0.1),
-      fg: AppTheme.primaryNavy,
+      bg: AppTheme.primaryNavy.withValues(alpha: dark ? 0.35 : 0.1),
+      fg: dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy,
       icon: Icons.swap_horiz_rounded,
     );
   }
@@ -1447,30 +1489,20 @@ class _AdminLedgerTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final st = _styleForEntry();
+    final dark = AppTheme.dashIsDark(context);
+    final st = _styleForEntry(context);
     final meta = entry.metadataJson;
     final metaBrief = meta != null && meta.isNotEmpty
         ? meta.entries.take(3).map((e) => '${e.key}: ${e.value}').join(' · ')
         : null;
 
     final amountColor = entry.daysChanged >= 0
-        ? const Color(0xFF2E7D32)
-        : const Color(0xFFC62828);
+        ? (dark ? Colors.green.shade300 : const Color(0xFF2E7D32))
+        : (dark ? Colors.red.shade300 : const Color(0xFFC62828));
 
     return Container(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1491,7 +1523,7 @@ class _AdminLedgerTile extends StatelessWidget {
                 Text(
                   _actionTitle(entry.action),
                   style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.dashTextPrimaryOf(context),
                     fontWeight: FontWeight.w700,
                     fontSize: 15,
                   ),
@@ -1499,12 +1531,18 @@ class _AdminLedgerTile extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   _leaveTypeLabel(entry.leaveType),
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                  style: TextStyle(
+                    color: AppTheme.dashTextSecondaryOf(context),
+                    fontSize: 13,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   'Bucket: ${entry.affectedBucket}',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                  style: TextStyle(
+                    color: AppTheme.dashTextSecondaryOf(context),
+                    fontSize: 12,
+                  ),
                 ),
                 if (entry.relatedLeaveRequestId != null &&
                     entry.relatedLeaveRequestId!.isNotEmpty) ...[
@@ -1512,7 +1550,7 @@ class _AdminLedgerTile extends StatelessWidget {
                   Text(
                     'Ref #${entry.relatedLeaveRequestId}',
                     style: TextStyle(
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                       fontSize: 12,
                     ),
                   ),
@@ -1523,7 +1561,7 @@ class _AdminLedgerTile extends StatelessWidget {
                   Text(
                     entry.employeeName!,
                     style: TextStyle(
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
                     ),
@@ -1534,7 +1572,10 @@ class _AdminLedgerTile extends StatelessWidget {
                   const SizedBox(height: 6),
                   Text(
                     entry.remarks!,
-                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                    style: TextStyle(
+                      color: AppTheme.dashTextPrimaryOf(context),
+                      fontSize: 13,
+                    ),
                   ),
                 ],
                 if (metaBrief != null) ...[
@@ -1544,7 +1585,7 @@ class _AdminLedgerTile extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                       fontSize: 11,
                       height: 1.25,
                     ),
@@ -1554,7 +1595,9 @@ class _AdminLedgerTile extends StatelessWidget {
                 Text(
                   _fmtDt(entry.createdAt),
                   style: TextStyle(
-                    color: AppTheme.textSecondary.withValues(alpha: 0.85),
+                    color: AppTheme.dashTextSecondaryOf(
+                      context,
+                    ).withValues(alpha: 0.85),
                     fontSize: 11,
                   ),
                 ),

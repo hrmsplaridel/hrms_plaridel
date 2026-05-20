@@ -29,20 +29,22 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   Widget build(BuildContext context) {
     final np = context.watch<NotificationProvider>();
     final scheme = Theme.of(context).colorScheme;
+    final headingColor = AppTheme.dashTextPrimaryOf(context);
+    final mutedColor = AppTheme.dashTextSecondaryOf(context);
 
     return Scaffold(
-      backgroundColor: AppTheme.sectionAlt,
+      backgroundColor: AppTheme.sectionAltOf(context),
       appBar: AppBar(
-        backgroundColor: AppTheme.white,
-        foregroundColor: AppTheme.textPrimary,
+        backgroundColor: AppTheme.dashPanelOf(context),
+        foregroundColor: headingColor,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         shadowColor: Colors.black.withValues(alpha: 0.08),
         leading: IconButton(
-          icon: Icon(Icons.close_rounded, color: AppTheme.textPrimary),
+          icon: Icon(Icons.close_rounded, color: headingColor),
           tooltip: 'Close',
           style: IconButton.styleFrom(
-            backgroundColor: AppTheme.offWhite,
+            backgroundColor: AppTheme.dashMutedSurfaceOf(context),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),
@@ -54,7 +56,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           style: TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 18,
-            color: AppTheme.textPrimary,
+            color: headingColor,
             letterSpacing: -0.2,
           ),
         ),
@@ -73,10 +75,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Container(
-            height: 1,
-            color: Colors.black.withValues(alpha: 0.06),
-          ),
+          child: Container(height: 1, color: AppTheme.dashHairlineOf(context)),
         ),
       ),
       body: np.loading && np.items.isEmpty
@@ -95,10 +94,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   const SizedBox(height: 16),
                   Text(
                     'Loading notifications…',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 14,
-                    ),
+                    style: TextStyle(color: mutedColor, fontSize: 14),
                   ),
                 ],
               ),
@@ -228,6 +224,9 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final headingColor = AppTheme.dashTextPrimaryOf(context);
+    final mutedColor = AppTheme.dashTextSecondaryOf(context);
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -237,20 +236,14 @@ class _EmptyState extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: AppTheme.white,
+                color: AppTheme.dashPanelOf(context),
                 shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.06),
-                    blurRadius: 16,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
+                border: Border.all(color: AppTheme.dashHairlineOf(context)),
               ),
               child: Icon(
                 Icons.notifications_none_rounded,
                 size: 48,
-                color: AppTheme.textSecondary.withValues(alpha: 0.5),
+                color: mutedColor.withValues(alpha: 0.5),
               ),
             ),
             const SizedBox(height: 24),
@@ -259,18 +252,14 @@ class _EmptyState extends StatelessWidget {
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
-                color: AppTheme.textPrimary,
+                color: headingColor,
               ),
             ),
             const SizedBox(height: 8),
             Text(
               'New leave updates and alerts will appear here.',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                height: 1.4,
-                color: AppTheme.textSecondary,
-              ),
+              style: TextStyle(fontSize: 14, height: 1.4, color: mutedColor),
             ),
           ],
         ),
@@ -286,6 +275,9 @@ class _ErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final headingColor = AppTheme.dashTextPrimaryOf(context);
+    final mutedColor = AppTheme.dashTextSecondaryOf(context);
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -295,7 +287,7 @@ class _ErrorState extends StatelessWidget {
             Icon(
               Icons.cloud_off_outlined,
               size: 48,
-              color: AppTheme.textSecondary.withValues(alpha: 0.6),
+              color: mutedColor.withValues(alpha: 0.6),
             ),
             const SizedBox(height: 16),
             Text(
@@ -303,14 +295,14 @@ class _ErrorState extends StatelessWidget {
               style: TextStyle(
                 fontWeight: FontWeight.w600,
                 fontSize: 16,
-                color: AppTheme.textPrimary,
+                color: headingColor,
               ),
             ),
             const SizedBox(height: 8),
             Text(
               message,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14, color: AppTheme.textSecondary),
+              style: TextStyle(fontSize: 14, color: mutedColor),
             ),
           ],
         ),
@@ -330,6 +322,14 @@ class _NotificationCard extends StatelessWidget {
     final n = notification;
     final visual = _visualForType(n.type, n.category);
     final unread = n.isUnread;
+    final dark = AppTheme.dashIsDark(context);
+    final headingColor = AppTheme.dashTextPrimaryOf(context);
+    final mutedColor = AppTheme.dashTextSecondaryOf(context);
+    final cardColor = unread
+        ? (dark
+              ? AppTheme.primaryNavy.withValues(alpha: 0.18)
+              : const Color(0xFFFFFBF5))
+        : AppTheme.dashPanelOf(context);
 
     return Material(
       color: Colors.transparent,
@@ -338,20 +338,24 @@ class _NotificationCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         child: Ink(
           decoration: BoxDecoration(
-            color: unread ? const Color(0xFFFFFBF5) : AppTheme.white,
+            color: cardColor,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: unread
                   ? AppTheme.primaryNavy.withValues(alpha: 0.22)
-                  : Colors.black.withValues(alpha: 0.06),
+                  : AppTheme.dashHairlineOf(context),
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: unread ? 0.07 : 0.04),
-                blurRadius: unread ? 12 : 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
+            boxShadow: dark
+                ? null
+                : [
+                    BoxShadow(
+                      color: Colors.black.withValues(
+                        alpha: unread ? 0.07 : 0.04,
+                      ),
+                      blurRadius: unread ? 12 : 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
           ),
           child: IntrinsicHeight(
             child: Row(
@@ -408,7 +412,7 @@ class _NotificationCard extends StatelessWidget {
                                       : FontWeight.w600,
                                   fontSize: 15,
                                   height: 1.25,
-                                  color: AppTheme.textPrimary,
+                                  color: headingColor,
                                 ),
                               ),
                               if (n.body != null &&
@@ -419,7 +423,7 @@ class _NotificationCard extends StatelessWidget {
                                   style: TextStyle(
                                     fontSize: 14,
                                     height: 1.45,
-                                    color: AppTheme.textSecondary,
+                                    color: mutedColor,
                                   ),
                                 ),
                               ],
@@ -429,9 +433,7 @@ class _NotificationCard extends StatelessWidget {
                                   Icon(
                                     Icons.schedule_rounded,
                                     size: 14,
-                                    color: AppTheme.textSecondary.withValues(
-                                      alpha: 0.75,
-                                    ),
+                                    color: mutedColor.withValues(alpha: 0.75),
                                   ),
                                   const SizedBox(width: 4),
                                   Text(
@@ -439,27 +441,21 @@ class _NotificationCard extends StatelessWidget {
                                     style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w500,
-                                      color: AppTheme.textSecondary.withValues(
-                                        alpha: 0.9,
-                                      ),
+                                      color: mutedColor.withValues(alpha: 0.9),
                                     ),
                                   ),
                                   Text(
                                     ' · ',
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: AppTheme.textSecondary.withValues(
-                                        alpha: 0.5,
-                                      ),
+                                      color: mutedColor.withValues(alpha: 0.5),
                                     ),
                                   ),
                                   Text(
                                     _formatAbsolute(n.createdAt),
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: AppTheme.textSecondary.withValues(
-                                        alpha: 0.75,
-                                      ),
+                                      color: mutedColor.withValues(alpha: 0.75),
                                     ),
                                   ),
                                 ],

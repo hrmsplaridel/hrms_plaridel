@@ -87,6 +87,26 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
   bool _isDefault = false;
   bool _isActive = true;
 
+  bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
+
+  Color _headingColor(BuildContext context) =>
+      AppTheme.dashTextPrimaryOf(context);
+
+  Color _mutedColor(BuildContext context) =>
+      AppTheme.dashTextSecondaryOf(context);
+
+  BoxDecoration _filterDecoration(BuildContext context) => BoxDecoration(
+        color: _isDark(context)
+            ? AppTheme.dashMutedSurfaceOf(context)
+            : AppTheme.lightGray.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: _isDark(context)
+              ? AppTheme.dashHairlineOf(context)
+              : Colors.transparent,
+        ),
+      );
+
   @override
   void initState() {
     super.initState();
@@ -428,7 +448,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
         Text(
           'Attendance Policy',
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: _headingColor(context),
             fontSize: 24,
             fontWeight: FontWeight.w800,
           ),
@@ -459,20 +479,10 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
   }
 
   Widget _buildListPanel(List<_PolicyRecord> filtered) {
+    final dark = _isDark(context);
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -485,31 +495,43 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
                 child: TextField(
                   controller: _searchController,
                   onChanged: (_) => setState(() {}),
-                  decoration: InputDecoration(
+                  style: AppTheme.dashFieldTextStyle(context),
+                  decoration: AppTheme.dashInputDecoration(
+                    context,
                     hintText: 'Search',
-                    isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 14,
                       vertical: 12,
                     ),
-                    filled: true,
-                    fillColor: AppTheme.lightGray.withValues(alpha: 0.5),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide.none,
-                    ),
+                    radius: 10,
                   ),
                 ),
               ),
-              DropdownButton<String>(
-                value: _statusFilter,
-                items: ['Active', 'Inactive', 'All']
-                    .map((o) => DropdownMenuItem(value: o, child: Text(o)))
-                    .toList(),
-                onChanged: (v) {
-                  setState(() => _statusFilter = v ?? 'Active');
-                  _loadPolicies();
-                },
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: _filterDecoration(context),
+                child: DropdownButton<String>(
+                  value: _statusFilter,
+                  dropdownColor: AppTheme.dashPanelOf(context),
+                  style: AppTheme.dashFieldTextStyle(context),
+                  underline: const SizedBox.shrink(),
+                  isDense: true,
+                  items: ['Active', 'Inactive', 'All']
+                      .map(
+                        (o) => DropdownMenuItem(
+                          value: o,
+                          child: Text(
+                            o,
+                            style: AppTheme.dashFieldTextStyle(context),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) {
+                    setState(() => _statusFilter = v ?? 'Active');
+                    _loadPolicies();
+                  },
+                ),
               ),
             ],
           ),
@@ -527,7 +549,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
                 padding: const EdgeInsets.all(32),
                 child: Text(
                   'No policies',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                  style: TextStyle(color: _mutedColor(context), fontSize: 14),
                 ),
               ),
             )
@@ -541,16 +563,16 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
                 final isSelected = _selectedPolicy?.id == p.id;
                 return ListTile(
                   selected: isSelected,
-                  selectedTileColor: AppTheme.primaryNavy.withValues(
-                    alpha: 0.08,
-                  ),
+                  selectedTileColor: dark
+                      ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                      : AppTheme.primaryNavy.withValues(alpha: 0.08),
                   title: Row(
                     children: [
                       Text(
                         p.policyName,
                         style: TextStyle(
                           fontWeight: FontWeight.w600,
-                          color: AppTheme.textPrimary,
+                          color: _headingColor(context),
                         ),
                       ),
                       if (p.isDefault) ...[
@@ -580,7 +602,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
                     'Work hours/day: ${p.workHoursPerDay % 1 == 0 ? p.workHoursPerDay.toStringAsFixed(0) : p.workHoursPerDay.toStringAsFixed(2)}',
                     style: TextStyle(
                       fontSize: 12,
-                      color: AppTheme.textSecondary,
+                      color: _mutedColor(context),
                     ),
                   ),
                   onTap: () => _selectPolicy(p),
@@ -595,18 +617,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
   Widget _buildFormPanel() {
     return Container(
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -616,6 +627,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           const SizedBox(height: 6),
           TextFormField(
             controller: _nameController,
+            style: AppTheme.dashFieldTextStyle(context),
             decoration: _decoration('Name'),
           ),
           const SizedBox(height: 16),
@@ -623,6 +635,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           const SizedBox(height: 6),
           TextFormField(
             controller: _descriptionController,
+            style: AppTheme.dashFieldTextStyle(context),
             decoration: _decoration('Description'),
             maxLines: 2,
           ),
@@ -634,7 +647,10 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
                 onChanged: (v) => setState(() => _isDefault = v ?? false),
                 activeColor: AppTheme.primaryNavy,
               ),
-              const Text('Default policy'),
+              Text(
+                'Default policy',
+                style: TextStyle(color: _headingColor(context)),
+              ),
             ],
           ),
           Row(
@@ -644,7 +660,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
                 onChanged: (v) => setState(() => _isActive = v ?? true),
                 activeColor: AppTheme.primaryNavy,
               ),
-              const Text('Active'),
+              Text('Active', style: TextStyle(color: _headingColor(context))),
             ],
           ),
 
@@ -655,6 +671,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           const SizedBox(height: 6),
           TextFormField(
             controller: _workHoursPerDayController,
+            style: AppTheme.dashFieldTextStyle(context),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             decoration: _decoration('8'),
           ),
@@ -678,6 +695,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           const SizedBox(height: 6),
           TextFormField(
             controller: _maxLateMinutesPerMonthController,
+            style: AppTheme.dashFieldTextStyle(context),
             keyboardType: TextInputType.number,
             decoration: _decoration('Optional'),
           ),
@@ -774,7 +792,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
     style: TextStyle(
       fontSize: 14,
       fontWeight: FontWeight.w800,
-      color: AppTheme.textPrimary,
+      color: _headingColor(context),
     ),
   );
 
@@ -801,14 +819,14 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
     style: TextStyle(
       fontSize: 12,
       fontWeight: FontWeight.w600,
-      color: AppTheme.textSecondary,
+      color: _mutedColor(context),
     ),
   );
 
-  InputDecoration _decoration(String hint) => InputDecoration(
-    hintText: hint,
-    filled: true,
-    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-  );
+  InputDecoration _decoration(String hint) => AppTheme.dashInputDecoration(
+        context,
+        hintText: hint,
+        radius: 8,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      );
 }
