@@ -28,17 +28,18 @@ import '../widgets/rsp_iframe_preview.dart';
 
 /// RSP module: hub with buttons for each RSP feature (Job Vacancies, Applications & Exam Results).
 class RspAdminContent extends StatefulWidget {
-  const RspAdminContent({super.key, this.onNavigateToSidebarIndex});
+  const RspAdminContent({super.key, this.onOpenCreateAccount});
 
-  /// Switch admin sidebar tab (e.g. index `5` = Create Account below DocuTracker).
-  final ValueChanged<int>? onNavigateToSidebarIndex;
+  /// Switches the admin shell to **Create Account** (sidebar) so the hire form opens.
+  final VoidCallback? onOpenCreateAccount;
 
   @override
   State<RspAdminContent> createState() => _RspAdminContentState();
 }
 
 class _RspAdminContentState extends State<RspAdminContent> {
-  /// 0 = menu, 1 = Job Vacancies, 2 = Applications, … 14 = Turn-Around Time, 15 = Final interview (passed exam)
+  /// 0 = menu, 1 = Job Vacancies, 2 = Applications, … 14 = Turn-Around Time,
+  /// 15 = Final interview (passed exam).
   int _rspSectionIndex = 0;
 
   @override
@@ -59,7 +60,7 @@ class _RspAdminContentState extends State<RspAdminContent> {
           Text(
             'RSP',
             style: TextStyle(
-              color: AppTheme.textPrimary,
+              color: AppTheme.dashTextPrimaryOf(context),
               fontSize: 24,
               fontWeight: FontWeight.w800,
               letterSpacing: -0.3,
@@ -69,7 +70,7 @@ class _RspAdminContentState extends State<RspAdminContent> {
           Text(
             'Recruitment, Selection, and Placement. Choose a feature below.',
             style: TextStyle(
-              color: AppTheme.textSecondary,
+              color: AppTheme.dashTextSecondaryOf(context),
               fontSize: 14,
               height: 1.4,
             ),
@@ -214,7 +215,7 @@ class _RspAdminContentState extends State<RspAdminContent> {
           const _RspTurnAroundTimeSection()
         else if (_rspSectionIndex == 15)
           RspFinalInterviewScheduler(
-            onGoToCreateAccount: () => widget.onNavigateToSidebarIndex?.call(5),
+            onGoToCreateAccount: widget.onOpenCreateAccount,
           )
         else
           const SizedBox.shrink(),
@@ -7895,18 +7896,27 @@ class _TurnAroundTimeList extends StatelessWidget {
   }
 }
 
-/// One vacancy form entry (headline + body controllers).
+/// One vacancy form entry (headline + education / experience / training).
 class _VacancyFormItem {
   _VacancyFormItem()
     : headline = TextEditingController(),
-      body = TextEditingController(),
+      education = TextEditingController(),
+      experience = TextEditingController(),
+      training = TextEditingController(),
+      closingDate = TextEditingController(),
       maxApplicants = TextEditingController();
   final TextEditingController headline;
-  final TextEditingController body;
+  final TextEditingController education;
+  final TextEditingController experience;
+  final TextEditingController training;
+  final TextEditingController closingDate;
   final TextEditingController maxApplicants;
   void dispose() {
     headline.dispose();
-    body.dispose();
+    education.dispose();
+    experience.dispose();
+    training.dispose();
+    closingDate.dispose();
     maxApplicants.dispose();
   }
 }
@@ -7923,7 +7933,29 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
   bool _loading = true;
   bool _hasVacancies = true;
   final List<_VacancyFormItem> _vacancies = [];
+
+  /// Parallel to [_vacancies]: when false, only the header row is shown.
+  final List<bool> _vacancyExpanded = [];
   bool _saving = false;
+
+  String _vacancyEntrySummary(_VacancyFormItem v) {
+    final h = v.headline.text.trim();
+    if (h.isNotEmpty) {
+      return h.length > 52 ? '${h.substring(0, 52)}…' : h;
+    }
+    final parts = <String>[
+      v.education.text.trim(),
+      v.experience.text.trim(),
+      v.training.text.trim(),
+    ].where((s) => s.isNotEmpty).toList();
+    if (parts.isNotEmpty) {
+      final joined = parts.join(' · ');
+      return joined.length > 64 ? '${joined.substring(0, 64)}…' : joined;
+    }
+    final m = v.maxApplicants.text.trim();
+    if (m.isNotEmpty) return 'Max applicants: $m';
+    return 'No headline yet — expand to edit';
+  }
 
   @override
   void initState() {
@@ -7935,7 +7967,20 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
         for (final v in a.vacancies) {
           final item = _VacancyFormItem();
           item.headline.text = v.headline ?? '';
-          item.body.text = v.body ?? '';
+          item.education.text = v.education ?? '';
+          item.experience.text = v.experience ?? '';
+          item.training.text = v.training ?? '';
+          item.closingDate.text = v.closingDate != null
+              ? '${v.closingDate!.year.toString().padLeft(4, '0')}-${v.closingDate!.month.toString().padLeft(2, '0')}-${v.closingDate!.day.toString().padLeft(2, '0')}'
+              : '';
+          if (item.education.text.isEmpty &&
+              item.experience.text.isEmpty &&
+              item.training.text.isEmpty) {
+            final legacy = v.body?.trim();
+            if (legacy != null && legacy.isNotEmpty) {
+              item.education.text = legacy;
+            }
+          }
           item.maxApplicants.text = v.maxApplicants != null
               ? '${v.maxApplicants}'
               : '';
@@ -7944,7 +7989,10 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
       } else {
         final item = _VacancyFormItem();
         item.headline.text = a.headline ?? '';
-        item.body.text = a.body ?? '';
+        final legacy = a.body?.trim();
+        if (legacy != null && legacy.isNotEmpty) {
+          item.education.text = legacy;
+        }
         next.add(item);
       }
       if (mounted) {
@@ -7952,6 +8000,9 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
           ..clear()
           ..addAll(next);
         setState(() {
+          _vacancyExpanded
+            ..clear()
+            ..addAll(List<bool>.filled(_vacancies.length, true));
           _loading = false;
           _hasVacancies = a.hasVacancies;
         });
@@ -7968,7 +8019,10 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
   }
 
   void _addVacancy() {
-    setState(() => _vacancies.add(_VacancyFormItem()));
+    setState(() {
+      _vacancies.add(_VacancyFormItem());
+      _vacancyExpanded.add(true);
+    });
   }
 
   void _removeVacancy(int index) {
@@ -7976,6 +8030,9 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
     setState(() {
       _vacancies[index].dispose();
       _vacancies.removeAt(index);
+      if (index < _vacancyExpanded.length) {
+        _vacancyExpanded.removeAt(index);
+      }
     });
   }
 
@@ -8017,11 +8074,20 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
           maxParsed = int.tryParse(rawMax);
           if (maxParsed != null && maxParsed < 1) maxParsed = null;
         }
+        final ed = v.education.text.trim();
+        final ex = v.experience.text.trim();
+        final tr = v.training.text.trim();
+        final cdRaw = v.closingDate.text.trim();
+        final cd = cdRaw.isNotEmpty ? DateTime.tryParse(cdRaw) : null;
         return JobVacancyItem(
           headline: v.headline.text.trim().isEmpty
               ? null
               : v.headline.text.trim(),
-          body: v.body.text.trim().isEmpty ? null : v.body.text.trim(),
+          body: null,
+          education: ed.isEmpty ? null : ed,
+          experience: ex.isEmpty ? null : ex,
+          training: tr.isEmpty ? null : tr,
+          closingDate: cd,
           maxApplicants: maxParsed,
         );
       }).toList();
@@ -8061,292 +8127,709 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
           'Job Vacancies Announcement',
           style: TextStyle(
             color: AppTheme.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
+            fontSize: 24,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.35,
+            height: 1.2,
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
         Text(
           'Control what appears in the Job Vacancies section on the landing page. Add multiple entries when you have more than one position.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          style: TextStyle(
+            color: AppTheme.textSecondary.withValues(alpha: 0.95),
+            fontSize: 14,
+            height: 1.45,
+            fontWeight: FontWeight.w500,
+          ),
         ),
         const SizedBox(height: 24),
         Container(
-          padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
             color: AppTheme.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.black.withValues(alpha: 0.07)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
+                color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                blurRadius: 28,
+                offset: const Offset(0, 12),
+              ),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.07),
+                blurRadius: 20,
+                offset: const Offset(0, 7),
+              ),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
               ),
             ],
           ),
-          child: _loading
-              ? const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(32),
-                    child: CircularProgressIndicator(),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                height: 4,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
                   ),
-                )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'Accepting applications',
-                            style: TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(22, 20, 22, 22),
+                child: _loading
+                    ? const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(32),
+                          child: CircularProgressIndicator(),
                         ),
-                        Switch(
-                          value: _hasVacancies,
-                          onChanged: (v) => setState(() => _hasVacancies = v),
-                          activeTrackColor: AppTheme.primaryNavy.withOpacity(
-                            0.5,
-                          ),
-                          activeThumbColor: AppTheme.primaryNavy,
-                        ),
-                      ],
-                    ),
-                    Text(
-                      'When ON, the landing page shows that you are hiring. When OFF, it shows no vacancies.',
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(height: 28),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Job vacancy entries',
-                          style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        FilledButton.icon(
-                          onPressed: _addVacancy,
-                          icon: const Icon(Icons.add_rounded, size: 20),
-                          label: const Text('Add new vacancy'),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: AppTheme.primaryNavy,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 12,
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.fromLTRB(16, 14, 10, 14),
+                            decoration: BoxDecoration(
+                              color: AppTheme.sectionAlt,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: Colors.black.withValues(alpha: 0.06),
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.045),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 3),
+                                ),
+                              ],
                             ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    ...List.generate(_vacancies.length, (i) {
-                      final v = _vacancies[i];
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 24),
-                        child: Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            color: AppTheme.offWhite.withOpacity(0.6),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: Colors.black.withOpacity(0.06),
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(
-                                    'Position ${i + 1}',
-                                    style: TextStyle(
-                                      color: AppTheme.textPrimary,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  if (_vacancies.length > 1)
-                                    OutlinedButton.icon(
-                                      onPressed: () =>
-                                          _confirmDeleteVacancy(context, i),
-                                      icon: Icon(
-                                        Icons.delete_outline_rounded,
-                                        size: 18,
-                                        color: Colors.red.shade700,
-                                      ),
-                                      label: Text(
-                                        'Delete',
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        'Accepting applications',
                                         style: TextStyle(
-                                          color: Colors.red.shade700,
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w600,
+                                          color: AppTheme.textPrimary,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w700,
                                         ),
-                                      ),
-                                      style: OutlinedButton.styleFrom(
-                                        foregroundColor: Colors.red.shade700,
-                                        side: BorderSide(
-                                          color: Colors.red.shade400,
-                                        ),
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 8,
-                                        ),
-                                        minimumSize: Size.zero,
                                       ),
                                     ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
+                                    Switch(
+                                      value: _hasVacancies,
+                                      onChanged: (v) =>
+                                          setState(() => _hasVacancies = v),
+                                      activeTrackColor: AppTheme.primaryNavy
+                                          .withValues(alpha: 0.45),
+                                      activeThumbColor: AppTheme.primaryNavy,
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'When ON, the landing page shows that you are hiring. When OFF, it shows no vacancies.',
+                                  style: TextStyle(
+                                    color: AppTheme.textSecondary.withValues(
+                                      alpha: 0.92,
+                                    ),
+                                    fontSize: 13,
+                                    height: 1.4,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 26),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
                               Text(
-                                'Headline (optional)',
+                                'Job vacancy entries',
                                 style: TextStyle(
-                                  color: AppTheme.textSecondary,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
+                                  color: AppTheme.textPrimary,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -0.2,
                                 ),
                               ),
-                              const SizedBox(height: 6),
-                              TextField(
-                                controller: v.headline,
-                                onChanged: (_) => setState(() {}),
-                                decoration: InputDecoration(
-                                  hintText:
-                                      'e.g. Now Hiring: Human Resource Assistant',
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.white,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
+                              FilledButton.icon(
+                                onPressed: _addVacancy,
+                                icon: const Icon(Icons.add_rounded, size: 20),
+                                label: const Text('Add new vacancy'),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: AppTheme.primaryNavy,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
                                     vertical: 12,
                                   ),
-                                ),
-                                maxLines: 1,
-                              ),
-                              const SizedBox(height: 14),
-                              Text(
-                                'Description (optional)',
-                                style: TextStyle(
-                                  color: AppTheme.textSecondary,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              TextField(
-                                controller: v.body,
-                                onChanged: (_) => setState(() {}),
-                                decoration: InputDecoration(
-                                  hintText:
-                                      'Short description for this position.',
-                                  border: OutlineInputBorder(
+                                  shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(10),
                                   ),
-                                  filled: true,
-                                  fillColor: Colors.white,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
-                                    vertical: 12,
-                                  ),
-                                  alignLabelWithHint: true,
                                 ),
-                                maxLines: 3,
-                              ),
-                              const SizedBox(height: 14),
-                              Text(
-                                'Max applicants (optional)',
-                                style: TextStyle(
-                                  color: AppTheme.textSecondary,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Counts only applicants still in process. Document declined, exam failed, final interview failed, or hired (registered) frees a slot.',
-                                style: TextStyle(
-                                  color: AppTheme.textSecondary.withOpacity(
-                                    0.9,
-                                  ),
-                                  fontSize: 11.5,
-                                  height: 1.35,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              TextField(
-                                controller: v.maxApplicants,
-                                onChanged: (_) => setState(() {}),
-                                keyboardType: TextInputType.number,
-                                decoration: InputDecoration(
-                                  hintText:
-                                      'Leave blank for no limit (e.g. 50)',
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.white,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
-                                    vertical: 12,
-                                  ),
-                                ),
-                                maxLines: 1,
                               ),
                             ],
                           ),
-                        ),
-                      );
-                    }),
-                    const SizedBox(height: 28),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: _saving ? null : _save,
-                        icon: _saving
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.save_rounded, size: 20),
-                        label: Text(
-                          _saving
-                              ? 'Saving...'
-                              : 'Save and display on landing page',
-                        ),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppTheme.primaryNavy,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Tap a row to expand or collapse fields. Delete is available when there is more than one entry.',
+                            style: TextStyle(
+                              color: AppTheme.textSecondary.withValues(
+                                alpha: 0.88,
+                              ),
+                              fontSize: 12.5,
+                              height: 1.35,
+                            ),
                           ),
-                        ),
+                          const SizedBox(height: 14),
+                          ...List.generate(_vacancies.length, (i) {
+                            final v = _vacancies[i];
+                            final expanded = i < _vacancyExpanded.length
+                                ? _vacancyExpanded[i]
+                                : true;
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 16),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: AppTheme.white,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: Colors.black.withValues(alpha: 0.08),
+                                  ),
+                                  boxShadow: AppTheme.cardShadow,
+                                ),
+                                clipBehavior: Clip.antiAlias,
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Container(
+                                      height: 3,
+                                      decoration: BoxDecoration(
+                                        gradient: LinearGradient(
+                                          colors: [
+                                            AppTheme.primaryNavy.withValues(
+                                              alpha: 0.85,
+                                            ),
+                                            AppTheme.primaryNavyLight
+                                                .withValues(alpha: 0.5),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        4,
+                                        2,
+                                        8,
+                                        2,
+                                      ),
+                                      child: Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Expanded(
+                                            child: Material(
+                                              color: Colors.transparent,
+                                              child: InkWell(
+                                                onTap: () => setState(() {
+                                                  if (i <
+                                                      _vacancyExpanded.length) {
+                                                    _vacancyExpanded[i] =
+                                                        !_vacancyExpanded[i];
+                                                  }
+                                                }),
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                                child: Padding(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 10,
+                                                        vertical: 10,
+                                                      ),
+                                                  child: Row(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      Padding(
+                                                        padding:
+                                                            const EdgeInsets.only(
+                                                              top: 2,
+                                                            ),
+                                                        child: Icon(
+                                                          expanded
+                                                              ? Icons
+                                                                    .expand_less_rounded
+                                                              : Icons
+                                                                    .expand_more_rounded,
+                                                          color: AppTheme
+                                                              .textSecondary
+                                                              .withValues(
+                                                                alpha: 0.75,
+                                                              ),
+                                                          size: 26,
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 6),
+                                                      Expanded(
+                                                        child: Column(
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .start,
+                                                          children: [
+                                                            Text(
+                                                              'Position ${i + 1}',
+                                                              style: const TextStyle(
+                                                                color: AppTheme
+                                                                    .textPrimary,
+                                                                fontSize: 15,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w800,
+                                                                letterSpacing:
+                                                                    -0.2,
+                                                              ),
+                                                            ),
+                                                            if (!expanded) ...[
+                                                              const SizedBox(
+                                                                height: 6,
+                                                              ),
+                                                              Text(
+                                                                _vacancyEntrySummary(
+                                                                  v,
+                                                                ),
+                                                                style: TextStyle(
+                                                                  color: AppTheme
+                                                                      .textSecondary
+                                                                      .withValues(
+                                                                        alpha:
+                                                                            0.92,
+                                                                      ),
+                                                                  fontSize:
+                                                                      12.5,
+                                                                  height: 1.4,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .w500,
+                                                                ),
+                                                                maxLines: 2,
+                                                                overflow:
+                                                                    TextOverflow
+                                                                        .ellipsis,
+                                                              ),
+                                                            ],
+                                                          ],
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          if (_vacancies.length > 1)
+                                            Padding(
+                                              padding: const EdgeInsets.only(
+                                                top: 6,
+                                              ),
+                                              child: OutlinedButton.icon(
+                                                onPressed: () =>
+                                                    _confirmDeleteVacancy(
+                                                      context,
+                                                      i,
+                                                    ),
+                                                icon: Icon(
+                                                  Icons.delete_outline_rounded,
+                                                  size: 18,
+                                                  color: Colors.red.shade700,
+                                                ),
+                                                label: Text(
+                                                  'Delete',
+                                                  style: TextStyle(
+                                                    color: Colors.red.shade700,
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                                style: OutlinedButton.styleFrom(
+                                                  foregroundColor:
+                                                      Colors.red.shade700,
+                                                  side: BorderSide(
+                                                    color: Colors.red.shade400,
+                                                  ),
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 12,
+                                                        vertical: 8,
+                                                      ),
+                                                  minimumSize: Size.zero,
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                    AnimatedSize(
+                                      duration: const Duration(
+                                        milliseconds: 220,
+                                      ),
+                                      curve: Curves.easeInOut,
+                                      alignment: Alignment.topCenter,
+                                      child: expanded
+                                          ? Padding(
+                                              padding:
+                                                  const EdgeInsets.fromLTRB(
+                                                    18,
+                                                    0,
+                                                    18,
+                                                    18,
+                                                  ),
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    'Headline',
+                                                    style: TextStyle(
+                                                      color: AppTheme
+                                                          .textSecondary,
+                                                      fontSize: 13,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 6),
+                                                  TextField(
+                                                    controller: v.headline,
+                                                    onChanged: (_) =>
+                                                        setState(() {}),
+                                                    decoration: InputDecoration(
+                                                      hintText:
+                                                          'e.g. Now Hiring: Human Resource Assistant',
+                                                      border: OutlineInputBorder(
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              10,
+                                                            ),
+                                                      ),
+                                                      filled: true,
+                                                      fillColor: Colors.white,
+                                                      contentPadding:
+                                                          const EdgeInsets.symmetric(
+                                                            horizontal: 14,
+                                                            vertical: 12,
+                                                          ),
+                                                    ),
+                                                    maxLines: 1,
+                                                  ),
+                                                  const SizedBox(height: 14),
+                                                  Text(
+                                                    'Education',
+                                                    style: TextStyle(
+                                                      color: AppTheme
+                                                          .textSecondary,
+                                                      fontSize: 13,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 6),
+                                                  TextField(
+                                                    controller: v.education,
+                                                    onChanged: (_) =>
+                                                        setState(() {}),
+                                                    decoration: InputDecoration(
+                                                      hintText:
+                                                          'e.g. Bachelor\'s degree in relevant field',
+                                                      border: OutlineInputBorder(
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              10,
+                                                            ),
+                                                      ),
+                                                      filled: true,
+                                                      fillColor: Colors.white,
+                                                      contentPadding:
+                                                          const EdgeInsets.symmetric(
+                                                            horizontal: 14,
+                                                            vertical: 12,
+                                                          ),
+                                                      alignLabelWithHint: true,
+                                                    ),
+                                                    maxLines: 3,
+                                                  ),
+                                                  const SizedBox(height: 14),
+                                                  Text(
+                                                    'Experience',
+                                                    style: TextStyle(
+                                                      color: AppTheme
+                                                          .textSecondary,
+                                                      fontSize: 13,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 6),
+                                                  TextField(
+                                                    controller: v.experience,
+                                                    onChanged: (_) =>
+                                                        setState(() {}),
+                                                    decoration: InputDecoration(
+                                                      hintText:
+                                                          'e.g. 2 years in HR or local government',
+                                                      border: OutlineInputBorder(
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              10,
+                                                            ),
+                                                      ),
+                                                      filled: true,
+                                                      fillColor: Colors.white,
+                                                      contentPadding:
+                                                          const EdgeInsets.symmetric(
+                                                            horizontal: 14,
+                                                            vertical: 12,
+                                                          ),
+                                                      alignLabelWithHint: true,
+                                                    ),
+                                                    maxLines: 3,
+                                                  ),
+                                                  const SizedBox(height: 14),
+                                                  Text(
+                                                    'Training',
+                                                    style: TextStyle(
+                                                      color: AppTheme
+                                                          .textSecondary,
+                                                      fontSize: 13,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 6),
+                                                  TextField(
+                                                    controller: v.training,
+                                                    onChanged: (_) =>
+                                                        setState(() {}),
+                                                    decoration: InputDecoration(
+                                                      hintText:
+                                                          'e.g. Civil service eligibility, seminars',
+                                                      border: OutlineInputBorder(
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              10,
+                                                            ),
+                                                      ),
+                                                      filled: true,
+                                                      fillColor: Colors.white,
+                                                      contentPadding:
+                                                          const EdgeInsets.symmetric(
+                                                            horizontal: 14,
+                                                            vertical: 12,
+                                                          ),
+                                                      alignLabelWithHint: true,
+                                                    ),
+                                                    maxLines: 3,
+                                                  ),
+                                                  const SizedBox(height: 14),
+                                                  Text(
+                                                    'Due date (auto-close)',
+                                                    style: TextStyle(
+                                                      color: AppTheme
+                                                          .textSecondary,
+                                                      fontSize: 13,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 4),
+                                                  Text(
+                                                    'After this date, the system will automatically stop accepting applicants for this position.',
+                                                    style: TextStyle(
+                                                      color: AppTheme
+                                                          .textSecondary
+                                                          .withValues(
+                                                            alpha: 0.9,
+                                                          ),
+                                                      fontSize: 11.5,
+                                                      height: 1.35,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 6),
+                                                  TextField(
+                                                    controller: v.closingDate,
+                                                    readOnly: true,
+                                                    onTap: () async {
+                                                      final now =
+                                                          DateTime.now();
+                                                      final parsed =
+                                                          DateTime.tryParse(
+                                                            v.closingDate.text
+                                                                .trim(),
+                                                          );
+                                                      final initial =
+                                                          parsed ??
+                                                          DateTime(
+                                                            now.year,
+                                                            now.month,
+                                                            now.day,
+                                                          );
+                                                      final picked =
+                                                          await showDatePicker(
+                                                            context: context,
+                                                            initialDate:
+                                                                initial,
+                                                            firstDate: DateTime(
+                                                              now.year - 1,
+                                                              1,
+                                                              1,
+                                                            ),
+                                                            lastDate: DateTime(
+                                                              now.year + 5,
+                                                              12,
+                                                              31,
+                                                            ),
+                                                            helpText:
+                                                                'Select due date',
+                                                          );
+                                                      if (!mounted) return;
+                                                      if (picked == null)
+                                                        return;
+                                                      setState(() {
+                                                        v.closingDate.text =
+                                                            '${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+                                                      });
+                                                    },
+                                                    decoration: InputDecoration(
+                                                      hintText:
+                                                          'Select a date (YYYY-MM-DD)',
+                                                      suffixIcon: const Icon(
+                                                        Icons
+                                                            .calendar_month_rounded,
+                                                      ),
+                                                      border: OutlineInputBorder(
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              10,
+                                                            ),
+                                                      ),
+                                                      filled: true,
+                                                      fillColor: Colors.white,
+                                                      contentPadding:
+                                                          const EdgeInsets.symmetric(
+                                                            horizontal: 14,
+                                                            vertical: 12,
+                                                          ),
+                                                    ),
+                                                    maxLines: 1,
+                                                  ),
+                                                  const SizedBox(height: 14),
+                                                  Text(
+                                                    'Max applicants',
+                                                    style: TextStyle(
+                                                      color: AppTheme
+                                                          .textSecondary,
+                                                      fontSize: 13,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 4),
+                                                  Text(
+                                                    'Counts only applicants still in process. Document declined, exam failed, final interview failed, or hired (registered) frees a slot.',
+                                                    style: TextStyle(
+                                                      color: AppTheme
+                                                          .textSecondary
+                                                          .withValues(
+                                                            alpha: 0.9,
+                                                          ),
+                                                      fontSize: 11.5,
+                                                      height: 1.35,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 6),
+                                                  TextField(
+                                                    controller: v.maxApplicants,
+                                                    onChanged: (_) =>
+                                                        setState(() {}),
+                                                    keyboardType:
+                                                        TextInputType.number,
+                                                    decoration: InputDecoration(
+                                                      hintText:
+                                                          'Leave blank for no limit (e.g. 50)',
+                                                      border: OutlineInputBorder(
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              10,
+                                                            ),
+                                                      ),
+                                                      filled: true,
+                                                      fillColor: Colors.white,
+                                                      contentPadding:
+                                                          const EdgeInsets.symmetric(
+                                                            horizontal: 14,
+                                                            vertical: 12,
+                                                          ),
+                                                    ),
+                                                    maxLines: 1,
+                                                  ),
+                                                ],
+                                              ),
+                                            )
+                                          : const SizedBox(
+                                              width: double.infinity,
+                                            ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }),
+                          const SizedBox(height: 28),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              onPressed: _saving ? null : _save,
+                              icon: _saving
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.save_rounded, size: 20),
+                              label: Text(
+                                _saving
+                                    ? 'Saving...'
+                                    : 'Save and display on landing page',
+                              ),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: AppTheme.primaryNavy,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                  ],
-                ),
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -8398,19 +8881,6 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     final bei = _examAnswersSubsection(exam.answersJson, 'bei');
     final a = bei?['answers'];
     return a is List && a.isNotEmpty;
-  }
-
-  Future<void> _openBeiGrading(
-    BuildContext context,
-    RecruitmentApplication app,
-    RecruitmentExamResult exam,
-  ) async {
-    await showRspBeiGradingDialog(
-      context: context,
-      applicant: app,
-      exam: exam,
-      onSaved: _load,
-    );
   }
 
   static const Color _kPassBg = Color(0xFFE8F5E9);
@@ -8494,281 +8964,261 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     );
   }
 
-  Widget _scoreBreakdownGuideBullet(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '•',
-            style: TextStyle(
-              color: AppTheme.primaryNavy,
-              fontWeight: FontWeight.w900,
-              fontSize: 14,
-              height: 1.35,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              text,
-              style: TextStyle(
-                fontSize: 13,
-                height: 1.45,
-                color: AppTheme.textSecondary,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _scoreBreakdownSidePanel() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: AppTheme.primaryNavy.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.07)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                Icons.info_outline_rounded,
-                size: 22,
-                color: AppTheme.primaryNavy,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Scoring guide',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          _scoreBreakdownGuideBullet(
-            'General, Math, and General information columns are filled automatically from the applicant’s multiple-choice answers.',
-          ),
-          _scoreBreakdownGuideBullet(
-            'BEI shows an average only after every behavioral question is scored (0–100). Use the grade icon in this table or Grade BEI on the main applications list.',
-          ),
-          _scoreBreakdownGuideBullet(
-            'Overall screening % averages all sections that apply. Pass / fail uses a 60% cutoff on that overall value.',
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildScoreBreakdownDataTable(BuildContext dialogContext) {
-    final borderColor = Colors.black.withValues(alpha: 0.08);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: borderColor),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: Scrollbar(
-          thumbVisibility: true,
-          child: SingleChildScrollView(
-            scrollDirection: Axis.vertical,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: DataTable(
-                columnSpacing: 28,
-                horizontalMargin: 16,
-                headingRowHeight: 48,
-                dataRowMinHeight: 52,
-                dataRowMaxHeight: 72,
-                border: TableBorder(
-                  top: BorderSide(color: borderColor),
-                  bottom: BorderSide(color: borderColor),
-                  horizontalInside: BorderSide(color: borderColor),
-                ),
-                dividerThickness: 0,
-                headingRowColor: WidgetStateProperty.all(
-                  AppTheme.primaryNavy.withValues(alpha: 0.08),
-                ),
-                headingTextStyle: TextStyle(
-                  color: AppTheme.primaryNavy,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 12,
-                  letterSpacing: 0.2,
-                ),
-                dataTextStyle: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 13,
-                ),
-                columns: [
-                  const DataColumn(label: Text('Applicant')),
-                  const DataColumn(label: Text('Position')),
-                  const DataColumn(label: Text('General'), numeric: true),
-                  const DataColumn(label: Text('Math'), numeric: true),
-                  const DataColumn(label: Text('Gen. info'), numeric: true),
-                  const DataColumn(label: Text('BEI'), numeric: true),
-                  const DataColumn(label: Text('Grade')),
-                  const DataColumn(label: Text('Result')),
-                ],
-                rows: _applications.map((app) {
-                  final exam = _examResults[app.id.toLowerCase()];
-                  double? generalScore;
-                  double? mathScore;
-                  double? infoScore;
-                  double? beiScore;
-                  final answersJson = exam?.answersJson;
-                  if (answersJson != null) {
-                    generalScore = _sectionScorePercent(answersJson, 'general');
-                    mathScore = _sectionScorePercent(answersJson, 'math');
-                    infoScore = _sectionScorePercent(
-                      answersJson,
-                      'general_info',
-                    );
-                    beiScore = _beiSectionScorePercent(answersJson);
-                  }
+    final borderColor = Colors.black.withValues(alpha: 0.085);
+    final headerBg = AppTheme.primaryNavy;
+    return SizedBox.expand(
+      child: Scrollbar(
+        thickness: 8,
+        radius: const Radius.circular(8),
+        thumbVisibility: true,
+        interactive: true,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.vertical,
+          primary: false,
+          child: Scrollbar(
+            controller: _horizontalScrollController,
+            thickness: 8,
+            radius: const Radius.circular(8),
+            thumbVisibility: true,
+            interactive: true,
+            notificationPredicate: (n) => n.metrics.axis == Axis.horizontal,
+            child: ScrollConfiguration(
+              behavior: ScrollConfiguration.of(dialogContext).copyWith(
+                dragDevices: const {
+                  PointerDeviceKind.touch,
+                  PointerDeviceKind.mouse,
+                  PointerDeviceKind.trackpad,
+                  PointerDeviceKind.stylus,
+                },
+              ),
+              child: SingleChildScrollView(
+                controller: _horizontalScrollController,
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.fromLTRB(6, 10, 14, 14),
+                child: DataTable(
+                  columnSpacing: 34,
+                  horizontalMargin: 24,
+                  headingRowHeight: 56,
+                  dataRowMinHeight: 62,
+                  dataRowMaxHeight: 100,
+                  border: TableBorder.symmetric(
+                    inside: BorderSide(
+                      color: borderColor.withValues(alpha: 0.7),
+                    ),
+                  ),
+                  dividerThickness: 0,
+                  headingRowColor: WidgetStateProperty.all(headerBg),
+                  headingTextStyle: const TextStyle(
+                    color: AppTheme.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12.5,
+                    letterSpacing: 0.55,
+                    height: 1.25,
+                  ),
+                  dataTextStyle: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 13.5,
+                    height: 1.3,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  columns: const [
+                    DataColumn(
+                      label: SizedBox(width: 220, child: Text('Applicant')),
+                    ),
+                    DataColumn(
+                      label: SizedBox(width: 200, child: Text('Position')),
+                    ),
+                    DataColumn(
+                      label: SizedBox(width: 84, child: Text('General')),
+                      numeric: true,
+                    ),
+                    DataColumn(
+                      label: SizedBox(width: 84, child: Text('Math')),
+                      numeric: true,
+                    ),
+                    DataColumn(
+                      label: SizedBox(width: 92, child: Text('Gen. info')),
+                      numeric: true,
+                    ),
+                    DataColumn(
+                      label: SizedBox(width: 74, child: Text('BEI')),
+                      numeric: true,
+                    ),
+                    DataColumn(
+                      label: SizedBox(width: 96, child: Text('Grade')),
+                    ),
+                    DataColumn(
+                      label: SizedBox(width: 120, child: Text('Result')),
+                    ),
+                  ],
+                  rows: _applications.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final app = entry.value;
+                    final exam = _examResults[app.id.toLowerCase()];
+                    double? generalScore;
+                    double? mathScore;
+                    double? infoScore;
+                    double? beiScore;
+                    final answersJson = exam?.answersJson;
+                    if (answersJson != null) {
+                      generalScore = _sectionScorePercent(
+                        answersJson,
+                        'general',
+                      );
+                      mathScore = _sectionScorePercent(answersJson, 'math');
+                      infoScore = _sectionScorePercent(
+                        answersJson,
+                        'general_info',
+                      );
+                      beiScore = _beiSectionScorePercent(answersJson);
+                    }
 
-                  String scoreLabel(double? v) =>
-                      v == null ? '—' : '${v.toStringAsFixed(0)}%';
+                    String scoreLabel(double? v) =>
+                        v == null ? '—' : '${v.toStringAsFixed(0)}%';
 
-                  final canGradeBei = exam != null && _hasBeiAnswers(exam);
+                    final canGradeBei = exam != null && _hasBeiAnswers(exam);
 
-                  return DataRow(
-                    cells: [
-                      DataCell(
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(
-                            minWidth: 150,
-                            maxWidth: 220,
-                          ),
-                          child: Text(
-                            app.fullName,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            softWrap: true,
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(
-                            minWidth: 80,
-                            maxWidth: 140,
-                          ),
-                          child: Text(
-                            (app.positionAppliedFor != null &&
-                                    app.positionAppliedFor!.trim().isNotEmpty)
-                                ? app.positionAppliedFor!.trim()
-                                : '—',
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            softWrap: true,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: AppTheme.textSecondary.withValues(
-                                alpha: 0.95,
+                    return DataRow(
+                      color: WidgetStateProperty.resolveWith((states) {
+                        if (index.isOdd) {
+                          return AppTheme.sectionAlt.withValues(alpha: 0.62);
+                        }
+                        return AppTheme.white;
+                      }),
+                      cells: [
+                        DataCell(
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(
+                              minWidth: 220,
+                              maxWidth: 300,
+                            ),
+                            child: Text(
+                              app.fullName,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              softWrap: true,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13.5,
                               ),
                             ),
                           ),
                         ),
-                      ),
-                      DataCell(
-                        Text(
-                          scoreLabel(generalScore),
-                          textAlign: TextAlign.end,
-                          style: _scoreBreakdownScoreStyle(
-                            isNA: generalScore == null,
-                            value: generalScore,
+                        DataCell(
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(
+                              minWidth: 200,
+                              maxWidth: 280,
+                            ),
+                            child: Text(
+                              (app.positionAppliedFor != null &&
+                                      app.positionAppliedFor!.trim().isNotEmpty)
+                                  ? app.positionAppliedFor!.trim()
+                                  : '—',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              softWrap: true,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: AppTheme.textSecondary.withValues(
+                                  alpha: 0.95,
+                                ),
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                      DataCell(
-                        Text(
-                          scoreLabel(mathScore),
-                          textAlign: TextAlign.end,
-                          style: _scoreBreakdownScoreStyle(
-                            isNA: mathScore == null,
-                            value: mathScore,
+                        DataCell(
+                          Text(
+                            scoreLabel(generalScore),
+                            textAlign: TextAlign.end,
+                            style: _scoreBreakdownScoreStyle(
+                              isNA: generalScore == null,
+                              value: generalScore,
+                            ),
                           ),
                         ),
-                      ),
-                      DataCell(
-                        Text(
-                          scoreLabel(infoScore),
-                          textAlign: TextAlign.end,
-                          style: _scoreBreakdownScoreStyle(
-                            isNA: infoScore == null,
-                            value: infoScore,
+                        DataCell(
+                          Text(
+                            scoreLabel(mathScore),
+                            textAlign: TextAlign.end,
+                            style: _scoreBreakdownScoreStyle(
+                              isNA: mathScore == null,
+                              value: mathScore,
+                            ),
                           ),
                         ),
-                      ),
-                      DataCell(
-                        Text(
-                          scoreLabel(beiScore),
-                          textAlign: TextAlign.end,
-                          style: _scoreBreakdownScoreStyle(
-                            isNA: beiScore == null,
-                            value: beiScore,
+                        DataCell(
+                          Text(
+                            scoreLabel(infoScore),
+                            textAlign: TextAlign.end,
+                            style: _scoreBreakdownScoreStyle(
+                              isNA: infoScore == null,
+                              value: infoScore,
+                            ),
                           ),
                         ),
-                      ),
-                      DataCell(
-                        Center(
-                          child: canGradeBei
-                              ? IconButton(
-                                  tooltip: 'Grade BEI',
-                                  icon: Icon(
-                                    Icons.rate_review_outlined,
-                                    color: AppTheme.primaryNavy,
-                                    size: 22,
-                                  ),
-                                  onPressed: () {
-                                    showRspBeiGradingDialog(
-                                      context: dialogContext,
-                                      applicant: app,
-                                      exam: exam,
-                                      onSaved: _load,
-                                    );
-                                  },
-                                )
-                              : Tooltip(
-                                  message: 'No BEI answers on file',
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(8),
-                                    child: Icon(
-                                      Icons.remove_rounded,
-                                      size: 20,
-                                      color: AppTheme.textSecondary.withValues(
-                                        alpha: 0.3,
+                        DataCell(
+                          Text(
+                            scoreLabel(beiScore),
+                            textAlign: TextAlign.end,
+                            style: _scoreBreakdownScoreStyle(
+                              isNA: beiScore == null,
+                              value: beiScore,
+                            ),
+                          ),
+                        ),
+                        DataCell(
+                          Center(
+                            child: canGradeBei
+                                ? IconButton.filled(
+                                    tooltip: 'Grade BEI',
+                                    style: IconButton.styleFrom(
+                                      backgroundColor: AppTheme.primaryNavy
+                                          .withValues(alpha: 0.14),
+                                      foregroundColor: AppTheme.primaryNavy,
+                                      padding: const EdgeInsets.all(10),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                        side: BorderSide(
+                                          color: AppTheme.primaryNavy
+                                              .withValues(alpha: 0.35),
+                                        ),
+                                      ),
+                                    ),
+                                    icon: const Icon(
+                                      Icons.rate_review_rounded,
+                                      size: 22,
+                                    ),
+                                    onPressed: () {
+                                      showRspBeiGradingDialog(
+                                        context: dialogContext,
+                                        applicant: app,
+                                        exam: exam,
+                                        onSaved: _load,
+                                      );
+                                    },
+                                  )
+                                : Tooltip(
+                                    message: 'No BEI answers on file',
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(8),
+                                      child: Icon(
+                                        Icons.remove_rounded,
+                                        size: 20,
+                                        color: AppTheme.textSecondary
+                                            .withValues(alpha: 0.35),
                                       ),
                                     ),
                                   ),
-                                ),
+                          ),
                         ),
-                      ),
-                      DataCell(_scoreBreakdownStatusPill(exam: exam)),
-                    ],
-                  );
-                }).toList(),
+                        DataCell(_scoreBreakdownStatusPill(exam: exam)),
+                      ],
+                    );
+                  }).toList(),
+                ),
               ),
             ),
           ),
@@ -8782,37 +9232,89 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
       context: context,
       builder: (ctx) {
         final hasData = _applications.isNotEmpty;
-        final borderColor = Colors.black.withValues(alpha: 0.08);
         return AlertDialog(
-          backgroundColor: AppTheme.offWhite,
+          backgroundColor: AppTheme.white,
+          surfaceTintColor: Colors.transparent,
           insetPadding: const EdgeInsets.symmetric(
-            horizontal: 20,
-            vertical: 24,
+            horizontal: 18,
+            vertical: 22,
           ),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(22),
           ),
-          titlePadding: const EdgeInsets.fromLTRB(24, 22, 24, 8),
-          contentPadding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-          title: Column(
+          titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+          contentPadding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 20, 16),
+          title: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Applicant score breakdown',
-                style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.3,
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  gradient: LinearGradient(
+                    colors: [
+                      AppTheme.primaryNavy.withValues(alpha: 0.14),
+                      AppTheme.primaryNavy.withValues(alpha: 0.06),
+                    ],
+                  ),
+                  border: Border.all(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.2),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Icon(
+                  Icons.analytics_rounded,
+                  size: 28,
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.95),
                 ),
               ),
-              const SizedBox(height: 6),
-              Text(
-                'Summary of screening scores by section. Grade BEI from the icon column when answers exist.',
-                style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 13,
-                  height: 1.35,
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Applicant score breakdown',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 23,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.55,
+                        height: 1.12,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'View section scores below. Grade BEI from the Grade column when answers exist; overall scores update automatically.',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary.withValues(alpha: 0.92),
+                        fontSize: 14,
+                        height: 1.5,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Container(
+                      height: 4,
+                      width: 52,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(4),
+                        gradient: LinearGradient(
+                          colors: [
+                            AppTheme.primaryNavy,
+                            AppTheme.primaryNavy.withValues(alpha: 0.4),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -8821,46 +9323,81 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
               ? Builder(
                   builder: (_) {
                     final mq = MediaQuery.sizeOf(ctx);
-                    final contentWidth = (mq.width - 48).clamp(280.0, 1120.0);
-                    final contentHeight = (mq.height * 0.58).clamp(
-                      300.0,
-                      560.0,
+                    final contentWidth = (mq.width - 36).clamp(300.0, 1080.0);
+                    final contentHeight = (mq.height * 0.68).clamp(
+                      360.0,
+                      720.0,
                     );
-                    final useWide = contentWidth >= 760;
-                    final table = _buildScoreBreakdownDataTable(ctx);
-                    final side = _scoreBreakdownSidePanel();
                     return SizedBox(
                       width: contentWidth,
                       height: contentHeight,
-                      child: useWide
-                          ? Row(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                Expanded(flex: 13, child: table),
-                                VerticalDivider(
-                                  width: 1,
-                                  thickness: 1,
-                                  color: borderColor,
-                                ),
-                                Expanded(
-                                  flex: 9,
-                                  child: SingleChildScrollView(
-                                    padding: const EdgeInsets.only(left: 14),
-                                    child: side,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(18),
+                          color: AppTheme.white,
+                          border: Border.all(
+                            color: Colors.black.withValues(alpha: 0.07),
+                          ),
+                          boxShadow: AppTheme.panelShadow,
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(18),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: [
+                                        AppTheme.sectionAlt.withValues(
+                                          alpha: 0.45,
+                                        ),
+                                        AppTheme.sectionAlt.withValues(
+                                          alpha: 0.2,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(12),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(14),
+                                      child: DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.white,
+                                          borderRadius: BorderRadius.circular(
+                                            14,
+                                          ),
+                                          border: Border.all(
+                                            color: Colors.black.withValues(
+                                              alpha: 0.06,
+                                            ),
+                                          ),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.black.withValues(
+                                                alpha: 0.05,
+                                              ),
+                                              blurRadius: 16,
+                                              offset: const Offset(0, 6),
+                                            ),
+                                          ],
+                                        ),
+                                        child: _buildScoreBreakdownDataTable(
+                                          ctx,
+                                        ),
+                                      ),
+                                    ),
                                   ),
                                 ),
-                              ],
-                            )
-                          : SingleChildScrollView(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  table,
-                                  const SizedBox(height: 16),
-                                  side,
-                                ],
                               ),
-                            ),
+                            ],
+                          ),
+                        ),
+                      ),
                     );
                   },
                 )
@@ -8879,20 +9416,26 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                   ),
                 ),
           actions: [
-            FilledButton(
+            FilledButton.icon(
               onPressed: () => Navigator.of(ctx).pop(),
+              icon: const Icon(Icons.check_rounded, size: 20),
+              label: const Text(
+                'Close',
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+              ),
               style: FilledButton.styleFrom(
                 backgroundColor: AppTheme.primaryNavy,
                 foregroundColor: AppTheme.white,
+                elevation: 2,
+                shadowColor: AppTheme.primaryNavy.withValues(alpha: 0.4),
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 12,
+                  horizontal: 26,
+                  vertical: 14,
                 ),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              child: const Text('Close'),
             ),
           ],
         );
@@ -9084,8 +9627,106 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     return TableCell(
       verticalAlignment: TableCellVerticalAlignment.middle,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: SizedBox(width: width, child: child),
+      ),
+    );
+  }
+
+  /// Readable status pill with color by outcome (tooltip shows raw value).
+  Widget _applicationStatusBadge(String status) {
+    final raw = status.trim();
+    final s = raw.toLowerCase();
+    late Color bg;
+    late Color fg;
+    late IconData icon;
+    if (s.contains('passed') ||
+        s == 'registered' ||
+        s.contains('approved') ||
+        s.contains('hire')) {
+      bg = const Color(0xFFE8F5E9);
+      fg = const Color(0xFF2E7D32);
+      icon = Icons.check_circle_outline_rounded;
+    } else if (s.contains('declined') ||
+        s.contains('failed') ||
+        s.contains('reject')) {
+      bg = const Color(0xFFFFEBEE);
+      fg = const Color(0xFFC62828);
+      icon = Icons.cancel_outlined;
+    } else if (s.contains('pending') ||
+        s.contains('submitted') ||
+        s.contains('review') ||
+        s.contains('exam')) {
+      bg = AppTheme.primaryNavy.withValues(alpha: 0.12);
+      fg = AppTheme.primaryNavyDark;
+      icon = Icons.schedule_rounded;
+    } else {
+      bg = AppTheme.sectionAlt;
+      fg = AppTheme.textSecondary;
+      icon = Icons.label_outline_rounded;
+    }
+    final display = raw.isEmpty ? _kNa : raw.replaceAll('_', ' ');
+    return Tooltip(
+      message: raw.isEmpty ? '' : raw,
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 158),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+            decoration: BoxDecoration(
+              color: bg,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: fg.withValues(alpha: 0.22)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 4,
+                  offset: const Offset(0, 1),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 14, color: fg),
+                const SizedBox(width: 5),
+                Flexible(
+                  child: Text(
+                    display,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: fg,
+                      height: 1.25,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _examOutcomeChip(bool passed) {
+    final fg = passed ? const Color(0xFF2E7D32) : const Color(0xFFC62828);
+    final bg = passed ? const Color(0xFFE8F5E9) : const Color(0xFFFFEBEE);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: fg.withValues(alpha: 0.25)),
+      ),
+      child: Text(
+        passed ? 'Passed' : 'Failed',
+        maxLines: 1,
+        softWrap: false,
+        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: fg),
       ),
     );
   }
@@ -9096,35 +9737,48 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Text(
               'Applications & Exam Results',
               style: TextStyle(
                 color: AppTheme.textPrimary,
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
+                fontSize: 24,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.35,
+                height: 1.2,
               ),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 8),
             IconButton(
-              icon: const Icon(Icons.refresh_rounded),
+              icon: const Icon(Icons.refresh_rounded, size: 22),
               onPressed: _loading ? null : _load,
               tooltip: 'Refresh',
+              style: IconButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
             ),
             const SizedBox(width: 8),
-            OutlinedButton.icon(
-              onPressed: _loading ? null : _showApplicantScoreBreakdownDialog,
-              icon: const Icon(Icons.assessment_rounded, size: 18),
-              label: const Text('View Scores'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-                side: const BorderSide(color: AppTheme.primaryNavy, width: 2),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+            Tooltip(
+              message:
+                  'Open the score table to grade BEI, see section scores, and pass/fail.',
+              child: OutlinedButton.icon(
+                onPressed: _loading ? null : _showApplicantScoreBreakdownDialog,
+                icon: const Icon(Icons.assessment_rounded, size: 18),
+                label: const Text('View score'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.primaryNavy,
+                  side: BorderSide(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.85),
+                    width: 1.5,
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
               ),
             ),
@@ -9147,54 +9801,89 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                 ),
                 style: TextButton.styleFrom(
                   foregroundColor: AppTheme.primaryNavy,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 8,
+                  ),
                 ),
               ),
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
         Text(
-          'Monitor all documents (basic info) and screening exam results from applicants.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          'Monitor all documents (basic info) and screening exam results from applicants. '
+          'Use View score to open the score table — grade BEI and review section results there.',
+          style: TextStyle(
+            color: AppTheme.textSecondary.withValues(alpha: 0.95),
+            fontSize: 14,
+            height: 1.45,
+            fontWeight: FontWeight.w500,
+          ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 20),
         Container(
           decoration: BoxDecoration(
             color: AppTheme.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.black.withValues(alpha: 0.07)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
+                color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                blurRadius: 28,
+                offset: const Offset(0, 12),
+              ),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.07),
+                blurRadius: 20,
+                offset: const Offset(0, 7),
+              ),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
               ),
             ],
           ),
-          child: _loading
-              ? const Padding(
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                height: 4,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
+                  ),
+                ),
+              ),
+              if (_loading)
+                const Padding(
                   padding: EdgeInsets.all(48),
                   child: Center(child: CircularProgressIndicator()),
                 )
-              : _applications.isEmpty
-              ? Padding(
+              else if (_applications.isEmpty)
+                Padding(
                   padding: const EdgeInsets.all(32),
                   child: Center(
                     child: Text(
                       'No applications yet. Applicants will appear here after they submit Step 1 from the recruitment flow.',
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.textSecondary.withValues(alpha: 0.92),
                         fontSize: 14,
+                        height: 1.45,
                       ),
                     ),
                   ),
                 )
-              : LayoutBuilder(
+              else
+                LayoutBuilder(
                   builder: (context, constraints) {
                     final scrollWidth = constraints.maxWidth.isFinite
                         ? constraints.maxWidth
                         : MediaQuery.sizeOf(context).width;
-                    const fixedTableWidth = 2234.0;
+                    const fixedTableWidth = 2698.0;
                     final tableWidth = scrollWidth > fixedTableWidth
                         ? scrollWidth
                         : fixedTableWidth;
@@ -9215,39 +9904,97 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                               constraints: BoxConstraints(minWidth: tableWidth),
                               child: Table(
                                 columnWidths: {
-                                  0: const FixedColumnWidth(160),
-                                  1: const FixedColumnWidth(260),
-                                  2: const FixedColumnWidth(140),
-                                  3: const FixedColumnWidth(200),
-                                  4: const FixedColumnWidth(170),
-                                  5: const FixedColumnWidth(76),
-                                  6: const FixedColumnWidth(108),
-                                  7: const FixedColumnWidth(188),
-                                  8: const FixedColumnWidth(188),
-                                  9: const FixedColumnWidth(188),
-                                  10: const FixedColumnWidth(200),
-                                  11: const FixedColumnWidth(248),
-                                  12: const FixedColumnWidth(108),
+                                  0: const FixedColumnWidth(140), // First
+                                  1: const FixedColumnWidth(140), // Middle
+                                  2: const FixedColumnWidth(140), // Last
+                                  3: const FixedColumnWidth(90), // Suffix
+                                  4: const FixedColumnWidth(90), // Gender
+                                  5: const FixedColumnWidth(260), // Email
+                                  6: const FixedColumnWidth(140), // Phone
+                                  7: const FixedColumnWidth(
+                                    200,
+                                  ), // Position applied
+                                  8: const FixedColumnWidth(170), // Status
+                                  9: const FixedColumnWidth(100), // Exam
+                                  10: const FixedColumnWidth(108), // Exam score
+                                  11: const FixedColumnWidth(
+                                    188,
+                                  ), // Application letter
+                                  12: const FixedColumnWidth(188), // Resume
+                                  13: const FixedColumnWidth(188), // TOR
+                                  14: const FixedColumnWidth(
+                                    200,
+                                  ), // Eligibility/trainings
+                                  15: const FixedColumnWidth(
+                                    248,
+                                  ), // Document review
+                                  16: const FixedColumnWidth(108), // Actions
                                 },
                                 defaultVerticalAlignment:
                                     TableCellVerticalAlignment.middle,
                                 border: TableBorder.symmetric(
                                   inside: BorderSide(
-                                    color: Colors.black.withOpacity(0.08),
+                                    color: Colors.black.withValues(alpha: 0.07),
                                   ),
                                 ),
                                 children: [
                                   TableRow(
                                     decoration: BoxDecoration(
-                                      color: AppTheme.primaryNavy.withOpacity(
-                                        0.08,
+                                      color: AppTheme.primaryNavy.withValues(
+                                        alpha: 0.1,
+                                      ),
+                                      border: Border(
+                                        bottom: BorderSide(
+                                          color: AppTheme.primaryNavy
+                                              .withValues(alpha: 0.15),
+                                        ),
                                       ),
                                     ),
                                     children: [
                                       _tableCell(
-                                        160,
+                                        140,
                                         const Text(
-                                          'Name',
+                                          'First name',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ),
+                                      _tableCell(
+                                        140,
+                                        const Text(
+                                          'Middle name',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ),
+                                      _tableCell(
+                                        140,
+                                        const Text(
+                                          'Last name',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ),
+                                      _tableCell(
+                                        90,
+                                        const Text(
+                                          'Suffix',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ),
+                                      _tableCell(
+                                        90,
+                                        const Text(
+                                          'Gender',
                                           style: TextStyle(
                                             fontWeight: FontWeight.w700,
                                             fontSize: 13,
@@ -9295,7 +10042,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         ),
                                       ),
                                       _tableCell(
-                                        76,
+                                        100,
                                         const Text(
                                           'Exam',
                                           style: TextStyle(
@@ -9307,7 +10054,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                       _tableCell(
                                         108,
                                         const Text(
-                                          'Score / BEI',
+                                          'Exam score',
                                           style: TextStyle(
                                             fontWeight: FontWeight.w700,
                                             fontSize: 12,
@@ -9376,26 +10123,110 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                       ),
                                     ],
                                   ),
-                                  ..._applications.map((app) {
+                                  ...List.generate(_applications.length, (ri) {
+                                    final app = _applications[ri];
                                     final exam =
                                         _examResults[app.id.toLowerCase()];
                                     final textStyle = TextStyle(
                                       fontSize: 13,
                                       color: AppTheme.textPrimary,
+                                      fontWeight: FontWeight.w500,
                                     );
+                                    String? beiSummaryLine;
+                                    if (exam != null && _hasBeiAnswers(exam)) {
+                                      final beiPct = _beiSectionScorePercent(
+                                        exam.answersJson,
+                                      );
+                                      beiSummaryLine = beiPct == null
+                                          ? 'BEI: pending'
+                                          : 'BEI: ${beiPct.toStringAsFixed(0)}%';
+                                    }
+
+                                    final full = app.fullName.trim();
+                                    final parts = full
+                                        .split(RegExp(r'\s+'))
+                                        .where((p) => p.trim().isNotEmpty)
+                                        .toList();
+                                    final fallbackFirst = parts.isNotEmpty
+                                        ? parts.first
+                                        : '—';
+                                    final fallbackLast = parts.length >= 2
+                                        ? parts.last
+                                        : '—';
+                                    final firstName =
+                                        (app.firstName ?? '').trim().isNotEmpty
+                                        ? app.firstName!.trim()
+                                        : fallbackFirst;
+                                    final middleName = (app.middleName ?? '')
+                                        .trim();
+                                    final lastName =
+                                        (app.lastName ?? '').trim().isNotEmpty
+                                        ? app.lastName!.trim()
+                                        : fallbackLast;
+                                    final suffix = (app.suffix ?? '').trim();
+                                    final gender = (app.sex ?? '').trim();
+
                                     return TableRow(
+                                      decoration: ri.isOdd
+                                          ? BoxDecoration(
+                                              color: AppTheme.sectionAlt
+                                                  .withValues(alpha: 0.4),
+                                            )
+                                          : null,
                                       children: [
                                         _tableCell(
-                                          160,
+                                          140,
                                           Tooltip(
                                             message: app.fullName,
                                             child: Text(
-                                              app.fullName,
+                                              firstName,
                                               style: textStyle,
                                               overflow: TextOverflow.ellipsis,
                                               maxLines: 2,
                                               softWrap: true,
                                             ),
+                                          ),
+                                        ),
+                                        _tableCell(
+                                          140,
+                                          Text(
+                                            middleName.isEmpty
+                                                ? '—'
+                                                : middleName,
+                                            style: textStyle,
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 2,
+                                            softWrap: true,
+                                          ),
+                                        ),
+                                        _tableCell(
+                                          140,
+                                          Text(
+                                            lastName,
+                                            style: textStyle,
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 2,
+                                            softWrap: true,
+                                          ),
+                                        ),
+                                        _tableCell(
+                                          90,
+                                          Text(
+                                            suffix.isEmpty ? '—' : suffix,
+                                            style: textStyle,
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 1,
+                                            softWrap: false,
+                                          ),
+                                        ),
+                                        _tableCell(
+                                          90,
+                                          Text(
+                                            gender.isEmpty ? '—' : gender,
+                                            style: textStyle,
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 1,
+                                            softWrap: false,
                                           ),
                                         ),
                                         _tableCell(
@@ -9442,71 +10273,66 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         ),
                                         _tableCell(
                                           170,
-                                          Tooltip(
-                                            message: app.status,
-                                            child: Text(
-                                              app.status,
-                                              style: textStyle,
-                                              overflow: TextOverflow.ellipsis,
-                                              maxLines: 1,
-                                            ),
-                                          ),
+                                          _applicationStatusBadge(app.status),
                                         ),
                                         _tableCell(
-                                          76,
-                                          Text(
-                                            exam == null
-                                                ? _kNa
-                                                : (exam.passed
-                                                      ? 'Passed'
-                                                      : 'Failed'),
-                                            style: textStyle,
-                                          ),
+                                          100,
+                                          exam == null
+                                              ? Text(
+                                                  _kNa,
+                                                  style: textStyle.copyWith(
+                                                    color:
+                                                        AppTheme.textSecondary,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                )
+                                              : Align(
+                                                  alignment:
+                                                      Alignment.centerLeft,
+                                                  child: _examOutcomeChip(
+                                                    exam.passed,
+                                                  ),
+                                                ),
                                         ),
                                         _tableCell(
                                           108,
                                           exam == null
                                               ? Text(_kNa, style: textStyle)
-                                              : Column(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.start,
-                                                  mainAxisSize:
-                                                      MainAxisSize.min,
-                                                  children: [
-                                                    Text(
-                                                      '${exam.scorePercent.toStringAsFixed(0)}%',
-                                                      style: textStyle,
-                                                    ),
-                                                    if (_hasBeiAnswers(exam))
-                                                      TextButton(
-                                                        style: TextButton.styleFrom(
-                                                          padding:
-                                                              EdgeInsets.zero,
-                                                          minimumSize:
-                                                              Size.zero,
-                                                          tapTargetSize:
-                                                              MaterialTapTargetSize
-                                                                  .shrinkWrap,
-                                                          foregroundColor:
-                                                              AppTheme
-                                                                  .primaryNavy,
+                                              : Tooltip(
+                                                  message:
+                                                      'Open View score to grade BEI and see all sections.',
+                                                  child: Column(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    children: [
+                                                      Text(
+                                                        '${exam.scorePercent.toStringAsFixed(0)}%',
+                                                        style: textStyle,
+                                                      ),
+                                                      if (beiSummaryLine !=
+                                                          null) ...[
+                                                        const SizedBox(
+                                                          height: 2,
                                                         ),
-                                                        onPressed: () =>
-                                                            _openBeiGrading(
-                                                              context,
-                                                              app,
-                                                              exam,
-                                                            ),
-                                                        child: const Text(
-                                                          'Grade BEI',
+                                                        Text(
+                                                          beiSummaryLine,
                                                           style: TextStyle(
                                                             fontSize: 11,
                                                             fontWeight:
                                                                 FontWeight.w600,
+                                                            color: AppTheme
+                                                                .textSecondary
+                                                                .withValues(
+                                                                  alpha: 0.9,
+                                                                ),
                                                           ),
                                                         ),
-                                                      ),
-                                                  ],
+                                                      ],
+                                                    ],
+                                                  ),
                                                 ),
                                         ),
                                         TableCell(
@@ -9658,6 +10484,8 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                     );
                   },
                 ),
+            ],
+          ),
         ),
       ],
     );

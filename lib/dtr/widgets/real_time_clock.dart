@@ -83,19 +83,20 @@ class _RealTimeClockState extends State<RealTimeClock> {
 
   @override
   Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       decoration: BoxDecoration(
-        color: AppTheme.white,
+        color: dark ? AppTheme.dashPanelOf(context) : AppTheme.white,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: dark ? 0.35 : 0.06),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
         ],
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -116,7 +117,7 @@ class _RealTimeClockState extends State<RealTimeClock> {
                 style: TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.w700,
-                  color: AppTheme.textPrimary,
+                  color: AppTheme.dashTextPrimaryOf(context),
                   fontFeatures: [const FontFeature.tabularFigures()],
                 ),
               ),
@@ -130,7 +131,7 @@ class _RealTimeClockState extends State<RealTimeClock> {
                 _dateStr,
                 style: TextStyle(
                   fontSize: 12,
-                  color: AppTheme.textSecondary,
+                  color: AppTheme.dashTextSecondaryOf(context),
                   fontWeight: FontWeight.w500,
                 ),
               ),

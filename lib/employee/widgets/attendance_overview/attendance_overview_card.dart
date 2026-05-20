@@ -165,18 +165,7 @@ class _EmployeeAttendanceOverviewCardState
 
     return Container(
       padding: EdgeInsets.all(pad),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.07)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+      decoration: AppTheme.dashSurfaceCard(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -186,7 +175,7 @@ class _EmployeeAttendanceOverviewCardState
             Divider(
               height: 1,
               thickness: 1,
-              color: Colors.black.withValues(alpha: 0.07),
+              color: AppTheme.dashHairlineOf(context),
             ),
             SizedBox(height: narrow ? 14 : 18),
           ],
@@ -250,7 +239,8 @@ class _EmployeeAttendanceOverviewCardState
                         style: TextStyle(
                           fontSize: 10.5,
                           height: 1.35,
-                          color: AppTheme.textSecondary.withValues(alpha: 0.8),
+                          color: AppTheme.dashTextSecondaryOf(context)
+                              .withValues(alpha: 0.85),
                         ),
                       ),
                     ),
@@ -263,7 +253,7 @@ class _EmployeeAttendanceOverviewCardState
             Divider(
               height: 1,
               thickness: 1,
-              color: Colors.black.withValues(alpha: 0.07),
+              color: AppTheme.dashHairlineOf(context),
             ),
             SizedBox(height: narrow ? 12 : 14),
             leaveSection,
@@ -294,13 +284,13 @@ class _AttendanceOverviewHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final titleStyle = TextStyle(
-      color: AppTheme.textPrimary,
+      color: AppTheme.dashTextPrimaryOf(context),
       fontWeight: FontWeight.w800,
       fontSize: narrow ? 16 : 17,
       letterSpacing: -0.3,
     );
     final subtitleStyle = TextStyle(
-      color: AppTheme.textSecondary.withValues(alpha: 0.9),
+      color: AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.92),
       fontSize: narrow ? 11.5 : 12,
       fontWeight: FontWeight.w500,
       height: 1.25,
@@ -317,7 +307,7 @@ class _AttendanceOverviewHeader extends StatelessWidget {
         ? TextButton(
             onPressed: onViewMore,
             style: TextButton.styleFrom(
-              foregroundColor: AppTheme.primaryNavy,
+              foregroundColor: Theme.of(context).colorScheme.primary,
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               minimumSize: Size.zero,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -384,9 +374,9 @@ class _MonthNavPill extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: AppTheme.lightGray.withValues(alpha: 0.45),
+        color: AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -401,7 +391,7 @@ class _MonthNavPill extends StatelessWidget {
               child: Icon(
                 Icons.chevron_left_rounded,
                 size: 22,
-                color: AppTheme.textPrimary,
+                color: AppTheme.dashTextPrimaryOf(context),
               ),
             ),
           ),
@@ -412,7 +402,7 @@ class _MonthNavPill extends StatelessWidget {
               style: TextStyle(
                 fontWeight: FontWeight.w700,
                 fontSize: 13,
-                color: AppTheme.textPrimary,
+                color: AppTheme.dashTextPrimaryOf(context),
               ),
             ),
           ),
@@ -427,8 +417,9 @@ class _MonthNavPill extends StatelessWidget {
                 Icons.chevron_right_rounded,
                 size: 22,
                 color: canGoNext
-                    ? AppTheme.textPrimary
-                    : AppTheme.textSecondary.withValues(alpha: 0.35),
+                    ? AppTheme.dashTextPrimaryOf(context)
+                    : AppTheme.dashTextSecondaryOf(context)
+                        .withValues(alpha: 0.35),
               ),
             ),
           ),
@@ -466,9 +457,9 @@ class _DistributionPanel extends StatelessWidget {
         narrow ? 10 : 12,
       ),
       decoration: BoxDecoration(
-        color: AppTheme.offWhite.withValues(alpha: 0.55),
+        color: AppTheme.dashMutedSurfaceOf(context).withValues(alpha: 0.72),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -482,7 +473,7 @@ class _DistributionPanel extends StatelessWidget {
                 style: TextStyle(
                   fontWeight: FontWeight.w700,
                   fontSize: narrow ? 12.5 : 13,
-                  color: AppTheme.textPrimary,
+                  color: AppTheme.dashTextPrimaryOf(context),
                 ),
               ),
               const Spacer(),
@@ -491,7 +482,8 @@ class _DistributionPanel extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w600,
-                  color: AppTheme.textSecondary.withValues(alpha: 0.9),
+                  color: AppTheme.dashTextSecondaryOf(context)
+                      .withValues(alpha: 0.9),
                 ),
               ),
             ],
@@ -501,7 +493,8 @@ class _DistributionPanel extends StatelessWidget {
             _throughLine(),
             style: TextStyle(
               fontSize: 10.5,
-              color: AppTheme.textSecondary.withValues(alpha: 0.78),
+              color: AppTheme.dashTextSecondaryOf(context)
+                  .withValues(alpha: 0.78),
             ),
           ),
           SizedBox(height: narrow ? 8 : 10),
@@ -526,16 +519,16 @@ class _EmptyBody extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 14),
       decoration: BoxDecoration(
-        color: AppTheme.offWhite.withValues(alpha: 0.45),
+        color: AppTheme.dashMutedSurfaceOf(context).withValues(alpha: 0.55),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Column(
         children: [
           Icon(
             Icons.inbox_outlined,
             size: 36,
-            color: AppTheme.textSecondary.withValues(alpha: 0.4),
+            color: AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.45),
           ),
           const SizedBox(height: 10),
           Text(
@@ -543,7 +536,7 @@ class _EmptyBody extends StatelessWidget {
             style: TextStyle(
               fontWeight: FontWeight.w700,
               fontSize: 14,
-              color: AppTheme.textPrimary,
+              color: AppTheme.dashTextPrimaryOf(context),
             ),
           ),
           const SizedBox(height: 5),
@@ -554,7 +547,8 @@ class _EmptyBody extends StatelessWidget {
             style: TextStyle(
               fontSize: 12,
               height: 1.4,
-              color: AppTheme.textSecondary.withValues(alpha: 0.92),
+              color: AppTheme.dashTextSecondaryOf(context)
+                  .withValues(alpha: 0.92),
             ),
           ),
         ],

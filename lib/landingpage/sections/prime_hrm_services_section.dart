@@ -118,10 +118,13 @@ class _ServiceCardState extends State<_ServiceCard> {
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
           color: _hover ? AppTheme.offWhite : AppTheme.white,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: _hover ? AppTheme.primaryNavy.withOpacity(0.2) : AppTheme.lightGray,
+            color: _hover
+                ? AppTheme.primaryNavy.withValues(alpha: 0.22)
+                : AppTheme.lightGray,
           ),
+          boxShadow: AppTheme.cardShadow,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -131,8 +134,15 @@ class _ServiceCardState extends State<_ServiceCard> {
               width: 48,
               height: 48,
               decoration: BoxDecoration(
-                color: AppTheme.primaryNavy.withOpacity(0.1),
+                color: AppTheme.primaryNavy.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
               ),
               alignment: Alignment.center,
               child: Icon(widget.icon, color: AppTheme.primaryNavy, size: 28),

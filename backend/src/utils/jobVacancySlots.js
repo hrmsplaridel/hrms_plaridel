@@ -1,12 +1,33 @@
 const { pool } = require('../config/db');
 
-/** Same "position key" as the Flutter client stores in `position_applied_for` (headline, else body). */
+/** Same "position key" as the Flutter client stores in `position_applied_for` (headline, else body, else first E/E/T). */
 function vacancyPositionKey(v) {
   if (!v || typeof v !== 'object') return '';
   const h = typeof v.headline === 'string' ? v.headline.trim() : '';
   if (h.length) return h.toLowerCase();
   const b = typeof v.body === 'string' ? v.body.trim() : '';
-  return b.length ? b.toLowerCase() : '';
+  if (b.length) return b.toLowerCase();
+  for (const k of ['education', 'experience', 'training']) {
+    const s = typeof v[k] === 'string' ? v[k].trim() : '';
+    if (s.length) return s.toLowerCase();
+  }
+  return '';
+}
+
+function parseClosingDateIso(v) {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  // Interpret the date as end-of-day in UTC to keep it consistent across hosts.
+  const d = new Date(`${s}T23:59:59.999Z`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function isVacancyClosedByDate(v, now = new Date()) {
+  if (!v || typeof v !== 'object') return false;
+  const d = parseClosingDateIso(v.closing_date);
+  if (!d) return false;
+  return now.getTime() > d.getTime();
 }
 
 function parseMaxApplicants(v) {
@@ -91,7 +112,7 @@ async function enrichVacanciesWithApplicationCounts(vacancies) {
   return vacancies.map((v) => {
     const key = vacancyPositionKey(v);
     const application_count = key ? map.get(key) ?? 0 : 0;
-    return { ...v, application_count };
+    return { ...v, application_count, is_closed: isVacancyClosedByDate(v) };
   });
 }
 
@@ -122,6 +143,27 @@ async function assertPositionApplicationSlotAvailable(positionTrimmed) {
   return { ok: true };
 }
 
+/**
+ * Checks both: deadline (closing_date) and max applicants.
+ * @returns {{ ok: true } | { ok: false, status: number, error: string, code?: string }}
+ */
+async function assertPositionAcceptingApplications(positionTrimmed) {
+  const pos = String(positionTrimmed || '').trim();
+  if (!pos) return { ok: true };
+
+  const vacancies = await loadVacanciesFromDb();
+  const vac = findVacancyForPosition(vacancies, pos);
+  if (vac && isVacancyClosedByDate(vac)) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'This hiring is already closed. The due date has passed.',
+      code: 'DEADLINE_PASSED',
+    };
+  }
+  return await assertPositionApplicationSlotAvailable(pos);
+}
+
 module.exports = {
   vacancyPositionKey,
   parseMaxApplicants,
@@ -129,4 +171,7 @@ module.exports = {
   findVacancyForPosition,
   enrichVacanciesWithApplicationCounts,
   assertPositionApplicationSlotAvailable,
+  assertPositionAcceptingApplications,
+  parseClosingDateIso,
+  isVacancyClosedByDate,
 };

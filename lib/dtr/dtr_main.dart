@@ -41,7 +41,7 @@ class _DtrMainState extends State<DtrMain> {
                   Text(
                     'DTR',
                     style: TextStyle(
-                      color: AppTheme.textPrimary,
+                      color: AppTheme.dashTextPrimaryOf(context),
                       fontSize: 22,
                       fontWeight: FontWeight.w700,
                     ),
@@ -52,7 +52,7 @@ class _DtrMainState extends State<DtrMain> {
                         ? 'Daily Time Record.'
                         : 'Daily Time Record. Choose a feature below.',
                     style: TextStyle(
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                       fontSize: 14,
                     ),
                   ),
@@ -72,15 +72,29 @@ class _DtrMainState extends State<DtrMain> {
   }
 
   Widget _buildSectionNav() {
+    final dark = AppTheme.dashIsDark(context);
+
     return Wrap(
       spacing: 12,
       runSpacing: 8,
       children: DtrRoutes.sections.map((section) {
         final isSelected = _currentSection == section;
+        final bg = isSelected
+            ? (dark
+                ? AppTheme.primaryNavy.withValues(alpha: 0.38)
+                : AppTheme.primaryNavy.withValues(alpha: 0.12))
+            : (dark
+                ? AppTheme.dashMutedSurfaceOf(context)
+                : AppTheme.lightGray);
+        final fg = isSelected
+            ? (dark ? Colors.white : AppTheme.primaryNavy)
+            : AppTheme.dashTextPrimaryOf(context);
+        final iconColor = isSelected
+            ? (dark ? Colors.white : AppTheme.primaryNavy)
+            : AppTheme.dashTextSecondaryOf(context);
+
         return Material(
-          color: isSelected
-              ? AppTheme.primaryNavy.withValues(alpha: 0.12)
-              : AppTheme.lightGray,
+          color: bg,
           borderRadius: BorderRadius.circular(8),
           child: InkWell(
             onTap: () => setState(() => _currentSection = section),
@@ -93,17 +107,13 @@ class _DtrMainState extends State<DtrMain> {
                   Icon(
                     _iconForSection(section),
                     size: 20,
-                    color: isSelected
-                        ? AppTheme.primaryNavy
-                        : AppTheme.textSecondary,
+                    color: iconColor,
                   ),
                   const SizedBox(width: 8),
                   Text(
                     section.title,
                     style: TextStyle(
-                      color: isSelected
-                          ? AppTheme.primaryNavy
-                          : AppTheme.textPrimary,
+                      color: fg,
                       fontWeight: isSelected
                           ? FontWeight.w600
                           : FontWeight.w500,

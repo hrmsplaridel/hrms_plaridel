@@ -8,6 +8,30 @@ const router = express.Router();
 const protect = [authMiddleware];
 
 const SALT_ROUNDS = 10;
+const EMPLOYEE_ID_MIN = 100000;
+const EMPLOYEE_ID_MAX = 999999;
+
+function randomEmployeeNumber() {
+  return (
+    Math.floor(Math.random() * (EMPLOYEE_ID_MAX - EMPLOYEE_ID_MIN + 1)) +
+    EMPLOYEE_ID_MIN
+  );
+}
+
+async function allocateEmployeeNumber() {
+  // Try a few times to avoid collisions; fall back to sequence if needed.
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const candidate = randomEmployeeNumber();
+    const exists = await pool.query(
+      'SELECT 1 FROM users WHERE employee_number = $1 LIMIT 1',
+      [candidate]
+    );
+    if (exists.rowCount === 0) return candidate;
+  }
+  // last resort: keep system running even if random keeps colliding
+  const seq = await pool.query("SELECT nextval('users_employee_number_seq') AS n");
+  return parseInt(seq.rows[0].n, 10);
+}
 
 const MAX_PAGE_SIZE = 100;
 const MAX_EXPORT_ROWS = 10000;
@@ -398,10 +422,11 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+    const empNo = await allocateEmployeeNumber();
 
     const result = await pool.query(
       `INSERT INTO users (email, password_hash, role, full_name, middle_name, suffix, sex, date_of_birth, contact_number, address, is_active, employee_number, employment_type, salary_grade, date_hired, employment_status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, true, nextval('users_employee_number_seq'), $11, $12, $13::date, $14)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, true, $11, $12, $13, COALESCE($14::date, CURRENT_DATE), $15)
        RETURNING id, employee_number, email, role, full_name, avatar_path, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address, employment_type, salary_grade, date_hired, employment_status`,
       [
         email.trim().toLowerCase(),
@@ -414,6 +439,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         date_of_birth || null,
         contact_number?.trim() || null,
         address?.trim() || null,
+        empNo,
         (employment_type && ['regular', 'contractual', 'job_order', 'casual'].includes(employment_type)) ? employment_type : null,
         salary_grade?.trim() || null,
         date_hired || null,

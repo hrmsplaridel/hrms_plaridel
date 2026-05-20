@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:hrms_plaridel/main.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
+import 'package:hrms_plaridel/providers/theme_mode_provider.dart';
 import 'package:hrms_plaridel/api/app_user.dart';
 
 class FakeAuthProvider extends AuthProvider {
@@ -41,6 +42,7 @@ void main() {
     await tester.pumpWidget(MyApp(
       auth: auth,
       storedLoginAs: 'Admin',
+      themeNotifier: ThemeModeNotifier(initial: ThemeMode.light),
     ));
 
     // Basic sanity check: the app bootstrapped without throwing.

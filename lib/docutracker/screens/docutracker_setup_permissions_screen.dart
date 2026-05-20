@@ -208,7 +208,7 @@ class _DocuTrackerSetupPermissionsScreenState
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Container(
-              decoration: DocuTrackerStyles.listCardDecoration(),
+              decoration: DocuTrackerStyles.listCardDecoration(context),
               padding: const EdgeInsets.all(20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -276,7 +276,7 @@ class _DocuTrackerSetupPermissionsScreenState
                     DropdownButtonFormField<String>(
                       value: _selectedUserId,
                       decoration:
-                          DocuTrackerStyles.dropdownDecoration('Select user'),
+                          DocuTrackerStyles.dropdownDecoration(context, 'Select user'),
                       items: _employees
                           .map(
                             (e) => DropdownMenuItem(
@@ -317,7 +317,7 @@ class _DocuTrackerSetupPermissionsScreenState
                   DropdownButtonFormField<String>(
                     value: _selectedDocumentType,
                     decoration:
-                        DocuTrackerStyles.dropdownDecoration('Select type'),
+                        DocuTrackerStyles.dropdownDecoration(context, 'Select type'),
                     items: [
                       const DropdownMenuItem(value: '*', child: Text('All (*)')),
                       ...DocumentType.values.map(

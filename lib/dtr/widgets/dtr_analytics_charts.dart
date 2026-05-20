@@ -97,6 +97,14 @@ class AttendanceTrendLineChart extends StatelessWidget {
       );
     }
 
+    final gridColor = AppTheme.dashIsDark(context)
+        ? Colors.white.withValues(alpha: 0.08)
+        : Colors.black.withValues(alpha: 0.06);
+    final borderColor = AppTheme.dashIsDark(context)
+        ? Colors.white.withValues(alpha: 0.12)
+        : Colors.black.withValues(alpha: 0.12);
+    final axisLabelColor = AppTheme.dashTextSecondaryOf(context);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -124,7 +132,7 @@ class AttendanceTrendLineChart extends StatelessWidget {
                 drawVerticalLine: false,
                 horizontalInterval: maxY > 20 ? 5 : (maxY / 5).ceilToDouble(),
                 getDrawingHorizontalLine: (v) => FlLine(
-                  color: Colors.black.withValues(alpha: 0.06),
+                  color: gridColor,
                   strokeWidth: 1,
                 ),
               ),
@@ -192,9 +200,9 @@ class AttendanceTrendLineChart extends StatelessWidget {
                   ),
                   maxContentWidth: 220,
                   // Default fl_chart tooltip is dark; series colors (esp. grey/blue) fail contrast.
-                  getTooltipColor: (_) => Colors.white,
+                  getTooltipColor: (_) => AppTheme.dashPanelOf(context),
                   tooltipBorder: BorderSide(
-                    color: Colors.black.withValues(alpha: 0.12),
+                    color: AppTheme.dashHairlineOf(context),
                   ),
                   getTooltipItems: (touched) {
                     return touched.map((s) {
@@ -276,11 +284,23 @@ class DepartmentIssueBarChart extends StatelessWidget {
           child: Text(
             emptyMessage,
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+            style: TextStyle(
+              fontSize: 13,
+              color: AppTheme.dashTextSecondaryOf(context),
+            ),
           ),
         ),
       );
     }
+
+    final gridColor = AppTheme.dashIsDark(context)
+        ? Colors.white.withValues(alpha: 0.08)
+        : Colors.black.withValues(alpha: 0.06);
+    final borderColor = AppTheme.dashIsDark(context)
+        ? Colors.white.withValues(alpha: 0.12)
+        : Colors.black.withValues(alpha: 0.12);
+    final axisLabelColor = AppTheme.dashTextSecondaryOf(context);
+    final axisPrimaryColor = AppTheme.dashTextPrimaryOf(context);
 
     final maxY =
         ((top.map((e) => e.value).reduce((a, b) => a > b ? a : b) * 1.15)
@@ -312,13 +332,13 @@ class DepartmentIssueBarChart extends StatelessWidget {
               barTouchData: BarTouchData(
                 enabled: true,
                 touchTooltipData: BarTouchTooltipData(
-                  getTooltipColor: (_) => Colors.white,
+                  getTooltipColor: (_) => AppTheme.dashPanelOf(context),
                   getTooltipItem: (group, groupIndex, rod, rodIndex) {
                     final name = top[group.x.toInt()].key;
                     return BarTooltipItem(
                       '$name\n',
                       TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: axisPrimaryColor,
                         fontWeight: FontWeight.w600,
                         fontSize: 12,
                       ),
@@ -326,7 +346,7 @@ class DepartmentIssueBarChart extends StatelessWidget {
                         TextSpan(
                           text: rod.toY.toStringAsFixed(0),
                           style: TextStyle(
-                            color: AppTheme.textPrimary,
+                            color: axisPrimaryColor,
                             fontSize: 14,
                             fontWeight: FontWeight.w800,
                           ),
@@ -350,10 +370,7 @@ class DepartmentIssueBarChart extends StatelessWidget {
                     interval: maxY > 10 ? 5 : 1,
                     getTitlesWidget: (v, m) => Text(
                       v.toInt().toString(),
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: AppTheme.textSecondary,
-                      ),
+                      style: TextStyle(fontSize: 10, color: axisLabelColor),
                     ),
                   ),
                 ),
@@ -378,7 +395,7 @@ class DepartmentIssueBarChart extends StatelessWidget {
                             style: TextStyle(
                               fontSize: 9,
                               fontWeight: FontWeight.w600,
-                              color: AppTheme.textPrimary,
+                              color: axisPrimaryColor,
                             ),
                           ),
                         );
@@ -393,17 +410,15 @@ class DepartmentIssueBarChart extends StatelessWidget {
                 drawVerticalLine: false,
                 horizontalInterval: maxY > 15 ? 5 : 2,
                 getDrawingHorizontalLine: (v) => FlLine(
-                  color: Colors.black.withValues(alpha: 0.06),
+                  color: gridColor,
                   strokeWidth: 1,
                 ),
               ),
               borderData: FlBorderData(
                 show: true,
                 border: Border(
-                  bottom: BorderSide(
-                    color: Colors.black.withValues(alpha: 0.12),
-                  ),
-                  left: BorderSide(color: Colors.black.withValues(alpha: 0.12)),
+                  bottom: BorderSide(color: borderColor),
+                  left: BorderSide(color: borderColor),
                 ),
               ),
               barGroups: List<BarChartGroupData>.generate(top.length, (i) {
@@ -478,7 +493,10 @@ class LeaveDistributionPieChart extends StatelessWidget {
           child: Text(
             'Leave data unavailable (check connection or permissions).',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+            style: TextStyle(
+              fontSize: 13,
+              color: AppTheme.dashTextSecondaryOf(context),
+            ),
           ),
         ),
       );
@@ -493,7 +511,10 @@ class LeaveDistributionPieChart extends StatelessWidget {
           child: Text(
             'No approved leave in this period.',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+            style: TextStyle(
+              fontSize: 13,
+              color: AppTheme.dashTextSecondaryOf(context),
+            ),
           ),
         ),
       );
@@ -588,7 +609,7 @@ class _ChartLegend extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w500,
-                    color: AppTheme.textSecondary,
+                    color: AppTheme.dashTextSecondaryOf(context),
                   ),
                 ),
               ],

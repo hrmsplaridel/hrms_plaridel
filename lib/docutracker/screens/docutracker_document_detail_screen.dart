@@ -191,7 +191,7 @@ class _DocuTrackerDocumentDetailScreenState
   Widget _buildInfoCard(DocuTrackerDocument doc) {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: DocuTrackerStyles.listCardDecoration(),
+      decoration: DocuTrackerStyles.listCardDecoration(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -277,7 +277,7 @@ class _DocuTrackerDocumentDetailScreenState
                       title: const Text('Reject - Remarks'),
                       content: TextField(
                         controller: _remarkController,
-                        decoration: DocuTrackerStyles.inputDecoration(
+                        decoration: DocuTrackerStyles.inputDecoration(context, 
                           'Reason for rejection (required)',
                           Icons.cancel_rounded,
                         ),
@@ -326,7 +326,7 @@ class _DocuTrackerDocumentDetailScreenState
                       title: const Text('Return - Remarks'),
                       content: TextField(
                         controller: _remarkController,
-                        decoration: DocuTrackerStyles.inputDecoration(
+                        decoration: DocuTrackerStyles.inputDecoration(context, 
                           'Reason for return (optional)',
                           Icons.reply_rounded,
                         ),
@@ -396,7 +396,7 @@ class _DocuTrackerDocumentDetailScreenState
                       title: const Text('Add Remark'),
                       content: TextField(
                         controller: _remarkController,
-                        decoration: DocuTrackerStyles.inputDecoration(
+                        decoration: DocuTrackerStyles.inputDecoration(context, 
                           'Enter your remark or comment',
                           Icons.comment_rounded,
                         ),
@@ -440,7 +440,7 @@ class _DocuTrackerDocumentDetailScreenState
   Widget _buildAuditTrail(DocuTrackerProvider provider) {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: DocuTrackerStyles.listCardDecoration(),
+      decoration: DocuTrackerStyles.listCardDecoration(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

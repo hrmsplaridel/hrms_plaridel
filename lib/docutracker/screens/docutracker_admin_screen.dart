@@ -113,7 +113,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
 
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: DocuTrackerStyles.listCardDecoration(),
+      decoration: DocuTrackerStyles.listCardDecoration(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -162,10 +162,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                 SizedBox(
                   width: 180,
                   child: TextField(
-                    decoration: DocuTrackerStyles.inputDecoration(
-                      'User ID',
-                      Icons.person_outline_rounded,
-                    ),
+                    decoration: DocuTrackerStyles.inputDecoration(context, 'User ID', Icons.person_outline_rounded),
                     onChanged: (v) {
                       setState(() => _selectedUserId = v.isEmpty ? null : v);
                       _load();
@@ -379,7 +376,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
   Widget _buildRightPanel(DocuTrackerProvider provider) {
     return Container(
       padding: const EdgeInsets.all(24),
-      decoration: DocuTrackerStyles.listCardDecoration(),
+      decoration: DocuTrackerStyles.listCardDecoration(context),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -535,10 +532,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                                 const SizedBox(height: 8),
                                 DropdownButtonFormField<DocumentAction>(
                                   value: action,
-                                  decoration:
-                                      DocuTrackerStyles.dropdownDecoration(
-                                        'Select action',
-                                      ),
+                                  decoration: DocuTrackerStyles.dropdownDecoration(context, 'Select action'),
                                   items: DocumentAction.values
                                       .map(
                                         (a) => DropdownMenuItem(
@@ -563,10 +557,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                                 const SizedBox(height: 8),
                                 DropdownButtonFormField<String>(
                                   value: documentType,
-                                  decoration:
-                                      DocuTrackerStyles.dropdownDecoration(
-                                        'Select type',
-                                      ),
+                                  decoration: DocuTrackerStyles.dropdownDecoration(context, 'Select type'),
                                   items: [
                                     const DropdownMenuItem(
                                       value: '*',
@@ -629,23 +620,13 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                                 ),
                                 const SizedBox(height: 8),
                                 TextField(
-                                  decoration: DocuTrackerStyles.inputDecoration(
-                                    'Role ID (e.g. admin, hr_staff)',
-                                    Icons.badge_outlined,
-                                  ),
-                                  onChanged: (v) => roleId = v.trim().isEmpty
-                                      ? null
-                                      : v.trim(),
+                                  decoration: DocuTrackerStyles.inputDecoration(context, 'Role ID (e.g. admin, hr_staff)', Icons.badge_outlined),
+                                  onChanged: (v) => roleId = v.trim().isEmpty ? null : v.trim(),
                                 ),
                                 const SizedBox(height: 16),
                                 TextField(
-                                  decoration: DocuTrackerStyles.inputDecoration(
-                                    'User ID (optional)',
-                                    Icons.person_outline_rounded,
-                                  ),
-                                  onChanged: (v) => userId = v.trim().isEmpty
-                                      ? null
-                                      : v.trim(),
+                                  decoration: DocuTrackerStyles.inputDecoration(context, 'User ID (optional)', Icons.person_outline_rounded),
+                                  onChanged: (v) => userId = v.trim().isEmpty ? null : v.trim(),
                                 ),
                               ],
                             ),
@@ -885,9 +866,7 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                       const SizedBox(height: 8),
                       DropdownButtonFormField<String>(
                         value: _selectedRoleId,
-                        decoration: DocuTrackerStyles.dropdownDecoration(
-                          'Select user group',
-                        ),
+                        decoration: DocuTrackerStyles.dropdownDecoration(context, 'Select user group'),
                         items: _DocuTrackerAdminScreenState._userGroups.entries
                             .map(
                               (e) => DropdownMenuItem(

@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
+import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_web/webview_flutter_web.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api/client.dart';
 import 'landingpage/constants/app_theme.dart';
 import 'landingpage/screens/landing_page.dart';
 import 'login/screens/login_page.dart';
 import 'providers/auth_provider.dart';
+import 'providers/theme_mode_provider.dart';
 import 'providers/recruitment_hire_prefill.dart';
 import 'dtr/dtr_provider.dart';
 import 'docutracker/docutracker_provider.dart';
@@ -52,29 +55,73 @@ Widget _initialHome(AuthProvider auth, String storedLoginAs) {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  if (kIsWeb) {
+    WebViewPlatform.instance ??= WebWebViewPlatform();
+  }
+
   await MisOccBarangaysData.load();
 
   ApiClient.instance.init();
 
   final auth = AuthProvider();
   await auth.restoreSession();
-
   final prefs = await SharedPreferences.getInstance();
   final storedLoginAs = prefs.getString(kLoginAsKey) ?? 'Admin';
+  final themeNotifier = await ThemeModeNotifier.load();
 
-  runApp(MyApp(auth: auth, storedLoginAs: storedLoginAs));
+  runApp(
+    MyApp(
+      auth: auth,
+      storedLoginAs: storedLoginAs,
+      themeNotifier: themeNotifier,
+    ),
+  );
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key, required this.auth, required this.storedLoginAs});
+/// Isolated [MaterialApp] so theme changes only rebuild this subtree.
+class _HrmsMaterialApp extends StatelessWidget {
+  const _HrmsMaterialApp({required this.auth, required this.storedLoginAs});
 
   final AuthProvider auth;
   final String storedLoginAs;
 
   @override
   Widget build(BuildContext context) {
+    final themeMode = context.select<ThemeModeNotifier, ThemeMode>(
+      (n) => n.mode,
+    );
+
+    return MaterialApp(
+      title: 'HRMS Plaridel',
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.lightTheme,
+      darkTheme: AppTheme.darkTheme,
+      themeMode: themeMode,
+      themeAnimationDuration: const Duration(milliseconds: 420),
+      themeAnimationCurve: Curves.easeInOutCubic,
+      navigatorObservers: [routeObserver],
+      home: _initialHome(auth, storedLoginAs),
+    );
+  }
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({
+    super.key,
+    required this.auth,
+    required this.storedLoginAs,
+    required this.themeNotifier,
+  });
+
+  final AuthProvider auth;
+  final String storedLoginAs;
+  final ThemeModeNotifier themeNotifier;
+
+  @override
+  Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
+        ChangeNotifierProvider<ThemeModeNotifier>.value(value: themeNotifier),
         ChangeNotifierProvider<AuthProvider>.value(value: auth),
         ChangeNotifierProxyProvider<AuthProvider, AppRealtimeProvider>(
           create: (_) => AppRealtimeProvider(),
@@ -95,13 +142,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => RecruitmentHirePrefill()),
       ],
       child: AppRealtimeBridge(
-        child: MaterialApp(
-          title: 'HRMS Plaridel',
-          debugShowCheckedModeBanner: false,
-          theme: AppTheme.lightTheme,
-          navigatorObservers: [routeObserver],
-          home: _initialHome(auth, storedLoginAs),
-        ),
+        child: _HrmsMaterialApp(auth: auth, storedLoginAs: storedLoginAs),
       ),
     );
   }

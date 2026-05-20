@@ -2,76 +2,112 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../api/app_user.dart';
 import '../../../api/client.dart';
 import '../../../api/config.dart';
 import '../../../landingpage/constants/app_theme.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../widgets/structured_address_fields.dart';
+import '../widgets/dashboard_header_actions.dart';
+import '../widgets/profile_account_tab_skeleton.dart';
+import '../widgets/profile_app_settings_panels.dart';
+import '../widgets/profile_modern_ui.dart';
+import '../widgets/settings_password_security_extras.dart';
 
-/// Breakpoint above which the profile uses a two-column web layout.
-const double _profileWebBreakpoint = 900;
+/// Breakpoint for two-column profile body (uses available content width).
+const double _profileWideBreakpoint = 720;
 
-/// Full-screen profile page (e.g. from admin menu). Uses [ProfileContent] for the body.
-/// Responsive: adaptive padding and scroll behavior for web vs mobile.
+/// Profile body shown inside the admin/employee dashboard (sidebar stays visible).
+class DashboardProfilePanel extends StatelessWidget {
+  const DashboardProfilePanel({super.key, this.initialTab});
+
+  final ProfilePageTab? initialTab;
+
+  @override
+  Widget build(BuildContext context) {
+    return RepaintBoundary(
+      child: SizedBox(
+        width: double.infinity,
+        child: ProfileContent(initialTab: initialTab),
+      ),
+    );
+  }
+}
+
+/// Full-screen profile (fallback). Prefer [DashboardProfilePanel] in dashboards.
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final width = MediaQuery.of(context).size.width;
-    final isWeb = width >= _profileWebBreakpoint;
-    final padding = isWeb ? 32.0 : 16.0;
+    final padding = MediaQuery.sizeOf(context).width >= 900 ? 24.0 : 16.0;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F6FA),
+      backgroundColor: AppTheme.dashCanvasOf(context),
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: AppTheme.dashPanelOf(context),
         elevation: 0,
         scrolledUnderElevation: 0,
         surfaceTintColor: Colors.transparent,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
           onPressed: () => Navigator.of(context).pop(),
-          color: AppTheme.textPrimary,
+          color: AppTheme.dashTextPrimaryOf(context),
         ),
         title: Text(
-          'My Profile',
+          'Settings',
           style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: isWeb ? 22 : 20,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.3,
+            color: AppTheme.dashTextPrimaryOf(context),
+            fontSize: MediaQuery.sizeOf(context).width >= 900 ? 20 : 18,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.2,
           ),
         ),
       ),
       body: SingleChildScrollView(
-        padding: EdgeInsets.symmetric(
-          horizontal: padding,
-          vertical: isWeb ? 32 : 20,
-        ),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth: isWeb ? 1000 : double.infinity,
-            ),
-            child: const ProfileContent(),
-          ),
+        padding: EdgeInsets.fromLTRB(padding, 16, padding, 24),
+        child: const SizedBox(
+          width: double.infinity,
+          child: ProfileContent(),
         ),
       ),
     );
   }
 }
 
-/// Reusable profile content: account info (name, email, phone) and change password. Used in [ProfilePage] and employee dashboard My Profile.
+/// Reusable profile content: account info (name, email, phone) and change password. Used in [ProfilePage] and Settings.
 class ProfileContent extends StatefulWidget {
-  const ProfileContent({super.key});
+  const ProfileContent({
+    super.key,
+    this.showAccountSection = true,
+    this.showPasswordSection = true,
+    this.showAppSettings = true,
+    this.initialTab,
+  });
+
+  /// When false, only the password card is shown (e.g. Settings → Password tab).
+  final bool showAccountSection;
+
+  /// When false, only the account card is shown.
+  final bool showPasswordSection;
+
+  /// Notification, preference, and about (formerly in Settings).
+  final bool showAppSettings;
+
+  final ProfilePageTab? initialTab;
 
   @override
   State<ProfileContent> createState() => _ProfileContentState();
 }
 
 class _ProfileContentState extends State<ProfileContent> {
-  final _nameController = TextEditingController();
+  final _firstNameController = TextEditingController();
+  final _middleNameController = TextEditingController();
+  final _lastNameController = TextEditingController();
+  final _birthdateController = TextEditingController();
   final _phoneController = TextEditingController();
+  final _streetController = TextEditingController();
+  final _addressFormKey = GlobalKey<StructuredAddressFormState>();
   final _emailFocusNode = FocusNode();
   final _currentPasswordController = TextEditingController();
   final _newPasswordController = TextEditingController();
@@ -88,6 +124,56 @@ class _ProfileContentState extends State<ProfileContent> {
   bool _obscureNew = true;
   bool _obscureConfirm = true;
   bool _loadedFromAuth = false;
+  String? _sexValue;
+  String? _civilStatusValue;
+  String? _suffixValue;
+  DateTime? _birthdateValue;
+  String? _nationalityValue;
+  late ProfilePageTab _profileTab;
+  late Set<ProfilePageTab> _mountedTabs;
+
+  @override
+  void initState() {
+    super.initState();
+    _profileTab = widget.initialTab ?? _defaultTab();
+    _mountedTabs = {_profileTab};
+  }
+
+  void _onProfileTabSelected(ProfilePageTab tab) {
+    if (_profileTab == tab) return;
+    setState(() {
+      _profileTab = tab;
+      _mountedTabs.add(tab);
+    });
+  }
+
+  List<ProfilePageTab> _visibleProfileTabs() {
+    final tabs = <ProfilePageTab>[];
+    if (widget.showAccountSection) tabs.add(ProfilePageTab.account);
+    if (widget.showPasswordSection) tabs.add(ProfilePageTab.security);
+    if (widget.showAppSettings) {
+      tabs.add(ProfilePageTab.notification);
+      tabs.add(ProfilePageTab.preference);
+      tabs.add(ProfilePageTab.about);
+    }
+    return tabs;
+  }
+
+  ProfilePageTab _defaultTab() {
+    if (widget.showAccountSection) return ProfilePageTab.account;
+    if (widget.showPasswordSection) return ProfilePageTab.security;
+    if (widget.showAppSettings) return ProfilePageTab.notification;
+    return ProfilePageTab.account;
+  }
+
+  @override
+  void didUpdateWidget(covariant ProfileContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialTab != null &&
+        widget.initialTab != oldWidget.initialTab) {
+      _profileTab = widget.initialTab!;
+    }
+  }
 
   @override
   void didChangeDependencies() {
@@ -95,12 +181,23 @@ class _ProfileContentState extends State<ProfileContent> {
     if (!_loadedFromAuth) {
       final auth = context.read<AuthProvider>();
       if (auth.user != null) {
-        _nameController.text = auth.displayName;
+        final u = auth.user!;
+        _firstNameController.text = u.firstName ?? '';
+        _middleNameController.text = u.middleName ?? '';
+        _lastNameController.text = u.lastName ?? '';
+        _suffixValue = (u.suffix ?? '').trim().isEmpty ? null : u.suffix!.trim();
+        _birthdateValue = u.dateOfBirth;
+        _birthdateController.text = _formatYmd(_birthdateValue);
         _avatarPath = auth.avatarPath;
-        _phoneController.text = auth.user!.contactNumber ?? '';
+        _phoneController.text = u.contactNumber ?? '';
+        _nationalityValue =
+            (u.nationality ?? '').trim().isEmpty ? null : u.nationality!.trim();
+        _streetController.text = '';
+        _sexValue = _normalizeSex(u.sex);
+        _civilStatusValue = _normalizeCivilStatus(u.civilStatus);
         _loadedFromAuth = true;
         // Always try avatar URL when we have userId; Image.network errorBuilder handles 404
-        _avatarUrl = _avatarUrlFor(auth.user!.id);
+        _avatarUrl = _avatarUrlFor(u.id);
       }
     }
   }
@@ -113,34 +210,250 @@ class _ProfileContentState extends State<ProfileContent> {
         : base;
   }
 
-  /// Returns a simple strength label and color for the given password.
-  static ({String label, Color color}) _passwordStrength(String value) {
-    if (value.isEmpty) return (label: '', color: Colors.grey);
-    final hasLower = value.contains(RegExp(r'[a-z]'));
-    final hasUpper = value.contains(RegExp(r'[A-Z]'));
-    final hasDigit = value.contains(RegExp(r'[0-9]'));
-    final hasSpecial = value.contains(RegExp(r'[!@#$%^&*(),.?":{}|<>]'));
-    final length = value.length;
-    int score = 0;
-    if (length >= 6) score++;
-    if (length >= 10) score++;
-    if (hasLower && hasUpper) score++;
-    if (hasDigit) score++;
-    if (hasSpecial) score++;
-    if (score <= 1) return (label: 'Weak', color: Colors.red.shade700);
-    if (score <= 3) return (label: 'Medium', color: Colors.orange.shade700);
-    return (label: 'Strong', color: Colors.green.shade700);
-  }
-
   @override
   void dispose() {
-    _nameController.dispose();
+    _firstNameController.dispose();
+    _middleNameController.dispose();
+    _lastNameController.dispose();
+    _birthdateController.dispose();
     _phoneController.dispose();
+    _streetController.dispose();
     _emailFocusNode.dispose();
     _currentPasswordController.dispose();
     _newPasswordController.dispose();
     _confirmPasswordController.dispose();
     super.dispose();
+  }
+
+  static const List<String> _civilStatusOptions = [
+    'Single',
+    'Married',
+    'Widowed',
+    'Separated',
+    'Divorced',
+  ];
+
+  // Common nationality adjectives (searchable). Includes Filipino and major nationalities.
+  static const List<String> _nationalities = [
+    'Afghan',
+    'Albanian',
+    'Algerian',
+    'American',
+    'Andorran',
+    'Angolan',
+    'Antiguan',
+    'Argentine',
+    'Armenian',
+    'Australian',
+    'Austrian',
+    'Azerbaijani',
+    'Bahamian',
+    'Bahraini',
+    'Bangladeshi',
+    'Barbadian',
+    'Belarusian',
+    'Belgian',
+    'Belizean',
+    'Beninese',
+    'Bhutanese',
+    'Bolivian',
+    'Bosnian',
+    'Botswanan',
+    'Brazilian',
+    'British',
+    'Bruneian',
+    'Bulgarian',
+    'Burkinabe',
+    'Burmese',
+    'Burundian',
+    'Cambodian',
+    'Cameroonian',
+    'Canadian',
+    'Cape Verdean',
+    'Central African',
+    'Chadian',
+    'Chilean',
+    'Chinese',
+    'Colombian',
+    'Comoran',
+    'Congolese',
+    'Costa Rican',
+    'Croatian',
+    'Cuban',
+    'Cypriot',
+    'Czech',
+    'Danish',
+    'Djiboutian',
+    'Dominican',
+    'Dutch',
+    'East Timorese',
+    'Ecuadorian',
+    'Egyptian',
+    'Emirati',
+    'Equatorial Guinean',
+    'Eritrean',
+    'Estonian',
+    'Ethiopian',
+    'Fijian',
+    'Filipino',
+    'Finnish',
+    'French',
+    'Gabonese',
+    'Gambian',
+    'Georgian',
+    'German',
+    'Ghanaian',
+    'Greek',
+    'Grenadian',
+    'Guatemalan',
+    'Guinean',
+    'Guyanese',
+    'Haitian',
+    'Honduran',
+    'Hungarian',
+    'Icelandic',
+    'Indian',
+    'Indonesian',
+    'Iranian',
+    'Iraqi',
+    'Irish',
+    'Israeli',
+    'Italian',
+    'Ivorian',
+    'Jamaican',
+    'Japanese',
+    'Jordanian',
+    'Kazakhstani',
+    'Kenyan',
+    'Kuwaiti',
+    'Kyrgyzstani',
+    'Laotian',
+    'Latvian',
+    'Lebanese',
+    'Liberian',
+    'Libyan',
+    'Liechtensteiner',
+    'Lithuanian',
+    'Luxembourgish',
+    'Macedonian',
+    'Malagasy',
+    'Malawian',
+    'Malaysian',
+    'Maldivian',
+    'Malian',
+    'Maltese',
+    'Mauritanian',
+    'Mauritian',
+    'Mexican',
+    'Moldovan',
+    'Monacan',
+    'Mongolian',
+    'Montenegrin',
+    'Moroccan',
+    'Mozambican',
+    'Namibian',
+    'Nepalese',
+    'New Zealander',
+    'Nicaraguan',
+    'Nigerien',
+    'Nigerian',
+    'Norwegian',
+    'Omani',
+    'Pakistani',
+    'Panamanian',
+    'Papua New Guinean',
+    'Paraguayan',
+    'Peruvian',
+    'Polish',
+    'Portuguese',
+    'Qatari',
+    'Romanian',
+    'Russian',
+    'Rwandan',
+    'Saudi',
+    'Senegalese',
+    'Serbian',
+    'Seychellois',
+    'Sierra Leonean',
+    'Singaporean',
+    'Slovak',
+    'Slovenian',
+    'Somali',
+    'South African',
+    'South Korean',
+    'Spanish',
+    'Sri Lankan',
+    'Sudanese',
+    'Swedish',
+    'Swiss',
+    'Syrian',
+    'Taiwanese',
+    'Tajikistani',
+    'Tanzanian',
+    'Thai',
+    'Togolese',
+    'Tongan',
+    'Trinidadian',
+    'Tunisian',
+    'Turkish',
+    'Ugandan',
+    'Ukrainian',
+    'Uruguayan',
+    'Uzbekistani',
+    'Venezuelan',
+    'Vietnamese',
+    'Yemeni',
+    'Zambian',
+    'Zimbabwean',
+  ];
+
+  String? _normalizeSex(String? raw) {
+    final s = (raw ?? '').trim().toLowerCase();
+    if (s.isEmpty) return null;
+    if (s == 'm' || s == 'male') return 'Male';
+    if (s == 'f' || s == 'female') return 'Female';
+    return null;
+  }
+
+  String? _normalizeCivilStatus(String? raw) {
+    final s = (raw ?? '').trim();
+    if (s.isEmpty) return null;
+    for (final o in _civilStatusOptions) {
+      if (o.toLowerCase() == s.toLowerCase()) return o;
+    }
+    return null;
+  }
+
+  static const List<String> _suffixOptions = [
+    'Jr.',
+    'Sr.',
+    'II',
+    'III',
+    'IV',
+    'V',
+    'VI',
+    'VII',
+    'VIII',
+    'IX',
+    'X',
+  ];
+
+  Future<void> _pickBirthdate() async {
+    final now = DateTime.now();
+    final initial = _birthdateValue ?? DateTime(now.year - 25, 1, 1);
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial.isAfter(now) ? now : initial,
+      firstDate: DateTime(1900, 1, 1),
+      lastDate: now,
+      helpText: 'Select birthdate',
+    );
+    if (!mounted) return;
+    if (picked == null) return;
+    setState(() {
+      _birthdateValue = picked;
+      _birthdateController.text = _formatYmd(picked);
+    });
   }
 
   Future<void> _sendPasswordReset() async {
@@ -223,10 +536,13 @@ class _ProfileContentState extends State<ProfileContent> {
   }
 
   Future<void> _saveProfile() async {
-    final name = _nameController.text.trim();
+    final first = _firstNameController.text.trim();
+    final middle = _middleNameController.text.trim();
+    final last = _lastNameController.text.trim();
     final phone = _phoneController.text.trim();
-    if (name.isEmpty) {
-      setState(() => _message = 'Name is required');
+    final encodedAddress = _addressFormKey.currentState?.composeEncoded();
+    if (first.isEmpty || last.isEmpty) {
+      setState(() => _message = 'First name and last name are required');
       return;
     }
     setState(() {
@@ -237,8 +553,16 @@ class _ProfileContentState extends State<ProfileContent> {
       await ApiClient.instance.patch(
         '/auth/me',
         data: {
-          'full_name': name,
+          'first_name': first,
+          'middle_name': middle.isNotEmpty ? middle : null,
+          'last_name': last,
+          'suffix': _suffixValue,
+          'date_of_birth': _birthdateValue != null ? _formatYmd(_birthdateValue) : null,
           'contact_number': phone.isNotEmpty ? phone : null,
+          'address': encodedAddress,
+          'sex': _sexValue,
+          'civil_status': _civilStatusValue,
+          'nationality': _nationalityValue,
         },
       );
       if (mounted) {
@@ -311,164 +635,321 @@ class _ProfileContentState extends State<ProfileContent> {
     }
   }
 
-  Widget _buildAccountSection(BuildContext context, String email, bool isWeb) {
-    final avatarSize = isWeb ? 56.0 : 48.0;
-    final avatarRadius = isWeb ? 52.0 : 44.0;
+  String _dashText(String? s) {
+    final t = s?.trim() ?? '';
+    return t.isEmpty ? '—' : t;
+  }
 
-    return _ProfileSection(
-      title: 'Account',
-      icon: Icons.person_outline_rounded,
-      isCompact: !isWeb,
-      padding: isWeb ? 24 : 16,
-      children: [
-        Center(
-          child: Column(
-            children: [
-              GestureDetector(
-                onTap: _imageLoading ? null : _pickAndUploadAvatar,
-                child: Stack(
-                  alignment: Alignment.bottomRight,
-                  children: [
-                    Container(
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.08),
-                            blurRadius: 16,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: _avatarUrl != null
-                          ? ClipOval(
-                              child: Image.network(
-                                _avatarUrl!,
-                                width: avatarRadius * 2,
-                                height: avatarRadius * 2,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => CircleAvatar(
-                                  radius: avatarRadius,
-                                  backgroundColor: AppTheme.primaryNavy
-                                      .withValues(alpha: 0.1),
-                                  child: Icon(
-                                    Icons.person_rounded,
-                                    size: avatarSize,
-                                    color: AppTheme.primaryNavy.withValues(
-                                      alpha: 0.5,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            )
-                          : CircleAvatar(
-                              radius: avatarRadius,
-                              backgroundColor:
-                                  AppTheme.primaryNavy.withValues(alpha: 0.1),
-                              child: Icon(
-                                Icons.person_rounded,
-                                size: avatarSize,
-                                color: AppTheme.primaryNavy.withValues(
-                                  alpha: 0.5,
-                                ),
-                              ),
-                            ),
+  String _usernameFromEmail(String email) {
+    final i = email.indexOf('@');
+    if (i <= 0) return email.isEmpty ? '—' : email;
+    return email.substring(0, i);
+  }
+
+  String _formatYmd(DateTime? d) {
+    if (d == null) return '—';
+    final y = d.year.toString().padLeft(4, '0');
+    final m = d.month.toString().padLeft(2, '0');
+    final day = d.day.toString().padLeft(2, '0');
+    return '$y-$m-$day';
+  }
+
+  String _profileDisplayNameFromAuth(AppUser? user, String authDisplayName) {
+    if (authDisplayName.isNotEmpty) return authDisplayName;
+    final parts = [
+      _firstNameController.text.trim(),
+      _middleNameController.text.trim(),
+      _lastNameController.text.trim(),
+    ].where((p) => p.isNotEmpty);
+    if (parts.isNotEmpty) return parts.join(' ');
+    return user?.fullName?.trim().isNotEmpty == true
+        ? user!.fullName!.trim()
+        : 'User';
+  }
+
+  String _roleLabel(AppUser? user) {
+    final role = (user?.role ?? 'employee').toLowerCase();
+    return switch (role) {
+      'admin' => 'Administrator',
+      'hr' => 'HR Staff',
+      _ => 'Employee',
+    };
+  }
+
+  Widget _buildAvatarCircle(double radius) {
+    return _avatarUrl != null
+        ? ClipOval(
+            child: Image.network(
+              _avatarUrl!,
+              width: radius * 2,
+              height: radius * 2,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => CircleAvatar(
+                radius: radius,
+                backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                child: Icon(
+                  Icons.person_rounded,
+                  size: radius,
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.5),
+                ),
+              ),
+            ),
+          )
+        : CircleAvatar(
+            radius: radius,
+            backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.1),
+            child: Icon(
+              Icons.person_rounded,
+              size: radius,
+              color: AppTheme.primaryNavy.withValues(alpha: 0.5),
+            ),
+          );
+  }
+
+  Widget _buildWorkAboutCard(
+    BuildContext context,
+    String email,
+    AppUser? user,
+    bool isWeb,
+  ) {
+    final empId = user != null ? user.displayEmployeeId : '—';
+
+    return ModernProfileCard(
+      title: 'About',
+      icon: Icons.info_outline_rounded,
+      child: Column(
+        children: [
+          ProfileAboutRow(
+            label: 'Employee ID:',
+            value: empId,
+            icon: Icons.badge_rounded,
+          ),
+          const ProfileAboutDivider(),
+          ProfileAboutRow(
+            label: 'Department:',
+            value: _dashText(user?.departmentName),
+            icon: Icons.apartment_rounded,
+          ),
+          const ProfileAboutDivider(),
+          ProfileAboutRow(
+            label: 'Position:',
+            value: _dashText(user?.positionName),
+            icon: Icons.work_outline_rounded,
+          ),
+          const ProfileAboutDivider(),
+          ProfileAboutRow(
+            label: 'Username:',
+            value: email.isEmpty ? '—' : _usernameFromEmail(email),
+            icon: Icons.alternate_email_rounded,
+          ),
+          const ProfileAboutDivider(),
+          ProfileAboutRow(
+            label: 'Date hired:',
+            value: _formatYmd(user?.dateHired),
+            icon: Icons.event_available_rounded,
+          ),
+          const ProfileAboutDivider(),
+          ProfileAboutRow(
+            label: 'Status:',
+            value: _dashText(user?.employmentStatus?.replaceAll('_', ' ')),
+            icon: Icons.verified_user_outlined,
+          ),
+          if (user?.employmentType != null &&
+              user!.employmentType!.trim().isNotEmpty) ...[
+            const ProfileAboutDivider(),
+            ProfileAboutRow(
+              label: 'Type:',
+              value: _dashText(user.employmentType!.replaceAll('_', ' ')),
+              icon: Icons.schedule_rounded,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAccountSection(
+    BuildContext context,
+    String email,
+    bool isWeb,
+    AppUser? user,
+  ) {
+    return ModernProfileCard(
+      title: 'Personal information',
+      icon: Icons.edit_outlined,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+        LayoutBuilder(
+          builder: (context, c) {
+            final gapX = isWeb ? 16.0 : 0.0;
+            final gapY = isWeb ? 14.0 : 12.0;
+            final useTwoCol = isWeb && c.maxWidth >= 760;
+            final colWidth = useTwoCol ? (c.maxWidth - gapX) / 2 : c.maxWidth;
+
+            Widget col(Widget child) => SizedBox(width: colWidth, child: child);
+
+            InputDecoration dec({
+              required String label,
+              String? hint,
+              Widget? suffixIcon,
+              IconData? icon,
+              String? helper,
+            }) {
+              return AppTheme.dashInputDecoration(
+                context,
+                labelText: label,
+                hintText: hint,
+                helperText: helper,
+                prefixIcon: icon != null
+                    ? Icon(icon, color: AppTheme.primaryNavy)
+                    : null,
+                suffixIcon: suffixIcon,
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: isWeb ? 18 : 16,
+                  vertical: isWeb ? 16 : 14,
+                ),
+              );
+            }
+
+            final fieldStyle = AppTheme.dashFieldTextStyle(context);
+
+            return Wrap(
+              spacing: gapX,
+              runSpacing: gapY,
+              children: [
+                col(
+                  TextFormField(
+                    controller: _firstNameController,
+                    style: fieldStyle,
+                    decoration: dec(
+                      label: 'First name',
+                      hint: 'Enter your first name',
+                      icon: Icons.badge_outlined,
                     ),
-                    if (_imageLoading)
-                      Positioned(
-                        right: 0,
-                        bottom: 0,
-                        child: SizedBox(
-                          width: 28,
-                          height: 28,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      )
-                    else
-                      Container(
-                        padding: EdgeInsets.all(isWeb ? 8 : 6),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primaryNavy,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.2),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: Icon(
-                          Icons.camera_alt_rounded,
-                          color: Colors.white,
-                          size: isWeb ? 20 : 18,
-                        ),
+                    textCapitalization: TextCapitalization.words,
+                  ),
+                ),
+                col(
+                  TextFormField(
+                    controller: _middleNameController,
+                    style: fieldStyle,
+                    decoration: dec(
+                      label: 'Middle name',
+                      hint: 'Enter your middle name',
+                      icon: Icons.badge_outlined,
+                    ),
+                    textCapitalization: TextCapitalization.words,
+                  ),
+                ),
+                col(
+                  TextFormField(
+                    controller: _lastNameController,
+                    style: fieldStyle,
+                    decoration: dec(
+                      label: 'Last name',
+                      hint: 'Enter your last name',
+                      icon: Icons.badge_outlined,
+                    ),
+                    textCapitalization: TextCapitalization.words,
+                  ),
+                ),
+                col(
+                  DropdownButtonFormField<String>(
+                    initialValue: _suffixValue,
+                    items: _suffixOptions
+                        .map(
+                          (s) => DropdownMenuItem(value: s, child: Text(s)),
+                        )
+                        .toList(),
+                    onChanged: (v) => setState(() => _suffixValue = v),
+                    decoration: dec(
+                      label: 'Suffix',
+                      icon: Icons.text_fields_rounded,
+                    ),
+                    isExpanded: true,
+                  ),
+                ),
+                col(
+                  DropdownButtonFormField<String>(
+                    initialValue: _sexValue,
+                    style: fieldStyle,
+                    dropdownColor: AppTheme.dashPanelOf(context),
+                    items: [
+                      DropdownMenuItem(
+                        value: 'Male',
+                        child: Text('Male', style: fieldStyle),
                       ),
-                  ],
+                      DropdownMenuItem(
+                        value: 'Female',
+                        child: Text('Female', style: fieldStyle),
+                      ),
+                    ],
+                    onChanged: (v) => setState(() => _sexValue = v),
+                    decoration: dec(label: 'Gender', icon: Icons.wc_rounded),
+                    isExpanded: true,
+                  ),
                 ),
-              ),
-              SizedBox(height: isWeb ? 10 : 8),
-              Text(
-                _avatarPath == null ? 'Add profile image' : 'Change photo',
-                style: TextStyle(
-                  fontSize: isWeb ? 13 : 12,
-                  color: AppTheme.primaryNavy,
-                  fontWeight: FontWeight.w600,
+                col(
+                  TextFormField(
+                    controller: _birthdateController,
+                    style: fieldStyle,
+                    readOnly: true,
+                    onTap: _pickBirthdate,
+                    decoration: dec(
+                      label: 'Birthdate',
+                      icon: Icons.cake_outlined,
+                      helper: 'Tap to select.',
+                      suffixIcon: const Icon(Icons.calendar_month_rounded),
+                    ),
+                  ),
                 ),
-              ),
-            ],
+                col(
+                  DropdownButtonFormField<String>(
+                    initialValue: _civilStatusValue,
+                    style: fieldStyle,
+                    dropdownColor: AppTheme.dashPanelOf(context),
+                    items: _civilStatusOptions
+                        .map(
+                          (s) => DropdownMenuItem(
+                            value: s,
+                            child: Text(s, style: fieldStyle),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (v) => setState(() => _civilStatusValue = v),
+                    decoration: dec(
+                      label: 'Civil status',
+                      icon: Icons.favorite_outline_rounded,
+                    ),
+                    isExpanded: true,
+                  ),
+                ),
+                col(_buildNationalityField(context, fieldStyle, dec)),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Contact',
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w800,
+            color: AppTheme.dashTextSecondaryOf(context),
+            letterSpacing: 0.2,
           ),
         ),
-        SizedBox(height: isWeb ? 24 : 20),
-        TextFormField(
-          controller: _nameController,
-          decoration: InputDecoration(
-            labelText: 'Full name',
-            hintText: 'Enter your full name',
-            filled: true,
-            fillColor: const Color(0xFFF8F9FA),
-            prefixIcon: const Icon(Icons.badge_outlined, color: AppTheme.primaryNavy),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFFE8EAED)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(
-                color: AppTheme.primaryNavy,
-                width: 2,
-              ),
-            ),
-            contentPadding: EdgeInsets.symmetric(
-              horizontal: isWeb ? 18 : 16,
-              vertical: isWeb ? 16 : 14,
-            ),
-          ),
-          textCapitalization: TextCapitalization.words,
-        ),
-        SizedBox(height: isWeb ? 16 : 12),
+        const SizedBox(height: 12),
         TextFormField(
           controller: _phoneController,
-          decoration: InputDecoration(
-            labelText: 'Phone (optional)',
+          style: AppTheme.dashFieldTextStyle(context),
+          decoration: AppTheme.dashInputDecoration(
+            context,
+            labelText: 'Phone number',
             hintText: 'e.g. 09XX XXX XXXX',
-            filled: true,
-            fillColor: const Color(0xFFF8F9FA),
-            prefixIcon: const Icon(Icons.phone_outlined, color: AppTheme.primaryNavy),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFFE8EAED)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(
-                color: AppTheme.primaryNavy,
-                width: 2,
-              ),
-            ),
+            prefixIcon:
+                const Icon(Icons.phone_outlined, color: AppTheme.primaryNavy),
             contentPadding: EdgeInsets.symmetric(
               horizontal: isWeb ? 18 : 16,
               vertical: isWeb ? 16 : 14,
@@ -476,27 +957,27 @@ class _ProfileContentState extends State<ProfileContent> {
           ),
           keyboardType: TextInputType.phone,
         ),
-        SizedBox(height: isWeb ? 16 : 12),
-        TextFormField(
-          initialValue: email,
-          readOnly: true,
-          decoration: InputDecoration(
-            labelText: 'Email',
-            filled: true,
-            fillColor: const Color(0xFFF8F9FA),
-            prefixIcon: const Icon(Icons.email_outlined, color: AppTheme.primaryNavy),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFFE8EAED)),
-            ),
-            helperText: isWeb
-                ? 'Used for login. Change via your account provider if needed.'
-                : null,
-            helperStyle: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
-            contentPadding: EdgeInsets.symmetric(
-              horizontal: isWeb ? 18 : 16,
-              vertical: isWeb ? 16 : 14,
+        SizedBox(height: isWeb ? 14 : 12),
+        ProfileAboutRow(
+          label: 'Email:',
+          value: email.isEmpty ? '—' : email,
+          icon: Icons.mail_outline_rounded,
+        ),
+        const SizedBox(height: 8),
+        DeferredProfileMount(
+          delayFrames: 1,
+          placeholder: const ProfileAccountTabSkeleton(),
+          builder: () => StructuredAddressForm(
+            key: _addressFormKey,
+            streetController: _streetController,
+            initialRawAddress: user?.address,
+            inputDecoration: (hint) => AppTheme.dashInputDecoration(
+              context,
+              labelText: hint,
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: isWeb ? 18 : 16,
+                vertical: isWeb ? 16 : 14,
+              ),
             ),
           ),
         ),
@@ -538,233 +1019,400 @@ class _ProfileContentState extends State<ProfileContent> {
             ),
           ),
         ),
-      ],
+        ],
+      ),
     );
   }
 
-  Widget _buildPasswordSection(
-    BuildContext context,
-    ({String label, Color color}) strength,
-    bool isWeb,
-  ) {
+  Widget _buildPasswordSection(BuildContext context, bool isWeb) {
     final newPass = _newPasswordController.text;
+    final strength = ProfilePasswordStrength.evaluate(newPass);
+    final fieldStyle = AppTheme.dashFieldTextStyle(context);
+    final fieldPad = EdgeInsets.symmetric(
+      horizontal: isWeb ? 18 : 16,
+      vertical: isWeb ? 16 : 14,
+    );
+    final visibilityColor = AppTheme.dashTextSecondaryOf(context);
 
-    return _ProfileSection(
-      title: 'Password',
-      icon: Icons.lock_outline_rounded,
-      isCompact: !isWeb,
-      padding: isWeb ? 24 : 16,
+    InputDecoration pwdDec({
+      required String label,
+      String? hint,
+      required Widget suffixIcon,
+    }) {
+      return AppTheme.dashInputDecoration(
+        context,
+        labelText: label,
+        hintText: hint,
+        prefixIcon:
+            const Icon(Icons.lock_outline_rounded, color: AppTheme.primaryNavy),
+        suffixIcon: suffixIcon,
+        contentPadding: fieldPad,
+      );
+    }
+
+    Widget visibilityToggle(bool obscure, VoidCallback onToggle) {
+      return IconButton(
+        icon: Icon(
+          obscure ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+          color: visibilityColor,
+        ),
+        onPressed: onToggle,
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TextFormField(
-          controller: _currentPasswordController,
-          obscureText: _obscureCurrent,
-          decoration: InputDecoration(
-            labelText: 'Current password',
-            filled: true,
-            fillColor: const Color(0xFFF8F9FA),
-            prefixIcon: const Icon(Icons.lock_outline_rounded, color: AppTheme.primaryNavy),
-            suffixIcon: IconButton(
-              icon: Icon(
-                _obscureCurrent
-                    ? Icons.visibility_off_rounded
-                    : Icons.visibility_rounded,
-                color: AppTheme.textSecondary,
-              ),
-              onPressed: () =>
-                  setState(() => _obscureCurrent = !_obscureCurrent),
-            ),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFFE8EAED)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(
-                color: AppTheme.primaryNavy,
-                width: 2,
-              ),
-            ),
-            contentPadding: EdgeInsets.symmetric(
-              horizontal: isWeb ? 18 : 16,
-              vertical: isWeb ? 16 : 14,
-            ),
-          ),
-        ),
-        SizedBox(height: isWeb ? 16 : 12),
-        TextFormField(
-          controller: _newPasswordController,
-          obscureText: _obscureNew,
-          onChanged: (_) => setState(() {}),
-          decoration: InputDecoration(
-            labelText: 'New password',
-            hintText: 'At least 6 characters',
-            filled: true,
-            fillColor: const Color(0xFFF8F9FA),
-            prefixIcon: const Icon(Icons.lock_rounded, color: AppTheme.primaryNavy),
-            suffixIcon: IconButton(
-              icon: Icon(
-                _obscureNew
-                    ? Icons.visibility_off_rounded
-                    : Icons.visibility_rounded,
-                color: AppTheme.textSecondary,
-              ),
-              onPressed: () => setState(() => _obscureNew = !_obscureNew),
-            ),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFFE8EAED)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(
-                color: AppTheme.primaryNavy,
-                width: 2,
-              ),
-            ),
-            contentPadding: EdgeInsets.symmetric(
-              horizontal: isWeb ? 18 : 16,
-              vertical: isWeb ? 16 : 14,
-            ),
-          ),
-        ),
-        if (newPass.isNotEmpty) ...[
-          SizedBox(height: isWeb ? 6 : 4),
-          Row(
+        ModernProfileCard(
+          title: 'Change password',
+          icon: Icons.lock_reset_rounded,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                'Strength: ',
-                style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+              const ProfileSecurityTipBanner(),
+              const SizedBox(height: 18),
+              ProfileInsetSurface(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextFormField(
+                      controller: _currentPasswordController,
+                      style: fieldStyle,
+                      obscureText: _obscureCurrent,
+                      decoration: pwdDec(
+                        label: 'Current password',
+                        suffixIcon: visibilityToggle(
+                          _obscureCurrent,
+                          () => setState(
+                            () => _obscureCurrent = !_obscureCurrent,
+                          ),
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: isWeb ? 16 : 14),
+                    TextFormField(
+                      controller: _newPasswordController,
+                      style: fieldStyle,
+                      obscureText: _obscureNew,
+                      onChanged: (_) => setState(() {}),
+                      decoration: pwdDec(
+                        label: 'New password',
+                        hint: 'At least 6 characters',
+                        suffixIcon: visibilityToggle(
+                          _obscureNew,
+                          () => setState(() => _obscureNew = !_obscureNew),
+                        ),
+                      ),
+                    ),
+                    if (newPass.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      ProfilePasswordStrengthMeter(strength: strength),
+                    ],
+                    SizedBox(height: isWeb ? 16 : 14),
+                    TextFormField(
+                      controller: _confirmPasswordController,
+                      style: fieldStyle,
+                      obscureText: _obscureConfirm,
+                      decoration: pwdDec(
+                        label: 'Confirm new password',
+                        suffixIcon: visibilityToggle(
+                          _obscureConfirm,
+                          () => setState(
+                            () => _obscureConfirm = !_obscureConfirm,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              Text(
-                strength.label,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: strength.color,
+              if (_passwordMessage != null) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.dashIsDark(context)
+                        ? const Color(0xFFC62828).withValues(alpha: 0.15)
+                        : Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: AppTheme.dashIsDark(context)
+                          ? const Color(0xFFC62828).withValues(alpha: 0.35)
+                          : Colors.red.shade200,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.error_outline_rounded,
+                          color: Colors.red.shade700, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _passwordMessage!,
+                          style: TextStyle(
+                            color: Colors.red.shade800,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 14),
+              Material(
+                color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(12),
+                child: InkWell(
+                  onTap: _resettingPassword ? null : _sendPasswordReset,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.mail_outline_rounded,
+                          size: 20,
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.9),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            isWeb
+                                ? 'Forgot password? Send a reset link to your email'
+                                : 'Forgot password? Email reset link',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.primaryNavy,
+                            ),
+                          ),
+                        ),
+                        if (_resettingPassword)
+                          const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        else
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            color: AppTheme.primaryNavy.withValues(alpha: 0.7),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton.icon(
+                  onPressed: _passwordLoading ? null : _changePassword,
+                  icon: _passwordLoading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.check_rounded, size: 20),
+                  label: Text(
+                    _passwordLoading ? 'Updating…' : 'Save new password',
+                  ),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.primaryNavy,
+                    foregroundColor: Colors.white,
+                    padding: EdgeInsets.symmetric(
+                      vertical: isWeb ? 14 : 16,
+                      horizontal: isWeb ? 28 : 24,
+                    ),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
                 ),
               ),
             ],
           ),
-        ],
-        SizedBox(height: isWeb ? 16 : 12),
-        TextFormField(
-          controller: _confirmPasswordController,
-          obscureText: _obscureConfirm,
-          decoration: InputDecoration(
-            labelText: 'Confirm new password',
-            filled: true,
-            fillColor: const Color(0xFFF8F9FA),
-            prefixIcon: const Icon(Icons.lock_rounded, color: AppTheme.primaryNavy),
-            suffixIcon: IconButton(
-              icon: Icon(
-                _obscureConfirm
-                    ? Icons.visibility_off_rounded
-                    : Icons.visibility_rounded,
-                color: AppTheme.textSecondary,
-              ),
-              onPressed: () =>
-                  setState(() => _obscureConfirm = !_obscureConfirm),
-            ),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFFE8EAED)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(
-                color: AppTheme.primaryNavy,
-                width: 2,
-              ),
-            ),
-            contentPadding: EdgeInsets.symmetric(
-              horizontal: isWeb ? 18 : 16,
-              vertical: isWeb ? 16 : 14,
-            ),
-          ),
         ),
-        if (_passwordMessage != null) ...[
-          SizedBox(height: isWeb ? 12 : 8),
-          Text(
-            _passwordMessage!,
-            style: TextStyle(color: Colors.red.shade700, fontSize: 13),
-          ),
-        ],
-        SizedBox(height: isWeb ? 12 : 10),
-        TextButton.icon(
-          onPressed: _resettingPassword ? null : _sendPasswordReset,
-          icon: _resettingPassword
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.mail_outline_rounded, size: 18),
-          label: Text(
-            isWeb
-                ? 'Forgot password? Send reset link to email'
-                : 'Forgot password?',
-          ),
-          style: TextButton.styleFrom(
-            foregroundColor: AppTheme.primaryNavy,
-            padding: EdgeInsets.symmetric(vertical: isWeb ? 8 : 12),
-          ),
-        ),
-        SizedBox(height: isWeb ? 20 : 16),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
-            onPressed: _passwordLoading ? null : _changePassword,
-            icon: _passwordLoading
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Icon(Icons.lock_reset_rounded, size: 20),
-            label: Text(_passwordLoading ? 'Updating...' : 'Change password'),
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.primaryNavy,
-              foregroundColor: Colors.white,
-              padding: EdgeInsets.symmetric(
-                vertical: isWeb ? 14 : 16,
-                horizontal: 24,
-              ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              elevation: 1,
-              shadowColor: Colors.black.withValues(alpha: 0.2),
-            ),
-          ),
-        ),
+        const SizedBox(height: 16),
+        const SettingsPasswordSecurityExtras(),
       ],
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final email = context.watch<AuthProvider>().email;
-    final newPass = _newPasswordController.text;
-    final strength = _passwordStrength(newPass);
-    final width = MediaQuery.of(context).size.width;
-    final isWeb = width >= _profileWebBreakpoint;
+  Widget _buildTabContent(
+    BuildContext context,
+    ProfilePageTab tab, {
+    required String email,
+    required AppUser? user,
+    required bool isWide,
+  }) {
+    switch (tab) {
+      case ProfilePageTab.account:
+        return DeferredProfileMount(
+          key: const ValueKey('profile_tab_account'),
+          builder: () => _buildAccountTabLayout(context, email, isWide, user),
+        );
+      case ProfilePageTab.security:
+        return _buildPasswordSection(context, isWide);
+      case ProfilePageTab.notification:
+        return const ProfileNotificationSettingsPanel(
+          key: ValueKey('profile_tab_notification'),
+        );
+      case ProfilePageTab.preference:
+        return const ProfilePreferenceSettingsPanel(
+          key: ValueKey('profile_tab_preference'),
+        );
+      case ProfilePageTab.about:
+        return const ProfileAboutSettingsPanel(
+          key: ValueKey('profile_tab_about'),
+        );
+    }
+  }
 
-    final accountSection = _buildAccountSection(context, email, isWeb);
-    final passwordSection = _buildPasswordSection(context, strength, isWeb);
+  /// [IndexedStack] keeps visited tabs alive so switching is instant (no
+  /// [DeferredProfileMount] state reuse between different tabs).
+  Widget _buildActiveTabBody(
+    BuildContext context, {
+    required String email,
+    required AppUser? user,
+    required bool isWide,
+  }) {
+    final tabs = _visibleProfileTabs();
+    final index = tabs.indexOf(_profileTab);
+    if (index < 0) return const SizedBox.shrink();
 
-    if (isWeb) {
+    return IndexedStack(
+      index: index,
+      sizing: StackFit.loose,
+      children: [
+        for (final tab in tabs)
+          if (_mountedTabs.contains(tab))
+            KeyedSubtree(
+              key: ValueKey(tab),
+              child: _buildTabContent(
+                context,
+                tab,
+                email: email,
+                user: user,
+                isWide: isWide,
+              ),
+            )
+          else
+            const SizedBox.shrink(),
+      ],
+    );
+  }
+
+  bool get _showTabBar {
+    var count = 0;
+    if (widget.showAccountSection) count++;
+    if (widget.showPasswordSection) count++;
+    if (widget.showAppSettings) count += 3;
+    return count > 1;
+  }
+
+  Widget _buildNationalityField(
+    BuildContext context,
+    TextStyle fieldStyle,
+    InputDecoration Function({
+      required String label,
+      IconData? icon,
+      String? helper,
+      Widget? suffixIcon,
+    }) dec,
+  ) {
+    return Autocomplete<String>(
+      initialValue: _nationalityValue != null
+          ? TextEditingValue(text: _nationalityValue!)
+          : null,
+      optionsBuilder: (query) {
+        final q = query.text.trim().toLowerCase();
+        if (q.isEmpty) return _nationalities.take(15);
+        return _nationalities
+            .where((n) => n.toLowerCase().contains(q))
+            .take(25);
+      },
+      onSelected: (v) => setState(() => _nationalityValue = v),
+      fieldViewBuilder: (context, controller, focusNode, _) {
+        if ((_nationalityValue ?? '').isNotEmpty &&
+            controller.text.isEmpty) {
+          controller.text = _nationalityValue!;
+        }
+        return TextFormField(
+          controller: controller,
+          focusNode: focusNode,
+          style: fieldStyle,
+          decoration: dec(
+            label: 'Nationality',
+            icon: Icons.public_rounded,
+            helper: 'Type to search or enter your nationality.',
+          ),
+          onChanged: (v) {
+            final trimmed = v.trim();
+            setState(() {
+              _nationalityValue = trimmed.isEmpty ? null : trimmed;
+            });
+          },
+        );
+      },
+      optionsViewBuilder: (context, onSelected, options) {
+        return Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            color: AppTheme.dashPanelOf(context),
+            elevation: 6,
+            shadowColor: Colors.black.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(12),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 220, maxWidth: 400),
+              child: ListView.builder(
+                padding: EdgeInsets.zero,
+                shrinkWrap: true,
+                itemCount: options.length,
+                itemBuilder: (context, index) {
+                  final opt = options.elementAt(index);
+                  return ListTile(
+                    dense: true,
+                    title: Text(opt, style: fieldStyle),
+                    onTap: () => onSelected(opt),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildAccountTabLayout(
+    BuildContext context,
+    String email,
+    bool isWide,
+    AppUser? user,
+  ) {
+    final about = _buildWorkAboutCard(context, email, user, isWide);
+    final personal = _buildAccountSection(context, email, isWide, user);
+
+    if (isWide) {
       return Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(child: accountSection),
+          Expanded(flex: 34, child: about),
           const SizedBox(width: 24),
-          Expanded(child: passwordSection),
+          Expanded(flex: 66, child: personal),
         ],
       );
     }
@@ -772,91 +1420,153 @@ class _ProfileContentState extends State<ProfileContent> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        accountSection,
-        const SizedBox(height: 20),
-        passwordSection,
+        about,
+        const SizedBox(height: 16),
+        personal,
       ],
     );
   }
-}
-
-class _ProfileSection extends StatelessWidget {
-  const _ProfileSection({
-    required this.title,
-    this.icon,
-    required this.children,
-    this.isCompact = false,
-    this.padding = 20,
-  });
-
-  final String title;
-  final IconData? icon;
-  final List<Widget> children;
-  final bool isCompact;
-  final double padding;
 
   @override
   Widget build(BuildContext context) {
-    final radius = isCompact ? 16.0 : 24.0;
-    final titleSize = isCompact ? 14.0 : 16.0;
+    final showA = widget.showAccountSection;
+    final showP = widget.showPasswordSection;
+    final showSettings = widget.showAppSettings;
+    if (!showA && !showP && !showSettings) {
+      return const SizedBox.shrink();
+    }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: EdgeInsets.only(left: 4, bottom: isCompact ? 10 : 14),
-          child: Row(
-            children: [
-              if (icon != null) ...[
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(
-                    icon,
-                    size: isCompact ? 18 : 20,
-                    color: AppTheme.primaryNavy,
-                  ),
-                ),
-                SizedBox(width: isCompact ? 10 : 12),
-              ],
-              Text(
-                title,
-                style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: titleSize,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.2,
-                ),
-              ),
-            ],
-          ),
-        ),
-        Container(
-          width: double.infinity,
-          padding: EdgeInsets.all(padding),
-          decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(radius),
-            border: Border.all(
-              color: Colors.black.withValues(alpha: 0.04),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.06),
-                blurRadius: 24,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: children,
-          ),
-        ),
-      ],
+    return Selector<AuthProvider, ({String email, AppUser? user, String displayName})>(
+      selector: (_, a) => (
+        email: a.email,
+        user: a.user,
+        displayName: a.displayName,
+      ),
+      builder: (context, auth, _) {
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final isWide =
+                constraints.maxWidth >= _profileWideBreakpoint;
+
+            return _buildProfileShell(
+              context: context,
+              displayName: auth.displayName,
+              email: auth.email,
+              user: auth.user,
+              showA: showA,
+              showP: showP,
+              showSettings: showSettings,
+              idLabel: dashboardAccountIdLabel(auth.user),
+              isWide: isWide,
+            );
+          },
+        );
+      },
     );
+  }
+
+  Widget _buildProfileShell({
+    required BuildContext context,
+    required String displayName,
+    required String email,
+    required AppUser? user,
+    required bool showA,
+    required bool showP,
+    required bool showSettings,
+    required String? idLabel,
+    required bool isWide,
+  }) {
+    final shell = Container(
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+        boxShadow: AppTheme.dashIsDark(context)
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 20,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (showA || showP)
+            ProfileHeroHeader(
+              displayName: _profileDisplayNameFromAuth(
+                user,
+                displayName,
+              ),
+              email: email,
+              roleLabel: _roleLabel(user),
+              idLabel: idLabel,
+              wideLayout: isWide,
+              avatar: SizedBox(
+                width: 104,
+                height: 104,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    _buildAvatarCircle(52),
+                    if (_imageLoading)
+                      Container(
+                        width: 104,
+                        height: 104,
+                        decoration: const BoxDecoration(
+                          color: Colors.black38,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Center(
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              onChangePhoto:
+                  _imageLoading ? null : _pickAndUploadAvatar,
+              isUploading: _imageLoading,
+            ),
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              isWide ? 28 : 16,
+              0,
+              isWide ? 28 : 16,
+              isWide ? 28 : 20,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (_showTabBar) ...[
+                  ProfileTabBar(
+                    tab: _profileTab,
+                    onChanged: _onProfileTabSelected,
+                    showAccount: showA,
+                    showSecurity: showP,
+                    showAppSettings: showSettings,
+                  ),
+                  const SizedBox(height: 20),
+                ],
+                _buildActiveTabBody(
+                  context,
+                  email: email,
+                  user: user,
+                  isWide: isWide,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
+    return shell;
   }
 }

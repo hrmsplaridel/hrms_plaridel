@@ -1,9 +1,7 @@
 import 'dart:async';
-
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../../api/user_facing_api_error.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../data/job_vacancy_announcement.dart';
 import '../../../data/recruitment_application.dart';
@@ -11,15 +9,16 @@ import '../../../data/action_brainstorming_coaching.dart';
 import '../../../data/training_need_analysis.dart';
 import '../../../data/training_daily_report.dart';
 import '../../../landingpage/constants/app_theme.dart';
-import '../../../landingpage/screens/landing_page.dart';
-import '../../../login/screens/login_page.dart';
 import '../../../utils/form_pdf.dart';
 import '../../../widgets/read_only_saved_entry_dialog.dart';
 import '../../../widgets/rsp_form_header_footer.dart';
 import '../../../widgets/rsp_ld_saved_records_browser.dart';
 import '../../../widgets/training_daily_report_read_only_view.dart';
-import '../../../widgets/user_avatar.dart';
-import '../../shared/screens/profile_and_settings_page.dart';
+import '../../../widgets/training_report_attachment_preview.dart';
+import '../../shared/screens/profile_page.dart' show DashboardProfilePanel;
+import '../../shared/widgets/dashboard_content_navigator.dart';
+import '../../shared/widgets/dashboard_header_actions.dart';
+import '../../shared/widgets/portal_sidebar_brand.dart';
 import '../../../dtr/dtr_main.dart';
 import '../../../dtr/dtr_provider.dart';
 import '../../../dtr/widgets/real_time_clock.dart';
@@ -44,10 +43,10 @@ import '../../../leave/utils/responsive_leave_form_host.dart';
 import '../../../locator/screens/admin_locator_management_screen.dart';
 import '../../../recruitment/screens/rsp_admin_screen.dart';
 import '../../../widgets/feature_card.dart';
+import '../../../employee/screens/employee_dashboard.dart';
 import '../../../notifications/notification_provider.dart';
 import '../../../notifications/notification_tap_result.dart';
 import '../../../notifications/open_notifications_panel.dart';
-import '../../../employee/screens/employee_dashboard.dart';
 
 /// Dashboard accent colors for summary cards and accents (orange theme).
 class _DashboardColors {
@@ -63,6 +62,7 @@ enum AdminMenu {
   dashboard,
   myAttendance,
   myLeave,
+  myProfile,
   dtr,
   rsp,
   ld,
@@ -84,10 +84,11 @@ class _AdminDashboardState extends State<AdminDashboard>
   AdminMenu _selectedMenu = AdminMenu.dashboard;
   final GlobalKey<_DtrContentState> _dtrContentKey =
       GlobalKey<_DtrContentState>();
-  final TextEditingController _dashboardSearchController =
-      TextEditingController();
-  String _dashboardSearchQuery = '';
-
+  static const _settingsPanelKey = PageStorageKey<String>('admin_settings');
+  late final Widget _settingsPanel = const DashboardProfilePanel(
+    key: _settingsPanelKey,
+  );
+  final GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
   Timer? _notificationPollTimer;
 
   @override
@@ -116,7 +117,6 @@ class _AdminDashboardState extends State<AdminDashboard>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _notificationPollTimer?.cancel();
-    _dashboardSearchController.dispose();
     super.dispose();
   }
 
@@ -154,12 +154,25 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   void _onMenuSelected(AdminMenu menu) {
-    setState(() {
-      _selectedMenu = menu;
-      if (menu != AdminMenu.dashboard) {
-        _dashboardSearchController.clear();
-        _dashboardSearchQuery = '';
-      }
+    if (menu == AdminMenu.myProfile) {
+      _openMyProfile();
+      return;
+    }
+    setState(() => _selectedMenu = menu);
+    DashboardContentNavigator.showHome(_contentNavKey);
+  }
+
+  void _openMyProfile() {
+    if (DashboardContentNavigator.isSettingsOnTop(
+      _contentNavKey.currentState,
+    )) {
+      setState(() => _selectedMenu = AdminMenu.myProfile);
+      return;
+    }
+    setState(() => _selectedMenu = AdminMenu.myProfile);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      DashboardContentNavigator.openSettings(_contentNavKey);
     });
   }
 
@@ -210,7 +223,7 @@ class _AdminDashboardState extends State<AdminDashboard>
   Widget _buildContent(String displayName) {
     switch (_selectedMenu) {
       case AdminMenu.dashboard:
-        return _DashboardContent(searchQuery: _dashboardSearchQuery);
+        return const _DashboardContent();
       case AdminMenu.myAttendance:
         return EmployeeAttendanceOverviewSection(
           displayName: displayName,
@@ -218,10 +231,14 @@ class _AdminDashboardState extends State<AdminDashboard>
         );
       case AdminMenu.myLeave:
         return EmployeeLeaveScreen(onFileLeavePressed: _openMyLeaveRequestForm);
+      case AdminMenu.myProfile:
+        return _settingsPanel;
       case AdminMenu.dtr:
         return _DtrContent(key: _dtrContentKey);
       case AdminMenu.rsp:
-        return const RspAdminContent();
+        return RspAdminContent(
+          onOpenCreateAccount: () => _onMenuSelected(AdminMenu.createAccount),
+        );
       case AdminMenu.ld:
         return const _LdContent();
       case AdminMenu.docutracker:
@@ -233,27 +250,29 @@ class _AdminDashboardState extends State<AdminDashboard>
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
-    // Sync DTR current user from API auth (so clock in/out and time records use correct user).
-    if (auth.user != null) {
+    final userId = context.select<AuthProvider, String?>((a) => a.user?.id);
+    if (userId != null && userId.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!context.mounted) return;
         final dtr = context.read<DtrProvider>();
-        if (dtr.userId != auth.user?.id) dtr.setUserFromApi(auth.user?.id);
+        if (dtr.userId != userId) dtr.setUserFromApi(userId);
       });
     }
-    final email = auth.email.isNotEmpty ? auth.email : 'Admin';
-    final displayName = auth.displayName.isNotEmpty
-        ? auth.displayName
-        : 'Admin';
-    final avatarPath = auth.avatarPath;
+    final email = context.select<AuthProvider, String>(
+      (a) => a.email.isNotEmpty ? a.email : 'Admin',
+    );
+    final displayName = context.select<AuthProvider, String>(
+      (a) => a.displayName.isNotEmpty ? a.displayName : 'Admin',
+    );
+    final avatarPath = context.select<AuthProvider, String?>(
+      (a) => a.avatarPath,
+    );
     final width = MediaQuery.of(context).size.width;
     final isWide = width > 900;
-    final contentPadding = width > 900 ? 24.0 : (width > 600 ? 20.0 : 16.0);
+    final contentPadding = width > 900 ? 28.0 : (width > 600 ? 22.0 : 18.0);
 
     return Scaffold(
-      // Light orange background for the main admin dashboard.
-      backgroundColor: const Color(0xFFFFF3E0),
+      backgroundColor: AppTheme.dashCanvasOf(context),
       drawer: isWide
           ? null
           : Drawer(
@@ -263,6 +282,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                   avatarPath: avatarPath,
                   email: email,
                   displayName: displayName,
+                  showBrand: true,
                   onTap: (menu) {
                     _onMenuSelected(menu);
                     if (context.mounted) Navigator.of(context).pop();
@@ -270,56 +290,91 @@ class _AdminDashboardState extends State<AdminDashboard>
                 ),
               ),
             ),
-      body: Row(
-        children: [
-          if (isWide)
-            _Sidebar(
-              selectedMenu: _selectedMenu,
-              avatarPath: avatarPath,
-              email: email,
-              displayName: displayName,
-              onTap: _onMenuSelected,
-            ),
-          Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    const Color(0xFFF8F9FA),
-                    const Color(0xFFF1F3F5),
-                    const Color(0xFFEEF1F4),
-                  ],
-                  stops: const [0.0, 0.5, 1.0],
-                ),
-              ),
-              child: Column(
+      body: SafeArea(
+        child: isWide
+            ? Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _TopBar(
+                  _Sidebar(
+                    railMode: true,
+                    showBrand: false,
+                    selectedMenu: _selectedMenu,
+                    avatarPath: avatarPath,
                     email: email,
                     displayName: displayName,
-                    avatarPath: avatarPath,
-                    showMenuButton: !isWide,
-                    searchEnabled: _selectedMenu == AdminMenu.dashboard,
-                    searchController: _dashboardSearchController,
-                    searchQuery: _dashboardSearchQuery,
-                    onSearchChanged: (value) {
-                      setState(() => _dashboardSearchQuery = value);
-                    },
-                    onOpenNotifications: _handleOpenNotifications,
+                    onTap: _onMenuSelected,
                   ),
                   Expanded(
-                    child: SingleChildScrollView(
-                      padding: EdgeInsets.all(contentPadding),
-                      child: _buildContent(displayName),
+                    child: Column(
+                      children: [
+                        DashboardAppHeaderBar(
+                          showBrand: false,
+                          compactActions: width < 600,
+                          onViewAllNotifications: _handleOpenNotifications,
+                          onNotificationTap: _applyNotificationTapResult,
+                          trailing: DashboardAccountMenuButton(
+                            avatarPath: avatarPath,
+                            compact: width < 600,
+                            tooltip: displayName,
+                            onProfile: () => _openMyProfile(),
+                          ),
+                        ),
+                        Expanded(
+                          child: ColoredBox(
+                            color: AppTheme.dashCanvasOf(context),
+                            child: DashboardContentNavigator(
+                              navigatorKey: _contentNavKey,
+                              homeBuilder: () => _buildContent(displayName),
+                              settingsPanel: _settingsPanel,
+                              homeScrollPadding: EdgeInsets.all(contentPadding),
+                              settingsScrollPadding: const EdgeInsets.fromLTRB(
+                                12,
+                                8,
+                                12,
+                                28,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              )
+            : Column(
+                children: [
+                  DashboardAppHeaderBar(
+                    showMenuButton: true,
+                    onMenuPressed: () => Scaffold.of(context).openDrawer(),
+                    compactActions: width < 600,
+                    onViewAllNotifications: _handleOpenNotifications,
+                    onNotificationTap: _applyNotificationTapResult,
+                    trailing: DashboardAccountMenuButton(
+                      avatarPath: avatarPath,
+                      compact: width < 600,
+                      tooltip: displayName,
+                      onProfile: () => _openMyProfile(),
+                    ),
+                  ),
+                  Expanded(
+                    child: ColoredBox(
+                      color: AppTheme.dashCanvasOf(context),
+                      child: DashboardContentNavigator(
+                        navigatorKey: _contentNavKey,
+                        homeBuilder: () => _buildContent(displayName),
+                        settingsPanel: _settingsPanel,
+                        homeScrollPadding: EdgeInsets.all(contentPadding),
+                        settingsScrollPadding: const EdgeInsets.fromLTRB(
+                          12,
+                          8,
+                          12,
+                          28,
+                        ),
+                      ),
                     ),
                   ),
                 ],
               ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -332,6 +387,8 @@ class _Sidebar extends StatelessWidget {
     required this.email,
     required this.displayName,
     required this.onTap,
+    this.showBrand = true,
+    this.railMode = false,
   });
 
   final AdminMenu selectedMenu;
@@ -339,297 +396,228 @@ class _Sidebar extends StatelessWidget {
   final String email;
   final String displayName;
   final ValueChanged<AdminMenu> onTap;
+  final bool showBrand;
 
-  static Widget _sealAvatar({double size = 48}) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.12),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Image.asset(
-          'assets/images/Plaridel Logo.jpg',
-          width: size,
-          height: size,
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => Container(
-            width: size,
-            height: size,
-            color: Colors.white,
-            child: Icon(
-              Icons.account_balance_rounded,
-              color: AppTheme.primaryNavy,
-              size: size * 0.5,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  /// Full-height rail with one straight right edge through header + nav.
+  final bool railMode;
 
   @override
   Widget build(BuildContext context) {
     final year = DateTime.now().year;
+    final hairline = AppTheme.dashHairlineOf(context);
+    final canvas = AppTheme.dashCanvasOf(context);
+    final panel = AppTheme.dashPanelOf(context);
+
+    final navList = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(height: railMode ? 12 : (showBrand ? 4 : 12)),
+        _NavTile(
+          icon: Icons.dashboard_outlined,
+          label: 'Dashboard',
+          selected: selectedMenu == AdminMenu.dashboard,
+          onTap: () => onTap(AdminMenu.dashboard),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+          child: Divider(
+            height: 1,
+            thickness: 1,
+            color: AppTheme.dashHairlineOf(context),
+          ),
+        ),
+        const _SidebarSectionLabel('MY PORTAL'),
+        _NavTile(
+          icon: Icons.schedule_outlined,
+          label: 'My Attendance',
+          selected: selectedMenu == AdminMenu.myAttendance,
+          onTap: () => onTap(AdminMenu.myAttendance),
+        ),
+        _NavTile(
+          icon: Icons.event_note_outlined,
+          label: 'My Leave',
+          selected: selectedMenu == AdminMenu.myLeave,
+          onTap: () => onTap(AdminMenu.myLeave),
+        ),
+        const _SidebarSectionLabel('MANAGEMENT'),
+        _NavTile(
+          icon: Icons.how_to_reg_outlined,
+          label: 'RSP',
+          selected: selectedMenu == AdminMenu.rsp,
+          onTap: () => onTap(AdminMenu.rsp),
+        ),
+        _NavTile(
+          icon: Icons.school_outlined,
+          label: 'L&D',
+          selected: selectedMenu == AdminMenu.ld,
+          onTap: () => onTap(AdminMenu.ld),
+        ),
+        _NavTile(
+          icon: Icons.access_time_outlined,
+          label: 'DTR',
+          selected: selectedMenu == AdminMenu.dtr,
+          onTap: () => onTap(AdminMenu.dtr),
+        ),
+        _NavTile(
+          icon: Icons.folder_outlined,
+          label: 'DocuTracker',
+          selected: selectedMenu == AdminMenu.docutracker,
+          onTap: () => onTap(AdminMenu.docutracker),
+        ),
+        _NavTile(
+          icon: Icons.person_add_outlined,
+          label: 'Create Account',
+          selected: selectedMenu == AdminMenu.createAccount,
+          onTap: () => onTap(AdminMenu.createAccount),
+        ),
+        const SizedBox(height: 12),
+      ],
+    );
+
+    final footer = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Container(
+            height: 2,
+            decoration: BoxDecoration(
+              color: AppTheme.primaryNavy.withValues(alpha: 0.28),
+              borderRadius: BorderRadius.circular(1),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+          child: DashboardSidebarProfileCard(
+            displayName: displayName,
+            subtitle: email.isNotEmpty ? email : 'System Administrator',
+            avatarPath: avatarPath,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
+          child: Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 0,
+            children: [
+              Text(
+                '\u00a9 $year HRMS',
+                style: TextStyle(
+                  color: AppTheme.dashTextSecondaryOf(context),
+                  fontSize: 11,
+                  height: 1.2,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: Text(
+                  '\u00b7',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppTheme.textSecondary.withValues(alpha: 0.7),
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () {},
+                style: TextButton.styleFrom(
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 2,
+                    vertical: 0,
+                  ),
+                ),
+                child: Text(
+                  'Privacy',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.primaryNavy,
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: Text(
+                  '\u00b7',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppTheme.textSecondary.withValues(alpha: 0.7),
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () {},
+                style: TextButton.styleFrom(
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 2,
+                    vertical: 0,
+                  ),
+                ),
+                child: Text(
+                  'Terms',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.primaryNavy,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+
+    if (railMode) {
+      return Container(
+        width: kDashboardSidebarWidth,
+        decoration: BoxDecoration(
+          border: Border(right: BorderSide(color: hairline)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SidebarRailHeader(),
+            Expanded(
+              child: ColoredBox(
+                color: canvas,
+                child: Column(
+                  children: [
+                    Expanded(child: SingleChildScrollView(child: navList)),
+                    footer,
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Container(
-      width: 288,
+      width: kDashboardSidebarWidth,
       decoration: BoxDecoration(
-        color: AppTheme.white,
+        color: panel,
+        border: Border(right: BorderSide(color: hairline)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.07),
-            blurRadius: 24,
-            offset: const Offset(4, 0),
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 14,
+            offset: const Offset(1, 0),
           ),
         ],
       ),
       child: Column(
         children: [
-          const SizedBox(height: 20),
-          Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16),
-            padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 18),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  AppTheme.primaryNavy,
-                  AppTheme.primaryNavyDark,
-                ],
-              ),
-              borderRadius: BorderRadius.circular(18),
-              boxShadow: [
-                BoxShadow(
-                  color: AppTheme.primaryNavy.withValues(alpha: 0.35),
-                  blurRadius: 18,
-                  offset: const Offset(0, 6),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                _sealAvatar(size: 52),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Municipality of Plaridel',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w800,
-                          height: 1.2,
-                          letterSpacing: -0.2,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'HUMAN RESOURCE MANAGEMENT SYSTEM',
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.92),
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.6,
-                          height: 1.25,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-          Expanded(
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _NavTile(
-                    icon: Icons.dashboard_rounded,
-                    label: 'Dashboard',
-                    selected: selectedMenu == AdminMenu.dashboard,
-                    onTap: () => onTap(AdminMenu.dashboard),
-                  ),
-                  const _SidebarSectionLabel('MY PORTAL'),
-                  _NavTile(
-                    icon: Icons.schedule_rounded,
-                    label: 'My Attendance',
-                    selected: selectedMenu == AdminMenu.myAttendance,
-                    onTap: () => onTap(AdminMenu.myAttendance),
-                  ),
-                  _NavTile(
-                    icon: Icons.event_note_rounded,
-                    label: 'My Leave',
-                    selected: selectedMenu == AdminMenu.myLeave,
-                    onTap: () => onTap(AdminMenu.myLeave),
-                  ),
-                  const _SidebarSectionLabel('MANAGEMENT'),
-                  _NavTile(
-                    icon: Icons.how_to_reg_rounded,
-                    label: 'RSP',
-                    selected: selectedMenu == AdminMenu.rsp,
-                    onTap: () => onTap(AdminMenu.rsp),
-                  ),
-                  _NavTile(
-                    icon: Icons.school_rounded,
-                    label: 'L&D',
-                    selected: selectedMenu == AdminMenu.ld,
-                    onTap: () => onTap(AdminMenu.ld),
-                  ),
-                  _NavTile(
-                    icon: Icons.access_time_rounded,
-                    label: 'DTR',
-                    selected: selectedMenu == AdminMenu.dtr,
-                    onTap: () => onTap(AdminMenu.dtr),
-                  ),
-                  _NavTile(
-                    icon: Icons.folder_rounded,
-                    label: 'DocuTracker',
-                    selected: selectedMenu == AdminMenu.docutracker,
-                    onTap: () => onTap(AdminMenu.docutracker),
-                  ),
-                  _NavTile(
-                    icon: Icons.person_add_rounded,
-                    label: 'Create Account',
-                    selected: selectedMenu == AdminMenu.createAccount,
-                    onTap: () => onTap(AdminMenu.createAccount),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Divider(height: 1, thickness: 1, color: AppTheme.lightGray),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF1F3F5),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppTheme.lightGray),
-              ),
-              child: Row(
-                children: [
-                  _sealAvatar(size: 40),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          displayName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 14,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          email.isNotEmpty ? email : 'System Administrator',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 12,
-                            height: 1.2,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
-            child: Wrap(
-              alignment: WrapAlignment.center,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 0,
-              children: [
-                Text(
-                  '\u00a9 $year HRMS',
-                  style: TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 11,
-                    height: 1.2,
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: Text(
-                    '\u00b7',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.textSecondary.withValues(alpha: 0.7),
-                    ),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () {},
-                  style: TextButton.styleFrom(
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 0),
-                  ),
-                  child: Text(
-                    'Privacy',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.primaryNavy,
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: Text(
-                    '\u00b7',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.textSecondary.withValues(alpha: 0.7),
-                    ),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () {},
-                  style: TextButton.styleFrom(
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 0),
-                  ),
-                  child: Text(
-                    'Terms',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.primaryNavy,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          if (showBrand) const PortalSidebarBrand(),
+          Expanded(child: SingleChildScrollView(child: navList)),
+          footer,
         ],
       ),
     );
@@ -643,17 +631,20 @@ class _SidebarSectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(30, 18, 30, 8),
-      child: Align(
-        alignment: Alignment.centerLeft,
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
         child: Text(
           label,
           style: TextStyle(
-            color: AppTheme.textSecondary,
+            color: AppTheme.dashIsDark(context)
+                ? AppTheme.primaryNavyLight.withValues(alpha: 0.95)
+                : AppTheme.letterheadNavy.withValues(alpha: 0.92),
             fontSize: 11,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.9,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.15,
+            height: 1.1,
           ),
         ),
       ),
@@ -680,464 +671,62 @@ class _NavTile extends StatefulWidget {
 class _NavTileState extends State<_NavTile> {
   bool _hover = false;
 
-  static const _activeFill = Color(0xFFFFF0E6);
-
   @override
   Widget build(BuildContext context) {
-    final iconColor = widget.selected
+    final inactive = AppTheme.dashTextSecondaryOf(context);
+    final selected = widget.selected;
+    final bg = selected
         ? AppTheme.primaryNavy
-        : (_hover ? AppTheme.primaryNavy.withValues(alpha: 0.88) : AppTheme.textSecondary);
-    final labelColor = widget.selected
-        ? AppTheme.primaryNavy
-        : (_hover ? AppTheme.textPrimary : AppTheme.textSecondary);
+        : (_hover ? AppTheme.dashMutedSurfaceOf(context) : Colors.transparent);
+    final fg = selected ? Colors.white : inactive;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
         child: Material(
           color: Colors.transparent,
           child: InkWell(
             onTap: widget.onTap,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(12),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 180),
               curve: Curves.easeOutCubic,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
               decoration: BoxDecoration(
-                color: widget.selected
-                    ? _activeFill
-                    : (_hover ? AppTheme.primaryNavy.withValues(alpha: 0.05) : Colors.transparent),
-                borderRadius: BorderRadius.circular(14),
+                color: bg,
+                borderRadius: BorderRadius.circular(12),
               ),
-              // IntrinsicHeight: sidebar nav lives in a scroll view (unbounded height).
-              // Row + CrossAxisAlignment.stretch needs a finite max height on the cross axis.
-              child: IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (widget.selected)
-                      Container(
-                        width: 4,
-                        decoration: BoxDecoration(
-                          color: AppTheme.primaryNavy,
-                          borderRadius: const BorderRadius.horizontal(left: Radius.circular(14)),
-                        ),
-                      ),
-                    Expanded(
-                      child: Padding(
-                        padding: EdgeInsets.fromLTRB(widget.selected ? 12 : 16, 13, 16, 13),
-                        child: Row(
-                          children: [
-                            Icon(widget.icon, size: 22, color: iconColor),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Text(
-                                widget.label,
-                                style: TextStyle(
-                                  color: labelColor,
-                                  fontWeight: widget.selected ? FontWeight.w700 : FontWeight.w500,
-                                  fontSize: 15,
-                                  letterSpacing: -0.1,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _TopBar extends StatelessWidget {
-  const _TopBar({
-    required this.email,
-    required this.displayName,
-    this.avatarPath,
-    this.showMenuButton = false,
-    this.searchEnabled = false,
-    required this.searchController,
-    required this.searchQuery,
-    required this.onSearchChanged,
-    required this.onOpenNotifications,
-  });
-
-  final String email;
-  final String displayName;
-  final String? avatarPath;
-  final bool showMenuButton;
-
-  /// Dashboard tab only — search filters overview sections.
-  final bool searchEnabled;
-  final TextEditingController searchController;
-  final String searchQuery;
-  final ValueChanged<String> onSearchChanged;
-  final Future<void> Function() onOpenNotifications;
-
-  @override
-  Widget build(BuildContext context) {
-    final isCompact = MediaQuery.of(context).size.width < 600;
-    return Container(
-      height: isCompact ? 60 : 72,
-      padding: EdgeInsets.symmetric(horizontal: isCompact ? 16 : 28),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 2),
-          ),
-          BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          if (showMenuButton)
-            IconButton(
-              icon: const Icon(Icons.menu_rounded),
-              onPressed: () => Scaffold.of(context).openDrawer(),
-              color: AppTheme.textPrimary,
-              tooltip: 'Menu',
-              style: IconButton.styleFrom(
-                backgroundColor: AppTheme.offWhite,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-          if (showMenuButton && !isCompact) const SizedBox(width: 12),
-          Expanded(
-            child: !searchEnabled
-                ? const SizedBox.shrink()
-                : Container(
-                    height: 48,
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    decoration: BoxDecoration(
-                      color: AppTheme.offWhite,
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: Colors.black.withOpacity(0.06)),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.03),
-                          blurRadius: 8,
-                          offset: const Offset(0, 1),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.search_rounded,
-                          size: 22,
-                          color: AppTheme.textSecondary.withOpacity(0.8),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: TextField(
-                            controller: searchController,
-                            onChanged: onSearchChanged,
-                            textInputAction: TextInputAction.search,
-                            style: TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: isCompact ? 13 : 14,
-                            ),
-                            decoration: InputDecoration(
-                              isDense: true,
-                              border: InputBorder.none,
-                              hintText: 'Search dashboard...',
-                              hintStyle: TextStyle(
-                                color: AppTheme.textSecondary.withOpacity(0.85),
-                                fontSize: isCompact ? 13 : 14,
-                              ),
-                              contentPadding: EdgeInsets.zero,
-                            ),
-                          ),
-                        ),
-                        if (searchQuery.isNotEmpty)
-                          IconButton(
-                            icon: Icon(
-                              Icons.close_rounded,
-                              size: 20,
-                              color: AppTheme.textSecondary.withOpacity(0.8),
-                            ),
-                            tooltip: 'Clear',
-                            onPressed: () {
-                              searchController.clear();
-                              onSearchChanged('');
-                            },
-                            style: IconButton.styleFrom(
-                              padding: EdgeInsets.zero,
-                              minimumSize: const Size(32, 32),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-          ),
-          if (!searchEnabled) const Spacer(),
-          Consumer<NotificationProvider>(
-            builder: (context, np, _) {
-              final c = np.unreadCount;
-              return Stack(
-                clipBehavior: Clip.none,
+              child: Row(
                 children: [
-                  IconButton(
-                    icon: Icon(
-                      Icons.notifications_outlined,
-                      color: AppTheme.textPrimary,
-                      size: isCompact ? 24 : 26,
-                    ),
-                    tooltip: 'Notifications',
-                    onPressed: () {
-                      onOpenNotifications();
-                    },
-                    style: IconButton.styleFrom(
-                      backgroundColor: AppTheme.offWhite,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                  if (c > 0)
-                    Positioned(
-                      right: -2,
-                      top: -2,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 5,
-                          vertical: 1,
-                        ),
-                        constraints: const BoxConstraints(
-                          minWidth: 18,
-                          minHeight: 18,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFE53935),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.white, width: 1),
-                        ),
-                        child: Text(
-                          c > 99 ? '99+' : '$c',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              );
-            },
-          ),
-          SizedBox(width: isCompact ? 6 : 12),
-          _AdminDropdown(
-            email: email,
-            displayName: displayName,
-            avatarPath: avatarPath,
-            compact: isCompact,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AdminDropdown extends StatelessWidget {
-  const _AdminDropdown({
-    required this.email,
-    required this.displayName,
-    this.avatarPath,
-    this.compact = false,
-  });
-
-  final String email;
-  final String displayName;
-  final String? avatarPath;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<String>(
-      offset: const Offset(0, 48),
-      padding: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      elevation: 8,
-      shadowColor: Colors.black.withOpacity(0.15),
-      child: Container(
-        padding: EdgeInsets.symmetric(
-          horizontal: compact ? 10 : 14,
-          vertical: 8,
-        ),
-        decoration: BoxDecoration(
-          color: AppTheme.offWhite,
-          borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: Colors.black.withOpacity(0.06)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 12,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            UserAvatar(avatarPath: avatarPath, radius: compact ? 17 : 20),
-            if (!compact) ...[
-              const SizedBox(width: 12),
-              Text(
-                displayName,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 14,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-            ],
-            const SizedBox(width: 4),
-            Icon(
-              Icons.keyboard_arrow_down_rounded,
-              size: compact ? 20 : 24,
-              color: AppTheme.textSecondary,
-            ),
-          ],
-        ),
-      ),
-      itemBuilder: (context) => [
-        PopupMenuItem<String>(
-          enabled: false,
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  UserAvatar(
-                    avatarPath: avatarPath,
-                    radius: 28,
-                    backgroundColor: AppTheme.primaryNavy.withOpacity(0.12),
-                    placeholderIconColor: AppTheme.primaryNavy,
-                  ),
+                  Icon(widget.icon, size: 22, color: fg),
                   const SizedBox(width: 14),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          displayName,
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.textPrimary,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          email,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: AppTheme.textSecondary,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 1,
-                        ),
-                      ],
+                    child: Text(
+                      widget.label,
+                      style: TextStyle(
+                        color: fg,
+                        fontWeight: selected
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                        fontSize: 14,
+                        letterSpacing: -0.15,
+                      ),
                     ),
                   ),
                 ],
               ),
-            ],
+            ),
           ),
         ),
-        const PopupMenuDivider(height: 1),
-        PopupMenuItem(
-          value: 'profile_settings',
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-          child: Row(
-            children: [
-              Icon(
-                Icons.person_outline_rounded,
-                size: 22,
-                color: AppTheme.textSecondary,
-              ),
-              const SizedBox(width: 14),
-              Text(
-                'Profile & Settings',
-                style: TextStyle(fontSize: 14, color: AppTheme.textPrimary),
-              ),
-              const SizedBox(width: 8),
-              Icon(
-                Icons.settings_outlined,
-                size: 18,
-                color: AppTheme.textSecondary,
-              ),
-            ],
-          ),
-        ),
-        const PopupMenuDivider(height: 1),
-        PopupMenuItem(
-          value: 'signout',
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-          child: Row(
-            children: [
-              Icon(Icons.logout_rounded, size: 22, color: Color(0xFFC62828)),
-              const SizedBox(width: 14),
-              Text(
-                'Sign out',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFFC62828),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-      onSelected: (value) async {
-        if (value == 'signout') {
-          await context.read<AuthProvider>().signOut();
-          if (context.mounted) {
-            final dest = kIsWeb ? const LandingPage() : const LoginPage();
-            Navigator.of(context).pushAndRemoveUntil(
-              MaterialPageRoute(builder: (_) => dest),
-              (route) => false,
-            );
-          }
-        }
-        if (value == 'profile_settings') {
-          Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const ProfileAndSettingsPage()),
-          );
-        }
-      },
+      ),
     );
   }
 }
 
 class _DashboardContent extends StatelessWidget {
-  const _DashboardContent({required this.searchQuery});
-
-  /// Filters which overview blocks are shown (Dashboard tab only).
-  final String searchQuery;
+  const _DashboardContent();
 
   static bool _sectionVisible(String query, List<String> keywords) {
     final q = query.trim().toLowerCase();
@@ -1149,38 +738,10 @@ class _DashboardContent extends StatelessWidget {
     return false;
   }
 
-  static String _formatDate(DateTime d) {
-    const days = [
-      'Monday',
-      'Tuesday',
-      'Wednesday',
-      'Thursday',
-      'Friday',
-      'Saturday',
-      'Sunday',
-    ];
-    const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    return '${days[d.weekday - 1]}, ${months[d.month - 1]} ${d.day}, ${d.year}';
-  }
-
   @override
   Widget build(BuildContext context) {
     final isNarrow = MediaQuery.of(context).size.width < 500;
-    final now = DateTime.now();
-    final q = searchQuery;
+    const q = '';
 
     final showWelcome = _sectionVisible(q, [
       'welcome',
@@ -1299,60 +860,33 @@ class _DashboardContent extends StatelessWidget {
           ),
         if (showWelcome)
           Container(
-            padding: EdgeInsets.all(isNarrow ? 20 : 28),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  AppTheme.primaryNavy.withOpacity(0.1),
-                  AppTheme.primaryNavy.withOpacity(0.04),
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(
-                color: AppTheme.primaryNavy.withOpacity(0.15),
-                width: 1,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: AppTheme.primaryNavy.withOpacity(0.06),
-                  blurRadius: 24,
-                  offset: const Offset(0, 8),
-                ),
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.03),
-                  blurRadius: 12,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
+            padding: EdgeInsets.all(isNarrow ? 20 : 24),
+            decoration: AppTheme.dashSurfaceCard(context),
             child: isNarrow
                 ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        _formatDate(now),
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
+                      const Align(
+                        alignment: Alignment.centerRight,
+                        child: RealTimeClock(),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 14),
                       Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Container(
-                            padding: const EdgeInsets.all(12),
+                            padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
-                              color: AppTheme.primaryNavy.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(14),
+                              color: AppTheme.primaryNavy.withValues(
+                                alpha: 0.08,
+                              ),
+                              borderRadius: BorderRadius.circular(12),
                             ),
                             child: Icon(
-                              Icons.waving_hand_rounded,
+                              Icons.waving_hand_outlined,
                               color: AppTheme.primaryNavy,
-                              size: 26,
+                              size: 22,
                             ),
                           ),
                           const SizedBox(width: 14),
@@ -1361,21 +895,24 @@ class _DashboardContent extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Welcome back, Admin!- Hello Boi Paldooooooooooo',
+                                  'Welcome back, Admin!',
                                   style: TextStyle(
-                                    color: AppTheme.textPrimary,
+                                    color: AppTheme.dashTextPrimaryOf(context),
                                     fontSize: 22,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: -0.3,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: -0.35,
+                                    height: 1.2,
                                   ),
                                 ),
-                                const SizedBox(height: 4),
+                                const SizedBox(height: 6),
                                 Text(
                                   "Here's the latest overview of the HR activities.",
                                   style: TextStyle(
-                                    color: AppTheme.textSecondary,
+                                    color: AppTheme.dashTextSecondaryOf(
+                                      context,
+                                    ),
                                     fontSize: 14,
-                                    height: 1.4,
+                                    height: 1.45,
                                   ),
                                 ),
                               ],
@@ -1386,98 +923,70 @@ class _DashboardContent extends StatelessWidget {
                     ],
                   )
                 : Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(16),
+                        padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: AppTheme.primaryNavy.withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(16),
-                          boxShadow: [
-                            BoxShadow(
-                              color: AppTheme.primaryNavy.withOpacity(0.08),
-                              blurRadius: 12,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(12),
                         ),
                         child: Icon(
-                          Icons.waving_hand_rounded,
+                          Icons.waving_hand_outlined,
                           color: AppTheme.primaryNavy,
-                          size: 32,
+                          size: 26,
                         ),
                       ),
-                      const SizedBox(width: 24),
+                      const SizedBox(width: 18),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text(
-                              _formatDate(now),
-                              style: TextStyle(
-                                color: AppTheme.textSecondary,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
                             Text(
                               'Welcome back, Admin!',
                               style: TextStyle(
-                                color: AppTheme.textPrimary,
-                                fontSize: 28,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -0.5,
+                                color: AppTheme.dashTextPrimaryOf(context),
+                                fontSize: 26,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -0.45,
+                                height: 1.2,
                               ),
                             ),
                             const SizedBox(height: 6),
                             Text(
                               "Here's the latest overview of the HR activities.",
                               style: TextStyle(
-                                color: AppTheme.textSecondary,
+                                color: AppTheme.dashTextSecondaryOf(context),
                                 fontSize: 15,
-                                height: 1.5,
+                                height: 1.45,
                               ),
                             ),
                           ],
                         ),
                       ),
+                      const RealTimeClock(),
                     ],
                   ),
           ),
-        if (showWelcome && showSummary) const SizedBox(height: 32),
+        if (showWelcome && showSummary) const SizedBox(height: 28),
         if (showSummary) const _SummaryCards(),
         if ((showWelcome || showSummary) && showDocu)
           const SizedBox(height: 28),
         if (showDocu) ...[
           Text(
             'DocuTracker',
-            style: TextStyle(
-              fontSize: 18,
+            style: AppTheme.dashSectionTitle(context).copyWith(
+              fontSize: 15,
               fontWeight: FontWeight.w700,
-              color: AppTheme.textPrimary,
+              color: AppTheme.dashTextPrimaryOf(context),
               letterSpacing: -0.2,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: AppTheme.white,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.black.withOpacity(0.06)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.06),
-                  blurRadius: 20,
-                  offset: const Offset(0, 4),
-                ),
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.02),
-                  blurRadius: 16,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
+            padding: const EdgeInsets.all(20),
+            decoration: AppTheme.dashSurfaceCard(context),
             child: const DocuTrackerDashboardScreen(
               isAdmin: true,
               showTitle: false,
@@ -1489,33 +998,17 @@ class _DashboardContent extends StatelessWidget {
         if (showDtr) ...[
           Text(
             'Daily Time Record',
-            style: TextStyle(
-              fontSize: 18,
+            style: AppTheme.dashSectionTitle(context).copyWith(
+              fontSize: 15,
               fontWeight: FontWeight.w700,
-              color: AppTheme.textPrimary,
+              color: AppTheme.dashTextPrimaryOf(context),
               letterSpacing: -0.2,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: AppTheme.white,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.black.withOpacity(0.06)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.06),
-                  blurRadius: 20,
-                  offset: const Offset(0, 4),
-                ),
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.02),
-                  blurRadius: 16,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
+            padding: const EdgeInsets.all(20),
+            decoration: AppTheme.dashSurfaceCard(context),
             child: const DtrDashboard(),
           ),
         ],
@@ -1772,54 +1265,36 @@ class _SummaryCard extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: Container(
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: data.color,
-          borderRadius: BorderRadius.circular(20),
-          border: data.color == Colors.white
-              ? Border.all(color: Colors.black.withOpacity(0.06))
-              : null,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.06),
-              blurRadius: 20,
-              offset: const Offset(0, 6),
-            ),
-            BoxShadow(
-              color: Colors.black.withOpacity(0.03),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
+        padding: const EdgeInsets.all(20),
+        decoration: AppTheme.dashSurfaceCard(context),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: data.iconColor.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(14),
+                color: data.iconColor.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
               ),
-              child: Icon(data.icon, size: 26, color: data.iconColor),
+              child: Icon(data.icon, size: 22, color: data.iconColor),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             Text(
               data.title,
               style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 13,
+                color: AppTheme.dashTextSecondaryOf(context),
+                fontSize: 12.5,
                 fontWeight: FontWeight.w600,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
               data.value,
               style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 28,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.5,
+                color: AppTheme.dashTextPrimaryOf(context),
+                fontSize: 26,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.45,
                 height: 1.2,
               ),
             ),
@@ -1828,7 +1303,7 @@ class _SummaryCard extends StatelessWidget {
               Text(
                 data.subtitle,
                 style: TextStyle(
-                  color: AppTheme.textSecondary,
+                  color: AppTheme.dashTextSecondaryOf(context),
                   fontSize: 12,
                   height: 1.3,
                 ),
@@ -1845,24 +1320,8 @@ class _AnnouncementsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(28),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 24,
-            offset: const Offset(0, 6),
-          ),
-          BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
+      padding: const EdgeInsets.all(22),
+      decoration: AppTheme.dashSurfaceCard(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1872,24 +1331,25 @@ class _AnnouncementsCard extends StatelessWidget {
               Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: AppTheme.primaryNavy.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(14),
+                      color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(
-                      Icons.campaign_rounded,
+                      Icons.campaign_outlined,
                       color: AppTheme.primaryNavy,
-                      size: 24,
+                      size: 22,
                     ),
                   ),
-                  const SizedBox(width: 16),
+                  const SizedBox(width: 14),
                   Text(
                     'Announcements',
                     style: TextStyle(
-                      color: AppTheme.textPrimary,
+                      color: AppTheme.dashTextPrimaryOf(context),
                       fontWeight: FontWeight.w700,
-                      fontSize: 18,
+                      fontSize: 15,
+                      letterSpacing: -0.2,
                     ),
                   ),
                 ],
@@ -1901,22 +1361,20 @@ class _AnnouncementsCard extends StatelessWidget {
                 style: TextButton.styleFrom(
                   foregroundColor: AppTheme.primaryNavy,
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
+                    horizontal: 12,
                     vertical: 8,
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 18),
           Container(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
-              color: AppTheme.offWhite,
-              borderRadius: BorderRadius.circular(14),
-              border: Border(
-                left: BorderSide(color: AppTheme.primaryNavy, width: 4),
-              ),
+              color: AppTheme.dashMutedSurfaceOf(context),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTheme.dashHairlineOf(context)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1924,7 +1382,7 @@ class _AnnouncementsCard extends StatelessWidget {
                 Text(
                   'Job Vacancies (Hiring)',
                   style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.dashTextPrimaryOf(context),
                     fontWeight: FontWeight.w700,
                     fontSize: 16,
                   ),
@@ -1933,7 +1391,7 @@ class _AnnouncementsCard extends StatelessWidget {
                 Text(
                   'Control whether the landing page shows "We are currently accepting applications" or "There are no job vacancies at the moment." Manage this in Job Vacancies.',
                   style: TextStyle(
-                    color: AppTheme.textSecondary,
+                    color: AppTheme.dashTextSecondaryOf(context),
                     fontSize: 14,
                     height: 1.55,
                   ),
@@ -1954,24 +1412,8 @@ class _RecruitmentOverviewCard extends StatelessWidget {
     final isCompact = width < 480;
 
     return Container(
-      padding: const EdgeInsets.all(28),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.black.withOpacity(0.05)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 20,
-            offset: const Offset(0, 6),
-          ),
-          BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
+      padding: const EdgeInsets.all(22),
+      decoration: AppTheme.dashSurfaceCard(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1998,7 +1440,7 @@ class _RecruitmentOverviewCard extends StatelessWidget {
                       child: Text(
                         'Recruitment Overview',
                         style: TextStyle(
-                          color: AppTheme.textPrimary,
+                          color: AppTheme.dashTextPrimaryOf(context),
                           fontWeight: FontWeight.w700,
                           fontSize: 18,
                         ),
@@ -2043,7 +1485,7 @@ class _RecruitmentOverviewCard extends StatelessWidget {
                     Text(
                       'Recruitment Overview',
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         fontWeight: FontWeight.w700,
                         fontSize: 18,
                       ),
@@ -2064,9 +1506,9 @@ class _RecruitmentOverviewCard extends StatelessWidget {
           Container(
             height: 200,
             decoration: BoxDecoration(
-              color: AppTheme.offWhite.withOpacity(0.6),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: Colors.black.withOpacity(0.05)),
+              color: AppTheme.dashMutedSurfaceOf(context),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTheme.dashHairlineOf(context)),
             ),
             child: Center(
               child: Column(
@@ -2075,13 +1517,15 @@ class _RecruitmentOverviewCard extends StatelessWidget {
                   Icon(
                     Icons.analytics_outlined,
                     size: 56,
-                    color: AppTheme.textSecondary.withOpacity(0.35),
+                    color: AppTheme.dashTextSecondaryOf(
+                      context,
+                    ).withValues(alpha: 0.5),
                   ),
                   const SizedBox(height: 16),
                   Text(
                     'No application data yet',
                     style: TextStyle(
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextPrimaryOf(context),
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
                     ),
@@ -2090,7 +1534,7 @@ class _RecruitmentOverviewCard extends StatelessWidget {
                   Text(
                     'Data will appear when applicants complete the recruitment process.',
                     style: TextStyle(
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                       fontSize: 13,
                     ),
                   ),
@@ -2129,24 +1573,8 @@ class _PendingApplicationsCard extends StatelessWidget {
     final isCompact = width < 480;
 
     return Container(
-      padding: const EdgeInsets.all(28),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.black.withOpacity(0.05)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 20,
-            offset: const Offset(0, 6),
-          ),
-          BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
+      padding: const EdgeInsets.all(22),
+      decoration: AppTheme.dashSurfaceCard(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2173,7 +1601,7 @@ class _PendingApplicationsCard extends StatelessWidget {
                       child: Text(
                         'Pending Applications',
                         style: TextStyle(
-                          color: AppTheme.textPrimary,
+                          color: AppTheme.dashTextPrimaryOf(context),
                           fontWeight: FontWeight.w700,
                           fontSize: 18,
                         ),
@@ -2218,7 +1646,7 @@ class _PendingApplicationsCard extends StatelessWidget {
                     Text(
                       'Pending Applications',
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         fontWeight: FontWeight.w700,
                         fontSize: 18,
                       ),
@@ -2255,7 +1683,7 @@ class _PendingApplicationsCard extends StatelessWidget {
                   children: [
                     TableRow(
                       decoration: BoxDecoration(
-                        color: AppTheme.primaryNavy.withOpacity(0.08),
+                        color: AppTheme.dashMutedSurfaceOf(context),
                       ),
                       children: [
                         _TableHeader('Applicant'),
@@ -2274,24 +1702,10 @@ class _PendingApplicationsCard extends StatelessWidget {
                           child: Text(
                             'No applications yet',
                             style: TextStyle(
-                              color: AppTheme.textSecondary,
+                              color: AppTheme.dashTextSecondaryOf(context),
                               fontSize: 14,
                             ),
                           ),
-                        ),
-                        const Padding(
-                          padding: EdgeInsets.symmetric(
-                            vertical: 16,
-                            horizontal: 8,
-                          ),
-                          child: Text('â€”', style: TextStyle(fontSize: 14)),
-                        ),
-                        const Padding(
-                          padding: EdgeInsets.symmetric(
-                            vertical: 16,
-                            horizontal: 8,
-                          ),
-                          child: Text('â€”', style: TextStyle(fontSize: 14)),
                         ),
                         Padding(
                           padding: const EdgeInsets.symmetric(
@@ -2299,10 +1713,36 @@ class _PendingApplicationsCard extends StatelessWidget {
                             horizontal: 8,
                           ),
                           child: Text(
-                            'â€”',
+                            '—',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: AppTheme.dashTextSecondaryOf(context),
+                            ),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 16,
+                            horizontal: 8,
+                          ),
+                          child: Text(
+                            '—',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: AppTheme.dashTextSecondaryOf(context),
+                            ),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 16,
+                            horizontal: 8,
+                          ),
+                          child: Text(
+                            '—',
                             style: TextStyle(
                               fontSize: 13,
-                              color: AppTheme.textSecondary,
+                              color: AppTheme.dashTextSecondaryOf(context),
                             ),
                           ),
                         ),
@@ -2327,23 +1767,25 @@ class _PendingApplicationsCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
             decoration: BoxDecoration(
-              color: AppTheme.primaryNavy.withOpacity(0.04),
+              color: AppTheme.dashMutedSurfaceOf(context),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppTheme.primaryNavy.withOpacity(0.1)),
+              border: Border.all(
+                color: AppTheme.primaryNavy.withValues(alpha: 0.25),
+              ),
             ),
             child: Row(
               children: [
                 Icon(
                   Icons.info_outline_rounded,
                   size: 20,
-                  color: AppTheme.primaryNavy.withOpacity(0.9),
+                  color: AppTheme.primaryNavy,
                 ),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Text(
                     'Applications from the recruitment process will appear here when you connect the backend.',
                     style: TextStyle(
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                       fontSize: 14,
                       height: 1.4,
                     ),
@@ -2371,7 +1813,7 @@ class _TableHeader extends StatelessWidget {
         style: TextStyle(
           fontWeight: FontWeight.w700,
           fontSize: 13,
-          color: AppTheme.textPrimary,
+          color: AppTheme.dashTextPrimaryOf(context),
         ),
       ),
     );
@@ -2476,7 +1918,9 @@ class _DtrContentState extends State<_DtrContent> {
                 const SizedBox(height: 16),
               ],
               if (_pendingDtrSectionIndex != null)
-                _DtrOpeningPanel(title: _dtrSectionTitle(_pendingDtrSectionIndex!))
+                _DtrOpeningPanel(
+                  title: _dtrSectionTitle(_pendingDtrSectionIndex!),
+                )
               else if (_dtrSectionIndex == 0) ...[
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2488,7 +1932,7 @@ class _DtrContentState extends State<_DtrContent> {
                         Text(
                           'DTR',
                           style: TextStyle(
-                            color: AppTheme.textPrimary,
+                            color: AppTheme.dashTextPrimaryOf(context),
                             fontSize: 24,
                             fontWeight: FontWeight.w800,
                             letterSpacing: -0.3,
@@ -2498,7 +1942,7 @@ class _DtrContentState extends State<_DtrContent> {
                         Text(
                           'Daily Time Record. Choose a feature below.',
                           style: TextStyle(
-                            color: AppTheme.textSecondary,
+                            color: AppTheme.dashTextSecondaryOf(context),
                             fontSize: 14,
                             height: 1.4,
                           ),
@@ -2689,7 +2133,7 @@ class _AdminSignUpContent extends StatelessWidget {
                   Text(
                     'Create Account',
                     style: TextStyle(
-                      color: AppTheme.textPrimary,
+                      color: AppTheme.dashTextPrimaryOf(context),
                       fontSize: 24,
                       fontWeight: FontWeight.w700,
                       letterSpacing: -0.3,
@@ -2699,7 +2143,7 @@ class _AdminSignUpContent extends StatelessWidget {
                   Text(
                     'Add a new employee or admin. Enter full profile details; they can sign in with email and password.',
                     style: TextStyle(
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                       fontSize: 14,
                       height: 1.35,
                     ),
@@ -2713,12 +2157,16 @@ class _AdminSignUpContent extends StatelessWidget {
         Container(
           constraints: const BoxConstraints(maxWidth: 1040),
           decoration: BoxDecoration(
-            color: const Color(0xFFF0F3F1),
+            color: AppTheme.dashIsDark(context)
+                ? AppTheme.dashPanelOf(context)
+                : const Color(0xFFF0F3F1),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            border: Border.all(color: AppTheme.dashHairlineOf(context)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.06),
+                color: Colors.black.withValues(
+                  alpha: AppTheme.dashIsDark(context) ? 0.35 : 0.06,
+                ),
                 blurRadius: 24,
                 offset: const Offset(0, 6),
               ),
@@ -2764,7 +2212,7 @@ class _LdContentState extends State<_LdContent> {
           Text(
             'L&D',
             style: TextStyle(
-              color: AppTheme.textPrimary,
+              color: AppTheme.dashTextPrimaryOf(context),
               fontSize: 24,
               fontWeight: FontWeight.w800,
               letterSpacing: -0.3,
@@ -2774,7 +2222,7 @@ class _LdContentState extends State<_LdContent> {
           Text(
             'Learning & Development. Choose a feature below.',
             style: TextStyle(
-              color: AppTheme.textSecondary,
+              color: AppTheme.dashTextSecondaryOf(context),
               fontSize: 14,
               height: 1.4,
             ),
@@ -3010,14 +2458,18 @@ class _TrainingNeedAnalysisSectionState
               onPressed: _loading ? null : _load,
               icon: const Icon(Icons.refresh_rounded, size: 20),
               label: const Text('Refresh'),
-              style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
             ),
             const SizedBox(width: 4),
             TextButton.icon(
               onPressed: _loading ? null : _openSavedRecordsBrowser,
               icon: const Icon(Icons.folder_open_outlined, size: 20),
               label: const Text('View records'),
-              style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
             ),
           ],
         ),
@@ -3046,6 +2498,12 @@ class _TrainingNeedAnalysisSectionState
       ],
     );
   }
+}
+
+String _formatLdTrainingDailySubmittedAt(DateTime utc) {
+  final l = utc.toLocal();
+  String z2(int x) => x.toString().padLeft(2, '0');
+  return '${l.year}-${z2(l.month)}-${z2(l.day)} ${z2(l.hour)}:${z2(l.minute)}:${z2(l.second)}';
 }
 
 /// L&D: Training Daily Reports monitoring content (embedded in L&D page, not a separate screen).
@@ -3087,28 +2545,6 @@ class _LdTrainingReportsSectionState extends State<_LdTrainingReportsSection> {
     }
   }
 
-  void _openSavedRecordsBrowser() {
-    showRspLdSavedRecordsBrowser(
-      context,
-      sheetTitle: 'Training daily reports (list)',
-      emptyMessage:
-          'No reports for the current search. Clear search and refresh, or wait for employees to submit.',
-      loading: _loading,
-      items: _reports
-          .map(
-            (r) => SavedRecordListItem(
-              title: '${r.employeeName ?? "Employee"} — ${r.title}',
-              subtitle: '${r.submittedAt.toLocal()} · ${r.status}',
-              detailDialogTitle: 'Training daily report — ${r.title}',
-              previewContentWidth: 560,
-              previewBuilder: () => TrainingDailyReportReadOnlyView(report: r),
-              onPrint: () => FormPdf.printTrainingDailyReport(r),
-            ),
-          )
-          .toList(),
-    );
-  }
-
   Future<void> _markSeen(TrainingDailyReport report) async {
     try {
       final updated = await TrainingDailyReportRepo.instance.markAsSeen(
@@ -3130,6 +2566,51 @@ class _LdTrainingReportsSectionState extends State<_LdTrainingReportsSection> {
     }
   }
 
+  Future<void> _confirmAndDelete(TrainingDailyReport report) async {
+    final who = report.employeeName ?? 'Unknown employee';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete this report?'),
+        content: Text(
+          'This permanently removes the record from the system. '
+          'Attachments linked to this report will also be removed.\n\n'
+          '$who — ${report.title}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.red.shade700,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await TrainingDailyReportRepo.instance.deleteReport(report.id);
+      if (!mounted) return;
+      setState(() {
+        _reports.removeWhere((r) => r.id == report.id);
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Report deleted.')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not delete: ${userFacingApiError(e)}')),
+      );
+    }
+  }
+
   @override
   void dispose() {
     _searchController.dispose();
@@ -3138,6 +2619,8 @@ class _LdTrainingReportsSectionState extends State<_LdTrainingReportsSection> {
 
   @override
   Widget build(BuildContext context) {
+    final narrowToolbar = MediaQuery.sizeOf(context).width < 720;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -3145,75 +2628,173 @@ class _LdTrainingReportsSectionState extends State<_LdTrainingReportsSection> {
           'Training Daily Reports',
           style: TextStyle(
             color: AppTheme.textPrimary,
-            fontSize: 24,
+            fontSize: 26,
             fontWeight: FontWeight.w800,
-            letterSpacing: -0.3,
+            letterSpacing: -0.45,
+            height: 1.15,
           ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         Text(
           'Monitor daily reports from employees under training, review attachments, and mark them as seen.',
           style: TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: 14,
-            height: 1.4,
+            color: AppTheme.textSecondary.withValues(alpha: 0.92),
+            fontSize: 14.5,
+            height: 1.45,
+            fontWeight: FontWeight.w500,
           ),
         ),
-        const SizedBox(height: 24),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _searchController,
-                decoration: InputDecoration(
-                  hintText: 'Search',
-                  prefixIcon: Icon(
-                    Icons.search_rounded,
-                    color: AppTheme.textSecondary.withOpacity(0.8),
-                    size: 22,
-                  ),
-                  filled: true,
-                  fillColor: AppTheme.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(
-                      color: Colors.black.withOpacity(0.08),
-                    ),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(
-                      color: Colors.black.withOpacity(0.08),
-                    ),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 14,
-                  ),
-                ),
-                onSubmitted: (_) => _load(),
-              ),
+        const SizedBox(height: 14),
+        Container(
+          width: 56,
+          height: 4,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(4),
+            gradient: LinearGradient(
+              colors: [
+                AppTheme.primaryNavy,
+                AppTheme.primaryNavy.withValues(alpha: 0.5),
+              ],
             ),
-            const SizedBox(width: 12),
-            IconButton.filled(
-              tooltip: 'Refresh',
-              onPressed: _load,
-              style: IconButton.styleFrom(
-                backgroundColor: Colors.grey.shade100,
-                foregroundColor: AppTheme.textPrimary,
-              ),
-              icon: const Icon(Icons.refresh_rounded, size: 22),
-            ),
-            const SizedBox(width: 4),
-            TextButton.icon(
-              onPressed: _loading ? null : _openSavedRecordsBrowser,
-              icon: const Icon(Icons.folder_open_outlined, size: 20),
-              label: const Text('View records'),
-              style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
-            ),
-          ],
+          ),
         ),
+        const SizedBox(height: 22),
+        narrowToolbar
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      hintText: 'Search by name, title, or notes…',
+                      hintStyle: TextStyle(
+                        color: AppTheme.textSecondary.withValues(alpha: 0.65),
+                        fontSize: 14,
+                      ),
+                      prefixIcon: Icon(
+                        Icons.search_rounded,
+                        color: AppTheme.textSecondary.withValues(alpha: 0.75),
+                        size: 22,
+                      ),
+                      filled: true,
+                      fillColor: AppTheme.offWhite,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide(
+                          color: AppTheme.lightGray.withValues(alpha: 0.9),
+                        ),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide(
+                          color: AppTheme.lightGray.withValues(alpha: 0.9),
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide(
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.65),
+                          width: 1.5,
+                        ),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
+                    ),
+                    onSubmitted: (_) => _load(),
+                  ),
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: IconButton(
+                      tooltip: 'Refresh',
+                      onPressed: _load,
+                      style: IconButton.styleFrom(
+                        backgroundColor: AppTheme.primaryNavy.withValues(
+                          alpha: 0.1,
+                        ),
+                        foregroundColor: AppTheme.primaryNavy,
+                        side: BorderSide(
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.35),
+                        ),
+                        padding: const EdgeInsets.all(14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      icon: const Icon(Icons.refresh_rounded, size: 22),
+                    ),
+                  ),
+                ],
+              )
+            : Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        hintText: 'Search by name, title, or notes…',
+                        hintStyle: TextStyle(
+                          color: AppTheme.textSecondary.withValues(alpha: 0.65),
+                          fontSize: 14,
+                        ),
+                        prefixIcon: Icon(
+                          Icons.search_rounded,
+                          color: AppTheme.textSecondary.withValues(alpha: 0.75),
+                          size: 22,
+                        ),
+                        filled: true,
+                        fillColor: AppTheme.offWhite,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(
+                            color: AppTheme.lightGray.withValues(alpha: 0.9),
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(
+                            color: AppTheme.lightGray.withValues(alpha: 0.9),
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(
+                            color: AppTheme.primaryNavy.withValues(alpha: 0.65),
+                            width: 1.5,
+                          ),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
+                      ),
+                      onSubmitted: (_) => _load(),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  IconButton(
+                    tooltip: 'Refresh',
+                    onPressed: _load,
+                    style: IconButton.styleFrom(
+                      backgroundColor: AppTheme.primaryNavy.withValues(
+                        alpha: 0.1,
+                      ),
+                      foregroundColor: AppTheme.primaryNavy,
+                      side: BorderSide(
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.35),
+                      ),
+                      padding: const EdgeInsets.all(14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    icon: const Icon(Icons.refresh_rounded, size: 22),
+                  ),
+                ],
+              ),
         const SizedBox(height: 20),
         if (_loading)
           const Padding(
@@ -3227,17 +2808,35 @@ class _LdTrainingReportsSectionState extends State<_LdTrainingReportsSection> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    Icons.assignment_outlined,
-                    size: 48,
-                    color: AppTheme.textSecondary.withOpacity(0.5),
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.assignment_outlined,
+                      size: 40,
+                      color: AppTheme.primaryNavy.withValues(alpha: 0.75),
+                    ),
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    'No training daily reports found.',
+                    'No reports match your search',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Try another keyword or refresh after employees submit.',
+                    textAlign: TextAlign.center,
                     style: TextStyle(
                       color: AppTheme.textSecondary,
                       fontSize: 14,
+                      height: 1.4,
                     ),
                   ),
                 ],
@@ -3255,93 +2854,19 @@ class _LdTrainingReportsSectionState extends State<_LdTrainingReportsSection> {
               return _LdReportCard(
                 report: r,
                 onViewFile: r.attachmentUrl != null
-                    ? () => _showAttachmentPreview(context, r.attachmentUrl!)
+                    ? () => showTrainingReportAttachmentPreview(
+                        context,
+                        url: r.attachmentUrl!,
+                        fileName: r.attachmentName,
+                        mimeType: r.attachmentType,
+                      )
                     : null,
                 onMarkSeen: () => _markSeen(r),
+                onDelete: () => _confirmAndDelete(r),
               );
             },
           ),
       ],
-    );
-  }
-
-  void _showAttachmentPreview(BuildContext context, String url) async {
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) {
-        return Dialog(
-          insetPadding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 900, maxHeight: 700),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Attachment preview',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Close',
-                        onPressed: () => Navigator.of(ctx).pop(),
-                        icon: const Icon(Icons.close),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Expanded(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: InteractiveViewer(
-                        minScale: 0.5,
-                        maxScale: 4,
-                        child: Image.network(
-                          url,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Text(
-                                  'Preview for this file type is not supported.',
-                                  style: TextStyle(fontSize: 13),
-                                ),
-                                const SizedBox(height: 8),
-                                TextButton.icon(
-                                  onPressed: () async {
-                                    final uri = Uri.parse(url);
-                                    await launchUrl(
-                                      uri,
-                                      mode: LaunchMode.externalApplication,
-                                    );
-                                  },
-                                  icon: const Icon(
-                                    Icons.open_in_new_rounded,
-                                    size: 18,
-                                  ),
-                                  label: const Text('Open in new tab'),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 }
@@ -3351,108 +2876,267 @@ class _LdReportCard extends StatelessWidget {
     required this.report,
     this.onViewFile,
     required this.onMarkSeen,
+    required this.onDelete,
   });
 
   final TrainingDailyReport report;
   final VoidCallback? onViewFile;
   final VoidCallback onMarkSeen;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
     final r = report;
+    final desc = (r.description ?? '').trim();
+    final submitted = _formatLdTrainingDailySubmittedAt(r.submittedAt);
+
     return Container(
-      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppTheme.lightGray.withValues(alpha: 0.85)),
+        boxShadow: AppTheme.cardShadow,
       ),
+      clipBehavior: Clip.antiAlias,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      r.employeeName ?? 'Unknown employee',
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 16,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      r.title,
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
+          Container(
+            height: 3,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  AppTheme.primaryNavy,
+                  AppTheme.primaryNavyLight.withValues(alpha: 0.85),
+                ],
               ),
-              const SizedBox(width: 12),
-              _LdStatusChip(status: r.status),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text(
-            r.description ?? 'No description provided.',
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 13,
-              height: 1.4,
             ),
           ),
-          const SizedBox(height: 10),
-          Text(
-            'Submitted ${r.submittedAt.toLocal()}',
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              if (onViewFile != null)
-                TextButton.icon(
-                  onPressed: onViewFile,
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppTheme.primaryNavy,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                  ),
-                  icon: const Icon(Icons.visibility_outlined, size: 18),
-                  label: const Text('View file'),
-                ),
-              const Spacer(),
-              TextButton(
-                onPressed: onMarkSeen,
-                style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.primaryNavy,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CircleAvatar(
+                  radius: 22,
+                  backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                  child: Icon(
+                    Icons.person_outline_rounded,
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.9),
+                    size: 24,
                   ),
                 ),
-                child: const Text('Mark as seen'),
-              ),
-            ],
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  r.employeeName ?? 'Unknown employee',
+                                  style: const TextStyle(
+                                    color: AppTheme.textPrimary,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 17,
+                                    letterSpacing: -0.2,
+                                    height: 1.2,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Row(
+                                  children: [
+                                    Icon(
+                                      Icons.topic_rounded,
+                                      size: 15,
+                                      color: AppTheme.textSecondary.withValues(
+                                        alpha: 0.75,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        r.title,
+                                        style: TextStyle(
+                                          color: AppTheme.textSecondary
+                                              .withValues(alpha: 0.95),
+                                          fontSize: 13.5,
+                                          fontWeight: FontWeight.w600,
+                                          height: 1.3,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          _LdStatusChip(status: r.status),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.sectionAlt.withValues(alpha: 0.65),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: Colors.black.withValues(alpha: 0.05),
+                          ),
+                        ),
+                        child: Text(
+                          desc.isEmpty ? 'No description provided.' : desc,
+                          maxLines: 4,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: desc.isEmpty
+                                ? AppTheme.textSecondary.withValues(alpha: 0.65)
+                                : AppTheme.textPrimary.withValues(alpha: 0.88),
+                            fontSize: 13.5,
+                            height: 1.45,
+                            fontStyle: desc.isEmpty
+                                ? FontStyle.italic
+                                : FontStyle.normal,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.schedule_rounded,
+                            size: 15,
+                            color: AppTheme.textSecondary.withValues(
+                              alpha: 0.7,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Submitted $submitted',
+                            style: TextStyle(
+                              color: AppTheme.textSecondary.withValues(
+                                alpha: 0.88,
+                              ),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Divider(
+                        height: 1,
+                        color: AppTheme.lightGray.withValues(alpha: 0.9),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Flexible(
+                            child: Wrap(
+                              spacing: 0,
+                              runSpacing: 4,
+                              children: [
+                                TextButton.icon(
+                                  onPressed: () => showReadOnlySavedEntryDialog(
+                                    context,
+                                    title: 'Training daily report',
+                                    previewBuilder: () =>
+                                        TrainingDailyReportReadOnlyView(
+                                          report: r,
+                                        ),
+                                    contentWidth: 560,
+                                  ),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: AppTheme.primaryNavy,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 6,
+                                    ),
+                                  ),
+                                  icon: const Icon(
+                                    Icons.article_outlined,
+                                    size: 18,
+                                  ),
+                                  label: const Text('View form'),
+                                ),
+                                if (onViewFile != null)
+                                  TextButton.icon(
+                                    onPressed: onViewFile,
+                                    style: TextButton.styleFrom(
+                                      foregroundColor: AppTheme.primaryNavy,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 6,
+                                      ),
+                                    ),
+                                    icon: const Icon(
+                                      Icons.visibility_outlined,
+                                      size: 18,
+                                    ),
+                                    label: const Text('View file'),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          TextButton.icon(
+                            onPressed: onDelete,
+                            icon: Icon(
+                              Icons.delete_outline_rounded,
+                              size: 18,
+                              color: Colors.red.shade700,
+                            ),
+                            label: Text(
+                              'Delete',
+                              style: TextStyle(
+                                color: Colors.red.shade700,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                              ),
+                            ),
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.red.shade700,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: onMarkSeen,
+                            style: TextButton.styleFrom(
+                              foregroundColor: AppTheme.primaryNavy,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                            ),
+                            child: const Text(
+                              'Mark as seen',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -3484,18 +3168,29 @@ class _LdStatusChip extends StatelessWidget {
       default:
         color = Colors.grey;
     }
+    final label = status.isEmpty
+        ? '—'
+        : (status[0].toUpperCase() + status.substring(1));
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
-        color: color.withOpacity(0.14),
+        color: color.withValues(alpha: 0.14),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.1),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Text(
-        status[0].toUpperCase() + status.substring(1),
+        label,
         style: TextStyle(
           color: color,
           fontSize: 12,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );
@@ -4083,7 +3778,9 @@ class _ActionBrainstormingSectionState
       emptyMessage: 'No worksheets yet.',
       loading: _loading,
       items: _entries.map((e) {
-        final dept = e.department?.trim().isNotEmpty == true ? e.department! : '(No department)';
+        final dept = e.department?.trim().isNotEmpty == true
+            ? e.department!
+            : '(No department)';
         return SavedRecordListItem(
           title: dept,
           subtitle: '${e.date ?? "—"} · ${e.rows.length} row(s)',
@@ -4145,14 +3842,18 @@ class _ActionBrainstormingSectionState
               onPressed: _loading ? null : _load,
               icon: const Icon(Icons.refresh_rounded, size: 20),
               label: const Text('Refresh'),
-              style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
             ),
             const SizedBox(width: 4),
             TextButton.icon(
               onPressed: _loading ? null : _openSavedRecordsBrowser,
               icon: const Icon(Icons.folder_open_outlined, size: 20),
               label: const Text('View records'),
-              style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+              ),
             ),
           ],
         ),

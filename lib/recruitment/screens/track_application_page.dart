@@ -106,6 +106,9 @@ class _TrackApplicationPageState extends State<TrackApplicationPage> {
         title: const Text('Track Application Status'),
         backgroundColor: AppTheme.primaryNavy,
         foregroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        elevation: 1,
+        shadowColor: Colors.black.withValues(alpha: 0.12),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.of(context).pop(),
@@ -138,12 +141,50 @@ class _TrackApplicationPageState extends State<TrackApplicationPage> {
                 controller: _emailController,
                 decoration: InputDecoration(
                   labelText: 'Email',
+                  floatingLabelBehavior: FloatingLabelBehavior.auto,
+                  labelStyle: TextStyle(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.95),
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                  floatingLabelStyle: const TextStyle(
+                    color: AppTheme.primaryNavy,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
                   hintText: 'e.g. applicant@email.com',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  hintStyle: TextStyle(
+                    color: AppTheme.textSecondary.withValues(alpha: 0.5),
+                    fontSize: 15,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(
+                      color: AppTheme.lightGray.withValues(alpha: 0.95),
+                      width: 1.5,
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(
+                      color: AppTheme.primaryNavy,
+                      width: 2,
+                    ),
+                  ),
                   filled: true,
                   fillColor: Colors.white,
-                  prefixIcon: const Icon(Icons.email_outlined),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+                  prefixIcon: Icon(
+                    Icons.alternate_email_rounded,
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.55),
+                    size: 22,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 18,
+                  ),
                 ),
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.done,
@@ -156,30 +197,49 @@ class _TrackApplicationPageState extends State<TrackApplicationPage> {
                 label: Text(_loading ? 'Checking...' : 'Check status'),
                 style: FilledButton.styleFrom(
                   backgroundColor: AppTheme.primaryNavy,
+                  foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 16),
+                  minimumSize: const Size(0, 48),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
               ),
             ],
           );
-          final lookupForm = kIsWeb
-              ? Container(
-                  padding: const EdgeInsets.all(28),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: AppTheme.lightGray),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.07),
-                        blurRadius: 24,
-                        offset: const Offset(0, 12),
-                      ),
-                    ],
+          final lookupForm = Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF6F1),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: AppTheme.lightGray.withValues(alpha: 0.88),
+              ),
+              boxShadow: AppTheme.panelShadow,
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  height: 4,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                      colors: [
+                        AppTheme.primaryNavyDark,
+                        AppTheme.primaryNavy,
+                        AppTheme.primaryNavyLight,
+                      ],
+                    ),
                   ),
+                ),
+                Padding(
+                  padding: EdgeInsets.all(kIsWeb ? 28 : 22),
                   child: lookupFormInner,
-                )
-              : lookupFormInner;
+                ),
+              ],
+            ),
+          );
 
           return SingleChildScrollView(
             padding: EdgeInsets.symmetric(horizontal: kIsWeb ? 32 : 24, vertical: kIsWeb ? 32 : 24),

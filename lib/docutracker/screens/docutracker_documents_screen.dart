@@ -253,7 +253,7 @@ class _DocuTrackerDocumentsScreenState
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
                                 TextField(
-                                  decoration: DocuTrackerStyles.inputDecoration(
+                                  decoration: DocuTrackerStyles.inputDecoration(context, 
                                     'Enter title',
                                     Icons.title_rounded,
                                   ),
@@ -263,7 +263,7 @@ class _DocuTrackerDocumentsScreenState
                                 DropdownButtonFormField<DocumentType>(
                                   value: type,
                                   decoration:
-                                      DocuTrackerStyles.dropdownDecoration(
+                                      DocuTrackerStyles.dropdownDecoration(context, 
                                         'Document Type',
                                       ),
                                   items: DocumentType.values
@@ -280,7 +280,7 @@ class _DocuTrackerDocumentsScreenState
                                 ),
                                 const SizedBox(height: 20),
                                 TextField(
-                                  decoration: DocuTrackerStyles.inputDecoration(
+                                  decoration: DocuTrackerStyles.inputDecoration(context, 
                                     'Description (optional)',
                                     Icons.notes_rounded,
                                   ),
@@ -358,7 +358,7 @@ class _EmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(48),
-      decoration: DocuTrackerStyles.listCardDecoration(),
+      decoration: DocuTrackerStyles.listCardDecoration(context),
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -412,7 +412,7 @@ class _DocumentList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: DocuTrackerStyles.listCardDecoration(),
+      decoration: DocuTrackerStyles.listCardDecoration(context),
       child: ListView.separated(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),

@@ -17,8 +17,19 @@ class AuthProvider extends ChangeNotifier {
   /// Display name from full_name or email prefix.
   String get displayName {
     if (_user == null) return '';
-    final name = _user!.fullName;
-    if (name != null && name.isNotEmpty) return name;
+    final first = (_user!.firstName ?? '').trim();
+    final last = (_user!.lastName ?? '').trim();
+    if (first.isNotEmpty || last.isNotEmpty) {
+      return [first, last].where((s) => s.isNotEmpty).join(' ');
+    }
+    final name = (_user!.fullName ?? '').trim();
+    if (name.isNotEmpty) {
+      final parts = name.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+      if (parts.length >= 2) {
+        return '${parts.first} ${parts.last}';
+      }
+      return name;
+    }
     return _user!.email.split('@').first;
   }
 
@@ -117,13 +128,8 @@ class AuthProvider extends ChangeNotifier {
       );
       final data = res.data;
       if (data != null) {
-        final newUser = AppUser.fromJson(data);
-        if (_user?.id != newUser.id ||
-            _user?.fullName != newUser.fullName ||
-            _user?.avatarPath != newUser.avatarPath) {
-          _user = newUser;
-          notifyListeners();
-        }
+        _user = AppUser.fromJson(data);
+        notifyListeners();
       }
     } catch (_) {
       // Keep existing state on error

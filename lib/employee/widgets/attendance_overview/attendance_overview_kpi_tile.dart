@@ -18,9 +18,10 @@ class AttendanceOverviewKpiTile extends StatelessWidget {
   final Color accentColor;
   final IconData icon;
 
-  static Color _tintBackground(Color c) => Color.alphaBlend(
+  static Color _tintBackground(BuildContext context, Color c) =>
+      Color.alphaBlend(
         c.withValues(alpha: 0.11),
-        Colors.white,
+        AppTheme.dashMutedSurfaceOf(context),
       );
 
   static Color _tintBorder(Color c) => c.withValues(alpha: 0.28);
@@ -29,7 +30,7 @@ class AttendanceOverviewKpiTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: _tintBackground(accentColor),
+        color: _tintBackground(context, accentColor),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: _tintBorder(accentColor), width: 1),
       ),
@@ -48,7 +49,7 @@ class AttendanceOverviewKpiTile extends StatelessWidget {
                 fontWeight: FontWeight.w800,
                 height: 1.05,
                 letterSpacing: -0.5,
-                color: AppTheme.textPrimary,
+                color: AppTheme.dashTextPrimaryOf(context),
               ),
             ),
             const SizedBox(height: 2),
@@ -60,7 +61,8 @@ class AttendanceOverviewKpiTile extends StatelessWidget {
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
                 height: 1.2,
-                color: AppTheme.textSecondary.withValues(alpha: 0.92),
+                color: AppTheme.dashTextSecondaryOf(context)
+                    .withValues(alpha: 0.92),
               ),
             ),
           ],

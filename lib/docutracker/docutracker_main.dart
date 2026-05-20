@@ -34,7 +34,7 @@ class _DocuTrackerMainState extends State<DocuTrackerMain> {
         Text(
           'DocuTracker',
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: AppTheme.dashTextPrimaryOf(context),
             fontSize: 22,
             fontWeight: FontWeight.w700,
           ),
@@ -44,7 +44,10 @@ class _DocuTrackerMainState extends State<DocuTrackerMain> {
           useSidebarNav
               ? 'Document routing and workflow tracking.'
               : 'Document routing and workflow tracking. Choose a feature below.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          style: TextStyle(
+            color: AppTheme.dashTextSecondaryOf(context),
+            fontSize: 14,
+          ),
         ),
         if (!useSidebarNav) ...[const SizedBox(height: 24), _buildSectionNav()],
         const SizedBox(height: 24),
@@ -60,15 +63,29 @@ class _DocuTrackerMainState extends State<DocuTrackerMain> {
 
     if (sections.length <= 1) return const SizedBox.shrink();
 
+    final dark = AppTheme.dashIsDark(context);
+
     return Wrap(
       spacing: 12,
       runSpacing: 8,
       children: sections.map((section) {
         final isSelected = _currentSection == section;
+        final bg = isSelected
+            ? (dark
+                ? AppTheme.primaryNavy.withValues(alpha: 0.38)
+                : AppTheme.primaryNavy.withValues(alpha: 0.12))
+            : (dark
+                ? AppTheme.dashMutedSurfaceOf(context)
+                : AppTheme.lightGray.withValues(alpha: 0.6));
+        final fg = isSelected
+            ? (dark ? Colors.white : AppTheme.primaryNavy)
+            : AppTheme.dashTextPrimaryOf(context);
+        final iconColor = isSelected
+            ? (dark ? Colors.white : AppTheme.primaryNavy)
+            : AppTheme.dashTextSecondaryOf(context);
+
         return Material(
-          color: isSelected
-              ? AppTheme.primaryNavy.withOpacity(0.12)
-              : AppTheme.lightGray.withOpacity(0.6),
+          color: bg,
           borderRadius: BorderRadius.circular(10),
           child: InkWell(
             onTap: () => setState(() => _currentSection = section),
@@ -81,17 +98,13 @@ class _DocuTrackerMainState extends State<DocuTrackerMain> {
                   Icon(
                     _iconForSection(section),
                     size: 20,
-                    color: isSelected
-                        ? AppTheme.primaryNavy
-                        : AppTheme.textSecondary,
+                    color: iconColor,
                   ),
                   const SizedBox(width: 8),
                   Text(
                     section.title,
                     style: TextStyle(
-                      color: isSelected
-                          ? AppTheme.primaryNavy
-                          : AppTheme.textPrimary,
+                      color: fg,
                       fontWeight: isSelected
                           ? FontWeight.w600
                           : FontWeight.w500,

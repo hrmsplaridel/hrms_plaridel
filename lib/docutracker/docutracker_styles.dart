@@ -8,42 +8,28 @@ class DocuTrackerStyles {
   static const Color primaryGreen = Color(0xFF4CAF50);
   static const Color destructiveRed = Color(0xFFE53935);
 
-  static InputDecoration inputDecoration(String hint, [IconData? icon]) {
-    return InputDecoration(
+  static InputDecoration inputDecoration(
+    BuildContext context,
+    String hint, [
+    IconData? icon,
+  ]) {
+    return AppTheme.dashInputDecoration(
+      context,
       hintText: hint,
       prefixIcon: icon != null
           ? Icon(icon, color: AppTheme.primaryNavy, size: 22)
           : null,
-      filled: true,
-      fillColor: AppTheme.offWhite,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: Colors.black.withOpacity(0.08)),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AppTheme.primaryNavy, width: 1.5),
-      ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      radius: 12,
     );
   }
 
-  static InputDecoration dropdownDecoration(String hint) {
-    return InputDecoration(
+  static InputDecoration dropdownDecoration(BuildContext context, String hint) {
+    return AppTheme.dashInputDecoration(
+      context,
       hintText: hint,
-      filled: true,
-      fillColor: AppTheme.offWhite,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: Colors.black.withOpacity(0.08)),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AppTheme.primaryNavy, width: 1.5),
-      ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      radius: 12,
     );
   }
 
@@ -128,34 +114,9 @@ class DocuTrackerStyles {
         child: child,
       );
 
-  static BoxDecoration cardDecoration() => BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 20,
-            offset: const Offset(0, 4),
-          ),
-          BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 16,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      );
+  static BoxDecoration cardDecoration(BuildContext context) =>
+      AppTheme.dashSurfaceCard(context, radius: 20);
 
-  static BoxDecoration listCardDecoration() => BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      );
+  static BoxDecoration listCardDecoration(BuildContext context) =>
+      AppTheme.dashSurfaceCard(context, radius: 16);
 }

@@ -343,6 +343,22 @@ router.post('/:id/import-user', protect, requireAdmin, async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 10);
     const userRole = role === 'admin' ? 'admin' : 'employee';
     const name = (full_name || 'Imported User').trim();
+
+    async function allocateEmployeeNumber() {
+      const min = 100000;
+      const max = 999999;
+      for (let attempt = 0; attempt < 12; attempt++) {
+        const candidate = Math.floor(Math.random() * (max - min + 1)) + min;
+        const exists = await pool.query(
+          'SELECT 1 FROM users WHERE employee_number = $1 LIMIT 1',
+          [candidate]
+        );
+        if (exists.rowCount === 0) return candidate;
+      }
+      const seq = await pool.query("SELECT nextval('users_employee_number_seq') AS n");
+      return parseInt(seq.rows[0].n, 10);
+    }
+    const empNo = await allocateEmployeeNumber();
     
     const result = await pool.query(
       `INSERT INTO users (
@@ -350,9 +366,9 @@ router.post('/:id/import-user', protect, requireAdmin, async (req, res) => {
         employee_number, biometric_user_id, employment_status
       ) VALUES (
         $1, $2, $3, $4, false, 
-        nextval('users_employee_number_seq'), $5, 'active'
+        $5, $6, 'active'
       ) RETURNING id`,
-      [mail, passwordHash, userRole, name, bioId]
+      [mail, passwordHash, userRole, name, empNo, bioId]
     );
 
     res.status(201).json({ message: 'User imported successfully', id: result.rows[0].id });

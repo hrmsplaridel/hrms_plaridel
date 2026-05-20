@@ -121,16 +121,23 @@ class _PillarCardState extends State<_PillarCard> {
           borderRadius: BorderRadius.circular(4),
           border: Border.all(
             color: _isHovered
-                ? AppTheme.primaryNavy.withOpacity(0.5)
+                ? AppTheme.primaryNavy.withValues(alpha: 0.5)
                 : AppTheme.lightGray,
           ),
           boxShadow: [
             BoxShadow(
-              color: AppTheme.primaryNavy.withOpacity(
-                _isHovered ? 0.12 : 0.08,
+              color: AppTheme.primaryNavy.withValues(
+                alpha: _isHovered ? 0.14 : 0.09,
               ),
-              blurRadius: _isHovered ? 16 : 12,
-              offset: Offset(0, _isHovered ? 4 : 2),
+              blurRadius: _isHovered ? 20 : 14,
+              offset: Offset(0, _isHovered ? 8 : 5),
+            ),
+            BoxShadow(
+              color: Colors.black.withValues(
+                alpha: _isHovered ? 0.07 : 0.045,
+              ),
+              blurRadius: _isHovered ? 14 : 10,
+              offset: const Offset(0, 3),
             ),
           ],
         ),
@@ -142,8 +149,15 @@ class _PillarCardState extends State<_PillarCard> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: AppTheme.primaryNavy.withOpacity(0.1),
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(4),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
                   ),
                   child: Icon(
                     icon,

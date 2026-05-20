@@ -184,44 +184,69 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     super.dispose();
   }
 
-  InputDecoration _fieldDecoration(String label, {String? hint}) =>
-      InputDecoration(
-        labelText: label,
-        hintText: hint,
-        floatingLabelBehavior: FloatingLabelBehavior.auto,
-        labelStyle: TextStyle(
-          color: AppTheme.textSecondary.withValues(alpha: 0.9),
-          fontSize: 14,
-          fontWeight: FontWeight.w500,
-        ),
-        floatingLabelStyle: TextStyle(
-          color: AppTheme.textPrimary,
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
-        ),
-        hintStyle: TextStyle(
-          color: AppTheme.textSecondary.withValues(alpha: 0.65),
-          fontSize: 14,
-        ),
-        filled: true,
-        fillColor: AppTheme.white,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 14,
-        ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: AppTheme.lightGray),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: AppTheme.lightGray),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: Color(0xFF4CAF50), width: 1.5),
-        ),
-      );
+  bool _chromeDark(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark;
+
+  Color _chromeHeadingColor(BuildContext context) =>
+      _chromeDark(context)
+          ? AppTheme.dashTextPrimaryOf(context)
+          : AppTheme.textPrimary;
+
+  Color _chromeMutedColor(BuildContext context) =>
+      _chromeDark(context)
+          ? AppTheme.dashTextSecondaryOf(context)
+          : AppTheme.textSecondary;
+
+  InputDecoration _fieldDecoration(String label, {String? hint}) {
+    final darkChrome = _chromeDark(context);
+    // Expanded label sits on white fill; floating label sits on the top edge and
+    // must stay light when the surrounding chrome is dark.
+    final floatingLabelColor = darkChrome
+        ? AppTheme.dashTextPrimaryOf(context)
+        : AppTheme.textPrimary;
+
+    return InputDecoration(
+      labelText: label,
+      hintText: hint,
+      floatingLabelBehavior: FloatingLabelBehavior.auto,
+      floatingLabelAlignment: FloatingLabelAlignment.start,
+      labelStyle: TextStyle(
+        color: AppTheme.textSecondary.withValues(alpha: 0.9),
+        fontSize: 14,
+        fontWeight: FontWeight.w500,
+      ),
+      floatingLabelStyle: TextStyle(
+        color: floatingLabelColor,
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+      ),
+      hintStyle: TextStyle(
+        color: AppTheme.textSecondary.withValues(alpha: 0.65),
+        fontSize: 14,
+      ),
+      filled: true,
+      fillColor: AppTheme.white,
+      isDense: false,
+      contentPadding: EdgeInsets.fromLTRB(
+        16,
+        darkChrome ? 22 : 18,
+        16,
+        16,
+      ),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: AppTheme.lightGray),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: AppTheme.lightGray),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: Color(0xFF4CAF50), width: 1.5),
+      ),
+    );
+  }
 
   Widget _paneHeader(String title, String subtitle) {
     return Column(
@@ -230,7 +255,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         Text(
           title,
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: _chromeHeadingColor(context),
             fontSize: 15,
             fontWeight: FontWeight.w700,
             letterSpacing: 0.15,
@@ -240,7 +265,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         Text(
           subtitle,
           style: TextStyle(
-            color: AppTheme.textSecondary,
+            color: _chromeMutedColor(context),
             fontSize: 12.5,
             height: 1.35,
           ),
@@ -446,7 +471,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
                             style: TextStyle(
                               fontSize: 13,
                               height: 1.4,
-                              color: AppTheme.textPrimary,
+                              color: _chromeHeadingColor(context),
                             ),
                           ),
                         ),
@@ -458,9 +483,12 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             },
           ),
           DecoratedBox(
-            decoration: const BoxDecoration(
-              color: AppTheme.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+            decoration: BoxDecoration(
+              color: _chromeDark(context)
+                  ? AppTheme.dashPanelOf(context)
+                  : AppTheme.white,
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(16)),
             ),
             child: Padding(
               padding: EdgeInsets.all(isNarrow ? 16 : 24),
@@ -508,9 +536,11 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           Container(
             padding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
             decoration: BoxDecoration(
-              color: AppTheme.white,
+              color: _chromeDark(context)
+                  ? AppTheme.dashPanelOf(context)
+                  : AppTheme.white,
               border: Border(
-                top: BorderSide(color: Colors.black.withValues(alpha: 0.06)),
+                top: BorderSide(color: AppTheme.dashHairlineOf(context)),
               ),
               borderRadius: const BorderRadius.vertical(
                 bottom: Radius.circular(16),
@@ -606,7 +636,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           keyboardType: TextInputType.emailAddress,
           validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 18),
         TextFormField(
           controller: _passwordController,
           decoration: _fieldDecoration('Password').copyWith(
@@ -625,7 +655,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           obscureText: _obscurePassword,
           validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 18),
         TextFormField(
           controller: _repeatPasswordController,
           decoration: _fieldDecoration('Repeat password').copyWith(
@@ -651,7 +681,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             return null;
           },
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 18),
         DropdownButtonFormField<String>(
           initialValue: _privilege,
           isExpanded: true,
@@ -667,10 +697,14 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: AppTheme.primaryNavy.withValues(alpha: 0.06),
+            color: AppTheme.primaryNavy.withValues(
+              alpha: _chromeDark(context) ? 0.14 : 0.06,
+            ),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+              color: AppTheme.primaryNavy.withValues(
+                alpha: _chromeDark(context) ? 0.28 : 0.1,
+              ),
             ),
           ),
           child: Row(
@@ -688,7 +722,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
                   style: TextStyle(
                     fontSize: 12,
                     height: 1.35,
-                    color: AppTheme.textSecondary,
+                    color: _chromeMutedColor(context),
                   ),
                 ),
               ),
@@ -700,12 +734,18 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   }
 
   Widget _buildSectionCard({required Widget child}) {
+    final dark = _chromeDark(context);
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppTheme.white,
+        color:
+            dark ? AppTheme.dashMutedSurfaceOf(context) : AppTheme.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+        border: Border.all(
+          color: dark
+              ? AppTheme.dashHairlineOf(context)
+              : Colors.black.withValues(alpha: 0.06),
+        ),
       ),
       child: child,
     );
@@ -723,33 +763,33 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         Text(
           'Name',
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: _chromeHeadingColor(context),
             fontSize: 12,
             fontWeight: FontWeight.w700,
             letterSpacing: 0.4,
           ),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 14),
         TextFormField(
           controller: _firstNameController,
           decoration: _fieldDecoration('First name'),
           textCapitalization: TextCapitalization.words,
           validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 18),
         TextFormField(
           controller: _middleNameController,
           decoration: _fieldDecoration('Middle name (optional)'),
           textCapitalization: TextCapitalization.words,
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 18),
         TextFormField(
           controller: _lastNameController,
           decoration: _fieldDecoration('Last name'),
           textCapitalization: TextCapitalization.words,
           validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 18),
         DropdownButtonFormField<String>(
           initialValue: _suffix ?? 'None',
           isExpanded: true,
@@ -768,13 +808,13 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         Text(
           'Demographics & contact',
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: _chromeHeadingColor(context),
             fontSize: 12,
             fontWeight: FontWeight.w700,
             letterSpacing: 0.4,
           ),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 14),
         DropdownButtonFormField<String>(
           initialValue: _sex,
           isExpanded: true,
@@ -786,7 +826,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           onChanged: (v) => setState(() => _sex = v),
           validator: (v) => v == null ? 'Required' : null,
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 18),
         InkWell(
           onTap: () async {
             final date = await showDatePicker(
@@ -823,7 +863,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             ),
           ),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 18),
         TextFormField(
           controller: _contactController,
           decoration: _fieldDecoration('Contact number'),
@@ -841,12 +881,18 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   }
 
   Widget _buildEmploymentSection() {
+    final dark = _chromeDark(context);
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppTheme.white,
+        color:
+            dark ? AppTheme.dashMutedSurfaceOf(context) : AppTheme.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+        border: Border.all(
+          color: dark
+              ? AppTheme.dashHairlineOf(context)
+              : Colors.black.withValues(alpha: 0.06),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -854,16 +900,22 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           Text(
             'Employment',
             style: TextStyle(
-              color: AppTheme.textPrimary,
+              color: _chromeHeadingColor(context),
               fontSize: 16,
               fontWeight: FontWeight.w700,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
           DropdownButtonFormField<String>(
             initialValue: _employmentType,
             decoration: _fieldDecoration('Employment Type'),
-            hint: const Text('Employment Type'),
+            hint: Text(
+              'Employment Type',
+              style: TextStyle(
+                color: AppTheme.textSecondary.withValues(alpha: 0.85),
+                fontSize: 14,
+              ),
+            ),
             items: [
               'regular',
               'contractual',
@@ -872,13 +924,13 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
             onChanged: (v) => setState(() => _employmentType = v),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
           TextFormField(
             controller: _salaryGradeController,
             decoration: _fieldDecoration('Salary Grade'),
             keyboardType: TextInputType.text,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
           FormField<DateTime>(
             key: ValueKey(_dateHired?.toIso8601String() ?? 'hire_null'),
             validator: (_) =>
@@ -901,7 +953,10 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
                 },
                 borderRadius: BorderRadius.circular(8),
                 child: InputDecorator(
-                  decoration: _fieldDecoration('').copyWith(
+                  decoration: _fieldDecoration(
+                    'Date hired',
+                    hint: 'Tap calendar to choose',
+                  ).copyWith(
                     errorText: state.errorText,
                     suffixIcon: Icon(
                       Icons.calendar_today_rounded,
@@ -912,19 +967,19 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
                   child: Text(
                     _dateHired != null
                         ? '${_dateHired!.year}-${_dateHired!.month.toString().padLeft(2, '0')}-${_dateHired!.day.toString().padLeft(2, '0')}'
-                        : 'Date Hired (tap to select) *',
+                        : 'Tap calendar to choose',
                     style: TextStyle(
                       fontSize: 14,
                       color: _dateHired != null
                           ? AppTheme.textPrimary
-                          : AppTheme.textSecondary,
+                          : AppTheme.textSecondary.withValues(alpha: 0.8),
                     ),
                   ),
                 ),
               );
             },
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
           DropdownButtonFormField<String>(
             initialValue: _employmentStatus,
             decoration: _fieldDecoration('Employment Status'),
@@ -1695,65 +1750,68 @@ class _ManageEmployeeState extends State<ManageEmployee> {
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
-        return Dialog(
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 20,
-            vertical: 24,
-          ),
-          clipBehavior: Clip.antiAlias,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth: 920,
-              maxHeight: MediaQuery.of(context).size.height * 0.92,
+        return Theme(
+          data: AppTheme.lightTheme,
+          child: Dialog(
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 20,
+              vertical: 24,
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 8, 8),
-                  child: Row(
-                    children: [
-                      Text(
-                        'Add employee',
-                        style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        icon: const Icon(Icons.close_rounded),
-                        tooltip: 'Close',
-                        onPressed: () => Navigator.of(dialogContext).pop(),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: AddEmployeeForm(
-                      onAccountCreated: () {
-                        Navigator.of(dialogContext).pop();
-                        setState(() => _pageIndex = 0);
-                        _loadEmployees();
-                        messenger.showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Account created. The list has been refreshed.',
-                            ),
+            clipBehavior: Clip.antiAlias,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: 920,
+                maxHeight: MediaQuery.of(context).size.height * 0.92,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 8, 8),
+                    child: Row(
+                      children: [
+                        Text(
+                          'Add employee',
+                          style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
                           ),
-                        );
-                      },
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded),
+                          tooltip: 'Close',
+                          onPressed: () => Navigator.of(dialogContext).pop(),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-              ],
+                  const Divider(height: 1),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: AddEmployeeForm(
+                        onAccountCreated: () {
+                          Navigator.of(dialogContext).pop();
+                          setState(() => _pageIndex = 0);
+                          _loadEmployees();
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Account created. The list has been refreshed.',
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         );
