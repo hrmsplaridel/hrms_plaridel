@@ -413,7 +413,7 @@ router.get('/:id', protect, async (req, res) => {
 // POST /api/employees - create employee (admin only); same as auth/register but admin creates
 router.post('/', protect, requireAdmin, async (req, res) => {
   try {
-    const { email, password, full_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address, employment_type, salary_grade, date_hired, employment_status } = req.body;
+    const { email, password, full_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address, employment_type, salary_grade, date_hired, employment_status, biometric_user_id } = req.body;
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
     }
@@ -425,9 +425,9 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     const empNo = await allocateEmployeeNumber();
 
     const result = await pool.query(
-      `INSERT INTO users (email, password_hash, role, full_name, middle_name, suffix, sex, date_of_birth, contact_number, address, is_active, employee_number, employment_type, salary_grade, date_hired, employment_status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, true, $11, $12, $13, COALESCE($14::date, CURRENT_DATE), $15)
-       RETURNING id, employee_number, email, role, full_name, avatar_path, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address, employment_type, salary_grade, date_hired, employment_status`,
+      `INSERT INTO users (email, password_hash, role, full_name, middle_name, suffix, sex, date_of_birth, contact_number, address, is_active, employee_number, employment_type, salary_grade, date_hired, employment_status, biometric_user_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, true, $11, $12, $13, COALESCE($14::date, CURRENT_DATE), $15, $16)
+       RETURNING id, employee_number, email, role, full_name, avatar_path, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address, employment_type, salary_grade, date_hired, employment_status, biometric_user_id`,
       [
         email.trim().toLowerCase(),
         passwordHash,
@@ -444,6 +444,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         salary_grade?.trim() || null,
         date_hired || null,
         (employment_status && ['active', 'inactive', 'resigned', 'retired', 'terminated'].includes(employment_status)) ? employment_status : 'active',
+        biometric_user_id?.trim() || null,
       ]
     );
 
@@ -461,7 +462,13 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    if (err.code === '23505') return res.status(409).json({ error: 'Email already registered' });
+    if (err.code === '23505') {
+      const constraint = String(err.constraint || '');
+      if (constraint.includes('biometric_user_id')) {
+        return res.status(409).json({ error: 'Biometric User ID is already assigned to another employee' });
+      }
+      return res.status(409).json({ error: 'Email already registered' });
+    }
     console.error('[employees POST]', err);
     res.status(500).json({ error: 'Failed to create employee' });
   }

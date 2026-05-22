@@ -516,14 +516,18 @@ function interpretPunchesForDay(punches, shiftType, shiftInfo = null) {
 }
 
 /**
- * total_hours: (time_out - time_in) minus (break_in - break_out) when both breaks exist; else full span.
- * For pm_only: time_in may be null → use (time_out - break_in).
- * If time_out is null → 0. Rounded to 2 decimals, minimum 0.
+ * total_hours: full-day uses (time_out - time_in) minus lunch when both break points exist.
+ * For am_only: use (break_out - time_in). For pm_only: use (time_out - break_in).
+ * Missing required end punch returns 0. Rounded to 2 decimals, minimum 0.
  */
 function computeTotalHours(timeIn, timeOut, breakOut, breakIn, shiftType) {
-  if (!timeOut) return 0;
   let workMs;
-  if (shiftType === 'pm_only' && !timeIn && breakIn) {
+  if (shiftType === 'am_only') {
+    if (!timeIn || !breakOut) return 0;
+    workMs = new Date(breakOut) - new Date(timeIn);
+  } else if (!timeOut) {
+    return 0;
+  } else if (shiftType === 'pm_only' && !timeIn && breakIn) {
     workMs = new Date(timeOut) - new Date(breakIn);
   } else if (!timeIn) {
     return 0;

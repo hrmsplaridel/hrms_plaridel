@@ -1382,7 +1382,7 @@ router.get('/today', protect, async (req, res) => {
   }
 });
 
-/** Compute total_hours from 4 punch points: (break_out - time_in) + (time_out - break_in). Fallback to (time_out - time_in) if only 2 punches. Afternoon-only: (time_out - break_in). */
+/** Compute total_hours from punch points. Supports full-day, AM-only, and PM-only records. */
 function computeTotalHours(timeIn, breakOut, breakIn, timeOut) {
   const parse = (x) => (x ? new Date(x).getTime() : null);
   const ti = parse(timeIn);
@@ -1392,6 +1392,7 @@ function computeTotalHours(timeIn, breakOut, breakIn, timeOut) {
   if (ti && bo && bi && to) {
     return ((bo - ti) + (to - bi)) / (1000 * 60 * 60);
   }
+  if (ti && bo && !bi && !to) return (bo - ti) / (1000 * 60 * 60); // morning-only
   if (ti && to) return (to - ti) / (1000 * 60 * 60);
   if (!ti && bi && to) return (to - bi) / (1000 * 60 * 60); // afternoon-only (AM absent)
   return 0;

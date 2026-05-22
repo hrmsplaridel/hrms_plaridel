@@ -112,6 +112,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   GlobalKey<StructuredAddressFormState> _addressFormKey =
       GlobalKey<StructuredAddressFormState>();
   final _salaryGradeController = TextEditingController();
+  final _biometricIdController = TextEditingController();
 
   String? _privilege;
   String? _suffix;
@@ -181,6 +182,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     _contactController.dispose();
     _streetController.dispose();
     _salaryGradeController.dispose();
+    _biometricIdController.dispose();
     super.dispose();
   }
 
@@ -288,6 +290,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     _contactController.clear();
     _streetController.clear();
     _salaryGradeController.clear();
+    _biometricIdController.clear();
     setState(() {
       _addressFormKey = GlobalKey<StructuredAddressFormState>();
       _privilege = null;
@@ -338,6 +341,8 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         if (_employmentType != null) 'employment_type': _employmentType,
         if (_salaryGradeController.text.trim().isNotEmpty)
           'salary_grade': _salaryGradeController.text.trim(),
+        if (_biometricIdController.text.trim().isNotEmpty)
+          'biometric_user_id': _biometricIdController.text.trim(),
         'date_hired': _dateHired!.toIso8601String().split('T')[0],
         'employment_status': _employmentStatus,
       };
@@ -402,7 +407,10 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     } on DioException catch (e) {
       if (!mounted) return;
       if (e.response?.statusCode == 409) {
-        _showSnackBar('Email already registered');
+        final msg = e.response?.data is Map
+            ? (e.response!.data as Map)['error']?.toString()
+            : null;
+        _showSnackBar(msg ?? 'Email already registered');
       } else {
         final msg = e.response?.data is Map
             ? (e.response!.data as Map)['error']?.toString()
@@ -682,6 +690,16 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
           onChanged: (v) => setState(() => _privilege = v),
           validator: (v) => v == null ? 'Required' : null,
+        ),
+        const SizedBox(height: 18),
+        TextFormField(
+          controller: _biometricIdController,
+          decoration: _fieldDecoration('Biometric User ID (optional)').copyWith(
+            helperText:
+                'Set now if known, or leave blank and add it later from Edit employee.',
+            helperMaxLines: 2,
+          ),
+          textInputAction: TextInputAction.next,
         ),
         SizedBox(height: narrow ? 14 : 16),
         Container(
@@ -1855,16 +1873,41 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Employees',
-          style: TextStyle(
-            color: _headingColor(context),
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
+        _buildEmployeesHeader(isNarrow: isNarrow),
         const SizedBox(height: 20),
         isNarrow ? _buildNarrowLayout() : _buildWideLayout(),
+      ],
+    );
+  }
+
+  Widget _buildEmployeesHeader({required bool isNarrow}) {
+    final title = Text(
+      'Employees',
+      style: TextStyle(
+        color: _headingColor(context),
+        fontSize: 24,
+        fontWeight: FontWeight.w800,
+      ),
+    );
+    final actions = _buildEmployeeHeaderActions();
+
+    if (isNarrow) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          title,
+          const SizedBox(height: 12),
+          Align(alignment: Alignment.centerRight, child: actions),
+        ],
+      );
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(child: title),
+        const SizedBox(width: 16),
+        actions,
       ],
     );
   }
@@ -1892,42 +1935,74 @@ class _ManageEmployeeState extends State<ManageEmployee> {
   }
 
   Widget _buildEmployeesToolbar() {
-    // Single horizontal strip: sharing one row with action buttons squeezed the Wrap
-    // and forced each filter onto its own line. Scroll when the strip is wider than the panel.
-    final filterStrip = SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 2),
-        child: Row(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : 720.0;
+        const gap = 10.0;
+        const roleWidth = 128.0;
+        const statusWidth = 128.0;
+        final searchWidth = (maxWidth * 0.22).clamp(165.0, 230.0).toDouble();
+        final departmentWidth = (maxWidth * 0.22)
+            .clamp(165.0, 220.0)
+            .toDouble();
+        final usedWidth =
+            searchWidth + roleWidth + statusWidth + departmentWidth + gap * 4;
+        final deviceWidth = (maxWidth - usedWidth)
+            .clamp(150.0, 220.0)
+            .toDouble();
+
+        return Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            SizedBox(width: 220, child: _buildSearchField()),
-            const SizedBox(width: 12),
-            _buildDropdown(_privilegeFilter, ['All', 'Admin', 'Employee'], (v) {
-              setState(() {
-                _privilegeFilter = v ?? 'All';
-                _pageIndex = 0;
-              });
-              _loadEmployees();
-            }),
-            const SizedBox(width: 12),
-            _buildDropdown(_statusFilter, ['Active', 'Inactive', 'All'], (v) {
-              setState(() {
-                _statusFilter = v ?? 'Active';
-                _pageIndex = 0;
-              });
-              _loadEmployees();
-            }),
-            const SizedBox(width: 12),
-            _buildDepartmentFilterDropdown(),
-            const SizedBox(width: 12),
-            _buildBiometricDeviceFilterDropdown(),
+            SizedBox(width: searchWidth, child: _buildSearchField()),
+            const SizedBox(width: gap),
+            SizedBox(
+              width: roleWidth,
+              child: _buildDropdown(
+                _privilegeFilter,
+                ['All', 'Admin', 'Employee'],
+                (v) {
+                  setState(() {
+                    _privilegeFilter = v ?? 'All';
+                    _pageIndex = 0;
+                  });
+                  _loadEmployees();
+                },
+              ),
+            ),
+            const SizedBox(width: gap),
+            SizedBox(
+              width: statusWidth,
+              child: _buildDropdown(
+                _statusFilter,
+                ['Active', 'Inactive', 'All'],
+                (v) {
+                  setState(() {
+                    _statusFilter = v ?? 'Active';
+                    _pageIndex = 0;
+                  });
+                  _loadEmployees();
+                },
+              ),
+            ),
+            const SizedBox(width: gap),
+            _buildDepartmentFilterDropdown(width: departmentWidth),
+            const SizedBox(width: gap),
+            _buildBiometricDeviceFilterDropdown(width: deviceWidth),
           ],
-        ),
-      ),
+        );
+      },
     );
-    final actions = Row(
-      mainAxisSize: MainAxisSize.min,
+  }
+
+  Widget _buildEmployeeHeaderActions() {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      alignment: WrapAlignment.end,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         PopupMenuButton<_EmployeeToolbarAction>(
           tooltip: 'More actions',
@@ -1996,7 +2071,6 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             ),
           ),
         ),
-        const SizedBox(width: 8),
         FilledButton.icon(
           onPressed: _showAddEmployeeDialog,
           icon: const Icon(Icons.person_add_rounded, size: 18),
@@ -2012,14 +2086,6 @@ class _ManageEmployeeState extends State<ManageEmployee> {
         ),
       ],
     );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        filterStrip,
-        const SizedBox(height: 12),
-        Align(alignment: Alignment.centerRight, child: actions),
-      ],
-    );
   }
 
   Widget _toolbarMenuItem({required IconData icon, required String label}) {
@@ -2032,100 +2098,127 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     );
   }
 
-  Widget _buildDepartmentFilterDropdown() {
-    return Container(
-      constraints: const BoxConstraints(minWidth: 160, maxWidth: 220),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: _filterDecoration(context),
-      child: DropdownButton<String?>(
-        value: _departmentFilterId,
-        dropdownColor: AppTheme.dashPanelOf(context),
-        style: AppTheme.dashFieldTextStyle(context),
-        hint: Text(
-          'All departments',
-          style: AppTheme.dashFieldHintStyle(context),
-        ),
-        underline: const SizedBox.shrink(),
-        isDense: true,
-        isExpanded: true,
-        items: [
-          DropdownMenuItem<String?>(
-            value: null,
-            child: Text(
+  Widget _buildDepartmentFilterDropdown({required double width}) {
+    return SizedBox(
+      width: width,
+      height: 44,
+      child: Container(
+        padding: const EdgeInsets.only(left: 12, right: 8),
+        decoration: _filterDecoration(context),
+        alignment: Alignment.center,
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String?>(
+            value: _departmentFilterId,
+            dropdownColor: AppTheme.dashPanelOf(context),
+            style: AppTheme.dashFieldTextStyle(context),
+            icon: Icon(
+              Icons.arrow_drop_down_rounded,
+              color: _mutedColor(context),
+            ),
+            hint: Text(
               'All departments',
-              style: AppTheme.dashFieldTextStyle(context),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+              style: AppTheme.dashFieldHintStyle(context),
             ),
-          ),
-          ..._departmentOptions.map(
-            (d) => DropdownMenuItem<String?>(
-              value: d.id,
-              child: Text(
-                d.name,
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
-                style: AppTheme.dashFieldTextStyle(context),
+            isExpanded: true,
+            items: [
+              DropdownMenuItem<String?>(
+                value: null,
+                child: Text(
+                  'All departments',
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                  style: AppTheme.dashFieldTextStyle(context),
+                ),
               ),
-            ),
+              ..._departmentOptions.map(
+                (d) => DropdownMenuItem<String?>(
+                  value: d.id,
+                  child: Text(
+                    d.name,
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                    style: AppTheme.dashFieldTextStyle(context),
+                  ),
+                ),
+              ),
+            ],
+            onChanged: (v) {
+              setState(() {
+                _departmentFilterId = v;
+                _pageIndex = 0;
+              });
+              _loadEmployees();
+            },
           ),
-        ],
-        onChanged: (v) {
-          setState(() {
-            _departmentFilterId = v;
-            _pageIndex = 0;
-          });
-          _loadEmployees();
-        },
+        ),
       ),
     );
   }
 
-  Widget _buildBiometricDeviceFilterDropdown() {
-    return Container(
-      constraints: const BoxConstraints(minWidth: 160, maxWidth: 240),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: _filterDecoration(context),
-      child: DropdownButton<String?>(
-        value: _biometricDeviceFilterId,
-        dropdownColor: AppTheme.dashPanelOf(context),
-        style: AppTheme.dashFieldTextStyle(context),
-        hint: Text('All devices', style: AppTheme.dashFieldHintStyle(context)),
-        underline: const SizedBox.shrink(),
-        isDense: true,
-        isExpanded: true,
-        items: [
-          DropdownMenuItem<String?>(
-            value: null,
-            child: Text(
-              'All devices',
-              style: AppTheme.dashFieldTextStyle(context),
+  Widget _buildBiometricDeviceFilterDropdown({required double width}) {
+    return SizedBox(
+      width: width,
+      height: 44,
+      child: Container(
+        padding: const EdgeInsets.only(left: 12, right: 8),
+        decoration: _filterDecoration(context),
+        alignment: Alignment.center,
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String?>(
+            value: _biometricDeviceFilterId,
+            dropdownColor: AppTheme.dashPanelOf(context),
+            style: AppTheme.dashFieldTextStyle(context),
+            icon: Icon(
+              Icons.arrow_drop_down_rounded,
+              color: _mutedColor(context),
             ),
-          ),
-          ..._biometricDevicesForFilter.map((d) {
-            final m = Map<String, dynamic>.from(d as Map);
-            final id = m['id']?.toString() ?? '';
-            final name = m['name']?.toString() ?? id;
-            final loc = m['location']?.toString();
-            final line = (loc != null && loc.isNotEmpty)
-                ? '$name · $loc'
-                : name;
-            return DropdownMenuItem<String?>(
-              value: id,
-              child: Text(
-                line,
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
-                style: AppTheme.dashFieldTextStyle(context),
+            hint: Text(
+              'All devices',
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+              style: AppTheme.dashFieldHintStyle(context),
+            ),
+            isExpanded: true,
+            items: [
+              DropdownMenuItem<String?>(
+                value: null,
+                child: Text(
+                  'All devices',
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                  style: AppTheme.dashFieldTextStyle(context),
+                ),
               ),
-            );
-          }),
-        ],
-        onChanged: (v) {
-          setState(() {
-            _biometricDeviceFilterId = v;
-            _pageIndex = 0;
-          });
-          _loadEmployees();
-        },
+              ..._biometricDevicesForFilter.map((d) {
+                final m = Map<String, dynamic>.from(d as Map);
+                final id = m['id']?.toString() ?? '';
+                final name = m['name']?.toString() ?? id;
+                final loc = m['location']?.toString();
+                final line = (loc != null && loc.isNotEmpty)
+                    ? '$name · $loc'
+                    : name;
+                return DropdownMenuItem<String?>(
+                  value: id,
+                  child: Text(
+                    line,
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                    style: AppTheme.dashFieldTextStyle(context),
+                  ),
+                );
+              }),
+            ],
+            onChanged: (v) {
+              setState(() {
+                _biometricDeviceFilterId = v;
+                _pageIndex = 0;
+              });
+              _loadEmployees();
+            },
+          ),
+        ),
       ),
     );
   }
@@ -4768,7 +4861,10 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   ChoiceChip(
-                    label: Text('All', style: TextStyle(color: _headingColor(context))),
+                    label: Text(
+                      'All',
+                      style: TextStyle(color: _headingColor(context)),
+                    ),
                     selected: _filter == 'all',
                     selectedColor: dark
                         ? AppTheme.primaryNavy.withValues(alpha: 0.35)
@@ -4896,10 +4992,16 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
                                       dataTextStyle: tableCellStyle,
                                       columns: [
                                         DataColumn(
-                                          label: Text('No.', style: tableHeadingStyle),
+                                          label: Text(
+                                            'No.',
+                                            style: tableHeadingStyle,
+                                          ),
                                         ),
                                         DataColumn(
-                                          label: Text('Name', style: tableHeadingStyle),
+                                          label: Text(
+                                            'Name',
+                                            style: tableHeadingStyle,
+                                          ),
                                         ),
                                         DataColumn(
                                           label: Text(
@@ -4908,7 +5010,10 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
                                           ),
                                         ),
                                         DataColumn(
-                                          label: Text('Active', style: tableHeadingStyle),
+                                          label: Text(
+                                            'Active',
+                                            style: tableHeadingStyle,
+                                          ),
                                         ),
                                       ],
                                       rows: _rows.map((e) {
@@ -4982,7 +5087,9 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
                       decoration: BoxDecoration(
                         color: AppTheme.dashMutedSurfaceOf(context),
                         borderRadius: BorderRadius.circular(999),
-                        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+                        border: Border.all(
+                          color: AppTheme.dashHairlineOf(context),
+                        ),
                       ),
                       child: Text(
                         _total == 0
