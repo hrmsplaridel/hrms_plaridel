@@ -8,6 +8,13 @@ const {
   dateInRecurringRange,
 } = require('../services/holidayRangeUtils');
 const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
+const {
+  ensureShiftPunchModeColumn,
+  getShiftType: resolveShiftType,
+  getExpectedWorkMinutes: resolveExpectedWorkMinutes,
+  getExpectedLogsForDay: resolveExpectedLogsForDay,
+  computeTotalHoursFromRecord,
+} = require('../services/shiftAttendance');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -213,47 +220,28 @@ const ONE_PM_MINUTES = 13 * 60;
 
 /**
  * Derive shift type from assignment shift info.
- * Returns 'am_only' | 'pm_only' | 'full_day' | null (no shift).
+ * Returns 'am_only' | 'pm_only' | 'full_day' | 'single_session' | null (no shift).
  * - pm_only: shift starts at or after noon (startMinutes >= 720)
  * - am_only: no break_end and shift ends by 1 PM
  * - full_day: otherwise (has both AM and PM periods)
  */
 function getShiftType(shiftInfo) {
-  if (!shiftInfo) return null;
-  const { startMinutes, endMinutes, breakEndMinutes } = shiftInfo;
-  if (startMinutes == null) return null;
-  if (startMinutes >= NOON_MINUTES) return 'pm_only';
-  if (breakEndMinutes == null && endMinutes != null && endMinutes <= ONE_PM_MINUTES) return 'am_only';
-  return 'full_day';
+  return resolveShiftType(shiftInfo);
 }
 
 /** Expected net work minutes for a shift (exclude lunch on full-day shifts). */
 function getExpectedWorkMinutes(shiftInfo) {
-  if (!shiftInfo || shiftInfo.startMinutes == null || shiftInfo.endMinutes == null) {
-    return 0;
-  }
-  const spanMinutes = Math.max(0, shiftInfo.endMinutes - shiftInfo.startMinutes);
-  const type = getShiftType(shiftInfo);
-  if (type !== 'full_day') return spanMinutes;
-  const lunchMinutes =
-    shiftInfo.breakEndMinutes != null
-      ? Math.max(0, shiftInfo.breakEndMinutes - NOON_MINUTES)
-      : 60;
-  return Math.max(0, spanMinutes - lunchMinutes);
+  return resolveExpectedWorkMinutes(shiftInfo);
 }
 
 /**
  * Get which logs are expected for the shift.
- * Returns { needsAm: boolean, needsPm: boolean }.
+ * Returns { needsAm: boolean, needsPm: boolean, needsInOut: boolean }.
  * needsAm: expects time_in + break_out
  * needsPm: expects break_in + time_out
  */
 function getShiftExpectedLogs(shiftInfo) {
-  const type = getShiftType(shiftInfo);
-  if (!type) return { needsAm: true, needsPm: true }; // fallback: require all
-  if (type === 'pm_only') return { needsAm: false, needsPm: true };
-  if (type === 'am_only') return { needsAm: true, needsPm: false };
-  return { needsAm: true, needsPm: true };
+  return resolveExpectedLogsForDay(shiftInfo, null);
 }
 
 /**
@@ -264,12 +252,7 @@ function getShiftExpectedLogs(shiftInfo) {
  * - pm_only (work_suspension): only AM required.
  */
 function getExpectedLogsForDay(shiftInfo, holidayInfo) {
-  if (!holidayInfo || !holidayInfo.coverage) return getShiftExpectedLogs(shiftInfo);
-  const cov = holidayInfo.coverage;
-  if (cov === 'whole_day') return { needsAm: false, needsPm: false };
-  if (cov === 'am_only') return { needsAm: false, needsPm: true };
-  if (cov === 'pm_only') return { needsAm: true, needsPm: false };
-  return getShiftExpectedLogs(shiftInfo);
+  return resolveExpectedLogsForDay(shiftInfo, holidayInfo);
 }
 
 /**
@@ -279,6 +262,7 @@ function getExpectedLogsForDay(shiftInfo, holidayInfo) {
  * endMinutes: shift end time in minutes from midnight (for validating clock-in outside shift).
  */
 async function getAssignmentShiftForDate(employeeId, dateStr) {
+  await ensureShiftPunchModeColumn(pool);
   const result = await pool.query(
     `SELECT a.override_start_time::text AS override_start_time,
             a.override_end_time::text AS override_end_time,
@@ -287,6 +271,7 @@ async function getAssignmentShiftForDate(employeeId, dateStr) {
             s.start_time::text AS shift_start,
             s.end_time::text AS shift_end,
             s.break_end::text AS shift_break_end,
+            s.punch_mode,
             s.grace_period_minutes
      FROM assignments a
      LEFT JOIN shifts s ON a.shift_id = s.id
@@ -309,7 +294,13 @@ async function getAssignmentShiftForDate(employeeId, dateStr) {
   const graceMinutes = row.grace_period_minutes != null ? parseInt(row.grace_period_minutes, 10) : 0;
   const breakEndStr = row.override_break_end || row.shift_break_end;
   const breakEndMinutes = breakEndStr ? timeToMinutes(breakEndStr) : null;
-  return { startMinutes, endMinutes, graceMinutes, breakEndMinutes };
+  return {
+    startMinutes,
+    endMinutes,
+    graceMinutes,
+    breakEndMinutes,
+    punchMode: row.punch_mode || 'auto',
+  };
 }
 
 /**
@@ -510,8 +501,11 @@ async function computeAttendanceRemark(
   const hasPm =
     (record.break_in != null || locatorSegSet.has('PM IN')) &&
     (record.time_out != null || locatorSegSet.has('PM OUT'));
+  const hasInOut = record.time_in != null && record.time_out != null;
   const missingRequired =
-    (expected.needsAm && !hasAm) || (expected.needsPm && !hasPm);
+    (expected.needsAm && !hasAm) ||
+    (expected.needsPm && !hasPm) ||
+    (expected.needsInOut && !hasInOut);
   if (missingRequired) return 'Incomplete';
 
   const late = (record.late_minutes ?? 0) > 0;
@@ -664,6 +658,7 @@ async function getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr) 
   const map = new Map();
   if (!employeeIds || employeeIds.length === 0) return map;
   if (!startStr || !endStr) return map;
+  await ensureShiftPunchModeColumn(pool);
   const res = await pool.query(
     `SELECT a.employee_id,
             a.effective_from::text AS effective_from,
@@ -671,6 +666,7 @@ async function getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr) 
             COALESCE(a.override_start_time, s.start_time) AS start_time,
             COALESCE(a.override_end_time, s.end_time) AS end_time,
             COALESCE(a.override_break_end, s.break_end) AS break_end,
+            s.punch_mode,
             s.grace_period_minutes,
             s.working_days
      FROM assignments a
@@ -692,6 +688,7 @@ async function getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr) 
       startMinutes: timeToMinutes(startTimeStr),
       endMinutes: r.end_time ? timeToMinutes(r.end_time) : null,
       breakEndMinutes: r.break_end ? timeToMinutes(r.break_end) : null,
+      punchMode: r.punch_mode || 'auto',
       graceMinutes: r.grace_period_minutes != null ? parseInt(r.grace_period_minutes, 10) : 0,
       workingDays: Array.isArray(r.working_days)
         ? r.working_days.map((x) => parseInt(x, 10)).filter((x) => Number.isFinite(x))
@@ -1382,20 +1379,17 @@ router.get('/today', protect, async (req, res) => {
   }
 });
 
-/** Compute total_hours from punch points. Supports full-day, AM-only, and PM-only records. */
-function computeTotalHours(timeIn, breakOut, breakIn, timeOut) {
-  const parse = (x) => (x ? new Date(x).getTime() : null);
-  const ti = parse(timeIn);
-  const bo = parse(breakOut);
-  const bi = parse(breakIn);
-  const to = parse(timeOut);
-  if (ti && bo && bi && to) {
-    return ((bo - ti) + (to - bi)) / (1000 * 60 * 60);
-  }
-  if (ti && bo && !bi && !to) return (bo - ti) / (1000 * 60 * 60); // morning-only
-  if (ti && to) return (to - ti) / (1000 * 60 * 60);
-  if (!ti && bi && to) return (to - bi) / (1000 * 60 * 60); // afternoon-only (AM absent)
-  return 0;
+/** Compute total_hours from punch points. Supports full-day, AM/PM-only, and single-session records. */
+function computeTotalHours(timeIn, breakOut, breakIn, timeOut, shiftInfo = null) {
+  return computeTotalHoursFromRecord(
+    {
+      time_in: timeIn,
+      break_out: breakOut,
+      break_in: breakIn,
+      time_out: timeOut,
+    },
+    shiftInfo
+  );
 }
 
 // POST /api/dtr-daily-summary - clock in or create manual record (employee or admin)

@@ -1,6 +1,12 @@
 const { pool } = require('../config/db');
 const { dateInRecurringRange } = require('./holidayRangeUtils');
 const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
+const {
+  ensureShiftPunchModeColumn,
+  getShiftType: resolveShiftType,
+  interpretPunchesForShift,
+  computeTotalHours: computeShiftTotalHours,
+} = require('./shiftAttendance');
 
 const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
 const NOON_MINUTES = 12 * 60;
@@ -149,6 +155,7 @@ function timeToMinutes(timeStr) {
 }
 
 async function getAssignmentShiftForDate(employeeId, dateStr) {
+  await ensureShiftPunchModeColumn(pool);
   const result = await pool.query(
     `SELECT a.override_start_time::text AS override_start_time,
             a.override_end_time::text AS override_end_time,
@@ -156,6 +163,7 @@ async function getAssignmentShiftForDate(employeeId, dateStr) {
             s.start_time::text AS shift_start,
             s.end_time::text AS shift_end,
             s.break_end::text AS shift_break_end,
+            s.punch_mode,
             s.grace_period_minutes
      FROM assignments a
      LEFT JOIN shifts s ON a.shift_id = s.id
@@ -178,7 +186,13 @@ async function getAssignmentShiftForDate(employeeId, dateStr) {
   const graceMinutes = row.grace_period_minutes != null ? parseInt(row.grace_period_minutes, 10) : 0;
   const breakEndStr = row.override_break_end || row.shift_break_end;
   const breakEndMinutes = breakEndStr ? timeToMinutes(breakEndStr) : null;
-  return { startMinutes, endMinutes, graceMinutes, breakEndMinutes };
+  return {
+    startMinutes,
+    endMinutes,
+    graceMinutes,
+    breakEndMinutes,
+    punchMode: row.punch_mode || 'auto',
+  };
 }
 
 /**
@@ -388,12 +402,7 @@ async function computeUndertimeMinutes(employeeId, dateStr, timeOutIso, breakOut
 }
 
 function getShiftType(shiftInfo) {
-  if (!shiftInfo) return null;
-  const { startMinutes, endMinutes, breakEndMinutes } = shiftInfo;
-  if (startMinutes == null) return null;
-  if (startMinutes >= NOON_MINUTES) return 'pm_only';
-  if (breakEndMinutes == null && endMinutes != null && endMinutes <= ONE_PM_MINUTES) return 'am_only';
-  return 'full_day';
+  return resolveShiftType(shiftInfo);
 }
 
 /** Normalize date to YYYY-MM-DD string. Avoid toISOString() for DATEs - it uses UTC and can shift calendar date. */
@@ -434,85 +443,14 @@ function getManilaDateStr(val) {
  * @param {Array<Date|string>} punches - ascending order, same calendar day (Manila)
  * @param {string|null} shiftType - 'pm_only' | 'am_only' | 'full_day' | null
  * @param {{ breakEndMinutes?: number|null }|null} shiftInfo - assignment shift info for thresholding
- * @returns {{ timeIn, breakOut, breakIn, timeOut, status, totalHours, punchCount }}
+ * @returns {{ timeIn, breakOut, breakIn, timeOut, status, totalHours, punchCount, shiftType }}
  */
 function interpretPunchesForDay(punches, shiftType, shiftInfo = null) {
-  const n = punches.length;
-  if (n === 0) return null;
-
-  let timeIn = null;
-  let breakOut = null;
-  let breakIn = null;
-  let timeOut = null;
-  let status;
-
-  if (shiftType === 'pm_only') {
-    if (n >= 1) breakIn = punches[0];
-    if (n >= 2) timeOut = punches[1];
-    status = n >= 2 ? 'present' : 'incomplete';
-  } else if (shiftType === 'am_only') {
-    if (n >= 1) timeIn = punches[0];
-    if (n >= 2) breakOut = punches[1];
-    status = n >= 2 ? 'present' : 'incomplete';
-  } else {
-    // Full-day shift: if first punch is in PM window, treat it as PM-only attendance
-    // for the day (AM absent). This avoids showing afternoon punches in AM columns.
-    const firstPunchMins = minutesFromMidnightInTimeZone(punches[0]);
-    const pmStartThreshold =
-      shiftInfo && Number.isFinite(shiftInfo.breakEndMinutes)
-        ? shiftInfo.breakEndMinutes
-        : NOON_MINUTES;
-    const isAfternoonFirstPunch =
-      firstPunchMins != null && firstPunchMins >= pmStartThreshold;
-
-    if (isAfternoonFirstPunch) {
-      breakIn = punches[0];
-      if (n >= 2) timeOut = punches[n - 1];
-      status = n >= 2 ? 'present' : 'incomplete';
-      const totalHours = computeTotalHours(timeIn, timeOut, breakOut, breakIn, 'pm_only');
-      return {
-        timeIn,
-        breakOut,
-        breakIn,
-        timeOut,
-        status,
-        totalHours,
-        punchCount: n,
-      };
-    }
-
-    if (n === 1) {
-      timeIn = punches[0];
-      status = 'incomplete';
-    } else if (n === 2) {
-      timeIn = punches[0];
-      breakOut = punches[1];
-      status = 'incomplete';
-    } else if (n === 3) {
-      timeIn = punches[0];
-      breakOut = punches[1];
-      breakIn = punches[2];
-      status = 'incomplete';
-    } else {
-      timeIn = punches[0];
-      breakOut = punches[1];
-      breakIn = punches[2];
-      timeOut = punches[n - 1];
-      status = 'present';
-    }
-  }
-
-  const totalHours = computeTotalHours(timeIn, timeOut, breakOut, breakIn, shiftType);
-
-  return {
-    timeIn,
-    breakOut,
-    breakIn,
-    timeOut,
-    status,
-    totalHours,
-    punchCount: n,
-  };
+  return interpretPunchesForShift(
+    punches,
+    { ...(shiftInfo || {}), punchMode: shiftType || shiftInfo?.punchMode || 'auto' },
+    HRMS_TIMEZONE
+  );
 }
 
 /**
@@ -521,25 +459,7 @@ function interpretPunchesForDay(punches, shiftType, shiftInfo = null) {
  * Missing required end punch returns 0. Rounded to 2 decimals, minimum 0.
  */
 function computeTotalHours(timeIn, timeOut, breakOut, breakIn, shiftType) {
-  let workMs;
-  if (shiftType === 'am_only') {
-    if (!timeIn || !breakOut) return 0;
-    workMs = new Date(breakOut) - new Date(timeIn);
-  } else if (!timeOut) {
-    return 0;
-  } else if (shiftType === 'pm_only' && !timeIn && breakIn) {
-    workMs = new Date(timeOut) - new Date(breakIn);
-  } else if (!timeIn) {
-    return 0;
-  } else {
-    workMs = new Date(timeOut) - new Date(timeIn);
-    if (breakOut && breakIn) {
-      const breakMs = new Date(breakIn) - new Date(breakOut);
-      if (breakMs > 0) workMs -= breakMs;
-    }
-  }
-  const hours = workMs / (1000 * 60 * 60);
-  return Math.max(0, Math.round(hours * 100) / 100);
+  return computeShiftTotalHours(timeIn, timeOut, breakOut, breakIn, shiftType);
 }
 
 /**
@@ -675,7 +595,11 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
       punches: punchList.map((p) => (p instanceof Date ? p.toISOString() : String(p))),
     });
 
-    const interpreted = interpretPunchesForDay(punchList, shiftType, shiftInfo);
+    const interpreted = interpretPunchesForShift(
+      punchList,
+      shiftInfo,
+      HRMS_TIMEZONE
+    );
     if (!interpreted) {
       skipped++;
       continue;

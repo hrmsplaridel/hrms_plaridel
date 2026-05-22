@@ -114,6 +114,9 @@ CREATE TABLE IF NOT EXISTS shifts (
   start_time TIME NOT NULL,
   end_time TIME NOT NULL,
   break_end TIME,
+  punch_mode TEXT NOT NULL DEFAULT 'auto'
+    CONSTRAINT shifts_punch_mode_check
+    CHECK (punch_mode IN ('auto', 'full_day', 'am_only', 'pm_only', 'single_session')),
 
   grace_period_minutes INT NOT NULL DEFAULT 0 CHECK (grace_period_minutes >= 0),
 
@@ -125,6 +128,7 @@ CREATE TABLE IF NOT EXISTS shifts (
 );
 
 COMMENT ON COLUMN shifts.working_days IS 'ISO weekday: 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 7=Sun';
+COMMENT ON COLUMN shifts.punch_mode IS 'Attendance punch interpretation: auto, full_day, am_only, pm_only, or single_session.';
 
 -- =========================================
 -- ATTENDANCE POLICIES

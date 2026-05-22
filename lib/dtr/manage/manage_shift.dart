@@ -14,6 +14,20 @@ const List<String> _dayLabels = [
   'Sat',
   'Sun',
 ];
+const List<String> _punchModes = [
+  'auto',
+  'full_day',
+  'am_only',
+  'pm_only',
+  'single_session',
+];
+const Map<String, String> _punchModeLabels = {
+  'auto': 'Auto',
+  'full_day': 'Full day with break',
+  'am_only': 'AM only',
+  'pm_only': 'PM only',
+  'single_session': 'Single session',
+};
 
 /// Shift record for display/CRUD.
 class _ShiftRecord {
@@ -27,6 +41,7 @@ class _ShiftRecord {
     this.workingDays = const [1, 2, 3, 4, 5],
     this.shiftNumber,
     this.breakEndTime,
+    this.punchMode = 'auto',
   });
   final String id;
   final String name;
@@ -37,6 +52,7 @@ class _ShiftRecord {
   final int gracePeriodMinutes;
   final List<int> workingDays;
   final int? shiftNumber;
+  final String punchMode;
 
   /// Display as SHF-001, SHF-002, etc., or "—" if null.
   String get displayShiftNo => shiftNumber != null
@@ -47,6 +63,8 @@ class _ShiftRecord {
     if (workingDays.isEmpty) return '—';
     return workingDays.map((d) => _dayLabels[d - 1]).join(', ');
   }
+
+  String get punchModeDisplay => _punchModeLabels[punchMode] ?? 'Auto';
 }
 
 /// Shift management screen: list with search/status filter + form.
@@ -71,6 +89,7 @@ class _ManageShiftState extends State<ManageShift> {
   TimeOfDay?
   _breakEndTime; // PM resume time (e.g. 13:00 for 1PM) – used for PM late check
   Set<int> _workingDays = {1, 2, 3, 4, 5}; // Mon–Fri default
+  String _punchMode = 'auto';
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
 
@@ -127,6 +146,11 @@ class _ManageShiftState extends State<ManageShift> {
     return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
   }
 
+  String _parsePunchMode(dynamic value) {
+    final mode = value?.toString().trim().toLowerCase();
+    return _punchModes.contains(mode) ? mode! : 'auto';
+  }
+
   Future<void> _loadShifts() async {
     setState(() => _loading = true);
     try {
@@ -163,6 +187,7 @@ class _ManageShiftState extends State<ManageShift> {
           startTime: _parseTime(st) ?? const TimeOfDay(hour: 0, minute: 0),
           endTime: _parseTime(et) ?? const TimeOfDay(hour: 0, minute: 0),
           breakEndTime: _parseTime(be),
+          punchMode: _parsePunchMode(m['punch_mode']),
           isActive: m['is_active'] as bool? ?? true,
           gracePeriodMinutes: grace is int
               ? grace
@@ -189,7 +214,8 @@ class _ManageShiftState extends State<ManageShift> {
           : '';
       _startTime = s.startTime;
       _endTime = s.endTime;
-      _breakEndTime = s.breakEndTime;
+      _punchMode = s.punchMode;
+      _breakEndTime = _punchMode == 'single_session' ? null : s.breakEndTime;
       _workingDays = s.workingDays.toSet();
     });
   }
@@ -201,7 +227,9 @@ class _ManageShiftState extends State<ManageShift> {
       _graceController.clear();
       _startTime = null;
       _endTime = null;
+      _breakEndTime = null;
       _workingDays = {1, 2, 3, 4, 5};
+      _punchMode = 'auto';
     });
   }
 
@@ -240,7 +268,9 @@ class _ManageShiftState extends State<ManageShift> {
         'name': name,
         'start_time': _timeStr(_startTime!),
         'end_time': _timeStr(_endTime!),
-        if (_breakEndTime != null) 'break_end': _timeStr(_breakEndTime!),
+        'punch_mode': _punchMode,
+        if (_breakEndTime != null && _punchMode != 'single_session')
+          'break_end': _timeStr(_breakEndTime!),
         'is_active': true,
         'grace_period_minutes': int.tryParse(_graceController.text.trim()) ?? 0,
         'working_days': _workingDays.toList()..sort(),
@@ -296,7 +326,10 @@ class _ManageShiftState extends State<ManageShift> {
         'name': name,
         'start_time': _timeStr(_startTime!),
         'end_time': _timeStr(_endTime!),
-        'break_end': _breakEndTime != null ? _timeStr(_breakEndTime!) : null,
+        'punch_mode': _punchMode,
+        'break_end': _breakEndTime != null && _punchMode != 'single_session'
+            ? _timeStr(_breakEndTime!)
+            : null,
         'grace_period_minutes': int.tryParse(_graceController.text.trim()) ?? 0,
         'working_days': _workingDays.toList()..sort(),
       };
@@ -420,6 +453,7 @@ class _ManageShiftState extends State<ManageShift> {
   Widget _buildLeftPanel() {
     final dark = _isDark(context);
     final search = _searchController.text.toLowerCase();
+    const shiftNoColumnWidth = 76.0;
     final filtered = search.isEmpty
         ? _shifts
         : _shifts.where((s) => s.name.toLowerCase().contains(search)).toList();
@@ -451,7 +485,7 @@ class _ManageShiftState extends State<ManageShift> {
             child: Row(
               children: [
                 SizedBox(
-                  width: 50,
+                  width: shiftNoColumnWidth,
                   child: Text(
                     'ID',
                     style: TextStyle(
@@ -545,23 +579,41 @@ class _ManageShiftState extends State<ManageShift> {
                     child: Row(
                       children: [
                         SizedBox(
-                          width: 50,
+                          width: shiftNoColumnWidth,
                           child: Text(
                             s.displayShiftNo,
                             style: TextStyle(
                               fontSize: 12,
                               color: _mutedColor(context),
                             ),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
                           ),
                         ),
                         Expanded(
                           flex: 1,
-                          child: Text(
-                            s.name,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: _headingColor(context),
-                            ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                s.name,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: _headingColor(context),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                s.punchModeDisplay,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: _mutedColor(context),
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                              ),
+                            ],
                           ),
                         ),
                         Expanded(
@@ -653,6 +705,41 @@ class _ManageShiftState extends State<ManageShift> {
     );
   }
 
+  Widget _buildPunchModeDropdown() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: _filterDecoration(context),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: _punchMode,
+          dropdownColor: AppTheme.dashPanelOf(context),
+          style: AppTheme.dashFieldTextStyle(context),
+          isExpanded: true,
+          items: _punchModes
+              .map(
+                (mode) => DropdownMenuItem(
+                  value: mode,
+                  child: Text(
+                    _punchModeLabels[mode] ?? mode,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTheme.dashFieldTextStyle(context),
+                  ),
+                ),
+              )
+              .toList(),
+          onChanged: (mode) {
+            setState(() {
+              _punchMode = mode ?? 'auto';
+              if (_punchMode == 'single_session') {
+                _breakEndTime = null;
+              }
+            });
+          },
+        ),
+      ),
+    );
+  }
+
   Widget _buildRightPanel() {
     final dark = _isDark(context);
     return Container(
@@ -699,6 +786,25 @@ class _ManageShiftState extends State<ManageShift> {
           _buildTimePicker(_endTime, (t) => setState(() => _endTime = t)),
           const SizedBox(height: 20),
           Text(
+            'Attendance Mode',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: _mutedColor(context),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Choose Single session for schedules like 10:00 AM to 2:00 PM.',
+            style: TextStyle(
+              fontSize: 11,
+              color: _mutedColor(context).withValues(alpha: 0.8),
+            ),
+          ),
+          const SizedBox(height: 6),
+          _buildPunchModeDropdown(),
+          const SizedBox(height: 20),
+          Text(
             'PM Start (Break End)',
             style: TextStyle(
               fontSize: 12,
@@ -708,7 +814,9 @@ class _ManageShiftState extends State<ManageShift> {
           ),
           const SizedBox(height: 4),
           Text(
-            'When PM shift starts; used for PM late check. Leave empty if not needed.',
+            _punchMode == 'single_session'
+                ? 'Not used for single-session shifts.'
+                : 'When PM shift starts; used for PM late check. Leave empty if not needed.',
             style: TextStyle(
               fontSize: 11,
               color: _mutedColor(context).withValues(alpha: 0.8),
@@ -719,6 +827,7 @@ class _ManageShiftState extends State<ManageShift> {
             _breakEndTime,
             (t) => setState(() => _breakEndTime = t),
             allowClear: true,
+            enabled: _punchMode != 'single_session',
           ),
           const SizedBox(height: 20),
           Text(
@@ -840,18 +949,21 @@ class _ManageShiftState extends State<ManageShift> {
     TimeOfDay? value,
     ValueChanged<TimeOfDay?> onChanged, {
     bool allowClear = false,
+    bool enabled = true,
   }) {
     return Row(
       children: [
         Expanded(
           child: InkWell(
-            onTap: () async {
-              final t = await showTimePicker(
-                context: context,
-                initialTime: value ?? const TimeOfDay(hour: 13, minute: 0),
-              );
-              if (t != null) onChanged(t);
-            },
+            onTap: enabled
+                ? () async {
+                    final t = await showTimePicker(
+                      context: context,
+                      initialTime: value ?? const TimeOfDay(hour: 13, minute: 0),
+                    );
+                    if (t != null) onChanged(t);
+                  }
+                : null,
             borderRadius: BorderRadius.circular(8),
             child: InputDecorator(
               decoration: _inputDecoration('HH:MM').copyWith(
@@ -865,7 +977,9 @@ class _ManageShiftState extends State<ManageShift> {
                 value != null ? value.format(context) : '',
                 style: TextStyle(
                   fontSize: 14,
-                  color: value != null
+                  color: !enabled
+                      ? _mutedColor(context).withValues(alpha: 0.5)
+                      : value != null
                       ? _headingColor(context)
                       : _mutedColor(context),
                 ),
@@ -873,7 +987,7 @@ class _ManageShiftState extends State<ManageShift> {
             ),
           ),
         ),
-        if (allowClear && value != null)
+        if (allowClear && value != null && enabled)
           IconButton(
             icon: Icon(
               Icons.clear_rounded,
