@@ -176,9 +176,11 @@ class DtrExport {
 
   static String _locatorSlotOrBlank(TimeRecord? r, String segment) {
     if (!_isOnFieldByLocator(r)) return '';
-    if (_hasLocatorSegment(r, segment)) return 'ON FIELD';
+    if (_hasLocatorSegment(r, segment)) return r!.locatorSlipPrintLabel;
     final segs = r?.locatorSlipSegments ?? const <String>[];
-    if (segs.isEmpty && segment.toUpperCase() == 'AM IN') return 'ON FIELD';
+    if (segs.isEmpty && segment.toUpperCase() == 'AM IN') {
+      return r?.locatorSlipPrintLabel ?? 'ON FIELD';
+    }
     return '';
   }
 
@@ -196,6 +198,9 @@ class DtrExport {
         return (leaveType != null && leaveType.isNotEmpty)
             ? leaveType.toUpperCase()
             : 'LEAVE';
+      }
+      if (s == 'on_field' || r.locatorSlipId != null) {
+        return r.locatorSlipPrintLabel;
       }
       if (s != null && s.isNotEmpty) return s.toUpperCase();
       return 'ABSENT';

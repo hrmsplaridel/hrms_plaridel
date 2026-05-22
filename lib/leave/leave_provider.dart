@@ -731,8 +731,13 @@ class LeaveProvider extends ChangeNotifier {
   Future<bool> checkIsDepartmentHead({bool forceRefresh = false}) async {
     final cached = _deptHeadCheckCache;
     if (!forceRefresh && cached != null && cached.isFresh(_referenceCacheTtl)) {
-      _deptHeadCheck = Map<String, dynamic>.from(cached.value);
-      notifyListeners();
+      final cachedValue = Map<String, dynamic>.from(cached.value);
+      final changed = !mapEquals(_deptHeadCheck, cachedValue);
+      _deptHeadCheck = cachedValue;
+      if (changed) {
+        await Future<void>.delayed(Duration.zero);
+        notifyListeners();
+      }
       return isDeptHead;
     }
     try {

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../api/client.dart';
+import '../../data/locator_request_type.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../realtime/app_realtime_provider.dart';
 import '../utils/locator_slip_print.dart';
@@ -100,7 +101,7 @@ class _AdminLocatorManagementScreenState
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Locator Slip Management',
+          'Locator Request Management',
           style: TextStyle(
             color: _headingColor(context),
             fontSize: 22,
@@ -109,7 +110,7 @@ class _AdminLocatorManagementScreenState
         ),
         const SizedBox(height: 8),
         Text(
-          'Manage locator slip workflow from department-head endorsement up to HR final approval.',
+          'Manage locator, pass slip, and work-from-home requests from endorsement to HR approval.',
           style: TextStyle(color: _mutedColor(context), fontSize: 14),
         ),
         const SizedBox(height: 16),
@@ -145,7 +146,7 @@ class _AdminLocatorManagementScreenState
                   Expanded(
                     child: Text(
                       _queue == _LocatorAdminQueue.all
-                          ? 'Locator Slip Records'
+                          ? 'Locator Request Records'
                           : '${_queue.label} Queue',
                       style: TextStyle(
                         color: _headingColor(context),
@@ -211,7 +212,7 @@ class _AdminLocatorManagementScreenState
                 ),
               if (_items.isEmpty && !_loading)
                 Text(
-                  'No locator slip records in this queue.',
+                  'No locator request records in this queue.',
                   style: TextStyle(
                     color: _mutedColor(context),
                     fontSize: 13,
@@ -363,7 +364,11 @@ class _AdminLocatorManagementScreenState
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _adminCellText(context, item.office, strong: true),
+                    _adminCellText(
+                      context,
+                      '${item.requestType.shortLabel} · ${item.office}',
+                      strong: true,
+                    ),
                     if (item.reason.trim().isNotEmpty) ...[
                       const SizedBox(height: 3),
                       _adminCellText(
@@ -476,7 +481,7 @@ class _AdminLocatorManagementScreenState
                   children: [
                     Expanded(
                       child: Text(
-                        'Locator Slip Details',
+                        'Request Details',
                         style: TextStyle(
                           color: _headingColor(dialogContext),
                           fontSize: 18,
@@ -506,7 +511,8 @@ class _AdminLocatorManagementScreenState
                       _detailTile('Employee', item.employeeName),
                       _detailTile('Department', item.departmentName),
                       _detailTile('Date', item.slipDate),
-                      _detailTile('Office/Destination', item.office),
+                      _detailTile('Type', item.requestType.label),
+                      _detailTile(item.requestType.locationLabel, item.office),
                       _detailTile('Status', item.statusLabel),
                       _detailTile('Segments', item.segmentText),
                       _detailTile(
@@ -544,6 +550,8 @@ class _AdminLocatorManagementScreenState
                         id: item.id,
                         employeeName: item.employeeName,
                         dateText: item.slipDateLabel,
+                        requestTypeLabel: item.requestType.label,
+                        locationLabel: item.requestType.locationLabel,
                         office: item.office,
                         remarks: item.reason,
                         amIn: item.amIn,
@@ -583,7 +591,7 @@ class _AdminLocatorManagementScreenState
                   children: [
                     Expanded(
                       child: Text(
-                        'Locator Slip History',
+                        'Request History',
                         style: TextStyle(
                           color: _headingColor(dialogContext),
                           fontSize: 18,
@@ -914,7 +922,7 @@ class _AdminLocatorManagementScreenState
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Failed to load locator slips: $e');
+      setState(() => _error = 'Failed to load locator requests: $e');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -929,7 +937,7 @@ class _AdminLocatorManagementScreenState
       );
       await _load();
       if (!mounted) return;
-      _showLocatorSnack('Locator slip approved.');
+      _showLocatorSnack('Request approved.');
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = 'Approve failed: $e');
@@ -947,7 +955,7 @@ class _AdminLocatorManagementScreenState
       );
       await _load();
       if (!mounted) return;
-      _showLocatorSnack('Locator slip rejected.');
+      _showLocatorSnack('Request rejected.');
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = 'Reject failed: $e');
@@ -963,6 +971,7 @@ class _LocatorAdminRecord {
     required this.employeeName,
     required this.departmentName,
     required this.slipDate,
+    this.requestType = LocatorRequestType.locator,
     required this.office,
     required this.reason,
     required this.status,
@@ -984,6 +993,7 @@ class _LocatorAdminRecord {
   final String employeeName;
   final String departmentName;
   final String slipDate;
+  final LocatorRequestType requestType;
   final String office;
   final String reason;
   final String status;
@@ -1046,6 +1056,7 @@ class _LocatorAdminRecord {
       employeeName: (json['employee_name'] ?? 'Employee').toString(),
       departmentName: (json['department_name'] ?? '').toString(),
       slipDate: (json['slip_date'] ?? '').toString(),
+      requestType: LocatorRequestType.fromCode(json['request_type']),
       office: (json['office'] ?? '').toString(),
       reason: (json['reason'] ?? '').toString(),
       status: (json['status'] ?? '').toString(),

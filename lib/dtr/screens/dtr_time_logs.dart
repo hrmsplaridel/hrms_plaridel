@@ -174,6 +174,16 @@ class _RemarksChip extends StatelessWidget {
         );
       case 'Leave':
         return _chipPair(Colors.blue.shade700, Colors.blue.shade50, dark: dark);
+      case 'Locator / Official Business':
+      case 'On Field':
+      case 'Pass Slip':
+      case 'Work From Home':
+      case 'WFH':
+        return _chipPair(
+          Colors.teal.shade700,
+          Colors.teal.shade50,
+          dark: dark,
+        );
       case 'Incomplete':
         return _chipPair(
           Colors.amber.shade800,
@@ -423,7 +433,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
     if (timeValue != null) return _formatTime(timeValue);
     final segs = record.locatorSlipSegments ?? const <String>[];
     if (segs.any((s) => s.toUpperCase() == segment)) {
-      return 'On Field';
+      return record.locatorSlipSlotLabel;
     }
     return '—';
   }
@@ -451,6 +461,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
     }
     if (r.status == 'on_leave' || r.leaveRequestId != null) {
       return r.leaveTypeName ?? 'Leave';
+    }
+    if (r.status == 'on_field' || r.locatorSlipId != null) {
+      return r.locatorSlipDisplayLabel;
     }
     final hasAnyLog =
         r.timeIn != null ||

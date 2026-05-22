@@ -18,6 +18,31 @@ const {
 
 const router = express.Router();
 const protect = [authMiddleware];
+const LOCATOR_REQUEST_TYPES = new Set(['locator', 'pass_slip', 'work_from_home']);
+
+function normalizeLocatorRequestType(value) {
+  const type = (value || 'locator').toString().trim().toLowerCase();
+  return LOCATOR_REQUEST_TYPES.has(type) ? type : 'locator';
+}
+
+function locatorRequestTypeLabel(value) {
+  switch (normalizeLocatorRequestType(value)) {
+    case 'pass_slip':
+      return 'Pass Slip';
+    case 'work_from_home':
+      return 'Work From Home';
+    default:
+      return 'Locator Slip';
+  }
+}
+
+function locatorAttendanceRemark(locator) {
+  const segText =
+    locator?.segments && locator.segments.length > 0
+      ? ` (${locator.segments.join(', ')})`
+      : '';
+  return `${locatorRequestTypeLabel(locator?.request_type)}${segText}`;
+}
 
 /** Parse time value to minutes from midnight. Returns null if invalid. */
 function timeToMinutes(timeStr) {
@@ -485,14 +510,20 @@ async function computeAttendanceRemark(
     (Array.isArray(locatorSegments) ? locatorSegments : [])
       .map((s) => String(s).toUpperCase().trim())
   );
-  const hasAnyLog =
+  const hasPhysicalLog =
     record.time_in ||
     record.break_out ||
     record.break_in ||
-    record.time_out ||
-    locatorSegSet.size > 0;
+    record.time_out;
+  const hasAnyLog =
+    hasPhysicalLog || locatorSegSet.size > 0;
   if (!hasAnyLog) return 'Absent';
   if (record.status === 'invalid') return 'Invalid Log';
+  if (record.status === 'on_field' && !hasPhysicalLog) {
+    const segments = Array.from(locatorSegSet);
+    const segText = segments.length > 0 ? ` (${segments.join(', ')})` : '';
+    return `${locatorRequestTypeLabel(record.locator_slip_request_type)}${segText}`;
+  }
 
   const expected = getExpectedLogsForDay(shiftInfo, holidayInfo);
   const hasAm =
@@ -622,7 +653,7 @@ async function getApprovedLocatorByDateInRange(employeeIds, startStr, endStr) {
   if (!employeeIds || employeeIds.length === 0) return out;
   const res = await pool.query(
     `SELECT id, employee_id, slip_date::text AS slip_date_str,
-            am_in, am_out, pm_in, pm_out, office, reason
+            am_in, am_out, pm_in, pm_out, request_type, office, reason
      FROM locator_slips
      WHERE status = 'approved'
        AND employee_id = ANY($1::uuid[])
@@ -642,6 +673,7 @@ async function getApprovedLocatorByDateInRange(employeeIds, startStr, endStr) {
     if (r.pm_out) segments.push('PM OUT');
     out.set(key, {
       id: r.id,
+      request_type: normalizeLocatorRequestType(r.request_type),
       office: r.office || null,
       reason: r.reason || null,
       segments,
@@ -1118,10 +1150,6 @@ router.get('/', protect, async (req, res) => {
         if (existingKeys.has(key)) continue;
         const [empId, dateStr] = key.split('|');
         existingKeys.add(key);
-        const segText =
-          locator.segments && locator.segments.length > 0
-            ? ` (${locator.segments.join(', ')})`
-            : '';
         rows.push({
           id: null,
           user_id: empId,
@@ -1137,10 +1165,11 @@ router.get('/', protect, async (req, res) => {
           pm_status: null,
           remarks: null,
           source: 'adjusted',
-          attendance_remark: `Locator Slip${segText}`,
+          attendance_remark: locatorAttendanceRemark(locator),
           holiday_id: null,
           leave_request_id: null,
           locator_slip_id: locator.id || null,
+          locator_slip_request_type: locator.request_type || 'locator',
           locator_slip_office: locator.office || null,
           locator_slip_reason: locator.reason || null,
           locator_slip_segments: locator.segments || [],
@@ -1159,6 +1188,7 @@ router.get('/', protect, async (req, res) => {
         const locator = locatorByKey.get(rowKey);
         if (!locator) continue;
         row.locator_slip_id = locator.id || null;
+        row.locator_slip_request_type = locator.request_type || 'locator';
         row.locator_slip_office = locator.office || null;
         row.locator_slip_reason = locator.reason || null;
         row.locator_slip_segments = locator.segments || [];
@@ -1184,14 +1214,10 @@ router.get('/', protect, async (req, res) => {
           row.status !== 'holiday' &&
           row.status !== 'on_leave'
         ) {
-          const segText =
-            locator.segments && locator.segments.length > 0
-              ? ` (${locator.segments.join(', ')})`
-              : '';
           row.status = 'on_field';
           row.late_minutes = 0;
           row.undertime_minutes = 0;
-          row.attendance_remark = `Locator Slip${segText}`;
+          row.attendance_remark = locatorAttendanceRemark(locator);
         }
 
         // Re-evaluate remark/undertime with locator segment substitution so

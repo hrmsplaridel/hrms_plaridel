@@ -299,7 +299,9 @@ class _DtrReportsState extends State<DtrReports> {
   }) {
     if (timeValue != null) return _formatTime(timeValue);
     final segs = record.locatorSlipSegments ?? const <String>[];
-    if (segs.any((s) => s.toUpperCase() == segment)) return 'On Field';
+    if (segs.any((s) => s.toUpperCase() == segment)) {
+      return record.locatorSlipSlotLabel;
+    }
     return '—';
   }
 
@@ -334,6 +336,8 @@ class _DtrReportsState extends State<DtrReports> {
           return r.leaveTypeName ?? r.attendanceRemark ?? 'On Leave';
         case 'holiday':
           return r.holidayName ?? 'Holiday';
+        case 'on_field':
+          return r.locatorSlipDisplayLabel;
         default:
           return 'On Time';
       }

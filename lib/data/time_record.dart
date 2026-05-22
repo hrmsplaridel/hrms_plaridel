@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 
 import '../api/client.dart';
+import 'locator_request_type.dart';
 
 /// One DTR (Daily Time Record) entry: AM/PM time-in/out for a user on a date.
 /// timeIn = AM in, breakOut = AM out (lunch), breakIn = PM in, timeOut = PM out (end of day).
@@ -30,6 +31,7 @@ class TimeRecord {
     this.leaveTypeName,
     this.source,
     this.locatorSlipId,
+    this.locatorSlipRequestType,
     this.locatorSlipSegments,
   });
 
@@ -83,7 +85,17 @@ class TimeRecord {
 
   /// Approved locator-slip metadata (when present in DTR payload).
   final String? locatorSlipId;
+  final String? locatorSlipRequestType;
   final List<String>? locatorSlipSegments;
+
+  LocatorRequestType get locatorRequestType =>
+      LocatorRequestType.fromCode(locatorSlipRequestType);
+
+  String get locatorSlipSlotLabel => locatorRequestType.dtrSlotLabel;
+
+  String get locatorSlipPrintLabel => locatorRequestType.dtrPrintLabel;
+
+  String get locatorSlipDisplayLabel => locatorRequestType.label;
 
   static const String tableName = 'time_records';
 
@@ -139,6 +151,7 @@ class TimeRecord {
       leaveTypeName: json['leave_type_name']?.toString(),
       source: json['source']?.toString(),
       locatorSlipId: json['locator_slip_id']?.toString(),
+      locatorSlipRequestType: json['locator_slip_request_type']?.toString(),
       locatorSlipSegments: (json['locator_slip_segments'] is List)
           ? (json['locator_slip_segments'] as List)
                 .map((e) => e.toString())
@@ -219,6 +232,7 @@ class TimeRecord {
     String? leaveTypeName,
     String? source,
     String? locatorSlipId,
+    String? locatorSlipRequestType,
     List<String>? locatorSlipSegments,
   }) {
     return TimeRecord(
@@ -245,6 +259,8 @@ class TimeRecord {
       leaveTypeName: leaveTypeName ?? this.leaveTypeName,
       source: source ?? this.source,
       locatorSlipId: locatorSlipId ?? this.locatorSlipId,
+      locatorSlipRequestType:
+          locatorSlipRequestType ?? this.locatorSlipRequestType,
       locatorSlipSegments: locatorSlipSegments ?? this.locatorSlipSegments,
     );
   }

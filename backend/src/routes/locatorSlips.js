@@ -12,6 +12,7 @@ const { broadcastAppEvent } = require('../websockets/appEvents');
 
 const router = express.Router();
 const protect = [authMiddleware];
+const LOCATOR_REQUEST_TYPES = new Set(['locator', 'pass_slip', 'work_from_home']);
 
 function notifySafe(fn) {
   Promise.resolve()
@@ -36,6 +37,11 @@ function broadcastLocatorUpdated(action, row = {}, extra = {}) {
   }
 }
 
+function normalizeRequestType(value) {
+  const type = (value || 'locator').toString().trim().toLowerCase();
+  return LOCATOR_REQUEST_TYPES.has(type) ? type : null;
+}
+
 pool
   .query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`)
   .then(() =>
@@ -49,6 +55,9 @@ pool
         am_out BOOLEAN NOT NULL DEFAULT false,
         pm_in BOOLEAN NOT NULL DEFAULT false,
         pm_out BOOLEAN NOT NULL DEFAULT false,
+        request_type TEXT NOT NULL DEFAULT 'locator'
+          CONSTRAINT locator_slips_request_type_check
+          CHECK (request_type IN ('locator', 'pass_slip', 'work_from_home')),
         office TEXT NOT NULL,
         reason TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'pending_department_head',
@@ -70,6 +79,16 @@ pool
         ON locator_slips(department_id, updated_at DESC);
       CREATE INDEX IF NOT EXISTS idx_locator_slips_date
         ON locator_slips(slip_date DESC);
+
+      ALTER TABLE locator_slips
+        ADD COLUMN IF NOT EXISTS request_type TEXT NOT NULL DEFAULT 'locator';
+      ALTER TABLE locator_slips
+        DROP CONSTRAINT IF EXISTS locator_slips_request_type_check;
+      ALTER TABLE locator_slips
+        ADD CONSTRAINT locator_slips_request_type_check
+        CHECK (request_type IN ('locator', 'pass_slip', 'work_from_home'));
+      CREATE INDEX IF NOT EXISTS idx_locator_slips_request_type
+        ON locator_slips(request_type);
     `)
   )
   .catch((err) =>
@@ -88,6 +107,7 @@ function mapLocatorRow(row) {
     am_out: row.am_out === true,
     pm_in: row.pm_in === true,
     pm_out: row.pm_out === true,
+    request_type: normalizeRequestType(row.request_type) || 'locator',
     office: row.office || '',
     reason: row.reason || '',
     status: row.status,
@@ -173,12 +193,14 @@ router.post('/submit', protect, async (req, res) => {
   const slipDate = (req.body?.slip_date || '').toString().trim();
   const office = (req.body?.office || '').toString().trim();
   const reason = (req.body?.reason || '').toString().trim();
+  const requestType = normalizeRequestType(req.body?.request_type);
   const amIn = req.body?.am_in === true;
   const amOut = req.body?.am_out === true;
   const pmIn = req.body?.pm_in === true;
   const pmOut = req.body?.pm_out === true;
 
   if (!slipDate) return res.status(400).json({ error: 'slip_date is required' });
+  if (!requestType) return res.status(400).json({ error: 'Invalid request_type' });
   if (!office) return res.status(400).json({ error: 'office is required' });
   if (!reason) return res.status(400).json({ error: 'reason is required' });
   if (!amIn && !amOut && !pmIn && !pmOut) {
@@ -197,13 +219,25 @@ router.post('/submit', protect, async (req, res) => {
     const inserted = await client.query(
       `INSERT INTO locator_slips (
         employee_id, department_id, slip_date, am_in, am_out, pm_in, pm_out,
-        office, reason, status, created_at, updated_at
+        request_type, office, reason, status, created_at, updated_at
       ) VALUES (
         $1::uuid, $2::uuid, $3::date, $4::boolean, $5::boolean, $6::boolean, $7::boolean,
-        $8::text, $9::text, $10::text, now(), now()
+        $8::text, $9::text, $10::text, $11::text, now(), now()
       )
       RETURNING *`,
-      [userId, departmentId, slipDate, amIn, amOut, pmIn, pmOut, office, reason, submitStatus]
+      [
+        userId,
+        departmentId,
+        slipDate,
+        amIn,
+        amOut,
+        pmIn,
+        pmOut,
+        requestType,
+        office,
+        reason,
+        submitStatus,
+      ]
     );
     await client.query('COMMIT');
 
@@ -235,6 +269,7 @@ router.post('/submit', protect, async (req, res) => {
         amOut,
         pmIn,
         pmOut,
+        requestType,
         departmentHeadUserId: deptInfo?.departmentHeadUserId || null,
       })
     );
@@ -421,6 +456,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
         slipId: id,
         employeeName: mapped.employee_name,
         slipDate: mapped.slip_date,
+        requestType: mapped.request_type,
       })
     );
     broadcastLocatorUpdated('department_head_approved', mapped);
@@ -484,10 +520,10 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
         employeeUserId: current.rows[0].employee_id,
         slipId: id,
         type: 'locator_rejected_department_head',
-        title: 'Locator slip not approved by department head',
+        title: 'Locator request not approved by department head',
         body: remarks
-          ? `Your locator slip was not approved. ${remarks}`
-          : 'Your locator slip was not approved by your department head.',
+          ? `Your locator request was not approved. ${remarks}`
+          : 'Your locator request was not approved by your department head.',
         metadata: { reviewer_remarks: remarks },
       })
     );
@@ -592,10 +628,10 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         employeeUserId: current.rows[0].employee_id,
         slipId: id,
         type: 'locator_approved_hr',
-        title: 'Locator slip approved',
+        title: 'Locator request approved',
         body: remarks
-          ? `Your locator slip was approved. ${remarks}`
-          : 'Your locator slip was approved by HR.',
+          ? `Your locator request was approved. ${remarks}`
+          : 'Your locator request was approved by HR.',
         metadata: { reviewer_remarks: remarks },
       })
     );
@@ -671,10 +707,10 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
         employeeUserId: current.rows[0].employee_id,
         slipId: id,
         type: 'locator_rejected_hr',
-        title: 'Locator slip not approved',
+        title: 'Locator request not approved',
         body: remarks
-          ? `HR did not approve this locator slip. ${remarks}`
-          : 'HR did not approve this locator slip.',
+          ? `HR did not approve this locator request. ${remarks}`
+          : 'HR did not approve this locator request.',
         metadata: { reviewer_remarks: remarks },
       })
     );

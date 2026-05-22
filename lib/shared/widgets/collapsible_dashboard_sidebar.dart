@@ -10,8 +10,11 @@ const double kDashboardSidebarCollapsedWidth = 72;
 /// Collapsed nav touch target (circular orb inside).
 const double kDashboardSidebarCollapsedOrbSize = 40;
 
-const Duration kDashboardSidebarAnimationDuration =
-    Duration(milliseconds: 280);
+const Duration kDashboardSidebarAnimationDuration = Duration(milliseconds: 280);
+
+/// Nav hover: short duration so highlight follows the cursor immediately.
+const Duration kSidebarNavHoverDuration = Duration(milliseconds: 100);
+const Curve kSidebarNavHoverCurve = Curves.easeOutCubic;
 
 /// Below this animated width, sidebar content stays in compact (icon-only) mode.
 const double kDashboardSidebarCompactThreshold = 260;
@@ -32,8 +35,9 @@ class AnimatedSidebarWidth extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final target =
-        collapsed ? kDashboardSidebarCollapsedWidth : kDashboardSidebarWidth;
+    final target = collapsed
+        ? kDashboardSidebarCollapsedWidth
+        : kDashboardSidebarWidth;
 
     return ClipRect(
       clipBehavior: Clip.hardEdge,
@@ -43,8 +47,7 @@ class AnimatedSidebarWidth extends StatelessWidget {
         width: target,
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final compact =
-                dashboardSidebarIsCompact(constraints.maxWidth);
+            final compact = dashboardSidebarIsCompact(constraints.maxWidth);
             return builder(context, compact);
           },
         ),
@@ -80,10 +83,7 @@ class DashboardSidebarRailFrame extends StatelessWidget {
             ? LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: [
-                  panel,
-                  Color.lerp(panel, canvas, 0.45)!,
-                ],
+                colors: [panel, Color.lerp(panel, canvas, 0.45)!],
               )
             : null,
       ),
@@ -176,7 +176,8 @@ class _DashboardSidebarNavTileState extends State<DashboardSidebarNavTile> {
     if (collapsed) {
       return Tooltip(
         message: widget.label,
-        waitDuration: const Duration(milliseconds: 400),
+        waitDuration: const Duration(milliseconds: 350),
+        showDuration: const Duration(seconds: 2),
         child: _CollapsedNavOrb(
           icon: widget.icon,
           selected: selected,
@@ -193,6 +194,7 @@ class _DashboardSidebarNavTileState extends State<DashboardSidebarNavTile> {
     final fg = selected ? Colors.white : inactive;
 
     return MouseRegion(
+      cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
       child: Padding(
@@ -202,30 +204,75 @@ class _DashboardSidebarNavTileState extends State<DashboardSidebarNavTile> {
           child: InkWell(
             onTap: widget.onTap,
             borderRadius: BorderRadius.circular(12),
+            splashColor: Colors.transparent,
+            highlightColor: Colors.transparent,
+            hoverColor: Colors.transparent,
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              curve: Curves.easeOutCubic,
+              duration: kSidebarNavHoverDuration,
+              curve: kSidebarNavHoverCurve,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
               decoration: BoxDecoration(
                 color: bg,
                 borderRadius: BorderRadius.circular(12),
+                border: selected
+                    ? null
+                    : (_hover
+                          ? Border.all(
+                              color: AppTheme.primaryNavy.withValues(
+                                alpha: AppTheme.dashIsDark(context)
+                                    ? 0.35
+                                    : 0.2,
+                              ),
+                            )
+                          : null),
+                boxShadow: selected
+                    ? [
+                        BoxShadow(
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.25),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ]
+                    : (_hover
+                          ? [
+                              BoxShadow(
+                                color: Colors.black.withValues(
+                                  alpha: AppTheme.dashIsDark(context)
+                                      ? 0.2
+                                      : 0.04,
+                                ),
+                                blurRadius: 6,
+                                offset: const Offset(0, 2),
+                              ),
+                            ]
+                          : null),
               ),
               child: Row(
                 children: [
-                  Icon(widget.icon, size: 22, color: fg),
+                  AnimatedScale(
+                    scale: _hover && !selected ? 1.04 : 1,
+                    duration: kSidebarNavHoverDuration,
+                    curve: kSidebarNavHoverCurve,
+                    child: Icon(widget.icon, size: 22, color: fg),
+                  ),
                   const SizedBox(width: 14),
                   Expanded(
-                    child: Text(
-                      widget.label,
+                    child: AnimatedDefaultTextStyle(
+                      duration: kSidebarNavHoverDuration,
+                      curve: kSidebarNavHoverCurve,
                       style: TextStyle(
                         color: fg,
-                        fontWeight:
-                            selected ? FontWeight.w700 : FontWeight.w500,
+                        fontWeight: selected
+                            ? FontWeight.w700
+                            : FontWeight.w500,
                         fontSize: 14,
                         letterSpacing: -0.15,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      child: Text(
+                        widget.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ),
                 ],
@@ -260,6 +307,7 @@ class _CollapsedNavOrb extends StatelessWidget {
     final inactive = AppTheme.dashTextSecondaryOf(context);
 
     return MouseRegion(
+      cursor: SystemMouseCursors.click,
       onEnter: (_) => onHover(true),
       onExit: (_) => onHover(false),
       child: Padding(
@@ -269,6 +317,9 @@ class _CollapsedNavOrb extends StatelessWidget {
           child: InkWell(
             onTap: onTap,
             customBorder: const CircleBorder(),
+            splashColor: Colors.transparent,
+            highlightColor: Colors.transparent,
+            hoverColor: Colors.transparent,
             child: SizedBox(
               height: 48,
               child: Stack(
@@ -279,8 +330,8 @@ class _CollapsedNavOrb extends StatelessWidget {
                     Positioned(
                       left: 4,
                       child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        curve: Curves.easeOutCubic,
+                        duration: kSidebarNavHoverDuration,
+                        curve: kSidebarNavHoverCurve,
                         width: 4,
                         height: 26,
                         decoration: BoxDecoration(
@@ -307,11 +358,11 @@ class _CollapsedNavOrb extends StatelessWidget {
                     ),
                   AnimatedScale(
                     scale: hovered && !selected ? 1.06 : 1,
-                    duration: const Duration(milliseconds: 180),
-                    curve: Curves.easeOutCubic,
+                    duration: kSidebarNavHoverDuration,
+                    curve: kSidebarNavHoverCurve,
                     child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      curve: Curves.easeOutCubic,
+                      duration: kSidebarNavHoverDuration,
+                      curve: kSidebarNavHoverCurve,
                       width: kDashboardSidebarCollapsedOrbSize,
                       height: kDashboardSidebarCollapsedOrbSize,
                       decoration: BoxDecoration(
@@ -329,10 +380,10 @@ class _CollapsedNavOrb extends StatelessWidget {
                         color: selected
                             ? null
                             : (hovered
-                                ? AppTheme.primaryNavy.withValues(
-                                    alpha: dark ? 0.18 : 0.08,
-                                  )
-                                : Colors.transparent),
+                                  ? AppTheme.primaryNavy.withValues(
+                                      alpha: dark ? 0.18 : 0.08,
+                                    )
+                                  : Colors.transparent),
                         border: selected
                             ? null
                             : Border.all(
@@ -354,16 +405,16 @@ class _CollapsedNavOrb extends StatelessWidget {
                                 ),
                               ]
                             : (hovered
-                                ? [
-                                    BoxShadow(
-                                      color: AppTheme.primaryNavy.withValues(
-                                        alpha: 0.12,
+                                  ? [
+                                      BoxShadow(
+                                        color: AppTheme.primaryNavy.withValues(
+                                          alpha: 0.12,
+                                        ),
+                                        blurRadius: 8,
+                                        offset: const Offset(0, 2),
                                       ),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ]
-                                : null),
+                                    ]
+                                  : null),
                       ),
                       child: Icon(
                         icon,
@@ -531,10 +582,7 @@ class CollapsedSidebarProfileOrb extends StatelessWidget {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(2),
                 gradient: const LinearGradient(
-                  colors: [
-                    AppTheme.primaryNavyLight,
-                    AppTheme.primaryNavy,
-                  ],
+                  colors: [AppTheme.primaryNavyLight, AppTheme.primaryNavy],
                 ),
               ),
             ),

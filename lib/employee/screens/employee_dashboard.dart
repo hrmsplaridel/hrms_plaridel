@@ -66,7 +66,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
     'Dashboard',
     'My Attendance',
     'My Leave',
-    'Locator Slip',
+    'Locator Requests',
     'Training Reports',
     'DocuTracker',
     'Announcements',
@@ -577,7 +577,7 @@ class _EmployeeSidebar extends StatelessWidget {
         ),
         DashboardSidebarNavTile(
           icon: Icons.pin_drop_outlined,
-          label: 'Locator Slip',
+          label: 'Locator Requests',
           selected: selectedIndex == 3,
           collapsed: compact,
           onTap: () => onTap(3),
@@ -639,66 +639,65 @@ class _EmployeeSidebar extends StatelessWidget {
         ),
         if (!compact)
           Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: Column(
-            children: [
-              Text(
-                '© ${DateTime.now().year} HRMS',
-                style: TextStyle(
-                  color: AppTheme.dashTextSecondaryOf(
-                    context,
-                  ).withValues(alpha: 0.85),
-                  fontSize: 11,
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              children: [
+                Text(
+                  '© ${DateTime.now().year} HRMS',
+                  style: TextStyle(
+                    color: AppTheme.dashTextSecondaryOf(
+                      context,
+                    ).withValues(alpha: 0.85),
+                    fontSize: 11,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 4),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  TextButton(
-                    onPressed: () {},
-                    style: TextButton.styleFrom(
-                      minimumSize: Size.zero,
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                    ),
-                    child: Text(
-                      'Privacy Policy',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.primaryNavy,
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    TextButton(
+                      onPressed: () {},
+                      style: TextButton.styleFrom(
+                        minimumSize: Size.zero,
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                      ),
+                      child: Text(
+                        'Privacy Policy',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.primaryNavy,
+                        ),
                       ),
                     ),
-                  ),
-                  Text(
-                    ' | ',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.textSecondary.withValues(alpha: 0.6),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () {},
-                    style: TextButton.styleFrom(
-                      minimumSize: Size.zero,
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                    ),
-                    child: Text(
-                      'Terms',
+                    Text(
+                      ' | ',
                       style: TextStyle(
                         fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.primaryNavy,
+                        color: AppTheme.textSecondary.withValues(alpha: 0.6),
                       ),
                     ),
-                  ),
-                ],
-              ),
-            ],
+                    TextButton(
+                      onPressed: () {},
+                      style: TextButton.styleFrom(
+                        minimumSize: Size.zero,
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                      ),
+                      child: Text(
+                        'Terms',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.primaryNavy,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
-        if (compact)
-          const SizedBox(height: 12),
+        if (compact) const SizedBox(height: 12),
       ],
     );
   }
@@ -772,9 +771,7 @@ class _EmployeeSidebar extends StatelessWidget {
         children: [
           if (showBrand) const PortalSidebarBrand(),
           Expanded(
-            child: SingleChildScrollView(
-              child: _buildNavList(compact: false),
-            ),
+            child: SingleChildScrollView(child: _buildNavList(compact: false)),
           ),
           _buildFooter(context, compact: false),
         ],
@@ -1914,11 +1911,13 @@ class _EmployeeAttendanceContentState
   ) {
     if (dt != null) return _formatTime(dt);
     final segs = r.locatorSlipSegments ?? const <String>[];
-    if (segs.any((s) => s.toUpperCase() == segment)) return 'On Field';
+    if (segs.any((s) => s.toUpperCase() == segment)) {
+      return r.locatorSlipSlotLabel;
+    }
     if (segs.isEmpty &&
         segment == 'AM IN' &&
         (r.status == 'on_field' || r.locatorSlipId != null))
-      return 'On Field';
+      return r.locatorSlipSlotLabel;
     return '—';
   }
 
@@ -1961,7 +1960,7 @@ class _EmployeeAttendanceContentState
           Text(
             'My Attendance',
             style: TextStyle(
-              color: AppTheme.textPrimary,
+              color: AppTheme.dashTextPrimaryOf(context),
               fontSize: 22,
               fontWeight: FontWeight.w700,
             ),
@@ -1969,200 +1968,248 @@ class _EmployeeAttendanceContentState
           const SizedBox(height: 8),
           Text(
             'View your time-in/out records.',
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+            style: TextStyle(
+              color: AppTheme.dashTextSecondaryOf(context),
+              fontSize: 14,
+            ),
           ),
           const SizedBox(height: 24),
         ],
         LayoutBuilder(
           builder: (context, constraints) {
             final isNarrow = constraints.maxWidth < 520;
-            return Wrap(
-              spacing: 12,
-              runSpacing: 8,
-              alignment: WrapAlignment.start,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                SizedBox(
-                  width: isNarrow ? 150 : 130,
-                  child: DropdownButtonFormField<int>(
-                    value: _selectedMonth,
-                    isExpanded: true,
-                    decoration: AppTheme.dashInputDecoration(
-                      context,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 8,
-                      ),
-                      radius: 8,
-                    ),
-                    style: AppTheme.dashFieldTextStyle(context),
-                    dropdownColor: AppTheme.dashPanelOf(context),
-                    selectedItemBuilder: (context) => List.generate(
-                      12,
-                      (i) => Text(
-                        _attendanceMonths[i],
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTheme.dashFieldTextStyle(
-                          context,
-                        ).copyWith(fontSize: 14),
-                      ),
-                    ),
-                    items: List.generate(12, (i) => i + 1)
-                        .map(
-                          (m) => DropdownMenuItem(
-                            value: m,
-                            child: Text(
-                              _attendanceMonths[m - 1],
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (v) {
-                      if (v != null) {
-                        setState(() {
-                          _selectedMonth = v;
-                          if (_selectedDay != null &&
-                              _selectedDay! > _lastDayOfSelectedMonth) {
-                            _selectedDay = null;
-                          }
-                          _clampSelectedDayIfNeeded();
-                        });
-                        _load();
-                      }
-                    },
-                  ),
+            final monthWidth = isNarrow ? 150.0 : 172.0;
+            final yearWidth = isNarrow ? 100.0 : 112.0;
+            final dayWidth = isNarrow ? 115.0 : 144.0;
+            const fieldPadding = EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 8,
+            );
+
+            Widget monthField() => SizedBox(
+              width: monthWidth,
+              child: DropdownButtonFormField<int>(
+                initialValue: _selectedMonth,
+                isExpanded: true,
+                decoration: AppTheme.dashInputDecoration(
+                  context,
+                  contentPadding: fieldPadding,
+                  radius: 8,
                 ),
-                SizedBox(
-                  width: isNarrow ? 95 : 85,
-                  child: DropdownButtonFormField<int>(
-                    value: _selectedYear,
-                    isExpanded: true,
-                    decoration: AppTheme.dashInputDecoration(
-                      context,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 8,
-                      ),
-                      radius: 8,
-                    ),
-                    style: AppTheme.dashFieldTextStyle(context),
-                    dropdownColor: AppTheme.dashPanelOf(context),
-                    selectedItemBuilder: (context) => List.generate(
-                      11,
-                      (i) => Text(
-                        '${DateTime.now().year - 5 + i}',
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTheme.dashFieldTextStyle(
-                          context,
-                        ).copyWith(fontSize: 14),
-                      ),
-                    ),
-                    items: List.generate(11, (i) => DateTime.now().year - 5 + i)
-                        .map(
-                          (y) => DropdownMenuItem(value: y, child: Text('$y')),
-                        )
-                        .toList(),
-                    onChanged: (v) {
-                      if (v != null) {
-                        setState(() {
-                          _selectedYear = v;
-                          if (_selectedDay != null &&
-                              _selectedDay! > _lastDayOfSelectedMonth) {
-                            _selectedDay = null;
-                          }
-                          _clampSelectedDayIfNeeded();
-                        });
-                        _load();
-                      }
-                    },
-                  ),
+                style: AppTheme.dashFieldTextStyle(context),
+                dropdownColor: AppTheme.dashPanelOf(context),
+                icon: Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  color: AppTheme.dashTextSecondaryOf(context),
                 ),
-                SizedBox(
-                  width: isNarrow ? 115 : 105,
-                  child: DropdownButtonFormField<int?>(
-                    value: _selectedDay,
-                    isExpanded: true,
-                    decoration: AppTheme.dashInputDecoration(
-                      context,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 8,
-                      ),
-                      radius: 8,
-                    ),
-                    style: AppTheme.dashFieldTextStyle(context),
-                    dropdownColor: AppTheme.dashPanelOf(context),
-                    hint: Text(
-                      'All days',
+                selectedItemBuilder: (context) => List.generate(
+                  12,
+                  (i) => Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      _attendanceMonths[i],
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: AppTheme.dashFieldTextStyle(
                         context,
                       ).copyWith(fontSize: 14),
                     ),
-                    selectedItemBuilder: (context) => [
-                      Text(
-                        'All days',
+                  ),
+                ),
+                items: List.generate(12, (i) => i + 1)
+                    .map(
+                      (m) => DropdownMenuItem(
+                        value: m,
+                        child: Text(
+                          _attendanceMonths[m - 1],
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) {
+                    setState(() {
+                      _selectedMonth = v;
+                      if (_selectedDay != null &&
+                          _selectedDay! > _lastDayOfSelectedMonth) {
+                        _selectedDay = null;
+                      }
+                      _clampSelectedDayIfNeeded();
+                    });
+                    _load();
+                  }
+                },
+              ),
+            );
+
+            Widget yearField() => SizedBox(
+              width: yearWidth,
+              child: DropdownButtonFormField<int>(
+                value: _selectedYear,
+                isExpanded: true,
+                decoration: AppTheme.dashInputDecoration(
+                  context,
+                  contentPadding: fieldPadding,
+                  radius: 8,
+                ),
+                style: AppTheme.dashFieldTextStyle(context),
+                dropdownColor: AppTheme.dashPanelOf(context),
+                icon: Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  color: AppTheme.dashTextSecondaryOf(context),
+                ),
+                selectedItemBuilder: (context) => List.generate(
+                  11,
+                  (i) => Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '${DateTime.now().year - 5 + i}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTheme.dashFieldTextStyle(
+                        context,
+                      ).copyWith(fontSize: 14),
+                    ),
+                  ),
+                ),
+                items: List.generate(11, (i) => DateTime.now().year - 5 + i)
+                    .map((y) => DropdownMenuItem(value: y, child: Text('$y')))
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) {
+                    setState(() {
+                      _selectedYear = v;
+                      if (_selectedDay != null &&
+                          _selectedDay! > _lastDayOfSelectedMonth) {
+                        _selectedDay = null;
+                      }
+                      _clampSelectedDayIfNeeded();
+                    });
+                    _load();
+                  }
+                },
+              ),
+            );
+
+            Widget dayField() => SizedBox(
+              width: dayWidth,
+              child: DropdownButtonFormField<int?>(
+                value: _selectedDay,
+                isExpanded: true,
+                decoration: AppTheme.dashInputDecoration(
+                  context,
+                  contentPadding: fieldPadding,
+                  radius: 8,
+                ),
+                style: AppTheme.dashFieldTextStyle(context),
+                dropdownColor: AppTheme.dashPanelOf(context),
+                icon: Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  color: AppTheme.dashTextSecondaryOf(context),
+                ),
+                hint: Text(
+                  'All days',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTheme.dashFieldTextStyle(
+                    context,
+                  ).copyWith(fontSize: 14),
+                ),
+                selectedItemBuilder: (context) => [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'All days',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTheme.dashFieldTextStyle(
+                        context,
+                      ).copyWith(fontSize: 14),
+                    ),
+                  ),
+                  ...List.generate(
+                    _maxSelectableCalendarDay,
+                    (i) => Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Day ${i + 1}',
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: AppTheme.dashFieldTextStyle(
                           context,
                         ).copyWith(fontSize: 14),
                       ),
-                      ...List.generate(
-                        _maxSelectableCalendarDay,
-                        (i) => Text(
-                          'Day ${i + 1}',
-                          overflow: TextOverflow.ellipsis,
-                          style: AppTheme.dashFieldTextStyle(
-                            context,
-                          ).copyWith(fontSize: 14),
-                        ),
-                      ),
-                    ],
-                    items: [
-                      const DropdownMenuItem<int?>(
-                        value: null,
-                        child: Text('All days'),
-                      ),
-                      ...List.generate(
-                        _maxSelectableCalendarDay,
-                        (i) => i + 1,
-                      ).map(
-                        (d) => DropdownMenuItem<int?>(
-                          value: d,
-                          child: Text('Day $d'),
-                        ),
-                      ),
-                    ],
-                    onChanged: (v) {
-                      setState(() => _selectedDay = v);
-                      _load();
-                    },
-                  ),
-                ),
-                IconButton(
-                  onPressed: () {
-                    final now = DateTime.now();
-                    setState(() {
-                      _selectedMonth = now.month;
-                      _selectedYear = now.year;
-                      _selectedDay = null;
-                    });
-                    _load();
-                  },
-                  icon: Icon(
-                    Icons.refresh_rounded,
-                    size: 22,
-                    color: AppTheme.textSecondary,
-                  ),
-                  tooltip: 'Reset filters',
-                  style: IconButton.styleFrom(
-                    backgroundColor: AppTheme.lightGray.withOpacity(0.5),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
                     ),
                   ),
+                ],
+                items: [
+                  const DropdownMenuItem<int?>(
+                    value: null,
+                    child: Text('All days'),
+                  ),
+                  ...List.generate(_maxSelectableCalendarDay, (i) => i + 1).map(
+                    (d) =>
+                        DropdownMenuItem<int?>(value: d, child: Text('Day $d')),
+                  ),
+                ],
+                onChanged: (v) {
+                  setState(() => _selectedDay = v);
+                  _load();
+                },
+              ),
+            );
+
+            final refreshButton = IconButton(
+              onPressed: () {
+                final now = DateTime.now();
+                setState(() {
+                  _selectedMonth = now.month;
+                  _selectedYear = now.year;
+                  _selectedDay = null;
+                });
+                _load();
+              },
+              icon: Icon(
+                Icons.refresh_rounded,
+                size: 22,
+                color: AppTheme.dashTextSecondaryOf(context),
+              ),
+              tooltip: 'Reset filters',
+              style: IconButton.styleFrom(
+                backgroundColor: AppTheme.dashMutedSurfaceOf(context),
+                minimumSize: const Size(44, 44),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
                 ),
+              ),
+            );
+
+            if (isNarrow) {
+              return Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                alignment: WrapAlignment.start,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  monthField(),
+                  yearField(),
+                  dayField(),
+                  refreshButton,
+                ],
+              );
+            }
+
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                monthField(),
+                const SizedBox(width: 12),
+                yearField(),
+                const SizedBox(width: 12),
+                dayField(),
+                const SizedBox(width: 4),
+                refreshButton,
               ],
             );
           },
@@ -2199,19 +2246,18 @@ class _EmployeeAttendanceContentState
               final tableWidth = constraints.maxWidth < minTableWidth
                   ? minTableWidth
                   : constraints.maxWidth;
+              final cellStyle = TextStyle(
+                fontSize: 13,
+                color: AppTheme.dashTextPrimaryOf(context),
+              );
+              final headerStyle = TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+                color: AppTheme.dashTextPrimaryOf(context),
+              );
               return Container(
-                decoration: BoxDecoration(
-                  color: AppTheme.white,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.black.withOpacity(0.06)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
+                clipBehavior: Clip.antiAlias,
+                decoration: AppTheme.dashSurfaceCard(context, radius: 12),
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   physics: const BouncingScrollPhysics(),
@@ -2226,126 +2272,68 @@ class _EmployeeAttendanceContentState
                             vertical: 12,
                           ),
                           decoration: BoxDecoration(
-                            color: AppTheme.lightGray.withOpacity(0.5),
+                            color: AppTheme.dashMutedSurfaceOf(context),
                             borderRadius: const BorderRadius.vertical(
                               top: Radius.circular(12),
+                            ),
+                            border: Border(
+                              bottom: BorderSide(
+                                color: AppTheme.dashHairlineOf(context),
+                              ),
                             ),
                           ),
                           child: Row(
                             children: [
                               Expanded(
                                 flex: 2,
-                                child: Text(
-                                  'Date',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 13,
-                                    color: AppTheme.textPrimary,
-                                  ),
+                                child: Text('Date', style: headerStyle),
+                              ),
+                              Expanded(
+                                flex: 1,
+                                child: Center(
+                                  child: Text('AM In', style: headerStyle),
                                 ),
                               ),
                               Expanded(
                                 flex: 1,
                                 child: Center(
-                                  child: Text(
-                                    'AM In',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 13,
-                                      color: AppTheme.textPrimary,
-                                    ),
-                                  ),
+                                  child: Text('AM Out', style: headerStyle),
                                 ),
                               ),
                               Expanded(
                                 flex: 1,
                                 child: Center(
-                                  child: Text(
-                                    'AM Out',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 13,
-                                      color: AppTheme.textPrimary,
-                                    ),
-                                  ),
+                                  child: Text('PM In', style: headerStyle),
                                 ),
                               ),
                               Expanded(
                                 flex: 1,
                                 child: Center(
-                                  child: Text(
-                                    'PM In',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 13,
-                                      color: AppTheme.textPrimary,
-                                    ),
-                                  ),
+                                  child: Text('PM Out', style: headerStyle),
                                 ),
                               ),
                               Expanded(
                                 flex: 1,
                                 child: Center(
-                                  child: Text(
-                                    'PM Out',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 13,
-                                      color: AppTheme.textPrimary,
-                                    ),
-                                  ),
+                                  child: Text('Late', style: headerStyle),
                                 ),
                               ),
                               Expanded(
                                 flex: 1,
                                 child: Center(
-                                  child: Text(
-                                    'Late',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 13,
-                                      color: AppTheme.textPrimary,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                flex: 1,
-                                child: Center(
-                                  child: Text(
-                                    'Undertime',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 13,
-                                      color: AppTheme.textPrimary,
-                                    ),
-                                  ),
+                                  child: Text('Undertime', style: headerStyle),
                                 ),
                               ),
                               Expanded(
                                 flex: 2,
                                 child: Center(
-                                  child: Text(
-                                    'Remarks',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 13,
-                                      color: AppTheme.textPrimary,
-                                    ),
-                                  ),
+                                  child: Text('Remarks', style: headerStyle),
                                 ),
                               ),
                               Expanded(
                                 flex: 1,
                                 child: Center(
-                                  child: Text(
-                                    'Source',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 13,
-                                      color: AppTheme.textPrimary,
-                                    ),
-                                  ),
+                                  child: Text('Source', style: headerStyle),
                                 ),
                               ),
                             ],
@@ -2353,6 +2341,7 @@ class _EmployeeAttendanceContentState
                         ),
                         ...visibleRecords.asMap().entries.map((entry) {
                           final i = entry.key;
+                          final isLastRow = i == visibleRecords.length - 1;
                           final r = entry.value;
                           final timeIn = r.timeIn?.toLocal();
                           final breakOut = r.breakOut?.toLocal();
@@ -2368,8 +2357,20 @@ class _EmployeeAttendanceContentState
                             ),
                             decoration: BoxDecoration(
                               color: i % 2 == 0
-                                  ? AppTheme.white
-                                  : AppTheme.lightGray.withOpacity(0.25),
+                                  ? AppTheme.dashPanelOf(context)
+                                  : AppTheme.dashMutedSurfaceOf(context),
+                              borderRadius: isLastRow
+                                  ? const BorderRadius.vertical(
+                                      bottom: Radius.circular(12),
+                                    )
+                                  : null,
+                              border: i > 0
+                                  ? Border(
+                                      top: BorderSide(
+                                        color: AppTheme.dashHairlineOf(context),
+                                      ),
+                                    )
+                                  : null,
                             ),
                             child: Row(
                               children: [
@@ -2377,10 +2378,7 @@ class _EmployeeAttendanceContentState
                                   flex: 2,
                                   child: Text(
                                     _formatDate(r.recordDate),
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      color: AppTheme.textPrimary,
-                                    ),
+                                    style: cellStyle,
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
@@ -2393,10 +2391,7 @@ class _EmployeeAttendanceContentState
                                         timeIn,
                                         'AM IN',
                                       ),
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        color: AppTheme.textPrimary,
-                                      ),
+                                      style: cellStyle,
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
@@ -2410,10 +2405,7 @@ class _EmployeeAttendanceContentState
                                         breakOut,
                                         'AM OUT',
                                       ),
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        color: AppTheme.textPrimary,
-                                      ),
+                                      style: cellStyle,
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
@@ -2427,10 +2419,7 @@ class _EmployeeAttendanceContentState
                                         breakIn,
                                         'PM IN',
                                       ),
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        color: AppTheme.textPrimary,
-                                      ),
+                                      style: cellStyle,
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
@@ -2444,10 +2433,7 @@ class _EmployeeAttendanceContentState
                                         timeOut,
                                         'PM OUT',
                                       ),
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        color: AppTheme.textPrimary,
-                                      ),
+                                      style: cellStyle,
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
@@ -2457,10 +2443,7 @@ class _EmployeeAttendanceContentState
                                   child: Center(
                                     child: Text(
                                       lateStr,
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        color: AppTheme.textPrimary,
-                                      ),
+                                      style: cellStyle,
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
@@ -2470,10 +2453,7 @@ class _EmployeeAttendanceContentState
                                   child: Center(
                                     child: Text(
                                       underStr,
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        color: AppTheme.textPrimary,
-                                      ),
+                                      style: cellStyle,
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
