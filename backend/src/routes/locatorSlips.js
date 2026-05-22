@@ -559,8 +559,13 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
 router.get('/admin', protect, requireAdminOrHr, async (req, res) => {
   try {
     const status = (req.query?.status || '').toString().trim() || null;
+    const requestTypeRaw = (req.query?.request_type || '').toString().trim();
+    const requestType = requestTypeRaw ? normalizeRequestType(requestTypeRaw) : null;
     if (status && !isValidStatus(status)) {
       return res.status(400).json({ error: 'Invalid status filter' });
+    }
+    if (requestTypeRaw && !requestType) {
+      return res.status(400).json({ error: 'Invalid request_type filter' });
     }
     const rows = await pool.query(
       `SELECT ls.*,
@@ -574,9 +579,10 @@ router.get('/admin', protect, requireAdminOrHr, async (req, res) => {
        LEFT JOIN users dh ON dh.id = ls.dept_head_reviewer_id
        LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
        WHERE ($1::text IS NULL OR ls.status = $1::text)
+         AND ($2::text IS NULL OR ls.request_type = $2::text)
        ORDER BY ls.updated_at DESC, ls.created_at DESC
        LIMIT 500`,
-      [status]
+      [status, requestType]
     );
     res.json(rows.rows.map(mapLocatorRow));
   } catch (err) {

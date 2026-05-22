@@ -36,6 +36,40 @@ class ProfileWavePainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
+/// Circular back control for the profile hero (dashboard settings overlay).
+class ProfileBackButton extends StatelessWidget {
+  const ProfileBackButton({super.key, required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
+    return Tooltip(
+      message: 'Back',
+      child: Material(
+        color: dark
+            ? Colors.white.withValues(alpha: 0.1)
+            : Colors.white.withValues(alpha: 0.92),
+        shape: const CircleBorder(),
+        elevation: 0,
+        child: InkWell(
+          onTap: onPressed,
+          customBorder: const CircleBorder(),
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Icon(
+              Icons.arrow_back_rounded,
+              size: 22,
+              color: dark ? Colors.white : AppTheme.primaryNavy,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Top banner with avatar, name, role, email — full-width on dashboard.
 class ProfileHeroHeader extends StatelessWidget {
   const ProfileHeroHeader({
@@ -48,6 +82,7 @@ class ProfileHeroHeader extends StatelessWidget {
     this.wideLayout = false,
     this.onChangePhoto,
     this.isUploading = false,
+    this.onBack,
   });
 
   final String displayName;
@@ -58,6 +93,7 @@ class ProfileHeroHeader extends StatelessWidget {
   final bool wideLayout;
   final VoidCallback? onChangePhoto;
   final bool isUploading;
+  final VoidCallback? onBack;
 
   @override
   Widget build(BuildContext context) {
@@ -253,33 +289,44 @@ class ProfileHeroHeader extends StatelessWidget {
           Positioned(
             left: wideLayout ? 20 : 12,
             top: wideLayout ? 16 : 10,
-            child: Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: dark ? Colors.white.withValues(alpha: 0.08) : Colors.white,
-                borderRadius: BorderRadius.circular(10),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.06),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (onBack != null) ...[
+                  ProfileBackButton(onPressed: onBack!),
+                  const SizedBox(width: 10),
                 ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: Image.asset(
-                  'assets/images/Plaridel Logo.jpg',
-                  width: 32,
-                  height: 32,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Icon(
-                    Icons.account_balance_rounded,
-                    size: 28,
-                    color: AppTheme.primaryNavy,
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: dark
+                        ? Colors.white.withValues(alpha: 0.08)
+                        : Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.06),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: Image.asset(
+                      'assets/images/Plaridel Logo.jpg',
+                      width: 32,
+                      height: 32,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Icon(
+                        Icons.account_balance_rounded,
+                        size: 28,
+                        color: AppTheme.primaryNavy,
+                      ),
+                    ),
                   ),
                 ),
-              ),
+              ],
             ),
           ),
           Column(

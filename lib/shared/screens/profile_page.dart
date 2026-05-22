@@ -19,16 +19,17 @@ const double _profileWideBreakpoint = 720;
 
 /// Profile body shown inside the admin/employee dashboard (sidebar stays visible).
 class DashboardProfilePanel extends StatelessWidget {
-  const DashboardProfilePanel({super.key, this.initialTab});
+  const DashboardProfilePanel({super.key, this.initialTab, this.onBack});
 
   final ProfilePageTab? initialTab;
+  final VoidCallback? onBack;
 
   @override
   Widget build(BuildContext context) {
     return RepaintBoundary(
       child: SizedBox(
         width: double.infinity,
-        child: ProfileContent(initialTab: initialTab),
+        child: ProfileContent(initialTab: initialTab, onBack: onBack),
       ),
     );
   }
@@ -83,6 +84,7 @@ class ProfileContent extends StatefulWidget {
     this.showPasswordSection = true,
     this.showAppSettings = true,
     this.initialTab,
+    this.onBack,
   });
 
   /// When false, only the password card is shown (e.g. Settings → Password tab).
@@ -95,6 +97,9 @@ class ProfileContent extends StatefulWidget {
   final bool showAppSettings;
 
   final ProfilePageTab? initialTab;
+
+  /// Pops dashboard settings / returns to the previous screen.
+  final VoidCallback? onBack;
 
   @override
   State<ProfileContent> createState() => _ProfileContentState();
@@ -1505,6 +1510,7 @@ class _ProfileContentState extends State<ProfileContent> {
               roleLabel: _roleLabel(user),
               idLabel: idLabel,
               wideLayout: isWide,
+              onBack: widget.onBack,
               avatar: SizedBox(
                 width: 104,
                 height: 104,

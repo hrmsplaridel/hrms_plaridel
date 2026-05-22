@@ -87,10 +87,12 @@ class _AdminDashboardState extends State<AdminDashboard>
   final GlobalKey<_DtrContentState> _dtrContentKey =
       GlobalKey<_DtrContentState>();
   static const _settingsPanelKey = PageStorageKey<String>('admin_settings');
-  late final Widget _settingsPanel = const DashboardProfilePanel(
-    key: _settingsPanelKey,
-  );
   final GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
+
+  Widget _settingsPanel() => DashboardProfilePanel(
+        key: _settingsPanelKey,
+        onBack: _closeMyProfile,
+      );
   Timer? _notificationPollTimer;
 
   @override
@@ -185,6 +187,18 @@ class _AdminDashboardState extends State<AdminDashboard>
     });
   }
 
+  void _closeMyProfile() {
+    final nav = _contentNavKey.currentState;
+    if (nav != null && nav.canPop()) {
+      nav.pop();
+    }
+    if (!mounted) return;
+    if (_selectedMenu == AdminMenu.myProfile) {
+      setState(() => _selectedMenu = AdminMenu.dashboard);
+      DashboardContentNavigator.showHome(_contentNavKey);
+    }
+  }
+
   /// Same flow as [LeaveMain] — admin My Portal must pass a handler or File Leave stays disabled.
   Future<void> _openMyLeaveRequestForm() async {
     final result = await openResponsiveLeaveFormHost<String?>(
@@ -241,7 +255,7 @@ class _AdminDashboardState extends State<AdminDashboard>
       case AdminMenu.myLeave:
         return EmployeeLeaveScreen(onFileLeavePressed: _openMyLeaveRequestForm);
       case AdminMenu.myProfile:
-        return _settingsPanel;
+        return _settingsPanel();
       case AdminMenu.dtr:
         return _DtrContent(key: _dtrContentKey);
       case AdminMenu.rsp:
@@ -339,7 +353,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                             child: DashboardContentNavigator(
                               navigatorKey: _contentNavKey,
                               homeBuilder: () => _buildContent(displayName),
-                              settingsPanel: _settingsPanel,
+                              settingsPanel: _settingsPanel(),
                               homeScrollPadding: EdgeInsets.all(contentPadding),
                               settingsScrollPadding: const EdgeInsets.fromLTRB(
                                 12,
@@ -376,7 +390,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                       child: DashboardContentNavigator(
                         navigatorKey: _contentNavKey,
                         homeBuilder: () => _buildContent(displayName),
-                        settingsPanel: _settingsPanel,
+                        settingsPanel: _settingsPanel(),
                         homeScrollPadding: EdgeInsets.all(contentPadding),
                         settingsScrollPadding: const EdgeInsets.fromLTRB(
                           12,

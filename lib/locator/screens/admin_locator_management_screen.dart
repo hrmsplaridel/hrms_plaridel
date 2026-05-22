@@ -40,6 +40,7 @@ class AdminLocatorManagementScreen extends StatefulWidget {
 class _AdminLocatorManagementScreenState
     extends State<AdminLocatorManagementScreen> {
   _LocatorAdminQueue _queue = _LocatorAdminQueue.all;
+  LocatorRequestType? _requestTypeFilter;
   bool _loading = false;
   bool _acting = false;
   String? _error;
@@ -124,12 +125,65 @@ class _AdminLocatorManagementScreenState
                   label: Text(queue.label),
                   onSelected: (_) {
                     if (_queue == queue) return;
-                    setState(() => _queue = queue);
+                    setState(() {
+                      _queue = queue;
+                      _selectedItemId = null;
+                    });
                     _load();
                   },
                 ),
               )
               .toList(),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Type',
+              style: TextStyle(
+                color: _mutedColor(context),
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 190,
+              child: DropdownButtonFormField<LocatorRequestType?>(
+                value: _requestTypeFilter,
+                decoration: AppTheme.dashInputDecoration(
+                  context,
+                  radius: 10,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                ),
+                isExpanded: true,
+                items: [
+                  const DropdownMenuItem<LocatorRequestType?>(
+                    value: null,
+                    child: Text('All types'),
+                  ),
+                  ...LocatorRequestType.values.map(
+                    (type) => DropdownMenuItem<LocatorRequestType?>(
+                      value: type,
+                      child: Text(type.shortLabel),
+                    ),
+                  ),
+                ],
+                onChanged: (type) {
+                  if (_requestTypeFilter == type) return;
+                  setState(() {
+                    _requestTypeFilter = type;
+                    _selectedItemId = null;
+                  });
+                  _load();
+                },
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 16),
         Container(
@@ -893,9 +947,15 @@ class _AdminLocatorManagementScreenState
         _LocatorAdminQueue.rejected => null,
         _LocatorAdminQueue.cancelled => 'cancelled',
       };
-      final path = statusParam == null
-          ? '/api/locator-slips/admin'
-          : '/api/locator-slips/admin?status=$statusParam';
+      final query = <String, String>{};
+      if (statusParam != null) query['status'] = statusParam;
+      if (_requestTypeFilter != null) {
+        query['request_type'] = _requestTypeFilter!.code;
+      }
+      final path = Uri(
+        path: '/api/locator-slips/admin',
+        queryParameters: query.isEmpty ? null : query,
+      ).toString();
       final res = await ApiClient.instance.get<List<dynamic>>(path);
       final all = (res.data ?? const [])
           .whereType<Map>()

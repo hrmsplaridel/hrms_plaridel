@@ -75,10 +75,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
   /// Shown only via account menu (not listed in sidebar).
   static const int _profileNavIndex = 7;
   static const _settingsPanelKey = PageStorageKey<String>('employee_settings');
-  late final Widget _settingsPanel = const DashboardProfilePanel(
-    key: _settingsPanelKey,
-  );
   final GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
+
+  Widget _settingsPanel() => DashboardProfilePanel(
+        key: _settingsPanelKey,
+        onBack: _closeMyProfile,
+      );
 
   @override
   void initState() {
@@ -162,6 +164,18 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
       if (!mounted) return;
       DashboardContentNavigator.openSettings(_contentNavKey);
     });
+  }
+
+  void _closeMyProfile() {
+    final nav = _contentNavKey.currentState;
+    if (nav != null && nav.canPop()) {
+      nav.pop();
+    }
+    if (!mounted) return;
+    if (_selectedNavIndex == _profileNavIndex) {
+      setState(() => _selectedNavIndex = 0);
+      DashboardContentNavigator.showHome(_contentNavKey);
+    }
   }
 
   void _onNavSelected(int index) {
@@ -277,7 +291,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                               navigatorKey: _contentNavKey,
                               homeBuilder: () =>
                                   _employeeMainChild(displayName: displayName),
-                              settingsPanel: _settingsPanel,
+                              settingsPanel: _settingsPanel(),
                               homeScrollPadding: _employeeMainScrollPadding(
                                 context,
                               ),
@@ -317,7 +331,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                         navigatorKey: _contentNavKey,
                         homeBuilder: () =>
                             _employeeMainChild(displayName: displayName),
-                        settingsPanel: _settingsPanel,
+                        settingsPanel: _settingsPanel(),
                         homeScrollPadding: _employeeMainScrollPadding(context),
                         settingsScrollPadding: const EdgeInsets.fromLTRB(
                           12,

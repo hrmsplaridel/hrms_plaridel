@@ -1487,6 +1487,15 @@ class _LocatorHeader extends StatelessWidget {
   }
 }
 
+enum _WfhCoverage {
+  wholeDay('Whole day'),
+  amOnly('AM only'),
+  pmOnly('PM only');
+
+  const _WfhCoverage(this.label);
+  final String label;
+}
+
 class _LocatorSlipFormDialog extends StatefulWidget {
   const _LocatorSlipFormDialog({required this.employeeName});
 
@@ -1500,6 +1509,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   final _formKey = GlobalKey<FormState>();
   DateTime _date = DateTime.now();
   LocatorRequestType _requestType = LocatorRequestType.locator;
+  _WfhCoverage _wfhCoverage = _WfhCoverage.wholeDay;
   final _officeController = TextEditingController();
   final _remarksController = TextEditingController();
 
@@ -1514,6 +1524,17 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   bool _hasSavedSegmentsBeforeWfh = false;
 
   bool get _isWfhRequest => _requestType == LocatorRequestType.workFromHome;
+
+  void _applyWfhCoverage(_WfhCoverage coverage) {
+    _amIn =
+        coverage == _WfhCoverage.wholeDay || coverage == _WfhCoverage.amOnly;
+    _amOut =
+        coverage == _WfhCoverage.wholeDay || coverage == _WfhCoverage.amOnly;
+    _pmIn =
+        coverage == _WfhCoverage.wholeDay || coverage == _WfhCoverage.pmOnly;
+    _pmOut =
+        coverage == _WfhCoverage.wholeDay || coverage == _WfhCoverage.pmOnly;
+  }
 
   void _setRequestType(LocatorRequestType type) {
     if (type == _requestType) return;
@@ -1531,10 +1552,8 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
         _savedPmInBeforeWfh = _pmIn;
         _savedPmOutBeforeWfh = _pmOut;
         _hasSavedSegmentsBeforeWfh = true;
-        _amIn = true;
-        _amOut = true;
-        _pmIn = true;
-        _pmOut = true;
+        _wfhCoverage = _WfhCoverage.wholeDay;
+        _applyWfhCoverage(_wfhCoverage);
       } else if (leavingWfh && _hasSavedSegmentsBeforeWfh) {
         _amIn = _savedAmInBeforeWfh;
         _amOut = _savedAmOutBeforeWfh;
@@ -1543,6 +1562,14 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
       }
 
       _requestType = type;
+    });
+  }
+
+  void _setWfhCoverage(_WfhCoverage coverage) {
+    if (coverage == _wfhCoverage) return;
+    setState(() {
+      _wfhCoverage = coverage;
+      _applyWfhCoverage(coverage);
     });
   }
 
@@ -1582,6 +1609,10 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
                 _datePicker(),
                 const SizedBox(height: 14),
                 _requestTypeDropdown(),
+                if (_isWfhRequest) ...[
+                  const SizedBox(height: 14),
+                  _wfhCoverageDropdown(),
+                ],
                 const SizedBox(height: 14),
                 _segmentSelector(),
                 const SizedBox(height: 14),
@@ -1717,6 +1748,32 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
     );
   }
 
+  Widget _wfhCoverageDropdown() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _fieldLabel('WFH Coverage'),
+        DropdownButtonFormField<_WfhCoverage>(
+          value: _wfhCoverage,
+          decoration: _inputDecoration(),
+          isExpanded: true,
+          items: _WfhCoverage.values
+              .map(
+                (coverage) => DropdownMenuItem<_WfhCoverage>(
+                  value: coverage,
+                  child: Text(coverage.label),
+                ),
+              )
+              .toList(),
+          onChanged: (coverage) {
+            if (coverage == null) return;
+            _setWfhCoverage(coverage);
+          },
+        ),
+      ],
+    );
+  }
+
   Widget _segmentSelector() {
     const accent = Color(0xFFF57C00);
     const border = Color(0xFFBEBEBE);
@@ -1729,6 +1786,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
         const SizedBox(height: 8),
         Container(
           height: 42,
+          clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: border),

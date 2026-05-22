@@ -34,14 +34,19 @@ class DashboardHeaderActions extends StatelessWidget {
   final VoidCallback? onViewAllNotifications;
   final void Function(NotificationTapResult? result)? onNotificationTap;
 
-  static const Color _moonCircleNavy = Color(0xFF1A237E);
-  static const Color _moonIconBlue = Color(0xFF90CAF9);
+  static const Color _darkModeCircleNavy = Color(0xFF1A237E);
+  static const Color _darkModeMoonBlue = Color(0xFF90CAF9);
+  static const Color _lightModeCircleAmber = Color(0xFFFFF8E1);
+  static const Color _lightModeIconYellow = Color(0xFFFFD600);
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isDark = context.watch<ThemeModeNotifier>().isDark;
     final iconSize = compact ? 20.0 : 22.0;
     final pad = compact ? 8.0 : 10.0;
+    final circleColor = isDark ? _darkModeCircleNavy : _lightModeCircleAmber;
+    final iconColor = isDark ? _darkModeMoonBlue : _lightModeIconYellow;
+    final icon = isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded;
 
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -50,19 +55,26 @@ class DashboardHeaderActions extends StatelessWidget {
         Tooltip(
           message: isDark ? 'Switch to light mode' : 'Switch to dark mode',
           child: Material(
-            color: _moonCircleNavy,
+            color: circleColor,
             shape: const CircleBorder(),
             clipBehavior: Clip.antiAlias,
-            elevation: 0,
+            elevation: isDark ? 0 : 1,
+            shadowColor: _lightModeIconYellow.withValues(alpha: 0.35),
             child: InkWell(
               onTap: () => context.read<ThemeModeNotifier>().toggle(),
               customBorder: const CircleBorder(),
               child: Padding(
                 padding: EdgeInsets.all(pad),
-                child: Icon(
-                  isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-                  color: _moonIconBlue,
-                  size: iconSize,
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  switchInCurve: Curves.easeOutCubic,
+                  switchOutCurve: Curves.easeInCubic,
+                  child: Icon(
+                    key: ValueKey<bool>(isDark),
+                    icon,
+                    color: iconColor,
+                    size: iconSize,
+                  ),
                 ),
               ),
             ),
