@@ -265,6 +265,13 @@ class _DtrReportsState extends State<DtrReports> {
     return n;
   }
 
+  List<DateTime> _calendarDatesInSelectedMonth(DateTime end) {
+    return List<DateTime>.generate(
+      end.day,
+      (i) => DateTime(_selectedYear, _selectedMonth, i + 1),
+    );
+  }
+
   void _reset() {
     setState(() {
       _searchController.clear();
@@ -342,6 +349,22 @@ class _DtrReportsState extends State<DtrReports> {
     );
     if (local.isAfter(officeStart)) return 'Late';
     return 'On Time';
+  }
+
+  static String _getReportRowRemark({
+    required TimeRecord? record,
+    required bool isQuietPlaceholder,
+    required bool isMissingScheduledWorkDay,
+  }) {
+    if (isQuietPlaceholder) return '—';
+    if (isMissingScheduledWorkDay) return 'Absent';
+    final rec = record;
+    if (rec == null) return '';
+    final attendanceRemark = rec.attendanceRemark?.trim();
+    if (attendanceRemark != null && attendanceRemark.isNotEmpty) {
+      return attendanceRemark;
+    }
+    return _getRemarks(rec);
   }
 
   Future<void> _generateDtr(
@@ -538,9 +561,15 @@ class _DtrReportsState extends State<DtrReports> {
       recordsByDate[key] = r;
     }
     final reportRecordsByDate = _filterRecordsForTardinessReport(recordsByDate);
-    // Dates to show: same as tardiness-relevant records (excludes irrelevant holiday-only rows).
-    final sortedDates = reportRecordsByDate.keys.toList()
-      ..sort((a, b) => a.compareTo(b)); // ordered by date ascending
+    // Display the full calendar month in the report. Non-working days without
+    // records are quiet placeholders only; they are not saved or counted.
+    final hasAssignment = _assignmentEffectiveFrom != null;
+    final shouldShowCalendarRows =
+        _selectedEmployeeId != null &&
+        (hasAssignment || reportRecordsByDate.isNotEmpty);
+    final sortedDates = shouldShowCalendarRows
+        ? _calendarDatesInSelectedMonth(end)
+        : <DateTime>[];
 
     // Compute summary from real API records, using shift + assignment window when available.
     // Only count days up to today (elapsed) — future days in the month are not "absent" yet.
@@ -568,7 +597,7 @@ class _DtrReportsState extends State<DtrReports> {
     }
     // Show summary whenever this month has any report rows — not only days with punches.
     // (Absent / undertime-only days have no timeIn/breakIn but must still roll up to totals.)
-    final hasRecords = reportRecordsByDate.isNotEmpty;
+    final hasRecords = reportRecordsByDate.isNotEmpty || hasAssignment;
     final workingDays = hasRecords ? totalWeekdays - holidaysCount : 0;
     final displayLateCount = hasRecords ? lateCount : 0;
     final displayAbsentCount = hasRecords ? absentCount : 0;
@@ -1169,6 +1198,7 @@ class _DtrReportsState extends State<DtrReports> {
       fontSize: compactColumns ? 11 : 12,
       color: AppTheme.dashTextPrimaryOf(context),
     );
+    final statsEnd = _tardinessStatsInclusiveEnd();
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: SizedBox(
@@ -1247,7 +1277,15 @@ class _DtrReportsState extends State<DtrReports> {
                         itemCount: sortedDates.length,
                         itemBuilder: (context, i) {
                           final dt = sortedDates[i];
-                          final rec = recordsByDate[dt]!;
+                          final rec = recordsByDate[dt];
+                          final isScheduled =
+                              _assignmentEffectiveFrom != null &&
+                              _isScheduledWorkDay(dt);
+                          final isQuietPlaceholder =
+                              rec == null &&
+                              (!isScheduled || dt.isAfter(statsEnd));
+                          final isMissingScheduledWorkDay =
+                              rec == null && !isQuietPlaceholder;
                           return Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 12,
@@ -1279,53 +1317,63 @@ class _DtrReportsState extends State<DtrReports> {
                                 SizedBox(
                                   width: colTime,
                                   child: Text(
-                                    _cellDisplayForSegment(
-                                      record: rec,
-                                      timeValue: rec.timeIn,
-                                      segment: 'AM IN',
-                                    ),
+                                    rec == null
+                                        ? '—'
+                                        : _cellDisplayForSegment(
+                                            record: rec,
+                                            timeValue: rec.timeIn,
+                                            segment: 'AM IN',
+                                          ),
                                     style: cellStyle,
                                   ),
                                 ),
                                 SizedBox(
                                   width: colTime,
                                   child: Text(
-                                    _cellDisplayForSegment(
-                                      record: rec,
-                                      timeValue: rec.breakOut,
-                                      segment: 'AM OUT',
-                                    ),
+                                    rec == null
+                                        ? '—'
+                                        : _cellDisplayForSegment(
+                                            record: rec,
+                                            timeValue: rec.breakOut,
+                                            segment: 'AM OUT',
+                                          ),
                                     style: cellStyle,
                                   ),
                                 ),
                                 SizedBox(
                                   width: colTime,
                                   child: Text(
-                                    _cellDisplayForSegment(
-                                      record: rec,
-                                      timeValue: rec.breakIn,
-                                      segment: 'PM IN',
-                                    ),
+                                    rec == null
+                                        ? '—'
+                                        : _cellDisplayForSegment(
+                                            record: rec,
+                                            timeValue: rec.breakIn,
+                                            segment: 'PM IN',
+                                          ),
                                     style: cellStyle,
                                   ),
                                 ),
                                 SizedBox(
                                   width: colTime,
                                   child: Text(
-                                    _cellDisplayForSegment(
-                                      record: rec,
-                                      timeValue: rec.timeOut,
-                                      segment: 'PM OUT',
-                                    ),
+                                    rec == null
+                                        ? '—'
+                                        : _cellDisplayForSegment(
+                                            record: rec,
+                                            timeValue: rec.timeOut,
+                                            segment: 'PM OUT',
+                                          ),
                                     style: cellStyle,
                                   ),
                                 ),
                                 SizedBox(
                                   width: colLate,
                                   child: Text(
-                                    _formatMinutes(rec.lateMinutes),
+                                    rec == null
+                                        ? '—'
+                                        : _formatMinutes(rec.lateMinutes),
                                     style: cellStyle.copyWith(
-                                      color: (rec.lateMinutes ?? 0) > 0
+                                      color: (rec?.lateMinutes ?? 0) > 0
                                           ? (dark
                                                 ? Colors.red.shade300
                                                 : Colors.red.shade700)
@@ -1336,9 +1384,11 @@ class _DtrReportsState extends State<DtrReports> {
                                 SizedBox(
                                   width: colUndertime,
                                   child: Text(
-                                    _formatMinutes(rec.undertimeMinutes),
+                                    rec == null
+                                        ? '—'
+                                        : _formatMinutes(rec.undertimeMinutes),
                                     style: cellStyle.copyWith(
-                                      color: (rec.undertimeMinutes ?? 0) > 0
+                                      color: (rec?.undertimeMinutes ?? 0) > 0
                                           ? (dark
                                                 ? Colors.orange.shade300
                                                 : Colors.orange.shade700)
@@ -1349,14 +1399,15 @@ class _DtrReportsState extends State<DtrReports> {
                                 Expanded(
                                   child: Builder(
                                     builder: (rowCtx) {
-                                      final remark =
-                                          rec.attendanceRemark != null &&
-                                              rec.attendanceRemark!.isNotEmpty
-                                          ? rec.attendanceRemark!
-                                          : _getRemarks(rec);
+                                      final remark = _getReportRowRemark(
+                                        record: rec,
+                                        isQuietPlaceholder: isQuietPlaceholder,
+                                        isMissingScheduledWorkDay:
+                                            isMissingScheduledWorkDay,
+                                      );
                                       final isHoliday =
-                                          rec.status == 'holiday' ||
-                                          rec.holidayId != null;
+                                          rec?.status == 'holiday' ||
+                                          rec?.holidayId != null;
                                       return Text(
                                         remark,
                                         style: TextStyle(

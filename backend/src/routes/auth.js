@@ -32,10 +32,16 @@ function hashRefreshToken(token) {
   return crypto.createHash('sha256').update(String(token)).digest('hex');
 }
 
+function createTokenId() {
+  return typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : crypto.randomBytes(16).toString('hex');
+}
+
 /**
  * Issue access + refresh JWTs and persist refresh token hash.
  */
-async function issueTokensForUser(user, req) {
+async function issueTokensForUser(user, req, db = pool) {
   const accessPayload = {
     id: user.id,
     email: user.email,
@@ -51,7 +57,7 @@ async function issueTokensForUser(user, req) {
   }
 
   const refreshToken = jwt.sign(
-    { id: user.id, typ: 'refresh' },
+    { id: user.id, typ: 'refresh', jti: createTokenId() },
     process.env.JWT_REFRESH_SECRET,
     { expiresIn: JWT_REFRESH_EXPIRATION }
   );
@@ -64,7 +70,7 @@ async function issueTokensForUser(user, req) {
   const rawIp = req.ip || req.socket?.remoteAddress;
   const ipForDb = rawIp && String(rawIp).trim() !== '' ? String(rawIp) : null;
 
-  await pool.query(
+  await db.query(
     `INSERT INTO auth_refresh_tokens (user_id, token_hash, expires_at, device_info, ip_address)
      VALUES ($1, $2, $3, $4, $5::inet)`,
     [user.id, tokenHash, expiresAt, ua || null, ipForDb]
@@ -196,6 +202,7 @@ router.post('/refresh', authTokenLimiter, async (req, res) => {
     return res.status(503).json({ error: 'Refresh tokens not configured' });
   }
 
+  let client;
   try {
     const decoded = jwt.verify(raw, process.env.JWT_REFRESH_SECRET);
     if (decoded.typ !== 'refresh') {
@@ -203,47 +210,66 @@ router.post('/refresh', authTokenLimiter, async (req, res) => {
     }
 
     const tokenHash = hashRefreshToken(raw);
-    const rowResult = await pool.query(
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    const rowResult = await client.query(
       `SELECT id, user_id, expires_at, revoked_at
        FROM auth_refresh_tokens
-       WHERE token_hash = $1`,
+       WHERE token_hash = $1
+       FOR UPDATE`,
       [tokenHash]
     );
     const rec = rowResult.rows[0];
     if (!rec || rec.revoked_at) {
+      await client.query('ROLLBACK');
       return res.status(401).json({ error: 'Invalid or revoked refresh token' });
     }
+    if (String(rec.user_id) !== String(decoded.id)) {
+      await client.query('ROLLBACK');
+      return res.status(401).json({ error: 'Invalid refresh token' });
+    }
     if (new Date(rec.expires_at) < new Date()) {
+      await client.query('ROLLBACK');
       return res.status(401).json({ error: 'Refresh token expired' });
     }
 
-    const userResult = await pool.query(
+    const userResult = await client.query(
       `SELECT id, email, role, full_name, avatar_path, is_active
        FROM users WHERE id = $1`,
       [decoded.id]
     );
     const user = userResult.rows[0];
     if (!user || !user.is_active) {
+      await client.query('ROLLBACK');
       return res.status(403).json({ error: 'Account is deactivated' });
     }
 
-    await pool.query(
+    await client.query(
       `UPDATE auth_refresh_tokens SET revoked_at = now() WHERE id = $1`,
       [rec.id]
     );
 
-    const { accessToken, refreshToken } = await issueTokensForUser(user, req);
+    const { accessToken, refreshToken } = await issueTokensForUser(user, req, client);
+    await client.query('COMMIT');
 
     return res.json({
       token: accessToken,
       refreshToken,
     });
   } catch (e) {
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (_) {}
+    }
     if (e.name === 'JsonWebTokenError' || e.name === 'TokenExpiredError') {
       return res.status(401).json({ error: 'Invalid or expired refresh token' });
     }
     console.error('[auth/refresh]', e);
     return res.status(500).json({ error: 'Token refresh failed' });
+  } finally {
+    if (client) client.release();
   }
 });
 

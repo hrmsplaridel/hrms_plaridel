@@ -5,6 +5,9 @@ const { pool } = require('./config/db');
 const { initWebSocket } = require('./websockets/biometricStream');
 const { initAppEventsWebSocket } = require('./websockets/appEvents');
 const { scheduleLeaveMonthlyAccrualCron } = require('./jobs/leaveMonthlyAccrualScheduler');
+const {
+  scheduleAuthRefreshTokenCleanupCron,
+} = require('./jobs/authRefreshTokenCleanupScheduler');
 const { generalApiLimiter } = require('./middleware/rateLimiters');
 
 const authRoutes = require('./routes/auth');
@@ -180,6 +183,7 @@ const server = app.listen(PORT, HOST, () => {
   console.log('  GET  /api/rsp/storage/signed-url - admin signed attachment URL (service role)');
   console.log('  API  /api/rsp-ld-saved-entries/:table - RSP/L&D saved forms (admin JWT, PostgreSQL)');
   scheduleLeaveMonthlyAccrualCron(pool);
+  scheduleAuthRefreshTokenCleanupCron(pool);
 });
 
 // Initialize WebSocket servers and route upgrade requests by path.
