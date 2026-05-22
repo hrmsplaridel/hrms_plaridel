@@ -50,7 +50,10 @@ router.get('/', protect, async (req, res) => {
 
     const result = await pool.query(
       `SELECT a.id, a.employee_id, a.department_id, a.position_id, a.shift_id,
-              a.override_start_time, a.override_end_time, a.effective_from, a.effective_to, a.is_active, a.remarks,
+              a.override_start_time, a.override_end_time,
+              a.effective_from::text AS effective_from,
+              a.effective_to::text AS effective_to,
+              a.is_active, a.remarks,
               d.name AS department_name, p.name AS position_name, s.name AS shift_name,
               s.start_time AS shift_start_time, s.end_time AS shift_end_time,
               s.working_days AS shift_working_days
@@ -120,7 +123,10 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       const result = await pool.query(
         `INSERT INTO assignments (employee_id, department_id, position_id, shift_id, effective_from, effective_to, is_active, remarks)
          VALUES ($1, $2, $3, $4, $5::date, $6::date, $7, $8)
-         RETURNING id, employee_id, department_id, position_id, shift_id, effective_from, effective_to, is_active, remarks`,
+         RETURNING id, employee_id, department_id, position_id, shift_id,
+                   effective_from::text AS effective_from,
+                   effective_to::text AS effective_to,
+                   is_active, remarks`,
         [employee_id, department_id || null, position_id || null, shift_id || null, ef, et, !!is_active, remarks?.trim() || null]
       );
       await pool.query('COMMIT');
@@ -164,7 +170,12 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
 
     const existing = await pool.query(
-      'SELECT id, employee_id, effective_from, effective_to, is_active FROM assignments WHERE id = $1',
+      `SELECT id, employee_id,
+              effective_from::text AS effective_from,
+              effective_to::text AS effective_to,
+              is_active
+       FROM assignments
+       WHERE id = $1`,
       [id]
     );
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Assignment not found' });
@@ -198,7 +209,10 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       values.push(id);
       const result = await pool.query(
         `UPDATE assignments SET ${updates.join(', ')} WHERE id = $${i}
-         RETURNING id, employee_id, department_id, position_id, shift_id, effective_from, effective_to, is_active, remarks`,
+         RETURNING id, employee_id, department_id, position_id, shift_id,
+                   effective_from::text AS effective_from,
+                   effective_to::text AS effective_to,
+                   is_active, remarks`,
         values
       );
       await pool.query('COMMIT');

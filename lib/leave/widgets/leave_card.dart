@@ -26,6 +26,7 @@ class LeaveCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -35,20 +36,22 @@ class LeaveCard extends StatelessWidget {
           duration: const Duration(milliseconds: 180),
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: AppTheme.white,
+            color: AppTheme.dashPanelOf(context),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: isSelected
                   ? AppTheme.primaryNavy.withValues(alpha: 0.25)
-                  : Colors.black.withValues(alpha: 0.06),
+                  : AppTheme.dashHairlineOf(context),
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
+            boxShadow: dark
+                ? null
+                : [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.05),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -63,7 +66,7 @@ class LeaveCard extends StatelessWidget {
                         Text(
                           request.leaveTypeLabel,
                           style: TextStyle(
-                            color: AppTheme.textPrimary,
+                            color: AppTheme.dashTextPrimaryOf(context),
                             fontSize: 16,
                             fontWeight: FontWeight.w700,
                           ),
@@ -72,7 +75,7 @@ class LeaveCard extends StatelessWidget {
                         Text(
                           _formatRange(request),
                           style: TextStyle(
-                            color: AppTheme.textSecondary,
+                            color: AppTheme.dashTextSecondaryOf(context),
                             fontSize: 13,
                           ),
                         ),
@@ -156,13 +159,16 @@ class _MetaChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: AppTheme.offWhite,
+        color: AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Text.rich(
         TextSpan(
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: 12),
+          style: TextStyle(
+            color: AppTheme.dashTextPrimaryOf(context),
+            fontSize: 12,
+          ),
           children: [
             TextSpan(
               text: '$label: ',

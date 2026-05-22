@@ -17,9 +17,9 @@ class LeaveBalanceCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppTheme.offWhite,
+        color: AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -27,7 +27,7 @@ class LeaveBalanceCard extends StatelessWidget {
           Text(
             balance.leaveType.displayName,
             style: TextStyle(
-              color: AppTheme.textPrimary,
+              color: AppTheme.dashTextPrimaryOf(context),
               fontWeight: FontWeight.w700,
               fontSize: 15,
             ),
@@ -75,17 +75,20 @@ class _MiniStatChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: emphasize
-            ? AppTheme.primaryNavy.withOpacity(0.10)
-            : AppTheme.white,
+            ? (dark
+                ? AppTheme.primaryNavy.withValues(alpha: 0.28)
+                : AppTheme.primaryNavy.withValues(alpha: 0.10))
+            : AppTheme.dashPanelOf(context),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
           color: emphasize
-              ? AppTheme.primaryNavy.withOpacity(0.25)
-              : Colors.black.withOpacity(0.06),
+              ? AppTheme.primaryNavy.withValues(alpha: 0.25)
+              : AppTheme.dashHairlineOf(context),
         ),
       ),
       child: Column(
@@ -94,7 +97,7 @@ class _MiniStatChip extends StatelessWidget {
           Text(
             label,
             style: TextStyle(
-              color: AppTheme.textSecondary,
+              color: AppTheme.dashTextSecondaryOf(context),
               fontSize: 11,
               fontWeight: FontWeight.w600,
             ),
@@ -103,7 +106,9 @@ class _MiniStatChip extends StatelessWidget {
           Text(
             value,
             style: TextStyle(
-              color: emphasize ? AppTheme.primaryNavyDark : AppTheme.textPrimary,
+              color: emphasize
+                  ? (dark ? Colors.white : AppTheme.primaryNavyDark)
+                  : AppTheme.dashTextPrimaryOf(context),
               fontSize: 14,
               fontWeight: FontWeight.w700,
             ),

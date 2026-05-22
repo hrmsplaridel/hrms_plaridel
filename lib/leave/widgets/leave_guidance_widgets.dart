@@ -15,11 +15,15 @@ class LeaveGeneralInstructionsPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
+    final accent = dark ? const Color(0xFFF59E0B) : const Color(0xFFB45309);
+    final titleColor = dark ? const Color(0xFFFCD34D) : const Color(0xFF92400E);
+    final bodyColor = dark ? const Color(0xFFFDE68A) : const Color(0xFF78350F);
     return _GuidanceContainer(
-      color: const Color(0xFFFFF8ED),
-      borderColor: const Color(0xFFFBBC04).withValues(alpha: 0.45),
+      color: dark ? const Color(0xFF3D2E14) : const Color(0xFFFFF8ED),
+      borderColor: accent.withValues(alpha: dark ? 0.45 : 0.45),
       icon: Icons.info_outline_rounded,
-      iconColor: const Color(0xFFB45309),
+      iconColor: accent,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -35,7 +39,7 @@ class LeaveGeneralInstructionsPanel extends StatelessWidget {
                   Icon(
                     Icons.info_outline_rounded,
                     size: 18,
-                    color: const Color(0xFFB45309),
+                    color: accent,
                   ),
                   const SizedBox(width: 8),
                   Text(
@@ -43,7 +47,7 @@ class LeaveGeneralInstructionsPanel extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
-                      color: const Color(0xFF92400E),
+                      color: titleColor,
                       letterSpacing: 0.3,
                     ),
                   ),
@@ -66,7 +70,7 @@ class LeaveGeneralInstructionsPanel extends StatelessWidget {
                       width: 5,
                       height: 5,
                       decoration: BoxDecoration(
-                        color: const Color(0xFFB45309),
+                        color: accent,
                         shape: BoxShape.circle,
                       ),
                     ),
@@ -77,7 +81,7 @@ class LeaveGeneralInstructionsPanel extends StatelessWidget {
                       reminder,
                       style: TextStyle(
                         fontSize: 13,
-                        color: const Color(0xFF78350F),
+                        color: bodyColor,
                         height: 1.45,
                       ),
                     ),
@@ -127,8 +131,12 @@ class LeaveTypeGuidanceCard extends StatelessWidget {
       ),
       child: _GuidanceContainer(
         key: ValueKey(selectedDefinition?.name ?? leaveType.value),
-        color: const Color(0xFFF0F7FF),
-        borderColor: AppTheme.primaryNavy.withOpacity(0.18),
+        color: AppTheme.dashIsDark(context)
+            ? AppTheme.primaryNavy.withValues(alpha: 0.14)
+            : const Color(0xFFF0F7FF),
+        borderColor: AppTheme.primaryNavy.withValues(
+          alpha: AppTheme.dashIsDark(context) ? 0.35 : 0.18,
+        ),
         icon: Icons.lightbulb_outline_rounded,
         iconColor: AppTheme.primaryNavy,
         child: Column(
@@ -162,7 +170,7 @@ class LeaveTypeGuidanceCard extends StatelessWidget {
               guidance.description,
               style: TextStyle(
                 fontSize: 13,
-                color: AppTheme.textPrimary,
+                color: AppTheme.dashTextPrimaryOf(context),
                 height: 1.5,
               ),
             ),
@@ -246,6 +254,7 @@ class LeaveFullGuidelinesSheet extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
+      backgroundColor: AppTheme.dashPanelOf(context),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -275,7 +284,7 @@ class LeaveFullGuidelinesSheet extends StatelessWidget {
                     width: 40,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: Colors.grey.shade300,
+                      color: AppTheme.dashHairlineOf(context),
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -297,14 +306,14 @@ class LeaveFullGuidelinesSheet extends StatelessWidget {
                               style: TextStyle(
                                 fontSize: 17,
                                 fontWeight: FontWeight.w700,
-                                color: AppTheme.textPrimary,
+                                color: AppTheme.dashTextPrimaryOf(context),
                               ),
                             ),
                             Text(
                               'CSC-based and HR-configured leave guidelines',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: AppTheme.textSecondary,
+                                color: AppTheme.dashTextSecondaryOf(context),
                               ),
                             ),
                           ],
@@ -318,7 +327,7 @@ class LeaveFullGuidelinesSheet extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  const Divider(height: 1),
+                  Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
                 ],
               ),
             ),
@@ -344,7 +353,7 @@ class LeaveFullGuidelinesSheet extends StatelessWidget {
                     'For queries, contact your HR Office.',
                     style: TextStyle(
                       fontSize: 12,
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                       fontStyle: FontStyle.italic,
                     ),
                     textAlign: TextAlign.center,
@@ -370,11 +379,7 @@ class _GuidelineSectionTile extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Container(
-        decoration: BoxDecoration(
-          color: AppTheme.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.black.withOpacity(0.07)),
-        ),
+        decoration: AppTheme.dashSurfaceCard(context, radius: 12),
         child: Theme(
           data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
           child: ExpansionTile(
@@ -388,7 +393,7 @@ class _GuidelineSectionTile extends StatelessWidget {
               style: TextStyle(
                 fontWeight: FontWeight.w600,
                 fontSize: 14,
-                color: AppTheme.textPrimary,
+                color: AppTheme.dashTextPrimaryOf(context),
               ),
             ),
             initiallyExpanded: true,
@@ -417,7 +422,7 @@ class _GuidelineSectionTile extends StatelessWidget {
                             item,
                             style: TextStyle(
                               fontSize: 13,
-                              color: AppTheme.textPrimary,
+                              color: AppTheme.dashTextPrimaryOf(context),
                               height: 1.5,
                             ),
                           ),
@@ -511,11 +516,7 @@ class _PerTypeQuickReferenceTableState
     required bool usingFallback,
   }) {
     return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.07)),
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -534,7 +535,7 @@ class _PerTypeQuickReferenceTableState
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 14,
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.dashTextPrimaryOf(context),
                   ),
                 ),
                 if (loading) ...[
@@ -553,7 +554,7 @@ class _PerTypeQuickReferenceTableState
           ),
           // Header
           Container(
-            color: AppTheme.offWhite,
+            color: AppTheme.dashMutedSurfaceOf(context),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(
               children: [
@@ -564,7 +565,7 @@ class _PerTypeQuickReferenceTableState
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                     ),
                   ),
                 ),
@@ -575,7 +576,7 @@ class _PerTypeQuickReferenceTableState
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                     ),
                   ),
                 ),
@@ -587,21 +588,21 @@ class _PerTypeQuickReferenceTableState
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                     ),
                   ),
                 ),
               ],
             ),
           ),
-          const Divider(height: 1),
+          Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
           ...rows.asMap().entries.map((entry) {
             final i = entry.key;
             final row = entry.value;
             return Container(
               color: i.isOdd
-                  ? AppTheme.offWhite.withOpacity(0.5)
-                  : AppTheme.white,
+                  ? AppTheme.dashMutedSurfaceOf(context)
+                  : AppTheme.dashPanelOf(context),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -612,7 +613,7 @@ class _PerTypeQuickReferenceTableState
                       row.type,
                       style: TextStyle(
                         fontSize: 12,
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         height: 1.4,
                       ),
                     ),
@@ -623,7 +624,7 @@ class _PerTypeQuickReferenceTableState
                       row.limit,
                       style: TextStyle(
                         fontSize: 12,
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         height: 1.4,
                       ),
                     ),
@@ -650,7 +651,7 @@ class _PerTypeQuickReferenceTableState
               child: Text(
                 'Loading configured leave type rules...',
                 style: TextStyle(
-                  color: AppTheme.textSecondary,
+                  color: AppTheme.dashTextSecondaryOf(context),
                   fontSize: 12,
                   fontStyle: FontStyle.italic,
                 ),
@@ -735,7 +736,7 @@ class _GuidanceRow extends StatelessWidget {
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w600,
-            color: AppTheme.textSecondary,
+            color: AppTheme.dashTextSecondaryOf(context),
           ),
         ),
         Expanded(
@@ -743,7 +744,7 @@ class _GuidanceRow extends StatelessWidget {
             value,
             style: TextStyle(
               fontSize: 12,
-              color: valueColor ?? AppTheme.textPrimary,
+              color: valueColor ?? AppTheme.dashTextPrimaryOf(context),
               height: 1.45,
             ),
           ),

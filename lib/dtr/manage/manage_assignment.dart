@@ -112,6 +112,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   DateTime? _effectiveTo;
   final _remarksController = TextEditingController();
   _AssignmentRecord? _selectedAssignment;
+  StateSetter? _drawerSetState;
 
   bool _initialPrefillApplied = false;
 
@@ -134,6 +135,11 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           : Colors.transparent,
     ),
   );
+
+  void _updateAssignmentFormState(VoidCallback update) {
+    if (mounted) setState(update);
+    _drawerSetState?.call(() {});
+  }
 
   @override
   void initState() {
@@ -232,7 +238,11 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       }).toList();
       _positions = (posRes.data ?? []).map((e) {
         final m = e as Map<String, dynamic>;
-        return {'id': m['id'], 'name': m['name'] as String? ?? ''};
+        return {
+          'id': m['id'],
+          'name': m['name'] as String? ?? '',
+          'department_id': m['department_id'],
+        };
       }).toList();
       _shifts = (shiftRes.data ?? []).map((e) {
         final m = e as Map<String, dynamic>;
@@ -244,6 +254,12 @@ class _ManageAssignmentState extends State<ManageAssignment> {
             (m['policy_name'] as String?) ?? (m['name'] as String?) ?? '';
         return {'id': m['id'], 'name': name};
       }).toList();
+      if (!_positionBelongsToDepartment(
+        _selectedPositionId,
+        _selectedDeptId,
+      )) {
+        _selectedPositionId = null;
+      }
     } catch (e) {
       debugPrint('Load lookups failed: $e');
       _departments = [];
@@ -251,13 +267,13 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       _shifts = [];
       _attendancePolicies = [];
     }
-    if (mounted) setState(() => _loadingLookups = false);
+    _updateAssignmentFormState(() => _loadingLookups = false);
   }
 
   Future<void> _loadAssignments() async {
     if (_selectedEmployeeId == null) {
       _assignments = [];
-      setState(() {});
+      _updateAssignmentFormState(() {});
       return;
     }
     setState(() => _loadingAssignments = true);
@@ -320,7 +336,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       _assignments = [];
     }
     if (mounted) {
-      setState(() {
+      _updateAssignmentFormState(() {
         _loadingAssignments = false;
         _selectedAssignment = null;
       });
@@ -381,6 +397,33 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     return to == null ? from : '$from → ${_dateStr(to)}';
   }
 
+  List<Map<String, dynamic>> get _positionsForSelectedDepartment {
+    final deptId = _selectedDeptId;
+    if (deptId == null || deptId.isEmpty) return const [];
+    return _positions
+        .where((p) => p['department_id']?.toString() == deptId)
+        .toList();
+  }
+
+  bool _positionBelongsToDepartment(String? positionId, String? departmentId) {
+    if (positionId == null || departmentId == null) return false;
+    for (final position in _positions) {
+      if (position['id']?.toString() == positionId) {
+        return position['department_id']?.toString() == departmentId;
+      }
+    }
+    return false;
+  }
+
+  void _setDepartment(String? departmentId) {
+    _updateAssignmentFormState(() {
+      _selectedDeptId = departmentId;
+      if (!_positionBelongsToDepartment(_selectedPositionId, departmentId)) {
+        _selectedPositionId = null;
+      }
+    });
+  }
+
   /// Calendar-day comparison (ignores time) so picker values stay valid across timezones.
   bool _isEffectiveRangeValid(DateTime from, DateTime? to) {
     if (to == null) return true;
@@ -390,10 +433,15 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   }
 
   void _selectAssignment(_AssignmentRecord a) {
-    setState(() {
+    _updateAssignmentFormState(() {
       _selectedAssignment = a;
       _selectedDeptId = a.departmentId;
-      _selectedPositionId = a.positionId;
+      _selectedPositionId = _positionBelongsToDepartment(
+        a.positionId,
+        a.departmentId,
+      )
+          ? a.positionId
+          : null;
       _selectedShiftId = a.shiftId;
       _selectedPolicyId = a.policyId;
       _effectiveFrom = a.effectiveFrom;
@@ -403,7 +451,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   }
 
   void _clearForm() {
-    setState(() {
+    _updateAssignmentFormState(() {
       _selectedAssignment = null;
       _selectedDeptId = null;
       _selectedPositionId = null;
@@ -415,8 +463,8 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     });
   }
 
-  Future<void> _addAssignment() async {
-    if (_selectedEmployeeId == null) return;
+  Future<bool> _addAssignment() async {
+    if (_selectedEmployeeId == null) return false;
     if (_selectedDeptId == null ||
         _selectedPositionId == null ||
         _selectedShiftId == null) {
@@ -425,13 +473,13 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           content: Text('Please select Department, Position, and Shift.'),
         ),
       );
-      return;
+      return false;
     }
     if (_effectiveFrom == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please set Effective From date.')),
       );
-      return;
+      return false;
     }
     if (!_isEffectiveRangeValid(_effectiveFrom!, _effectiveTo)) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -439,7 +487,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           content: Text('Effective to must be on or after effective from.'),
         ),
       );
-      return;
+      return false;
     }
     try {
       final data = <String, dynamic>{
@@ -464,22 +512,24 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         _clearForm();
         _loadAssignments();
       }
+      return true;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(_userFacingApiError(e))));
       }
+      return false;
     }
   }
 
-  Future<void> _updateAssignment() async {
+  Future<bool> _updateAssignment() async {
     final a = _selectedAssignment;
     if (a == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select an assignment to update.')),
       );
-      return;
+      return false;
     }
     if (_selectedDeptId == null ||
         _selectedPositionId == null ||
@@ -489,13 +539,13 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           content: Text('Please select Department, Position, and Shift.'),
         ),
       );
-      return;
+      return false;
     }
     if (_effectiveFrom == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please set Effective From date.')),
       );
-      return;
+      return false;
     }
     if (!_isEffectiveRangeValid(_effectiveFrom!, _effectiveTo)) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -503,7 +553,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           content: Text('Effective to must be on or after effective from.'),
         ),
       );
-      return;
+      return false;
     }
     try {
       final data = <String, dynamic>{
@@ -527,12 +577,14 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         _clearForm();
         _loadAssignments();
       }
+      return true;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(_userFacingApiError(e))));
       }
+      return false;
     }
   }
 
@@ -552,13 +604,13 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     );
   }
 
-  Future<void> _deactivateAssignment() async {
+  Future<bool> _deactivateAssignment() async {
     final a = _selectedAssignment;
     if (a == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select an assignment to deactivate.')),
       );
-      return;
+      return false;
     }
     final ok = await showDialog<bool>(
       context: context,
@@ -580,7 +632,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         ],
       ),
     );
-    if (ok != true || !mounted) return;
+    if (ok != true || !mounted) return false;
     try {
       await ApiClient.instance.put(
         '/api/assignments/${a.id}',
@@ -593,13 +645,181 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         _clearForm();
         _loadAssignments();
       }
+      return true;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(_userFacingApiError(e))));
       }
+      return false;
     }
+  }
+
+  Future<void> _openAssignmentDrawer({_AssignmentRecord? assignment}) async {
+    if (_selectedEmployeeId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select an employee first.')),
+      );
+      return;
+    }
+
+    if (assignment == null) {
+      _clearForm();
+    } else {
+      _selectAssignment(assignment);
+    }
+
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+      barrierColor: Colors.black.withValues(alpha: 0.32),
+      transitionDuration: const Duration(milliseconds: 220),
+      pageBuilder: (dialogContext, _, __) {
+        final screenWidth = MediaQuery.of(dialogContext).size.width;
+        final drawerWidth = screenWidth < 760 ? screenWidth : 620.0;
+        return Align(
+          alignment: Alignment.centerRight,
+          child: SizedBox(
+            width: drawerWidth,
+            height: double.infinity,
+            child: Material(
+              color: AppTheme.dashPanelOf(dialogContext),
+              elevation: 18,
+              child: StatefulBuilder(
+                builder: (context, drawerSetState) {
+                  _drawerSetState = drawerSetState;
+                  return _buildAssignmentDrawer(dialogContext);
+                },
+              ),
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (context, animation, _, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(1, 0),
+            end: Offset.zero,
+          ).animate(curved),
+          child: child,
+        );
+      },
+    );
+
+    _drawerSetState = null;
+  }
+
+  Widget _buildAssignmentDrawer(BuildContext drawerContext) {
+    final isEditing = _selectedAssignment != null;
+    return SafeArea(
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    isEditing ? 'Edit Assignment' : 'Add Assignment',
+                    style: TextStyle(
+                      color: _headingColor(context),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(drawerContext).pop(),
+                  icon: Icon(
+                    Icons.close_rounded,
+                    color: _mutedColor(context),
+                  ),
+                  tooltip: 'Close',
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              child: _buildAssignmentForm(framed: false, showActions: false),
+            ),
+          ),
+          _buildDrawerFooter(drawerContext),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDrawerFooter(BuildContext drawerContext) {
+    final isEditing = _selectedAssignment != null;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        border: Border(
+          top: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        ),
+      ),
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 8,
+        alignment: WrapAlignment.end,
+        children: [
+          TextButton(
+            onPressed: () => Navigator.of(drawerContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          if (isEditing)
+            OutlinedButton.icon(
+              onPressed: () async {
+                final ok = await _deactivateAssignment();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
+              icon: const Icon(Icons.person_off_rounded, size: 18),
+              label: const Text('Deactivate'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+              ),
+            ),
+          FilledButton.icon(
+            onPressed: _loadingLookups
+                ? null
+                : () async {
+                    final ok = isEditing
+                        ? await _updateAssignment()
+                        : await _addAssignment();
+                    if (ok && drawerContext.mounted) {
+                      Navigator.of(drawerContext).pop();
+                    }
+                  },
+            icon: Icon(
+              isEditing ? Icons.edit_rounded : Icons.add_rounded,
+              size: 18,
+            ),
+            label: Text(isEditing ? 'Update' : 'Add Assignment'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFE85D04),
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -734,9 +954,16 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                     : Colors.transparent,
                 child: InkWell(
                   onTap: () {
-                    setState(() {
+                    _updateAssignmentFormState(() {
                       _selectedEmployeeId = e.id;
-                      _clearForm();
+                      _selectedAssignment = null;
+                      _selectedDeptId = null;
+                      _selectedPositionId = null;
+                      _selectedShiftId = null;
+                      _selectedPolicyId = null;
+                      _effectiveFrom = null;
+                      _effectiveTo = null;
+                      _remarksController.clear();
                     });
                     _loadAssignments();
                   },
@@ -860,6 +1087,8 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                 Expanded(
                   child: Text(
                     'Manage Assignments for ${hasSelection ? sel.fullName : 'Select an employee'}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: _headingColor(context),
                       fontSize: 16,
@@ -869,13 +1098,29 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                     ),
                   ),
                 ),
+                if (hasSelection) ...[
+                  FilledButton.icon(
+                    onPressed: _loadingLookups
+                        ? null
+                        : () => _openAssignmentDrawer(),
+                    icon: const Icon(Icons.add_rounded, size: 18),
+                    label: const Text('Add Assignment'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFE85D04),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                ],
                 _buildStatusDropdown(),
               ],
             ),
             const SizedBox(height: 24),
             _buildAssignmentsTable(hasSelection),
-            const SizedBox(height: 24),
-            if (hasSelection) _buildAssignmentForm(),
           ],
         ),
       ),
@@ -990,7 +1235,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                           : AppTheme.primaryNavy.withValues(alpha: 0.08))
                     : Colors.transparent,
                 child: InkWell(
-                  onTap: () => _selectAssignment(a),
+                  onTap: () => _openAssignmentDrawer(assignment: a),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
@@ -1063,17 +1308,38 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   TextStyle _tableCellStyle(BuildContext context) =>
       TextStyle(fontSize: 13, color: _headingColor(context));
 
-  Widget _buildAssignmentForm() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: _isDark(context)
-            ? AppTheme.dashMutedSurfaceOf(context)
-            : AppTheme.lightGray.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.dashHairlineOf(context)),
-      ),
-      child: Column(
+  Widget _buildAssignmentForm({
+    bool framed = true,
+    bool showActions = true,
+  }) {
+    String? safeValue(String? value, List<Map<String, dynamic>> items) {
+      if (value == null) return null;
+      return items.any((item) => item['id']?.toString() == value)
+          ? value
+          : null;
+    }
+
+    final selectedDeptValue = safeValue(_selectedDeptId, _departments);
+    final selectedShiftValue = safeValue(_selectedShiftId, _shifts);
+    final selectedPolicyValue = safeValue(
+      _selectedPolicyId,
+      _attendancePolicies,
+    );
+    final filteredPositions = _positionsForSelectedDepartment;
+    final hasDepartment = selectedDeptValue != null;
+    final canSelectPosition = hasDepartment && filteredPositions.isNotEmpty;
+    final positionSelectLabel = !hasDepartment
+        ? 'Select department first'
+        : filteredPositions.isEmpty
+        ? 'No positions'
+        : 'Select';
+    final selectedPositionValue = filteredPositions.any(
+      (position) => position['id']?.toString() == _selectedPositionId,
+    )
+        ? _selectedPositionId
+        : null;
+
+    final content = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           LayoutBuilder(
@@ -1087,9 +1353,9 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                       flex: 1,
                       child: _buildFormDropdown(
                         'Department',
-                        _selectedDeptId,
+                        selectedDeptValue,
                         _departments,
-                        (v) => setState(() => _selectedDeptId = v),
+                        _setDepartment,
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -1097,9 +1363,13 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                       flex: 1,
                       child: _buildFormDropdown(
                         'Position',
-                        _selectedPositionId,
-                        _positions,
-                        (v) => setState(() => _selectedPositionId = v),
+                        selectedPositionValue,
+                        filteredPositions,
+                        (v) => _updateAssignmentFormState(
+                          () => _selectedPositionId = v,
+                        ),
+                        enabled: canSelectPosition,
+                        selectLabel: positionSelectLabel,
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -1107,9 +1377,11 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                       flex: 1,
                       child: _buildFormDropdown(
                         'Shift',
-                        _selectedShiftId,
+                        selectedShiftValue,
                         _shifts,
-                        (v) => setState(() => _selectedShiftId = v),
+                        (v) => _updateAssignmentFormState(
+                          () => _selectedShiftId = v,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -1117,9 +1389,11 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                       flex: 1,
                       child: _buildFormDropdown(
                         'Attendance Policy (opt)',
-                        _selectedPolicyId,
+                        selectedPolicyValue,
                         _attendancePolicies,
-                        (v) => setState(() => _selectedPolicyId = v),
+                        (v) => _updateAssignmentFormState(
+                          () => _selectedPolicyId = v,
+                        ),
                       ),
                     ),
                   ],
@@ -1131,27 +1405,35 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                 children: [
                   _buildFormDropdown(
                     'Department',
-                    _selectedDeptId,
+                    selectedDeptValue,
                     _departments,
-                    (v) => setState(() => _selectedDeptId = v),
+                    _setDepartment,
                   ),
                   _buildFormDropdown(
                     'Position',
-                    _selectedPositionId,
-                    _positions,
-                    (v) => setState(() => _selectedPositionId = v),
+                    selectedPositionValue,
+                    filteredPositions,
+                    (v) => _updateAssignmentFormState(
+                      () => _selectedPositionId = v,
+                    ),
+                    enabled: canSelectPosition,
+                    selectLabel: positionSelectLabel,
                   ),
                   _buildFormDropdown(
                     'Shift',
-                    _selectedShiftId,
+                    selectedShiftValue,
                     _shifts,
-                    (v) => setState(() => _selectedShiftId = v),
+                    (v) => _updateAssignmentFormState(
+                      () => _selectedShiftId = v,
+                    ),
                   ),
                   _buildFormDropdown(
                     'Attendance Policy (opt)',
-                    _selectedPolicyId,
+                    selectedPolicyValue,
                     _attendancePolicies,
-                    (v) => setState(() => _selectedPolicyId = v),
+                    (v) => _updateAssignmentFormState(
+                      () => _selectedPolicyId = v,
+                    ),
                   ),
                 ],
               );
@@ -1169,7 +1451,9 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                       child: _buildDatePicker(
                         'Effective from',
                         _effectiveFrom,
-                        (d) => setState(() => _effectiveFrom = d),
+                        (d) => _updateAssignmentFormState(
+                          () => _effectiveFrom = d,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 16),
@@ -1177,7 +1461,9 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                       child: _buildDatePicker(
                         'Effective to (opt)',
                         _effectiveTo,
-                        (d) => setState(() => _effectiveTo = d),
+                        (d) => _updateAssignmentFormState(
+                          () => _effectiveTo = d,
+                        ),
                       ),
                     ),
                   ],
@@ -1190,12 +1476,16 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                   _buildDatePicker(
                     'Effective from',
                     _effectiveFrom,
-                    (d) => setState(() => _effectiveFrom = d),
+                    (d) => _updateAssignmentFormState(
+                      () => _effectiveFrom = d,
+                    ),
                   ),
                   _buildDatePicker(
                     'Effective to (opt)',
                     _effectiveTo,
-                    (d) => setState(() => _effectiveTo = d),
+                    (d) => _updateAssignmentFormState(
+                      () => _effectiveTo = d,
+                    ),
                   ),
                 ],
               );
@@ -1225,69 +1515,89 @@ class _ManageAssignmentState extends State<ManageAssignment> {
             ),
             maxLines: 2,
           ),
-          const SizedBox(height: 24),
-          Row(
-            children: [
-              FilledButton.icon(
-                onPressed: _loadingLookups ? null : _addAssignment,
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Add Assignment'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF4CAF50),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  elevation: 0,
-                ),
-              ),
-              const SizedBox(width: 12),
-              OutlinedButton.icon(
-                onPressed: _selectedAssignment != null
-                    ? _updateAssignment
-                    : null,
-                icon: const Icon(Icons.edit_rounded, size: 18),
-                label: const Text('Update'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF4CAF50),
-                  side: const BorderSide(color: Color(0xFF4CAF50)),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+          if (showActions) ...[
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                FilledButton.icon(
+                  onPressed: _loadingLookups ? null : () => _addAssignment(),
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('Add Assignment'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF4CAF50),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    elevation: 0,
                   ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              FilledButton.icon(
-                onPressed: _selectedAssignment != null
-                    ? _deactivateAssignment
-                    : null,
-                icon: const Icon(Icons.person_off_rounded, size: 18),
-                label: const Text('Deactivate'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFFE53935),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
+                const SizedBox(width: 12),
+                OutlinedButton.icon(
+                  onPressed: _selectedAssignment != null
+                      ? () => _updateAssignment()
+                      : null,
+                  icon: const Icon(Icons.edit_rounded, size: 18),
+                  label: const Text('Update'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF4CAF50),
+                    side: const BorderSide(color: Color(0xFF4CAF50)),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  elevation: 0,
                 ),
-              ),
-            ],
-          ),
+                const SizedBox(width: 12),
+                FilledButton.icon(
+                  onPressed: _selectedAssignment != null
+                      ? () => _deactivateAssignment()
+                      : null,
+                  icon: const Icon(Icons.person_off_rounded, size: 18),
+                  label: const Text('Deactivate'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFE53935),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    elevation: 0,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
+      );
+
+    if (!framed) {
+      return Padding(
+        padding: const EdgeInsets.all(24),
+        child: content,
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: _isDark(context)
+            ? AppTheme.dashMutedSurfaceOf(context)
+            : AppTheme.lightGray.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
+      child: content,
     );
   }
 
@@ -1295,8 +1605,10 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     String label,
     String? value,
     List<Map<String, dynamic>> items,
-    ValueChanged<String?> onChanged,
-  ) {
+    ValueChanged<String?> onChanged, {
+    bool enabled = true,
+    String selectLabel = 'Select',
+  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -1311,18 +1623,24 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         ),
         const SizedBox(height: 6),
         DropdownButtonFormField<String>(
+          key: ValueKey('$label-${value ?? ''}-${items.length}-$enabled'),
           initialValue: value,
           dropdownColor: AppTheme.dashPanelOf(context),
           style: AppTheme.dashFieldTextStyle(context),
-          decoration: _inputDecoration('Select'),
-          hint: Text('Select', style: TextStyle(color: _mutedColor(context))),
+          decoration: _inputDecoration(selectLabel),
+          hint: Text(
+            selectLabel,
+            style: TextStyle(color: _mutedColor(context)),
+            overflow: TextOverflow.ellipsis,
+          ),
           isExpanded: true,
           items: [
             DropdownMenuItem(
               value: null,
               child: Text(
-                'Select',
+                selectLabel,
                 style: AppTheme.dashFieldTextStyle(context),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
             ...items.map(
@@ -1336,7 +1654,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               ),
             ),
           ],
-          onChanged: onChanged,
+          onChanged: enabled ? onChanged : null,
         ),
       ],
     );

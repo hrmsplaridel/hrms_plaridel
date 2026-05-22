@@ -161,6 +161,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
   List<_DeviceRecord> _devices = [];
   bool _loading = false;
   _DeviceRecord? _selectedDevice;
+  StateSetter? _drawerSetState;
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
 
@@ -191,6 +192,11 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
           vertical: 12,
         ),
       );
+
+  void _updateDeviceFormState(VoidCallback update) {
+    if (mounted) setState(update);
+    _drawerSetState?.call(() {});
+  }
 
   @override
   void initState() {
@@ -245,7 +251,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
   }
 
   void _selectDevice(_DeviceRecord d) {
-    setState(() {
+    _updateDeviceFormState(() {
       _selectedDevice = d;
       _nameController.text = d.name;
       _deviceIdController.text = d.deviceId ?? '';
@@ -255,7 +261,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
   }
 
   void _clearForm() {
-    setState(() {
+    _updateDeviceFormState(() {
       _selectedDevice = null;
       _nameController.clear();
       _deviceIdController.clear();
@@ -264,13 +270,13 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
     });
   }
 
-  Future<void> _addDevice() async {
+  Future<bool> _addDevice() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a device name.')),
       );
-      return;
+      return false;
     }
     try {
       await ApiClient.instance.post(
@@ -296,6 +302,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
         _clearForm();
         _loadDevices();
       }
+      return true;
     } on DioException catch (e) {
       if (mounted) {
         final msg =
@@ -306,23 +313,24 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to add: $msg')));
       }
+      return false;
     }
   }
 
-  Future<void> _updateDevice() async {
+  Future<bool> _updateDevice() async {
     final d = _selectedDevice;
     if (d == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select a device to update.')),
       );
-      return;
+      return false;
     }
     final name = _nameController.text.trim();
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a device name.')),
       );
-      return;
+      return false;
     }
     try {
       await ApiClient.instance.put(
@@ -347,6 +355,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
         _clearForm();
         _loadDevices();
       }
+      return true;
     } on DioException catch (e) {
       if (mounted) {
         final msg =
@@ -357,12 +366,13 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to update: $msg')));
       }
+      return false;
     }
   }
 
-  Future<void> _deactivateDevice() async {
+  Future<bool> _deactivateDevice() async {
     final d = _selectedDevice;
-    if (d == null) return;
+    if (d == null) return false;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -381,7 +391,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
         ],
       ),
     );
-    if (ok != true || !mounted) return;
+    if (ok != true || !mounted) return false;
     try {
       await ApiClient.instance.put(
         '/api/biometric-devices/${d.id}',
@@ -394,6 +404,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
         _clearForm();
         _loadDevices();
       }
+      return true;
     } on DioException catch (e) {
       if (mounted) {
         final msg =
@@ -404,13 +415,169 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
           context,
         ).showSnackBar(SnackBar(content: Text('Failed: $msg')));
       }
+      return false;
     }
+  }
+
+  Future<void> _openDeviceDrawer({_DeviceRecord? device}) async {
+    if (device == null) {
+      _clearForm();
+    } else {
+      _selectDevice(device);
+    }
+
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+      barrierColor: Colors.black.withValues(alpha: 0.32),
+      transitionDuration: const Duration(milliseconds: 220),
+      pageBuilder: (dialogContext, _, __) {
+        final screenWidth = MediaQuery.of(dialogContext).size.width;
+        final drawerWidth = screenWidth < 720 ? screenWidth : 560.0;
+        return Align(
+          alignment: Alignment.centerRight,
+          child: SizedBox(
+            width: drawerWidth,
+            height: double.infinity,
+            child: Material(
+              color: AppTheme.dashPanelOf(dialogContext),
+              elevation: 18,
+              child: StatefulBuilder(
+                builder: (context, drawerSetState) {
+                  _drawerSetState = drawerSetState;
+                  return _buildDeviceDrawer(dialogContext);
+                },
+              ),
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (context, animation, _, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(1, 0),
+            end: Offset.zero,
+          ).animate(curved),
+          child: child,
+        );
+      },
+    );
+
+    _drawerSetState = null;
+  }
+
+  Widget _buildDeviceDrawer(BuildContext drawerContext) {
+    final isEditing = _selectedDevice != null;
+    return SafeArea(
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    isEditing
+                        ? 'Edit Biometric Device'
+                        : 'Add Biometric Device',
+                    style: TextStyle(
+                      color: _headingColor(context),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(drawerContext).pop(),
+                  icon: Icon(
+                    Icons.close_rounded,
+                    color: _mutedColor(context),
+                  ),
+                  tooltip: 'Close',
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              child: _buildFormPanel(framed: false, showActions: false),
+            ),
+          ),
+          _buildDrawerFooter(drawerContext),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDrawerFooter(BuildContext drawerContext) {
+    final isEditing = _selectedDevice != null;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        border: Border(
+          top: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        ),
+      ),
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 8,
+        alignment: WrapAlignment.end,
+        children: [
+          TextButton(
+            onPressed: () => Navigator.of(drawerContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          if (isEditing)
+            OutlinedButton.icon(
+              onPressed: () async {
+                final ok = await _deactivateDevice();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
+              icon: const Icon(Icons.person_off_rounded, size: 18),
+              label: const Text('Deactivate'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+              ),
+            ),
+          FilledButton.icon(
+            onPressed: () async {
+              final ok = isEditing ? await _updateDevice() : await _addDevice();
+              if (ok && drawerContext.mounted) {
+                Navigator.of(drawerContext).pop();
+              }
+            },
+            icon: Icon(
+              isEditing ? Icons.edit_rounded : Icons.add_rounded,
+              size: 18,
+            ),
+            label: Text(isEditing ? 'Update' : 'Add Device'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFE85D04),
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final w = MediaQuery.of(context).size.width;
-    final isNarrow = w < 700;
     final search = _searchController.text.toLowerCase();
     final filtered = _devices
         .where(
@@ -424,13 +591,32 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Biometric Devices',
-          style: TextStyle(
-            color: _headingColor(context),
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Biometric Devices',
+                style: TextStyle(
+                  color: _headingColor(context),
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            FilledButton.icon(
+              onPressed: () => _openDeviceDrawer(),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Add Device'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFE85D04),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 12,
+                ),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 8),
         Text(
@@ -438,23 +624,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
           style: TextStyle(color: _mutedColor(context), fontSize: 14),
         ),
         const SizedBox(height: 20),
-        isNarrow
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _buildListPanel(filtered),
-                  const SizedBox(height: 24),
-                  _buildFormPanel(),
-                ],
-              )
-            : Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(flex: 1, child: _buildListPanel(filtered)),
-                  const SizedBox(width: 24),
-                  Expanded(flex: 1, child: _buildFormPanel()),
-                ],
-              ),
+        _buildListPanel(filtered),
       ],
     );
   }
@@ -595,7 +765,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
                     ],
                   ),
                   isThreeLine: true,
-                  onTap: () => _selectDevice(d),
+                  onTap: () => _openDeviceDrawer(device: d),
                 );
               },
             ),
@@ -604,12 +774,12 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
     );
   }
 
-  Widget _buildFormPanel() {
+  Widget _buildFormPanel({
+    bool framed = true,
+    bool showActions = true,
+  }) {
     final dark = _isDark(context);
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
-      child: Column(
+    final content = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (_selectedDevice != null) ...[
@@ -731,38 +901,56 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
             style: AppTheme.dashFieldTextStyle(context),
             decoration: _inputDecoration('e.g. 192.168.1.10'),
           ),
-          const SizedBox(height: 24),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              FilledButton.icon(
-                onPressed: _addDevice,
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Add Device'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF4CAF50),
-                  foregroundColor: Colors.white,
+          if (showActions) ...[
+            const SizedBox(height: 24),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                FilledButton.icon(
+                  onPressed: () => _addDevice(),
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('Add Device'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF4CAF50),
+                    foregroundColor: Colors.white,
+                  ),
                 ),
-              ),
-              OutlinedButton.icon(
-                onPressed: _selectedDevice != null ? _updateDevice : null,
-                icon: const Icon(Icons.edit_rounded, size: 18),
-                label: const Text('Update'),
-              ),
-              FilledButton.icon(
-                onPressed: _selectedDevice != null ? _deactivateDevice : null,
-                icon: const Icon(Icons.person_off_rounded, size: 18),
-                label: const Text('Deactivate'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
+                OutlinedButton.icon(
+                  onPressed: _selectedDevice != null
+                      ? () => _updateDevice()
+                      : null,
+                  icon: const Icon(Icons.edit_rounded, size: 18),
+                  label: const Text('Update'),
                 ),
-              ),
-            ],
-          ),
+                FilledButton.icon(
+                  onPressed: _selectedDevice != null
+                      ? () => _deactivateDevice()
+                      : null,
+                  icon: const Icon(Icons.person_off_rounded, size: 18),
+                  label: const Text('Deactivate'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
-      ),
+      );
+
+    if (!framed) {
+      return Padding(
+        padding: const EdgeInsets.all(24),
+        child: content,
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
+      child: content,
     );
   }
 }

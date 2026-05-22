@@ -52,6 +52,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
   List<_HolidayRecord> _holidays = [];
   bool _loading = false;
   _HolidayRecord? _selectedHoliday;
+  StateSetter? _drawerSetState;
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
 
@@ -70,6 +71,11 @@ class _ManageHolidayState extends State<ManageHoliday> {
           vertical: 12,
         ),
       );
+
+  void _updateHolidayFormState(VoidCallback update) {
+    if (mounted) setState(update);
+    _drawerSetState?.call(() {});
+  }
 
   @override
   void initState() {
@@ -114,7 +120,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
   }
 
   void _selectHoliday(_HolidayRecord h) {
-    setState(() {
+    _updateHolidayFormState(() {
       _selectedHoliday = h;
       _nameController.text = h.name;
       _descriptionController.text = h.description ?? '';
@@ -128,7 +134,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
   }
 
   void _clearForm() {
-    setState(() {
+    _updateHolidayFormState(() {
       _selectedHoliday = null;
       _nameController.clear();
       _descriptionController.clear();
@@ -179,19 +185,19 @@ class _ManageHolidayState extends State<ManageHoliday> {
     return DateTime(y, m, day); // Local date, no timezone
   }
 
-  Future<void> _addHoliday() async {
+  Future<bool> _addHoliday() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a holiday name.')),
       );
-      return;
+      return false;
     }
     if (_dateFrom == null || _dateTo == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select start and end dates.')),
       );
-      return;
+      return false;
     }
     if (_dateTo!.isBefore(_dateFrom!)) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -199,7 +205,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
           content: Text('End date must be on or after start date.'),
         ),
       );
-      return;
+      return false;
     }
     try {
       await ApiClient.instance.post(
@@ -224,6 +230,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
         _clearForm();
         _loadHolidays();
       }
+      return true;
     } on DioException catch (e) {
       if (mounted) {
         final msg =
@@ -234,29 +241,30 @@ class _ManageHolidayState extends State<ManageHoliday> {
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to add: $msg')));
       }
+      return false;
     }
   }
 
-  Future<void> _updateHoliday() async {
+  Future<bool> _updateHoliday() async {
     final h = _selectedHoliday;
     if (h == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select a holiday to update.')),
       );
-      return;
+      return false;
     }
     final name = _nameController.text.trim();
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a holiday name.')),
       );
-      return;
+      return false;
     }
     if (_dateFrom == null || _dateTo == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select start and end dates.')),
       );
-      return;
+      return false;
     }
     if (_dateTo!.isBefore(_dateFrom!)) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -264,7 +272,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
           content: Text('End date must be on or after start date.'),
         ),
       );
-      return;
+      return false;
     }
     try {
       await ApiClient.instance.put(
@@ -291,6 +299,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
         _clearForm();
         _loadHolidays();
       }
+      return true;
     } on DioException catch (e) {
       if (mounted) {
         final msg =
@@ -301,12 +310,13 @@ class _ManageHolidayState extends State<ManageHoliday> {
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to update: $msg')));
       }
+      return false;
     }
   }
 
-  Future<void> _deleteHoliday() async {
+  Future<bool> _deleteHoliday() async {
     final h = _selectedHoliday;
-    if (h == null) return;
+    if (h == null) return false;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -325,7 +335,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
         ],
       ),
     );
-    if (ok != true || !mounted) return;
+    if (ok != true || !mounted) return false;
     try {
       await ApiClient.instance.delete('/api/holidays/${h.id}');
       if (mounted) {
@@ -335,6 +345,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
         _clearForm();
         _loadHolidays();
       }
+      return true;
     } on DioException catch (e) {
       if (mounted) {
         final msg =
@@ -345,13 +356,169 @@ class _ManageHolidayState extends State<ManageHoliday> {
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to delete: $msg')));
       }
+      return false;
     }
+  }
+
+  Future<void> _openHolidayDrawer({_HolidayRecord? holiday}) async {
+    if (holiday == null) {
+      _clearForm();
+    } else {
+      _selectHoliday(holiday);
+    }
+
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+      barrierColor: Colors.black.withValues(alpha: 0.32),
+      transitionDuration: const Duration(milliseconds: 220),
+      pageBuilder: (dialogContext, _, __) {
+        final screenWidth = MediaQuery.of(dialogContext).size.width;
+        final drawerWidth = screenWidth < 720 ? screenWidth : 560.0;
+        return Align(
+          alignment: Alignment.centerRight,
+          child: SizedBox(
+            width: drawerWidth,
+            height: double.infinity,
+            child: Material(
+              color: AppTheme.dashPanelOf(dialogContext),
+              elevation: 18,
+              child: StatefulBuilder(
+                builder: (context, drawerSetState) {
+                  _drawerSetState = drawerSetState;
+                  return _buildHolidayDrawer(dialogContext);
+                },
+              ),
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (context, animation, _, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(1, 0),
+            end: Offset.zero,
+          ).animate(curved),
+          child: child,
+        );
+      },
+    );
+
+    _drawerSetState = null;
+  }
+
+  Widget _buildHolidayDrawer(BuildContext drawerContext) {
+    final isEditing = _selectedHoliday != null;
+    return SafeArea(
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    isEditing ? 'Edit Holiday' : 'Add Holiday',
+                    style: TextStyle(
+                      color: _headingColor(context),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(drawerContext).pop(),
+                  icon: Icon(
+                    Icons.close_rounded,
+                    color: _mutedColor(context),
+                  ),
+                  tooltip: 'Close',
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              child: _buildFormPanel(framed: false, showActions: false),
+            ),
+          ),
+          _buildDrawerFooter(drawerContext),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDrawerFooter(BuildContext drawerContext) {
+    final isEditing = _selectedHoliday != null;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        border: Border(
+          top: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        ),
+      ),
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 8,
+        alignment: WrapAlignment.end,
+        children: [
+          TextButton(
+            onPressed: () => Navigator.of(drawerContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          if (isEditing)
+            OutlinedButton.icon(
+              onPressed: () async {
+                final ok = await _deleteHoliday();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
+              icon: const Icon(Icons.delete_rounded, size: 18),
+              label: const Text('Delete'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+              ),
+            ),
+          FilledButton.icon(
+            onPressed: () async {
+              final ok = isEditing
+                  ? await _updateHoliday()
+                  : await _addHoliday();
+              if (ok && drawerContext.mounted) {
+                Navigator.of(drawerContext).pop();
+              }
+            },
+            icon: Icon(
+              isEditing ? Icons.edit_rounded : Icons.add_rounded,
+              size: 18,
+            ),
+            label: Text(isEditing ? 'Update' : 'Add Holiday'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFE85D04),
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final w = MediaQuery.of(context).size.width;
-    final isNarrow = w < 700;
     final search = _searchController.text.toLowerCase();
     final filtered = _holidays.where((h) {
       if (h.name.toLowerCase().contains(search)) return true;
@@ -362,32 +529,35 @@ class _ManageHolidayState extends State<ManageHoliday> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Holiday Management',
-          style: TextStyle(
-            color: _headingColor(context),
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Holiday Management',
+                style: TextStyle(
+                  color: _headingColor(context),
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            FilledButton.icon(
+              onPressed: () => _openHolidayDrawer(),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Add Holiday'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFE85D04),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 12,
+                ),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 20),
-        isNarrow
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _buildListPanel(filtered),
-                  const SizedBox(height: 24),
-                  _buildFormPanel(),
-                ],
-              )
-            : Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(flex: 1, child: _buildListPanel(filtered)),
-                  const SizedBox(width: 24),
-                  Expanded(flex: 1, child: _buildFormPanel()),
-                ],
-              ),
+        _buildListPanel(filtered),
       ],
     );
   }
@@ -464,7 +634,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
                       color: _mutedColor(context),
                     ),
                   ),
-                  onTap: () => _selectHoliday(h),
+                  onTap: () => _openHolidayDrawer(holiday: h),
                 );
               },
             ),
@@ -473,11 +643,11 @@ class _ManageHolidayState extends State<ManageHoliday> {
     );
   }
 
-  Widget _buildFormPanel() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
-      child: Column(
+  Widget _buildFormPanel({
+    bool framed = true,
+    bool showActions = true,
+  }) {
+    final content = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
@@ -536,7 +706,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
                           lastDate: DateTime(2035),
                         );
                         if (d != null) {
-                          setState(() {
+                          _updateHolidayFormState(() {
                             _dateFrom = d;
                             if (_dateTo != null && _dateTo!.isBefore(d)) {
                               _dateTo = d;
@@ -582,7 +752,9 @@ class _ManageHolidayState extends State<ManageHoliday> {
                           firstDate: _dateFrom ?? DateTime(2020),
                           lastDate: DateTime(2035),
                         );
-                        if (d != null) setState(() => _dateTo = d);
+                        if (d != null) {
+                          _updateHolidayFormState(() => _dateTo = d);
+                        }
                       },
                       child: InputDecorator(
                         decoration: _inputDecoration(''),
@@ -608,10 +780,14 @@ class _ManageHolidayState extends State<ManageHoliday> {
             children: [
               Checkbox(
                 value: _isRecurring,
-                onChanged: (v) => setState(() => _isRecurring = v ?? false),
+                onChanged: (v) =>
+                    _updateHolidayFormState(() => _isRecurring = v ?? false),
                 activeColor: AppTheme.primaryNavy,
               ),
-              Text('Repeat every year', style: TextStyle(color: _headingColor(context))),
+              Text(
+                'Repeat every year',
+                style: TextStyle(color: _headingColor(context)),
+              ),
             ],
           ),
           const SizedBox(height: 16),
@@ -625,6 +801,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
           ),
           const SizedBox(height: 6),
           DropdownButtonFormField<String>(
+            key: ValueKey(_holidayType),
             initialValue: _holidayType,
             dropdownColor: AppTheme.dashPanelOf(context),
             style: AppTheme.dashFieldTextStyle(context),
@@ -639,7 +816,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
               ),
             ],
             onChanged: (v) {
-              setState(() {
+              _updateHolidayFormState(() {
                 _holidayType = v ?? 'regular';
                 if (_holidayType != 'work_suspension') _coverage = 'whole_day';
               });
@@ -657,6 +834,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
             ),
             const SizedBox(height: 6),
             DropdownButtonFormField<String>(
+              key: ValueKey(_coverage),
               initialValue: _coverage,
               dropdownColor: AppTheme.dashPanelOf(context),
               style: AppTheme.dashFieldTextStyle(context),
@@ -666,7 +844,8 @@ class _ManageHolidayState extends State<ManageHoliday> {
                 DropdownMenuItem(value: 'am_only', child: Text('AM only')),
                 DropdownMenuItem(value: 'pm_only', child: Text('PM only')),
               ],
-              onChanged: (v) => setState(() => _coverage = v ?? 'whole_day'),
+              onChanged: (v) =>
+                  _updateHolidayFormState(() => _coverage = v ?? 'whole_day'),
             ),
           ],
           const SizedBox(height: 16),
@@ -690,44 +869,63 @@ class _ManageHolidayState extends State<ManageHoliday> {
             children: [
               Checkbox(
                 value: _isActive,
-                onChanged: (v) => setState(() => _isActive = v ?? true),
+                onChanged: (v) =>
+                    _updateHolidayFormState(() => _isActive = v ?? true),
                 activeColor: AppTheme.primaryNavy,
               ),
               Text('Active', style: TextStyle(color: _headingColor(context))),
             ],
           ),
-          const SizedBox(height: 24),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              FilledButton.icon(
-                onPressed: _addHoliday,
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Add Holiday'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF4CAF50),
-                  foregroundColor: Colors.white,
+          if (showActions) ...[
+            const SizedBox(height: 24),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                FilledButton.icon(
+                  onPressed: () => _addHoliday(),
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('Add Holiday'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF4CAF50),
+                    foregroundColor: Colors.white,
+                  ),
                 ),
-              ),
-              OutlinedButton.icon(
-                onPressed: _selectedHoliday != null ? _updateHoliday : null,
-                icon: const Icon(Icons.edit_rounded, size: 18),
-                label: const Text('Update'),
-              ),
-              FilledButton.icon(
-                onPressed: _selectedHoliday != null ? _deleteHoliday : null,
-                icon: const Icon(Icons.delete_rounded, size: 18),
-                label: const Text('Delete'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
+                OutlinedButton.icon(
+                  onPressed: _selectedHoliday != null
+                      ? () => _updateHoliday()
+                      : null,
+                  icon: const Icon(Icons.edit_rounded, size: 18),
+                  label: const Text('Update'),
                 ),
-              ),
-            ],
-          ),
+                FilledButton.icon(
+                  onPressed: _selectedHoliday != null
+                      ? () => _deleteHoliday()
+                      : null,
+                  icon: const Icon(Icons.delete_rounded, size: 18),
+                  label: const Text('Delete'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
-      ),
+      );
+
+    if (!framed) {
+      return Padding(
+        padding: const EdgeInsets.all(24),
+        child: content,
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
+      child: content,
     );
   }
 }

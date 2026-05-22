@@ -46,6 +46,7 @@ class _TimelineItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
     return IntrinsicHeight(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -61,7 +62,9 @@ class _TimelineItem extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: event.completed
                         ? AppTheme.primaryNavy
-                        : Colors.grey.shade400,
+                        : (dark
+                            ? const Color(0xFF6B7280)
+                            : Colors.grey.shade400),
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -70,7 +73,7 @@ class _TimelineItem extends StatelessWidget {
                     child: Container(
                       width: 2,
                       margin: const EdgeInsets.symmetric(vertical: 4),
-                      color: Colors.black.withOpacity(0.12),
+                      color: AppTheme.dashHairlineOf(context),
                     ),
                   ),
               ],
@@ -86,7 +89,7 @@ class _TimelineItem extends StatelessWidget {
                   Text(
                     event.label,
                     style: TextStyle(
-                      color: AppTheme.textPrimary,
+                      color: AppTheme.dashTextPrimaryOf(context),
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
                     ),
@@ -95,7 +98,7 @@ class _TimelineItem extends StatelessWidget {
                   Text(
                     '${_formatDateTime(event.dateTime)} · ${event.actor}',
                     style: TextStyle(
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                       fontSize: 12,
                     ),
                   ),
@@ -104,7 +107,7 @@ class _TimelineItem extends StatelessWidget {
                     Text(
                       event.remarks!.trim(),
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 12,
                         height: 1.4,
                       ),

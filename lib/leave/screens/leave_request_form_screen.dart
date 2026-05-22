@@ -538,7 +538,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     final formMaxWidth = 800.0; // Clean, narrow column for digital entry
 
     return Scaffold(
-      backgroundColor: AppTheme.offWhite,
+      backgroundColor: AppTheme.dashCanvasOf(context),
       appBar: AppBar(
         title: const Text('File Leave Request'),
         centerTitle: true,
@@ -559,14 +559,14 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                       style: TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.w700,
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                       ),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       'Select the type of leave and provide the necessary details.',
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 14,
                       ),
                     ),
@@ -753,8 +753,13 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                                   });
                                 },
                               ),
-                              const Expanded(
-                                child: Text('Requested Commutation of Leave'),
+                              Expanded(
+                                child: Text(
+                                  'Requested Commutation of Leave',
+                                  style: TextStyle(
+                                    color: AppTheme.dashTextPrimaryOf(context),
+                                  ),
+                                ),
                               ),
                             ],
                           ),
@@ -819,18 +824,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   Widget _buildCard({required Widget child}) {
     return Container(
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 16),
       child: child,
     );
   }
@@ -847,10 +841,11 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   }
 
   InputDecoration _inputDecoration(String label) {
-    return InputDecoration(
+    return AppTheme.dashInputDecoration(
+      context,
       labelText: label,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      radius: 8,
     );
   }
 
@@ -898,7 +893,13 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         _leaveType == LeaveType.specialPrivilegeLeave) {
       children.addAll([
         const SizedBox(height: 16),
-        Text('Location Option', style: TextStyle(fontWeight: FontWeight.w500)),
+        Text(
+          'Location Option',
+          style: TextStyle(
+            fontWeight: FontWeight.w500,
+            color: AppTheme.dashTextPrimaryOf(context),
+          ),
+        ),
         RadioListTile<LeaveLocationOption>(
           title: const Text('Within Philippines'),
           value: LeaveLocationOption.withinPhilippines,
@@ -926,7 +927,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         const SizedBox(height: 16),
         Text(
           'Nature of Illness',
-          style: TextStyle(fontWeight: FontWeight.w500),
+          style: TextStyle(
+            fontWeight: FontWeight.w500,
+            color: AppTheme.dashTextPrimaryOf(context),
+          ),
         ),
         RadioListTile<SickLeaveNature>(
           title: const Text('In Hospital'),
@@ -964,7 +968,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         const SizedBox(height: 16),
         Text(
           'Purpose of Study Leave',
-          style: TextStyle(fontWeight: FontWeight.w500),
+          style: TextStyle(
+            fontWeight: FontWeight.w500,
+            color: AppTheme.dashTextPrimaryOf(context),
+          ),
         ),
         RadioListTile<StudyLeavePurpose>(
           title: const Text('Completion of Master\'s Degree'),
@@ -1005,7 +1012,13 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       children: [
         Row(
           children: [
-            Text('Attachments', style: TextStyle(fontWeight: FontWeight.w500)),
+            Text(
+              'Attachments',
+              style: TextStyle(
+                fontWeight: FontWeight.w500,
+                color: AppTheme.dashTextPrimaryOf(context),
+              ),
+            ),
             const SizedBox(width: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -1033,14 +1046,17 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
               : 'A supporting document is required for $_selectedLeaveTypeLabel '
                     '(e.g. medical certificate, birth certificate). '
                     'PDF, JPG, PNG (max 10MB).',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+          style: TextStyle(
+            color: AppTheme.dashTextSecondaryOf(context),
+            fontSize: 13,
+          ),
         ),
         if (!_hasLeaveRequestId()) ...[
           const SizedBox(height: 8),
           Text(
             'If you upload before saving manually, a draft is created automatically.',
             style: TextStyle(
-              color: AppTheme.textSecondary,
+              color: AppTheme.dashTextSecondaryOf(context),
               fontSize: 12,
               fontStyle: FontStyle.italic,
             ),
@@ -1057,7 +1073,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                 Expanded(
                   child: Text(
                     current!.attachmentName!,
-                    style: const TextStyle(fontWeight: FontWeight.w500),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w500,
+                      color: AppTheme.dashTextPrimaryOf(context),
+                    ),
                   ),
                 ),
               ],
