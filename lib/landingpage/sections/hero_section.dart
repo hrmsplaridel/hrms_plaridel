@@ -6,10 +6,10 @@ import '../widgets/section_container.dart';
 /// Hero: Title, subtitle, and primary CTA. No registration link.
 /// Opens combined recruitment flow (apply, check status, continue) in one place.
 class HeroSection extends StatelessWidget {
-  const HeroSection({
-    super.key,
-    this.onRecruitmentTap,
-  });
+  const HeroSection({super.key, this.onRecruitmentTap});
+
+  static const String _heroFont = 'NotoSans';
+  static const String _hrmsTitleFont = 'Milanello';
 
   final VoidCallback? onRecruitmentTap;
 
@@ -26,10 +26,7 @@ class HeroSection extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      decoration: BoxDecoration(
-        // Keep a light overlay so background image is still visible.
-        color: Colors.transparent,
-      ),
+      decoration: const BoxDecoration(color: Colors.transparent),
       child: ConstrainedBox(
         constraints: BoxConstraints(minHeight: minHeight),
         child: Stack(
@@ -58,21 +55,6 @@ class HeroSection extends StatelessWidget {
                 ),
               ),
             ),
-            Positioned.fill(
-              child: Container(
-                // Stronger overlay + gradient to keep title/buttons readable.
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Color(0xBFFFFFFF), // more contrast at top
-                      Color(0x80FFFFFF),
-                    ],
-                  ),
-                ),
-              ),
-            ),
             SectionContainer(
               backgroundColor: Colors.transparent,
               padding: EdgeInsets.symmetric(
@@ -81,62 +63,96 @@ class HeroSection extends StatelessWidget {
                 vertical: isWide ? 110 : 80,
               ),
               child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-            Text(
-              'Human Resource Management System (HRMS)',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: AppTheme.primaryNavy,
-                fontSize: isNarrow ? 24 : (isWide ? 40 : 30),
-                fontWeight: FontWeight.w800,
-                height: 1.2,
-                letterSpacing: -0.5,
-                shadows: const [
-                  Shadow(
-                    color: Colors.black26,
-                    blurRadius: 10,
-                    offset: Offset(0, 2),
+                crossAxisAlignment: CrossAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Human Resource Management System',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontFamily: _hrmsTitleFont,
+                      color: AppTheme.primaryNavy,
+                      fontSize: isNarrow ? 26 : (isWide ? 44 : 32),
+                      fontWeight: FontWeight.w400,
+                      height: 1.08,
+                      letterSpacing: isWide ? -0.35 : -0.2,
+                      wordSpacing: isWide ? 1.5 : 0.5,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 640),
+                    child: Text(
+                      'A Digital Platform for Recruitment, Employee Management, and HR Services of the Municipality of Plaridel.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontFamily: _heroFont,
+                        color: Colors.white.withValues(alpha: 0.97),
+                        fontSize: isNarrow ? 15.5 : (isWide ? 19.5 : 17.5),
+                        height: 1.5,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 0.15,
+                        wordSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 40),
+                  Semantics(
+                    button: true,
+                    label: 'Job application',
+                    child: OutlinedButton.icon(
+                      onPressed: onRecruitmentTap,
+                      icon: Icon(
+                        Icons.work_outline_rounded,
+                        size: isNarrow ? 20 : 22,
+                        color: Colors.white,
+                        shadows: const [
+                          Shadow(
+                            color: Color(0x66000000),
+                            blurRadius: 6,
+                            offset: Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                      label: Text(
+                        'Job application',
+                        style: TextStyle(
+                          fontFamily: _heroFont,
+                          fontWeight: FontWeight.w700,
+                          fontSize: isNarrow ? 15 : 16,
+                          letterSpacing: 0.2,
+                          color: Colors.white,
+                          shadows: const [
+                            Shadow(
+                              color: Color(0x66000000),
+                              blurRadius: 8,
+                              offset: Offset(0, 1),
+                            ),
+                          ],
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        backgroundColor: Colors.transparent,
+                        side: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.92),
+                          width: 1.75,
+                        ),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: isNarrow ? 22 : 28,
+                          vertical: isNarrow ? 14 : 16,
+                        ),
+                        minimumSize: Size(0, isNarrow ? 48 : 50),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        elevation: 0,
+                        shadowColor: Colors.transparent,
+                      ),
+                    ),
                   ),
                 ],
               ),
-            ),
-            const SizedBox(height: 20),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 640),
-              child: Text(
-                'A Digital Platform for Recruitment, Employee Management, and HR Services of the Municipality of Plaridel.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: isNarrow ? 15 : (isWide ? 19 : 17),
-                  height: 1.55,
-                ),
-              ),
-            ),
-            const SizedBox(height: 40),
-            FilledButton.icon(
-              onPressed: onRecruitmentTap,
-              icon: const Icon(Icons.work_outline_rounded, size: 22),
-              label: const Text('Job application'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.primaryNavy,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 32,
-                  vertical: 18,
-                ),
-                minimumSize: const Size(0, 52),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                elevation: 2,
-                shadowColor: AppTheme.primaryNavy.withValues(alpha: 0.35),
-              ),
-            ),
-            ],
-          ),
             ),
           ],
         ),

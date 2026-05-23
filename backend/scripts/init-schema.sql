@@ -286,9 +286,20 @@ CREATE TABLE IF NOT EXISTS holidays (
 CREATE TABLE IF NOT EXISTS leave_types (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL UNIQUE,
+  display_name TEXT,
   description TEXT,
   is_active BOOLEAN NOT NULL DEFAULT true,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  employee_can_file BOOLEAN NOT NULL DEFAULT true,
+  admin_only BOOLEAN NOT NULL DEFAULT false,
+  allows_past_dates BOOLEAN NOT NULL DEFAULT true,
+  requires_attachment BOOLEAN NOT NULL DEFAULT false,
+  requires_attachment_when_over_days NUMERIC,
+  max_days NUMERIC,
+  affects_dtr_normally BOOLEAN NOT NULL DEFAULT true,
+  balance_ledger_type TEXT NOT NULL DEFAULT 'others',
+  is_system BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- Seed leave types (names must match Flutter LeaveType enum .value for API lookup).
@@ -309,6 +320,77 @@ VALUES
   ('adoptionLeave', 'Adoption Leave', true),
   ('others', 'Others', true)
 ON CONFLICT (name) DO NOTHING;
+
+UPDATE leave_types
+SET display_name = COALESCE(NULLIF(display_name, ''), description, name),
+    employee_can_file = CASE WHEN name = 'mandatoryForcedLeave' THEN false ELSE true END,
+    admin_only = CASE WHEN name = 'mandatoryForcedLeave' THEN true ELSE false END,
+    allows_past_dates = CASE WHEN name IN ('vacationLeave', 'specialPrivilegeLeave') THEN false ELSE true END,
+    requires_attachment = CASE
+      WHEN name IN (
+        'maternityLeave',
+        'paternityLeave',
+        'soloParentLeave',
+        'studyLeave',
+        'tenDayVawcLeave',
+        'rehabilitationPrivilege',
+        'specialLeaveBenefitsForWomen',
+        'specialEmergencyCalamityLeave',
+        'adoptionLeave',
+        'others'
+      ) THEN true
+      ELSE false
+    END,
+    requires_attachment_when_over_days = CASE WHEN name = 'sickLeave' THEN 5 ELSE NULL END,
+    max_days = CASE
+      WHEN name = 'mandatoryForcedLeave' THEN 5
+      WHEN name = 'maternityLeave' THEN 105
+      WHEN name = 'paternityLeave' THEN 7
+      WHEN name = 'specialPrivilegeLeave' THEN 3
+      WHEN name = 'soloParentLeave' THEN 7
+      WHEN name = 'studyLeave' THEN 180
+      WHEN name = 'tenDayVawcLeave' THEN 10
+      WHEN name = 'rehabilitationPrivilege' THEN 180
+      WHEN name = 'specialLeaveBenefitsForWomen' THEN 60
+      WHEN name = 'specialEmergencyCalamityLeave' THEN 5
+      ELSE NULL
+    END,
+    affects_dtr_normally = true,
+    is_system = name IN (
+      'vacationLeave',
+      'mandatoryForcedLeave',
+      'sickLeave',
+      'maternityLeave',
+      'paternityLeave',
+      'specialPrivilegeLeave',
+      'soloParentLeave',
+      'studyLeave',
+      'tenDayVawcLeave',
+      'rehabilitationPrivilege',
+      'specialLeaveBenefitsForWomen',
+      'specialEmergencyCalamityLeave',
+      'adoptionLeave',
+      'others'
+    ),
+    balance_ledger_type = CASE
+      WHEN name = 'mandatoryForcedLeave' THEN 'vacationLeave'
+      WHEN name IN (
+        'vacationLeave',
+        'sickLeave',
+        'maternityLeave',
+        'paternityLeave',
+        'specialPrivilegeLeave',
+        'soloParentLeave',
+        'studyLeave',
+        'tenDayVawcLeave',
+        'rehabilitationPrivilege',
+        'specialLeaveBenefitsForWomen',
+        'specialEmergencyCalamityLeave',
+        'adoptionLeave',
+        'others'
+      ) THEN name
+      ELSE 'others'
+    END;
 
 -- =========================================
 -- LEAVE REQUESTS

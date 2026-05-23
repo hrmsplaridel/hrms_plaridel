@@ -4,6 +4,13 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
+const {
+  authLoginLimiter,
+  authRegisterLimiter,
+  authPasswordResetLimiter,
+  authTokenLimiter,
+  authPasswordChangeLimiter,
+} = require('../middleware/rateLimiters');
 
 const router = express.Router();
 
@@ -11,6 +18,15 @@ const SALT_ROUNDS = 10;
 // Support JWT_EXPIRATION or legacy JWT_EXPIRY from .env
 const JWT_EXPIRATION = process.env.JWT_EXPIRATION || process.env.JWT_EXPIRY || '15m';
 const JWT_REFRESH_EXPIRATION = process.env.JWT_REFRESH_EXPIRATION || '30d';
+
+async function ensurePersonalInfoColumns() {
+  // Safe, idempotent additions so older DBs don't break /auth/me + PATCH /auth/me.
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS civil_status TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS nationality TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth DATE`);
+}
 
 function hashRefreshToken(token) {
   return crypto.createHash('sha256').update(String(token)).digest('hex');
@@ -61,7 +77,7 @@ async function issueTokensForUser(user, req) {
  * POST /auth/register
  * Body: { email, password, fullName?, role? }
  */
-router.post('/register', async (req, res) => {
+router.post('/register', authRegisterLimiter, async (req, res) => {
   try {
     const { email, password, fullName, role = 'employee' } = req.body;
     if (!email || !password) {
@@ -120,7 +136,7 @@ router.post('/register', async (req, res) => {
  * POST /auth/login
  * Body: { email, password }
  */
-router.post('/login', async (req, res) => {
+router.post('/login', authLoginLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
@@ -171,7 +187,7 @@ router.post('/login', async (req, res) => {
  * Body: { refreshToken: string }
  * Returns new { token, refreshToken } (rotates refresh token).
  */
-router.post('/refresh', async (req, res) => {
+router.post('/refresh', authTokenLimiter, async (req, res) => {
   const raw = req.body?.refreshToken;
   if (!raw || typeof raw !== 'string') {
     return res.status(400).json({ error: 'refreshToken is required' });
@@ -236,7 +252,7 @@ router.post('/refresh', async (req, res) => {
  * Body: { refreshToken: string }
  * Revokes the refresh token row (optional client cleanup).
  */
-router.post('/logout', async (req, res) => {
+router.post('/logout', authTokenLimiter, async (req, res) => {
   const raw = req.body?.refreshToken;
   if (!raw || typeof raw !== 'string') {
     return res.status(400).json({ error: 'refreshToken is required' });
@@ -259,10 +275,21 @@ router.post('/logout', async (req, res) => {
  */
 router.get('/me', authMiddleware, async (req, res) => {
   try {
+    await ensurePersonalInfoColumns();
     const result = await pool.query(
-      `SELECT id, email, role, full_name, avatar_path, is_active,
-              middle_name, suffix, sex, date_of_birth, contact_number, address, created_at
-       FROM users WHERE id = $1`,
+      `SELECT u.id, u.email, u.role, u.full_name, u.avatar_path, u.is_active,
+              u.first_name, u.middle_name, u.last_name, u.suffix,
+              u.sex, u.date_of_birth, u.contact_number,
+              u.address, u.civil_status, u.nationality, u.created_at,
+              u.employee_number, u.date_hired, u.employment_status, u.employment_type,
+              d.name AS department_name,
+              p.name AS position_name
+       FROM users u
+       LEFT JOIN assignments a
+         ON a.employee_id = u.id AND a.is_active = true
+       LEFT JOIN departments d ON d.id = a.department_id
+       LEFT JOIN positions p ON p.id = a.position_id
+       WHERE u.id = $1`,
       [req.user.id]
     );
     const row = result.rows[0];
@@ -276,12 +303,22 @@ router.get('/me', authMiddleware, async (req, res) => {
       full_name: row.full_name,
       avatar_path: row.avatar_path,
       is_active: row.is_active,
+      first_name: row.first_name,
       middle_name: row.middle_name,
+      last_name: row.last_name,
       suffix: row.suffix,
       sex: row.sex,
       date_of_birth: row.date_of_birth,
+      civil_status: row.civil_status,
+      nationality: row.nationality,
       contact_number: row.contact_number,
       address: row.address,
+      employee_number: row.employee_number,
+      date_hired: row.date_hired,
+      employment_status: row.employment_status,
+      employment_type: row.employment_type,
+      department_name: row.department_name,
+      position_name: row.position_name,
       user_metadata: {
         full_name: row.full_name,
         avatar_path: row.avatar_path,
@@ -295,12 +332,65 @@ router.get('/me', authMiddleware, async (req, res) => {
 });
 
 /**
+ * GET /auth/sessions — active refresh-token sessions (no secrets).
+ */
+router.get('/sessions', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, device_info, ip_address, created_at, expires_at
+       FROM auth_refresh_tokens
+       WHERE user_id = $1
+         AND revoked_at IS NULL
+         AND expires_at > now()
+       ORDER BY created_at DESC`,
+      [req.user.id]
+    );
+    res.json({ sessions: result.rows });
+  } catch (err) {
+    console.error('[auth/sessions]', err);
+    res.status(500).json({ error: 'Failed to list sessions' });
+  }
+});
+
+/**
+ * POST /auth/logout-all — revoke every refresh session for this user (other devices).
+ */
+router.post('/logout-all', authMiddleware, async (req, res) => {
+  try {
+    await pool.query(
+      `UPDATE auth_refresh_tokens
+       SET revoked_at = now()
+       WHERE user_id = $1 AND revoked_at IS NULL`,
+      [req.user.id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[auth/logout-all]', err);
+    res.status(500).json({ error: 'Failed to revoke sessions' });
+  }
+});
+
+/**
  * PATCH /auth/me - Update profile (name, contact, avatar_path)
  * Body: { full_name?, contact_number?, avatar_path? }
  */
 router.patch('/me', authMiddleware, async (req, res) => {
   try {
-    const { full_name, contact_number, avatar_path } = req.body;
+    await ensurePersonalInfoColumns();
+    const {
+      first_name,
+      middle_name,
+      last_name,
+      suffix,
+      full_name,
+      date_of_birth,
+      contact_number,
+      address,
+      avatar_path,
+      sex,
+      civil_status,
+      nationality,
+    } = req.body;
     const updates = [];
     const values = [];
     let i = 1;
@@ -313,9 +403,60 @@ router.patch('/me', authMiddleware, async (req, res) => {
       updates.push(`contact_number = $${i++}`);
       values.push(contact_number);
     }
+    if (address !== undefined) {
+      updates.push(`address = $${i++}`);
+      values.push(address);
+    }
     if (avatar_path !== undefined) {
       updates.push(`avatar_path = $${i++}`);
       values.push(avatar_path);
+    }
+    if (sex !== undefined) {
+      updates.push(`sex = $${i++}`);
+      values.push(sex);
+    }
+    if (civil_status !== undefined) {
+      updates.push(`civil_status = $${i++}`);
+      values.push(civil_status);
+    }
+    if (nationality !== undefined) {
+      updates.push(`nationality = $${i++}`);
+      values.push(nationality);
+    }
+    if (first_name !== undefined) {
+      updates.push(`first_name = $${i++}`);
+      values.push(first_name);
+    }
+    if (middle_name !== undefined) {
+      updates.push(`middle_name = $${i++}`);
+      values.push(middle_name);
+    }
+    if (last_name !== undefined) {
+      updates.push(`last_name = $${i++}`);
+      values.push(last_name);
+    }
+    if (suffix !== undefined) {
+      updates.push(`suffix = $${i++}`);
+      values.push(suffix);
+    }
+    if (date_of_birth !== undefined) {
+      updates.push(`date_of_birth = $${i++}`);
+      values.push(date_of_birth);
+    }
+    // If name parts are provided, also keep full_name in sync.
+    if (
+      first_name !== undefined ||
+      middle_name !== undefined ||
+      last_name !== undefined ||
+      suffix !== undefined
+    ) {
+      const fn = typeof first_name === 'string' ? first_name.trim() : '';
+      const mn = typeof middle_name === 'string' ? middle_name.trim() : '';
+      const ln = typeof last_name === 'string' ? last_name.trim() : '';
+      const sx = typeof suffix === 'string' ? suffix.trim() : '';
+      const computed = [fn, mn, ln].filter(Boolean).join(' ') + (sx ? ` ${sx}` : '');
+      updates.push(`full_name = $${i++}`);
+      values.push(computed.trim() || null);
     }
 
     if (updates.length === 0) {
@@ -330,7 +471,9 @@ router.patch('/me', authMiddleware, async (req, res) => {
     );
 
     const result = await pool.query(
-      `SELECT id, email, role, full_name, avatar_path, is_active, contact_number
+      `SELECT id, email, role, full_name, avatar_path, is_active, contact_number,
+              address, sex, civil_status, nationality, date_of_birth,
+              first_name, middle_name, last_name, suffix
        FROM users WHERE id = $1`,
       [req.user.id]
     );
@@ -342,6 +485,15 @@ router.patch('/me', authMiddleware, async (req, res) => {
       full_name: row.full_name,
       avatar_path: row.avatar_path,
       is_active: row.is_active,
+      address: row.address,
+      sex: row.sex,
+      civil_status: row.civil_status,
+      nationality: row.nationality,
+      date_of_birth: row.date_of_birth,
+      first_name: row.first_name,
+      middle_name: row.middle_name,
+      last_name: row.last_name,
+      suffix: row.suffix,
       user_metadata: { full_name: row.full_name, avatar_path: row.avatar_path, phone: row.contact_number },
     });
   } catch (err) {
@@ -354,43 +506,48 @@ router.patch('/me', authMiddleware, async (req, res) => {
  * POST /auth/change-password
  * Body: { current_password, new_password }
  */
-router.post('/change-password', authMiddleware, async (req, res) => {
-  try {
-    const { current_password, new_password } = req.body;
-    if (!current_password || !new_password) {
-      return res.status(400).json({ error: 'Current and new password required' });
+router.post(
+  '/change-password',
+  authMiddleware,
+  authPasswordChangeLimiter,
+  async (req, res) => {
+    try {
+      const { current_password, new_password } = req.body;
+      if (!current_password || !new_password) {
+        return res.status(400).json({ error: 'Current and new password required' });
+      }
+
+      const result = await pool.query(
+        'SELECT password_hash FROM users WHERE id = $1',
+        [req.user.id]
+      );
+      const user = result.rows[0];
+      if (!user) return res.status(404).json({ error: 'User not found' });
+
+      const match = await bcrypt.compare(current_password, user.password_hash);
+      if (!match) {
+        return res.status(401).json({ error: 'Current password is incorrect' });
+      }
+
+      const hash = await bcrypt.hash(new_password, SALT_ROUNDS);
+      await pool.query(
+        'UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2',
+        [hash, req.user.id]
+      );
+      res.json({ message: 'Password updated' });
+    } catch (err) {
+      console.error('[auth/change-password]', err);
+      res.status(500).json({ error: 'Failed to change password' });
     }
-
-    const result = await pool.query(
-      'SELECT password_hash FROM users WHERE id = $1',
-      [req.user.id]
-    );
-    const user = result.rows[0];
-    if (!user) return res.status(404).json({ error: 'User not found' });
-
-    const match = await bcrypt.compare(current_password, user.password_hash);
-    if (!match) {
-      return res.status(401).json({ error: 'Current password is incorrect' });
-    }
-
-    const hash = await bcrypt.hash(new_password, SALT_ROUNDS);
-    await pool.query(
-      'UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2',
-      [hash, req.user.id]
-    );
-    res.json({ message: 'Password updated' });
-  } catch (err) {
-    console.error('[auth/change-password]', err);
-    res.status(500).json({ error: 'Failed to change password' });
   }
-});
+);
 
 /**
  * POST /auth/forgot-password
  * Body: { email }
  * Stub: returns 200 with message. Implement email service (nodemailer, SendGrid, etc.) later.
  */
-router.post('/forgot-password', async (req, res) => {
+router.post('/forgot-password', authPasswordResetLimiter, async (req, res) => {
   const { email } = req.body;
   if (!email) {
     return res.status(400).json({ error: 'Email is required' });

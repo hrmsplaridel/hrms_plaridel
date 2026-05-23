@@ -99,6 +99,7 @@ class LocatorSlipPrint {
         build: (ctx) => pw.Center(
           child: pw.Container(
             width: 760,
+            height: 370,
             decoration: pw.BoxDecoration(border: pw.Border.all(width: 1)),
             padding: const pw.EdgeInsets.fromLTRB(18, 14, 18, 12),
             child: pw.Column(

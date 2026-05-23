@@ -115,18 +115,19 @@ class _TransparencyButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: AppTheme.white,
-      borderRadius: BorderRadius.circular(4),
-      elevation: 1,
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(4),
-        hoverColor: AppTheme.primaryNavy.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(12),
+        hoverColor: AppTheme.primaryNavy.withValues(alpha: 0.06),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(4),
+            color: AppTheme.white,
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(color: AppTheme.lightGray),
+            boxShadow: AppTheme.cardShadow,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,

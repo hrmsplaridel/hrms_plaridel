@@ -46,7 +46,7 @@ Widget _buildRegistrationBadge(bool isActive) {
     decoration: BoxDecoration(
       color: bg,
       borderRadius: BorderRadius.circular(6),
-      border: Border.all(color: fg.withOpacity(0.35)),
+      border: Border.all(color: fg.withValues(alpha: 0.35)),
     ),
     child: Text(
       label,
@@ -78,7 +78,7 @@ Widget _buildOnlineBadge(bool? online, String? ipAddress) {
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: fg.withOpacity(0.35)),
+        border: Border.all(color: fg.withValues(alpha: 0.35)),
       ),
       child: Text(
         label,
@@ -111,7 +111,7 @@ Widget _buildSyncBadge(_BiometricSyncHealth health) {
     decoration: BoxDecoration(
       color: bg,
       borderRadius: BorderRadius.circular(6),
-      border: Border.all(color: fg.withOpacity(0.35)),
+      border: Border.all(color: fg.withValues(alpha: 0.35)),
     ),
     child: Text(
       label,
@@ -437,12 +437,12 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
         ],
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -464,7 +464,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
                       vertical: 12,
                     ),
                     filled: true,
-                    fillColor: AppTheme.lightGray.withOpacity(0.5),
+                    fillColor: AppTheme.lightGray.withValues(alpha: 0.5),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
                       borderSide: BorderSide.none,
@@ -514,10 +514,12 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
                 final health = _biometricSyncHealth(d.lastSyncAt, now);
                 return ListTile(
                   selected: isSelected,
-                  selectedTileColor: AppTheme.primaryNavy.withOpacity(0.08),
+                  selectedTileColor: AppTheme.primaryNavy.withValues(
+                    alpha: 0.08,
+                  ),
                   leading: Icon(
                     Icons.fingerprint_rounded,
-                    color: AppTheme.primaryNavy.withOpacity(0.8),
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.8),
                   ),
                   title: Text(
                     d.name,
@@ -578,12 +580,12 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
         ],
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -606,9 +608,11 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
                 return Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: AppTheme.lightGray.withOpacity(0.4),
+                    color: AppTheme.lightGray.withValues(alpha: 0.4),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.black.withOpacity(0.06)),
+                    border: Border.all(
+                      color: Colors.black.withValues(alpha: 0.06),
+                    ),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

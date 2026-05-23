@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../landingpage/constants/app_theme.dart';
 import '../models/leave_request.dart';
-import '../models/leave_type.dart';
 import 'leave_status_chip.dart';
 
 class AdminRow extends StatelessWidget {
@@ -45,7 +44,7 @@ class AdminRow extends StatelessWidget {
                 _kFlexDepartment,
                 _cell(request.officeDepartment ?? '—'),
               ),
-              _flexCell(_kFlexLeaveType, _cell(request.leaveType.displayName)),
+              _flexCell(_kFlexLeaveType, _cell(request.leaveTypeLabel)),
               _flexCell(_kFlexDateRange, _cell(_rangeText(request))),
               _flexCell(
                 _kFlexDays,

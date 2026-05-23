@@ -242,6 +242,7 @@ function isEmployeeFileable(leaveTypeName, otherPurpose) {
 
 module.exports = {
   LEAVE_TYPE_RULES,
+  SPECIAL_PROCESS_PURPOSES,
   getRule,
   validateEmployeeLeaveRequest,
   isEmployeeFileable,

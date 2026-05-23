@@ -2,9 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 // ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html;
 // ignore: avoid_web_libraries_in_flutter
-import 'dart:ui_web' as ui_web;
 import 'package:url_launcher/url_launcher.dart';
 import '../../data/applicants_profile.dart';
 import '../../data/bi_form.dart';
@@ -30,17 +28,18 @@ import '../widgets/rsp_iframe_preview.dart';
 
 /// RSP module: hub with buttons for each RSP feature (Job Vacancies, Applications & Exam Results).
 class RspAdminContent extends StatefulWidget {
-  const RspAdminContent({super.key, this.onNavigateToSidebarIndex});
+  const RspAdminContent({super.key, this.onOpenCreateAccount});
 
-  /// Switch admin sidebar tab (e.g. index `5` = Create Account below DocuTracker).
-  final ValueChanged<int>? onNavigateToSidebarIndex;
+  /// Switches the admin shell to **Create Account** (sidebar) so the hire form opens.
+  final VoidCallback? onOpenCreateAccount;
 
   @override
   State<RspAdminContent> createState() => _RspAdminContentState();
 }
 
 class _RspAdminContentState extends State<RspAdminContent> {
-  /// 0 = menu, 1 = Job Vacancies, 2 = Applications, … 14 = Turn-Around Time, 15 = Final interview (passed exam)
+  /// 0 = menu, 1 = Job Vacancies, 2 = Applications, … 14 = Turn-Around Time,
+  /// 15 = Final interview (passed exam).
   int _rspSectionIndex = 0;
 
   @override
@@ -61,7 +60,7 @@ class _RspAdminContentState extends State<RspAdminContent> {
           Text(
             'RSP',
             style: TextStyle(
-              color: AppTheme.textPrimary,
+              color: AppTheme.dashTextPrimaryOf(context),
               fontSize: 24,
               fontWeight: FontWeight.w800,
               letterSpacing: -0.3,
@@ -71,15 +70,13 @@ class _RspAdminContentState extends State<RspAdminContent> {
           Text(
             'Recruitment, Selection, and Placement. Choose a feature below.',
             style: TextStyle(
-              color: AppTheme.textSecondary,
+              color: AppTheme.dashTextSecondaryOf(context),
               fontSize: 14,
               height: 1.4,
             ),
           ),
           const SizedBox(height: 24),
-          Wrap(
-            spacing: 16,
-            runSpacing: 16,
+          FeatureCardGrid(
             children: [
               FeatureCard(
                 title: 'Job Vacancies (Landing Page)',
@@ -216,7 +213,7 @@ class _RspAdminContentState extends State<RspAdminContent> {
           const _RspTurnAroundTimeSection()
         else if (_rspSectionIndex == 15)
           RspFinalInterviewScheduler(
-            onGoToCreateAccount: () => widget.onNavigateToSidebarIndex?.call(5),
+            onGoToCreateAccount: widget.onOpenCreateAccount,
           )
         else
           const SizedBox.shrink(),
@@ -482,7 +479,8 @@ class _RspExamTimeLimitEditor extends StatefulWidget {
   final String examType;
 
   @override
-  State<_RspExamTimeLimitEditor> createState() => _RspExamTimeLimitEditorState();
+  State<_RspExamTimeLimitEditor> createState() =>
+      _RspExamTimeLimitEditorState();
 }
 
 class _RspExamTimeLimitEditorState extends State<_RspExamTimeLimitEditor> {
@@ -517,7 +515,9 @@ class _RspExamTimeLimitEditorState extends State<_RspExamTimeLimitEditor> {
     if (parsed == null || parsed < 0 || parsed > 24 * 60) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Enter minutes between 0 (no limit) and 1440 (24 hours).'),
+          content: Text(
+            'Enter minutes between 0 (no limit) and 1440 (24 hours).',
+          ),
         ),
       );
       return;
@@ -529,9 +529,9 @@ class _RspExamTimeLimitEditorState extends State<_RspExamTimeLimitEditor> {
         parsed * 60,
       );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Time limit saved.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Time limit saved.')));
       }
     } catch (e) {
       if (mounted) {
@@ -618,7 +618,9 @@ class _RspExamTimeLimitEditorState extends State<_RspExamTimeLimitEditor> {
                               ? const SizedBox(
                                   width: 18,
                                   height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
                                 )
                               : const Text('Save limit'),
                         ),
@@ -5495,6 +5497,410 @@ class _ComparativeAssessmentList extends StatelessWidget {
   }
 }
 
+Widget _rspSectionHeader(
+  BuildContext context, {
+  required IconData icon,
+  required String title,
+  required String subtitle,
+}) {
+  return Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              AppTheme.primaryNavy.withValues(alpha: 0.14),
+              AppTheme.primaryNavyLight.withValues(alpha: 0.08),
+            ],
+          ),
+          border: Border.all(
+            color: AppTheme.primaryNavy.withValues(alpha: 0.2),
+          ),
+        ),
+        child: Icon(icon, size: 26, color: AppTheme.primaryNavy),
+      ),
+      const SizedBox(width: 16),
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: TextStyle(
+                color: AppTheme.dashTextPrimaryOf(context),
+                fontSize: 26,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.4,
+                height: 1.15,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              subtitle,
+              style: TextStyle(
+                color: AppTheme.dashTextSecondaryOf(context),
+                fontSize: 14.5,
+                height: 1.45,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ],
+  );
+}
+
+Widget _rspSectionToolbar(
+  BuildContext context, {
+  required bool loading,
+  required String addLabel,
+  required VoidCallback onAdd,
+  required VoidCallback onRefresh,
+  required VoidCallback onViewRecords,
+}) {
+  final narrow = MediaQuery.sizeOf(context).width < 720;
+  final addBtn = FilledButton.icon(
+    onPressed: loading ? null : onAdd,
+    icon: const Icon(Icons.add_rounded, size: 20),
+    label: Text(addLabel),
+    style: FilledButton.styleFrom(
+      backgroundColor: AppTheme.primaryNavy,
+      foregroundColor: Colors.white,
+      elevation: 0,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ),
+  );
+  final refreshBtn = OutlinedButton.icon(
+    onPressed: loading ? null : onRefresh,
+    icon: const Icon(Icons.refresh_rounded, size: 20),
+    label: const Text('Refresh'),
+    style: OutlinedButton.styleFrom(
+      foregroundColor: AppTheme.primaryNavy,
+      side: BorderSide(color: AppTheme.primaryNavy.withValues(alpha: 0.45)),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ),
+  );
+  final recordsBtn = OutlinedButton.icon(
+    onPressed: loading ? null : onViewRecords,
+    icon: const Icon(Icons.folder_open_outlined, size: 20),
+    label: const Text('View records'),
+    style: OutlinedButton.styleFrom(
+      foregroundColor: AppTheme.primaryNavy,
+      side: BorderSide(color: AppTheme.primaryNavy.withValues(alpha: 0.45)),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ),
+  );
+
+  return Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: AppTheme.dashMutedSurfaceOf(context),
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: AppTheme.dashHairlineOf(context)),
+    ),
+    child: narrow
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              addBtn,
+              const SizedBox(height: 10),
+              refreshBtn,
+              const SizedBox(height: 10),
+              recordsBtn,
+            ],
+          )
+        : Row(
+            children: [
+              addBtn,
+              const Spacer(),
+              refreshBtn,
+              const SizedBox(width: 10),
+              recordsBtn,
+            ],
+          ),
+  );
+}
+
+Widget _rspEmptyPlaceholder({
+  required IconData icon,
+  required String title,
+  required String subtitle,
+}) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 32),
+    child: Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              icon,
+              size: 40,
+              color: AppTheme.primaryNavy.withValues(alpha: 0.75),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            style: const TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 14,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _RspSavedEntryCard extends StatelessWidget {
+  const _RspSavedEntryCard({
+    required this.title,
+    required this.subtitle,
+    required this.meta,
+    required this.onView,
+    required this.onEdit,
+    required this.onPrint,
+    required this.onDownloadPdf,
+    required this.onDelete,
+  });
+
+  final String title;
+  final String subtitle;
+  final String meta;
+  final VoidCallback onView;
+  final VoidCallback onEdit;
+  final Future<void> Function() onPrint;
+  final Future<void> Function() onDownloadPdf;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final hairline = AppTheme.dashHairlineOf(context);
+    final muted = AppTheme.dashMutedSurfaceOf(context);
+    final panel = AppTheme.dashPanelOf(context);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: panel,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: hairline),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primaryNavy.withValues(alpha: 0.05),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            height: 4,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: TextStyle(
+                              color: AppTheme.dashTextPrimaryOf(context),
+                              fontWeight: FontWeight.w800,
+                              fontSize: 17,
+                              letterSpacing: -0.2,
+                              height: 1.2,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            subtitle,
+                            style: TextStyle(
+                              color: AppTheme.dashTextSecondaryOf(context),
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w600,
+                              height: 1.3,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(999),
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                        border: Border.all(
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.22),
+                        ),
+                      ),
+                      child: Text(
+                        meta,
+                        style: const TextStyle(
+                          color: AppTheme.primaryNavy,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Divider(height: 1, color: hairline),
+                const SizedBox(height: 12),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: onView,
+                          icon: const Icon(Icons.visibility_outlined, size: 18),
+                          label: const Text('View'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTheme.primaryNavy,
+                            side: BorderSide(
+                              color: AppTheme.primaryNavy.withValues(
+                                alpha: 0.45,
+                              ),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: onEdit,
+                          icon: const Icon(Icons.edit_outlined, size: 18),
+                          label: const Text('Edit'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTheme.primaryNavy,
+                            side: BorderSide(
+                              color: AppTheme.primaryNavy.withValues(
+                                alpha: 0.45,
+                              ),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Spacer(),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        IconButton(
+                          onPressed: () => onPrint(),
+                          icon: const Icon(Icons.print_rounded, size: 20),
+                          tooltip: 'Print',
+                          style: IconButton.styleFrom(
+                            backgroundColor: muted,
+                            foregroundColor: AppTheme.primaryNavy,
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => onDownloadPdf(),
+                          icon: const Icon(
+                            Icons.picture_as_pdf_rounded,
+                            size: 20,
+                          ),
+                          tooltip: 'Download PDF',
+                          style: IconButton.styleFrom(
+                            backgroundColor: muted,
+                            foregroundColor: AppTheme.primaryNavy,
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: onDelete,
+                          icon: Icon(
+                            Icons.delete_outline_rounded,
+                            size: 18,
+                            color: Colors.red.shade700,
+                          ),
+                          label: Text(
+                            'Delete',
+                            style: TextStyle(
+                              color: Colors.red.shade700,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// RSP: Promotion Certification / Screening — form only, no names/values pre-filled.
 class _RspPromotionCertificationSection extends StatefulWidget {
   const _RspPromotionCertificationSection();
@@ -5652,20 +6058,23 @@ class _RspPromotionCertificationSectionState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Promotion Certification / Screening',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
+        _rspSectionHeader(
+          context,
+          icon: Icons.verified_outlined,
+          title: 'Promotion Certification / Screening',
+          subtitle:
+              'Certification that candidate(s) have been screened and found qualified for promotion. Form only—no names or values pre-filled.',
         ),
-        const SizedBox(height: 8),
-        Text(
-          'Certification that candidate(s) have been screened and found qualified for promotion. Form only—no names or values pre-filled.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+        const SizedBox(height: 22),
+        _rspSectionToolbar(
+          context,
+          loading: _loading,
+          addLabel: 'Add certification',
+          onAdd: _startNew,
+          onRefresh: _load,
+          onViewRecords: _openSavedRecordsBrowser,
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
         if (_editing != null) ...[
           _PromotionCertificationEditor(
             key: ValueKey(_editing?.id ?? 'new'),
@@ -5675,48 +6084,19 @@ class _RspPromotionCertificationSectionState
             onPrint: _printPc,
             onDownloadPdf: _downloadPc,
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
         ],
-        Row(
-          children: [
-            FilledButton.icon(
-              onPressed: _loading ? null : _startNew,
-              icon: const Icon(Icons.add_rounded, size: 20),
-              label: const Text('Add certification'),
-            ),
-            const SizedBox(width: 12),
-            TextButton.icon(
-              onPressed: _loading ? null : _load,
-              icon: const Icon(Icons.refresh_rounded, size: 20),
-              label: const Text('Refresh'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-            const SizedBox(width: 4),
-            TextButton.icon(
-              onPressed: _loading ? null : _openSavedRecordsBrowser,
-              icon: const Icon(Icons.folder_open_outlined, size: 20),
-              label: const Text('View records'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
         if (_loading)
           const Padding(
-            padding: EdgeInsets.all(24),
+            padding: EdgeInsets.symmetric(vertical: 32),
             child: Center(child: CircularProgressIndicator()),
           )
         else if (_entries.isEmpty)
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text(
-              'No certifications yet. Tap "Add certification" to add one.',
-              style: TextStyle(color: AppTheme.textSecondary),
-            ),
+          _rspEmptyPlaceholder(
+            icon: Icons.verified_outlined,
+            title: 'No certifications yet',
+            subtitle:
+                'Tap "Add certification" to create a Promotion Certification / Screening form.',
           )
         else
           _PromotionCertificationList(
@@ -5890,66 +6270,109 @@ class _PromotionCertificationEditorState
     widget.onSave(_buildCurrentEntry());
   }
 
+  Widget _pcSectionLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Text(
+        text.toUpperCase(),
+        style: TextStyle(
+          color: AppTheme.primaryNavy.withValues(alpha: 0.85),
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.65,
+          height: 1.2,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final ro = widget.readOnly;
+    final hairline = AppTheme.dashHairlineOf(context);
+    final muted = AppTheme.dashMutedSurfaceOf(context);
+
     return Container(
-      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: hairline),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primaryNavy.withValues(alpha: 0.04),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const RspFormHeader(
-              formTitle: 'Promotion Certification / Screening',
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Position for promotion:',
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-            ),
-            const SizedBox(height: 8),
-            RspSpacedOutlineField(
-              child: TextFormField(
-                controller: _position,
-                readOnly: ro,
-                decoration: rspUnderlinedField(''),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            height: 4,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
               ),
             ),
-            const SizedBox(height: rspFormSectionGap),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Text(
-                    'Candidates (name + 5 columns)',
-                    style: TextStyle(
-                      color: AppTheme.primaryNavy,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
+          ),
+          Padding(
+            padding: const EdgeInsets.all(24),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const RspFormHeader(
+                    formTitle: 'Promotion Certification / Screening',
+                  ),
+                  const SizedBox(height: 20),
+                  _pcSectionLabel('Position for promotion'),
+                  RspSpacedOutlineField(
+                    child: TextFormField(
+                      controller: _position,
+                      readOnly: ro,
+                      decoration: rspUnderlinedField(''),
                     ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
                   ),
-                ),
-                if (!ro) ...[
-                  const SizedBox(width: 8),
-                  TextButton.icon(
-                    onPressed: _addRow,
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Add row'),
+                  const SizedBox(height: rspFormSectionGap),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(child: _pcSectionLabel('Candidates (name + 5 columns)')),
+                      if (!ro)
+                        OutlinedButton.icon(
+                          onPressed: _addRow,
+                          icon: const Icon(Icons.add_rounded, size: 18),
+                          label: const Text('Add row'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTheme.primaryNavy,
+                            side: BorderSide(
+                              color: AppTheme.primaryNavy.withValues(alpha: 0.45),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
-                ],
-              ],
-            ),
-            const SizedBox(height: 14),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
+                  const SizedBox(height: 8),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: muted,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: hairline),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: DataTable(
                 columns: const [
                   DataColumn(label: Text('Name')),
                   DataColumn(label: Text('1')),
@@ -6039,24 +6462,44 @@ class _PromotionCertificationEditorState
                     ],
                   );
                 }),
-              ),
-            ),
-            const SizedBox(height: rspFormSectionGap),
-            const Text(
-              'We hereby certify that the above candidate(s) have been screened and found to be qualified for promotion to the above position.',
-              style: TextStyle(fontSize: 13, fontStyle: FontStyle.italic, height: 1.45),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              'Date of certification',
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Wrap(
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: rspFormSectionGap),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppTheme.sectionAlt.withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: hairline),
+                    ),
+                    child: const Text(
+                      'We hereby certify that the above candidate(s) have been screened and found to be qualified for promotion to the above position.',
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontStyle: FontStyle.italic,
+                        height: 1.5,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: rspFormSectionGap),
+                  _pcSectionLabel('Date of certification'),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: muted,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: hairline),
+                    ),
+                    child: Wrap(
               crossAxisAlignment: WrapCrossAlignment.center,
               spacing: 6,
               runSpacing: 12,
@@ -6120,57 +6563,101 @@ class _PromotionCertificationEditorState
                     height: 1.35,
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: rspFormSectionGap),
-            Text(
-              'Signatory (e.g. Secretariat)',
-              style: TextStyle(
-                color: AppTheme.primaryNavy,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            _field(_signName, 'Name'),
-            _field(_signTitle, 'Title'),
-            const SizedBox(height: 24),
-            if (!ro) ...[
-              Row(
-                children: [
-                  FilledButton(onPressed: _save, child: const Text('Save')),
-                  const SizedBox(width: 16),
-                  TextButton(
-                    onPressed: widget.onCancel,
-                    child: const Text('Cancel'),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                    icon: const Icon(Icons.print_rounded),
-                    tooltip: 'Print',
                   ),
-                  IconButton(
-                    onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
-                    icon: const Icon(Icons.picture_as_pdf_rounded),
-                    tooltip: 'Download PDF',
-                  ),
+                  const SizedBox(height: rspFormSectionGap),
+                  _pcSectionLabel('Signatory (e.g. Secretariat)'),
+                  _field(_signName, 'Name'),
+                  _field(_signTitle, 'Title'),
+                  const SizedBox(height: 24),
+                  if (!ro) ...[
+                    Divider(height: 1, color: hairline),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        FilledButton(
+                          onPressed: _save,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppTheme.primaryNavy,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 22,
+                              vertical: 14,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text(
+                            'Save',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        OutlinedButton(
+                          onPressed: widget.onCancel,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTheme.primaryNavy,
+                            side: BorderSide(
+                              color: AppTheme.primaryNavy.withValues(alpha: 0.45),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 18,
+                              vertical: 14,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text('Cancel'),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          onPressed: () => widget.onPrint(_buildCurrentEntry()),
+                          icon: const Icon(Icons.print_rounded),
+                          tooltip: 'Print',
+                          style: IconButton.styleFrom(
+                            backgroundColor: muted,
+                            foregroundColor: AppTheme.primaryNavy,
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () =>
+                              widget.onDownloadPdf(_buildCurrentEntry()),
+                          icon: const Icon(Icons.picture_as_pdf_rounded),
+                          tooltip: 'Download PDF',
+                          style: IconButton.styleFrom(
+                            backgroundColor: muted,
+                            foregroundColor: AppTheme.primaryNavy,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ] else ...[
+                    if (widget.entry.createdAt != null)
+                      Text(
+                        'Created: ${widget.entry.createdAt!.toLocal()}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                    if (widget.entry.updatedAt != null)
+                      Text(
+                        'Last updated: ${widget.entry.updatedAt!.toLocal()}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                  ],
                 ],
               ),
-            ] else ...[
-              if (widget.entry.createdAt != null)
-                Text(
-                  'Created: ${widget.entry.createdAt!.toLocal()}',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
-                ),
-              if (widget.entry.updatedAt != null)
-                Text(
-                  'Last updated: ${widget.entry.updatedAt!.toLocal()}',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
-                ),
-            ],
-          ],
-        ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -6201,98 +6688,67 @@ class _PromotionCertificationList extends StatelessWidget {
   final Future<void> Function(PromotionCertificationEntry) onPrint;
   final Future<void> Function(PromotionCertificationEntry) onDownloadPdf;
 
+  Future<void> _confirmDelete(
+    BuildContext context,
+    PromotionCertificationEntry e,
+  ) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete?'),
+        content: const Text('This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && e.id != null) onDelete(e.id!);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('Position')),
-          DataColumn(label: Text('Candidates')),
-          DataColumn(label: Text('Actions')),
-        ],
-        rows: entries
-            .map(
-              (e) => DataRow(
-                cells: [
-                  DataCell(Text(e.positionForPromotion ?? 'â€”')),
-                  DataCell(Text('${e.candidates.length}')),
-                  DataCell(
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        TextButton(
-                          onPressed: () => showReadOnlySavedEntryDialog(
-                            context,
-                            title: 'Saved promotion certification',
-                            previewBuilder: () => _PromotionCertificationEditor(
-                              readOnly: true,
-                              entry: e,
-                              onSave: (_) {},
-                              onCancel: () {},
-                              onPrint: (_) async {},
-                              onDownloadPdf: (_) async {},
-                            ),
-                            contentWidth: 960,
-                          ),
-                          child: const Text('View'),
-                        ),
-                        TextButton(
-                          onPressed: () => onEdit(e),
-                          child: const Text('Edit'),
-                        ),
-                        IconButton(
-                          onPressed: () => onPrint(e),
-                          icon: const Icon(Icons.print_rounded, size: 20),
-                          tooltip: 'Print',
-                        ),
-                        IconButton(
-                          onPressed: () => onDownloadPdf(e),
-                          icon: const Icon(
-                            Icons.picture_as_pdf_rounded,
-                            size: 20,
-                          ),
-                          tooltip: 'Download PDF',
-                        ),
-                        TextButton(
-                          onPressed: () async {
-                            final ok = await showDialog<bool>(
-                              context: context,
-                              builder: (ctx) => AlertDialog(
-                                title: const Text('Delete?'),
-                                content: const Text('This cannot be undone.'),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () =>
-                                        Navigator.of(ctx).pop(false),
-                                    child: const Text('Cancel'),
-                                  ),
-                                  FilledButton(
-                                    onPressed: () =>
-                                        Navigator.of(ctx).pop(true),
-                                    style: FilledButton.styleFrom(
-                                      backgroundColor: Colors.red,
-                                    ),
-                                    child: const Text('Delete'),
-                                  ),
-                                ],
-                              ),
-                            );
-                            if (ok == true && e.id != null) onDelete(e.id!);
-                          },
-                          child: const Text(
-                            'Delete',
-                            style: TextStyle(color: Colors.red),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            )
-            .toList(),
-      ),
+    return ListView.separated(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: entries.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 12),
+      itemBuilder: (context, index) {
+        final e = entries[index];
+        final pos = e.positionForPromotion?.trim().isNotEmpty == true
+            ? e.positionForPromotion!
+            : 'No position';
+        return _RspSavedEntryCard(
+          title: pos,
+          subtitle: 'Promotion certification',
+          meta:
+              '${e.candidates.length} candidate${e.candidates.length == 1 ? '' : 's'}',
+          onView: () => showReadOnlySavedEntryDialog(
+            context,
+            title: 'Saved promotion certification',
+            previewBuilder: () => _PromotionCertificationEditor(
+              readOnly: true,
+              entry: e,
+              onSave: (_) {},
+              onCancel: () {},
+              onPrint: (_) async {},
+              onDownloadPdf: (_) async {},
+            ),
+            contentWidth: 960,
+          ),
+          onEdit: () => onEdit(e),
+          onPrint: () => onPrint(e),
+          onDownloadPdf: () => onDownloadPdf(e),
+          onDelete: () => _confirmDelete(context, e),
+        );
+      },
     );
   }
 }
@@ -7888,18 +8344,27 @@ class _TurnAroundTimeList extends StatelessWidget {
   }
 }
 
-/// One vacancy form entry (headline + body controllers).
+/// One vacancy form entry (headline + education / experience / training).
 class _VacancyFormItem {
   _VacancyFormItem()
     : headline = TextEditingController(),
-      body = TextEditingController(),
+      education = TextEditingController(),
+      experience = TextEditingController(),
+      training = TextEditingController(),
+      closingDate = TextEditingController(),
       maxApplicants = TextEditingController();
   final TextEditingController headline;
-  final TextEditingController body;
+  final TextEditingController education;
+  final TextEditingController experience;
+  final TextEditingController training;
+  final TextEditingController closingDate;
   final TextEditingController maxApplicants;
   void dispose() {
     headline.dispose();
-    body.dispose();
+    education.dispose();
+    experience.dispose();
+    training.dispose();
+    closingDate.dispose();
     maxApplicants.dispose();
   }
 }
@@ -7916,7 +8381,29 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
   bool _loading = true;
   bool _hasVacancies = true;
   final List<_VacancyFormItem> _vacancies = [];
+
+  /// Parallel to [_vacancies]: when false, only the header row is shown.
+  final List<bool> _vacancyExpanded = [];
   bool _saving = false;
+
+  String _vacancyEntrySummary(_VacancyFormItem v) {
+    final h = v.headline.text.trim();
+    if (h.isNotEmpty) {
+      return h.length > 52 ? '${h.substring(0, 52)}…' : h;
+    }
+    final parts = <String>[
+      v.education.text.trim(),
+      v.experience.text.trim(),
+      v.training.text.trim(),
+    ].where((s) => s.isNotEmpty).toList();
+    if (parts.isNotEmpty) {
+      final joined = parts.join(' · ');
+      return joined.length > 64 ? '${joined.substring(0, 64)}…' : joined;
+    }
+    final m = v.maxApplicants.text.trim();
+    if (m.isNotEmpty) return 'Max applicants: $m';
+    return 'No headline yet — expand to edit';
+  }
 
   @override
   void initState() {
@@ -7928,15 +8415,32 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
         for (final v in a.vacancies) {
           final item = _VacancyFormItem();
           item.headline.text = v.headline ?? '';
-          item.body.text = v.body ?? '';
-          item.maxApplicants.text =
-              v.maxApplicants != null ? '${v.maxApplicants}' : '';
+          item.education.text = v.education ?? '';
+          item.experience.text = v.experience ?? '';
+          item.training.text = v.training ?? '';
+          item.closingDate.text = v.closingDate != null
+              ? '${v.closingDate!.year.toString().padLeft(4, '0')}-${v.closingDate!.month.toString().padLeft(2, '0')}-${v.closingDate!.day.toString().padLeft(2, '0')}'
+              : '';
+          if (item.education.text.isEmpty &&
+              item.experience.text.isEmpty &&
+              item.training.text.isEmpty) {
+            final legacy = v.body?.trim();
+            if (legacy != null && legacy.isNotEmpty) {
+              item.education.text = legacy;
+            }
+          }
+          item.maxApplicants.text = v.maxApplicants != null
+              ? '${v.maxApplicants}'
+              : '';
           next.add(item);
         }
       } else {
         final item = _VacancyFormItem();
         item.headline.text = a.headline ?? '';
-        item.body.text = a.body ?? '';
+        final legacy = a.body?.trim();
+        if (legacy != null && legacy.isNotEmpty) {
+          item.education.text = legacy;
+        }
         next.add(item);
       }
       if (mounted) {
@@ -7944,6 +8448,9 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
           ..clear()
           ..addAll(next);
         setState(() {
+          _vacancyExpanded
+            ..clear()
+            ..addAll(List<bool>.filled(_vacancies.length, true));
           _loading = false;
           _hasVacancies = a.hasVacancies;
         });
@@ -7960,7 +8467,10 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
   }
 
   void _addVacancy() {
-    setState(() => _vacancies.add(_VacancyFormItem()));
+    setState(() {
+      _vacancies.add(_VacancyFormItem());
+      _vacancyExpanded.add(true);
+    });
   }
 
   void _removeVacancy(int index) {
@@ -7968,6 +8478,9 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
     setState(() {
       _vacancies[index].dispose();
       _vacancies.removeAt(index);
+      if (index < _vacancyExpanded.length) {
+        _vacancyExpanded.removeAt(index);
+      }
     });
   }
 
@@ -8002,25 +8515,30 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
-      final list = _vacancies
-          .map(
-            (v) {
-              final rawMax = v.maxApplicants.text.trim();
-              int? maxParsed;
-              if (rawMax.isNotEmpty) {
-                maxParsed = int.tryParse(rawMax);
-                if (maxParsed != null && maxParsed < 1) maxParsed = null;
-              }
-              return JobVacancyItem(
-                headline: v.headline.text.trim().isEmpty
-                    ? null
-                    : v.headline.text.trim(),
-                body: v.body.text.trim().isEmpty ? null : v.body.text.trim(),
-                maxApplicants: maxParsed,
-              );
-            },
-          )
-          .toList();
+      final list = _vacancies.map((v) {
+        final rawMax = v.maxApplicants.text.trim();
+        int? maxParsed;
+        if (rawMax.isNotEmpty) {
+          maxParsed = int.tryParse(rawMax);
+          if (maxParsed != null && maxParsed < 1) maxParsed = null;
+        }
+        final ed = v.education.text.trim();
+        final ex = v.experience.text.trim();
+        final tr = v.training.text.trim();
+        final cdRaw = v.closingDate.text.trim();
+        final cd = cdRaw.isNotEmpty ? DateTime.tryParse(cdRaw) : null;
+        return JobVacancyItem(
+          headline: v.headline.text.trim().isEmpty
+              ? null
+              : v.headline.text.trim(),
+          body: null,
+          education: ed.isEmpty ? null : ed,
+          experience: ex.isEmpty ? null : ex,
+          training: tr.isEmpty ? null : tr,
+          closingDate: cd,
+          maxApplicants: maxParsed,
+        );
+      }).toList();
       final a = JobVacancyAnnouncement(
         hasVacancies: _hasVacancies,
         headline: list.isNotEmpty ? list.first.headline : null,
@@ -8048,299 +8566,811 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
     }
   }
 
+  InputDecoration _vacancyInput(
+    BuildContext context, {
+    required String hint,
+    Widget? suffixIcon,
+  }) {
+    return AppTheme.dashInputDecoration(
+      context,
+      hintText: hint,
+      suffixIcon: suffixIcon,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+    );
+  }
+
+  Widget _vacancyFieldLabel(BuildContext context, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        text.toUpperCase(),
+        style: TextStyle(
+          color: AppTheme.dashTextSecondaryOf(context),
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.65,
+          height: 1.2,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final hairline = AppTheme.dashHairlineOf(context);
+    final panel = AppTheme.dashPanelOf(context);
+    final muted = AppTheme.dashMutedSurfaceOf(context);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Job Vacancies Announcement',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppTheme.primaryNavy.withValues(alpha: 0.14),
+                    AppTheme.primaryNavyLight.withValues(alpha: 0.08),
+                  ],
+                ),
+                border: Border.all(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.2),
+                ),
+              ),
+              child: const Icon(
+                Icons.work_outline_rounded,
+                color: AppTheme.primaryNavy,
+                size: 26,
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Job Vacancies Announcement',
+                    style: TextStyle(
+                      color: AppTheme.dashTextPrimaryOf(context),
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.4,
+                      height: 1.15,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Control what appears in the Job Vacancies section on the landing page. Add multiple entries when you have more than one position.',
+                    style: TextStyle(
+                      color: AppTheme.dashTextSecondaryOf(context),
+                      fontSize: 14,
+                      height: 1.5,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 8),
-        Text(
-          'Control what appears in the Job Vacancies section on the landing page. Add multiple entries when you have more than one position.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-        ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 28),
         Container(
-          padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            color: panel,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: hairline),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
+                color: AppTheme.primaryNavy.withValues(alpha: 0.06),
+                blurRadius: 32,
+                offset: const Offset(0, 14),
+              ),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
               ),
             ],
           ),
-          child: _loading
-              ? const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(32),
-                    child: CircularProgressIndicator(),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                height: 4,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
                   ),
-                )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'Accepting applications',
-                            style: TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 28),
+                child: _loading
+                    ? const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(32),
+                          child: CircularProgressIndicator(),
+                        ),
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(18),
+                            decoration: BoxDecoration(
+                              color: muted,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: _hasVacancies
+                                    ? AppTheme.primaryNavy.withValues(
+                                        alpha: 0.28,
+                                      )
+                                    : hairline,
+                                width: _hasVacancies ? 1.5 : 1,
+                              ),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  width: 44,
+                                  height: 44,
+                                  decoration: BoxDecoration(
+                                    color: panel,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: hairline),
+                                  ),
+                                  child: Icon(
+                                    _hasVacancies
+                                        ? Icons.campaign_rounded
+                                        : Icons.pause_circle_outline_rounded,
+                                    color: _hasVacancies
+                                        ? AppTheme.primaryNavy
+                                        : AppTheme.dashTextSecondaryOf(
+                                            context,
+                                          ),
+                                    size: 24,
+                                  ),
+                                ),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              'Accepting applications',
+                                              style: TextStyle(
+                                                color: AppTheme.dashTextPrimaryOf(
+                                                  context,
+                                                ),
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w700,
+                                                letterSpacing: -0.15,
+                                              ),
+                                            ),
+                                          ),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 10,
+                                              vertical: 4,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: _hasVacancies
+                                                  ? AppTheme.primaryNavy
+                                                      .withValues(alpha: 0.12)
+                                                  : AppTheme.dashTextSecondaryOf(
+                                                      context,
+                                                    ).withValues(alpha: 0.1),
+                                              borderRadius:
+                                                  BorderRadius.circular(20),
+                                            ),
+                                            child: Text(
+                                              _hasVacancies ? 'Hiring' : 'Closed',
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w800,
+                                                letterSpacing: 0.3,
+                                                color: _hasVacancies
+                                                    ? AppTheme.primaryNavy
+                                                    : AppTheme.dashTextSecondaryOf(
+                                                        context,
+                                                      ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        'When ON, the landing page shows that you are hiring. When OFF, it shows no vacancies.',
+                                        style: TextStyle(
+                                          color: AppTheme.dashTextSecondaryOf(
+                                            context,
+                                          ),
+                                          fontSize: 13,
+                                          height: 1.45,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Switch(
+                                  value: _hasVacancies,
+                                  onChanged: (v) =>
+                                      setState(() => _hasVacancies = v),
+                                  activeTrackColor: AppTheme.primaryNavy
+                                      .withValues(alpha: 0.45),
+                                  activeThumbColor: AppTheme.primaryNavy,
+                                ),
+                              ],
                             ),
                           ),
-                        ),
-                        Switch(
-                          value: _hasVacancies,
-                          onChanged: (v) => setState(() => _hasVacancies = v),
-                          activeTrackColor: AppTheme.primaryNavy.withOpacity(
-                            0.5,
-                          ),
-                          activeThumbColor: AppTheme.primaryNavy,
-                        ),
-                      ],
-                    ),
-                    Text(
-                      'When ON, the landing page shows that you are hiring. When OFF, it shows no vacancies.',
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(height: 28),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Job vacancy entries',
-                          style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        FilledButton.icon(
-                          onPressed: _addVacancy,
-                          icon: const Icon(Icons.add_rounded, size: 20),
-                          label: const Text('Add new vacancy'),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: AppTheme.primaryNavy,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 12,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    ...List.generate(_vacancies.length, (i) {
-                      final v = _vacancies[i];
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 24),
-                        child: Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            color: AppTheme.offWhite.withOpacity(0.6),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: Colors.black.withOpacity(0.06),
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
+                          const SizedBox(height: 28),
+                          Divider(height: 1, color: hairline),
+                          const SizedBox(height: 24),
+                          LayoutBuilder(
+                            builder: (context, constraints) {
+                              final stackHeader = constraints.maxWidth < 520;
+                              final headerTitle = Row(
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Text(
-                                    'Position ${i + 1}',
+                                    'Job vacancy entries',
                                     style: TextStyle(
-                                      color: AppTheme.textPrimary,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
+                                      color: AppTheme.dashTextPrimaryOf(
+                                        context,
+                                      ),
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: -0.25,
                                     ),
                                   ),
-                                  if (_vacancies.length > 1)
-                                    OutlinedButton.icon(
-                                      onPressed: () =>
-                                          _confirmDeleteVacancy(context, i),
-                                      icon: Icon(
-                                        Icons.delete_outline_rounded,
-                                        size: 18,
-                                        color: Colors.red.shade700,
+                                  const SizedBox(width: 10),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 9,
+                                      vertical: 3,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.primaryNavy.withValues(
+                                        alpha: 0.1,
                                       ),
-                                      label: Text(
-                                        'Delete',
-                                        style: TextStyle(
-                                          color: Colors.red.shade700,
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                      style: OutlinedButton.styleFrom(
-                                        foregroundColor: Colors.red.shade700,
-                                        side: BorderSide(
-                                          color: Colors.red.shade400,
-                                        ),
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 8,
-                                        ),
-                                        minimumSize: Size.zero,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      '${_vacancies.length}',
+                                      style: const TextStyle(
+                                        color: AppTheme.primaryNavy,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w800,
                                       ),
                                     ),
+                                  ),
+                                ],
+                              );
+                              final addBtn = FilledButton.icon(
+                                onPressed: _addVacancy,
+                                icon: const Icon(Icons.add_rounded, size: 20),
+                                label: const Text('Add new vacancy'),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: AppTheme.primaryNavy,
+                                  foregroundColor: Colors.white,
+                                  elevation: 0,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 18,
+                                    vertical: 12,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              );
+                              if (stackHeader) {
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    headerTitle,
+                                    const SizedBox(height: 12),
+                                    Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: addBtn,
+                                    ),
+                                  ],
+                                );
+                              }
+                              return Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Expanded(child: headerTitle),
+                                  addBtn,
+                                ],
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            'Tap a row to expand or collapse fields. Delete is available when there is more than one entry.',
+                            style: TextStyle(
+                              color: AppTheme.dashTextSecondaryOf(context)
+                                  .withValues(alpha: 0.9),
+                              fontSize: 13,
+                              height: 1.4,
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                          ...List.generate(_vacancies.length, (i) {
+                            final v = _vacancies[i];
+                            final expanded = i < _vacancyExpanded.length
+                                ? _vacancyExpanded[i]
+                                : true;
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 14),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: panel,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: expanded
+                                        ? AppTheme.primaryNavy.withValues(
+                                            alpha: 0.22,
+                                          )
+                                        : hairline,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(
+                                        alpha: 0.035,
+                                      ),
+                                      blurRadius: 12,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                  ],
+                                ),
+                                clipBehavior: Clip.antiAlias,
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Material(
+                                      color: expanded
+                                          ? AppTheme.primaryNavy.withValues(
+                                              alpha: 0.04,
+                                            )
+                                          : Colors.transparent,
+                                      child: InkWell(
+                                        onTap: () => setState(() {
+                                          if (i < _vacancyExpanded.length) {
+                                            _vacancyExpanded[i] =
+                                                !_vacancyExpanded[i];
+                                          }
+                                        }),
+                                        child: Padding(
+                                          padding: const EdgeInsets.fromLTRB(
+                                            14,
+                                            14,
+                                            12,
+                                            14,
+                                          ),
+                                          child: Row(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Container(
+                                                width: 36,
+                                                height: 36,
+                                                decoration: BoxDecoration(
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                        10,
+                                                      ),
+                                                  gradient: LinearGradient(
+                                                    begin: Alignment.topLeft,
+                                                    end: Alignment.bottomRight,
+                                                    colors: [
+                                                      AppTheme.primaryNavy
+                                                          .withValues(
+                                                            alpha: 0.9,
+                                                          ),
+                                                      AppTheme.primaryNavyLight
+                                                          .withValues(
+                                                            alpha: 0.75,
+                                                          ),
+                                                    ],
+                                                  ),
+                                                ),
+                                                alignment: Alignment.center,
+                                                child: Text(
+                                                  '${i + 1}',
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 15,
+                                                    fontWeight: FontWeight.w800,
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 12),
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      'Position ${i + 1}',
+                                                      style: TextStyle(
+                                                        color: AppTheme
+                                                            .dashTextPrimaryOf(
+                                                          context,
+                                                        ),
+                                                        fontSize: 15,
+                                                        fontWeight:
+                                                            FontWeight.w800,
+                                                        letterSpacing: -0.2,
+                                                      ),
+                                                    ),
+                                                    if (!expanded) ...[
+                                                      const SizedBox(height: 6),
+                                                      Text(
+                                                        _vacancyEntrySummary(v),
+                                                        style: TextStyle(
+                                                          color: AppTheme
+                                                              .dashTextSecondaryOf(
+                                                            context,
+                                                          ).withValues(
+                                                            alpha: 0.92,
+                                                          ),
+                                                          fontSize: 12.5,
+                                                          height: 1.4,
+                                                          fontWeight:
+                                                              FontWeight.w500,
+                                                        ),
+                                                        maxLines: 2,
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                      ),
+                                                    ],
+                                                  ],
+                                                ),
+                                              ),
+                                              Container(
+                                                width: 32,
+                                                height: 32,
+                                                decoration: BoxDecoration(
+                                                  color: panel,
+                                                  shape: BoxShape.circle,
+                                                  border: Border.all(
+                                                    color: hairline,
+                                                  ),
+                                                ),
+                                                child: Icon(
+                                                  expanded
+                                                      ? Icons
+                                                          .expand_less_rounded
+                                                      : Icons
+                                                          .expand_more_rounded,
+                                                  size: 22,
+                                                  color: AppTheme
+                                                      .dashTextSecondaryOf(
+                                                    context,
+                                                  ),
+                                                ),
+                                              ),
+                                              if (_vacancies.length > 1) ...[
+                                                const SizedBox(width: 8),
+                                                IconButton(
+                                                  onPressed: () =>
+                                                      _confirmDeleteVacancy(
+                                                    context,
+                                                    i,
+                                                  ),
+                                                  icon: Icon(
+                                                    Icons
+                                                        .delete_outline_rounded,
+                                                    size: 20,
+                                                    color: Colors.red.shade700,
+                                                  ),
+                                                  tooltip: 'Delete',
+                                                  style: IconButton.styleFrom(
+                                                    backgroundColor: Colors.red
+                                                        .shade50,
+                                                    shape: RoundedRectangleBorder(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                        10,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    AnimatedSize(
+                                      duration: const Duration(
+                                        milliseconds: 220,
+                                      ),
+                                      curve: Curves.easeInOut,
+                                      alignment: Alignment.topCenter,
+                                      child: expanded
+                                          ? Padding(
+                                              padding: const EdgeInsets.fromLTRB(
+                                                14,
+                                                0,
+                                                14,
+                                                14,
+                                              ),
+                                              child: Container(
+                                                padding: const EdgeInsets.all(18),
+                                                decoration: BoxDecoration(
+                                                  color: muted,
+                                                  borderRadius:
+                                                      BorderRadius.circular(14),
+                                                  border: Border.all(
+                                                    color: hairline,
+                                                  ),
+                                                ),
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    _vacancyFieldLabel(
+                                                      context,
+                                                      'Headline',
+                                                    ),
+                                                    TextField(
+                                                      controller: v.headline,
+                                                      onChanged: (_) =>
+                                                          setState(() {}),
+                                                      decoration: _vacancyInput(
+                                                        context,
+                                                        hint:
+                                                            'e.g. Now Hiring: Human Resource Assistant',
+                                                      ),
+                                                      maxLines: 1,
+                                                    ),
+                                                    const SizedBox(height: 18),
+                                                    _vacancyFieldLabel(
+                                                      context,
+                                                      'Education',
+                                                    ),
+                                                    TextField(
+                                                      controller: v.education,
+                                                      onChanged: (_) =>
+                                                          setState(() {}),
+                                                      decoration: _vacancyInput(
+                                                        context,
+                                                        hint:
+                                                            'e.g. Bachelor\'s degree in relevant field',
+                                                      ),
+                                                      maxLines: 3,
+                                                    ),
+                                                    const SizedBox(height: 18),
+                                                    _vacancyFieldLabel(
+                                                      context,
+                                                      'Experience',
+                                                    ),
+                                                    TextField(
+                                                      controller: v.experience,
+                                                      onChanged: (_) =>
+                                                          setState(() {}),
+                                                      decoration: _vacancyInput(
+                                                        context,
+                                                        hint:
+                                                            'e.g. 2 years in HR or local government',
+                                                      ),
+                                                      maxLines: 3,
+                                                    ),
+                                                    const SizedBox(height: 18),
+                                                    _vacancyFieldLabel(
+                                                      context,
+                                                      'Training',
+                                                    ),
+                                                    TextField(
+                                                      controller: v.training,
+                                                      onChanged: (_) =>
+                                                          setState(() {}),
+                                                      decoration: _vacancyInput(
+                                                        context,
+                                                        hint:
+                                                            'e.g. Civil service eligibility, seminars',
+                                                      ),
+                                                      maxLines: 3,
+                                                    ),
+                                                    const SizedBox(height: 18),
+                                                    _vacancyFieldLabel(
+                                                      context,
+                                                      'Due date (auto-close)',
+                                                    ),
+                                                    Text(
+                                                      'After this date, the system will automatically stop accepting applicants for this position.',
+                                                      style: TextStyle(
+                                                        color: AppTheme
+                                                            .dashTextSecondaryOf(
+                                                          context,
+                                                        ).withValues(alpha: 0.9),
+                                                        fontSize: 12,
+                                                        height: 1.4,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(height: 10),
+                                                    TextField(
+                                                      controller: v.closingDate,
+                                                      readOnly: true,
+                                                      onTap: () async {
+                                                      final now =
+                                                          DateTime.now();
+                                                      final parsed =
+                                                          DateTime.tryParse(
+                                                            v.closingDate.text
+                                                                .trim(),
+                                                          );
+                                                      final initial =
+                                                          parsed ??
+                                                          DateTime(
+                                                            now.year,
+                                                            now.month,
+                                                            now.day,
+                                                          );
+                                                      final picked =
+                                                          await showDatePicker(
+                                                            context: context,
+                                                            initialDate:
+                                                                initial,
+                                                            firstDate: DateTime(
+                                                              now.year - 1,
+                                                              1,
+                                                              1,
+                                                            ),
+                                                            lastDate: DateTime(
+                                                              now.year + 5,
+                                                              12,
+                                                              31,
+                                                            ),
+                                                            helpText:
+                                                                'Select due date',
+                                                          );
+                                                      if (!mounted) return;
+                                                      if (picked == null)
+                                                        return;
+                                                      setState(() {
+                                                        v.closingDate.text =
+                                                            '${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+                                                      });
+                                                    },
+                                                    decoration: _vacancyInput(
+                                                      context,
+                                                      hint:
+                                                          'Select a date (YYYY-MM-DD)',
+                                                      suffixIcon: const Icon(
+                                                        Icons
+                                                            .calendar_month_rounded,
+                                                      ),
+                                                    ),
+                                                    maxLines: 1,
+                                                  ),
+                                                  const SizedBox(height: 18),
+                                                  _vacancyFieldLabel(
+                                                    context,
+                                                    'Max applicants',
+                                                  ),
+                                                  Text(
+                                                    'Counts only applicants still in process. Document declined, exam failed, final interview failed, or hired (registered) frees a slot.',
+                                                    style: TextStyle(
+                                                      color: AppTheme
+                                                          .dashTextSecondaryOf(
+                                                        context,
+                                                      ).withValues(alpha: 0.9),
+                                                      fontSize: 12,
+                                                      height: 1.4,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 10),
+                                                  TextField(
+                                                    controller: v.maxApplicants,
+                                                    onChanged: (_) =>
+                                                        setState(() {}),
+                                                    keyboardType:
+                                                        TextInputType.number,
+                                                    decoration: _vacancyInput(
+                                                      context,
+                                                      hint:
+                                                          'Leave blank for no limit (e.g. 50)',
+                                                    ),
+                                                    maxLines: 1,
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          )
+                                          : const SizedBox(
+                                              width: double.infinity,
+                                            ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }),
+                          const SizedBox(height: 8),
+                          Divider(height: 1, color: hairline),
+                          const SizedBox(height: 20),
+                          DecoratedBox(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(14),
+                              gradient: const LinearGradient(
+                                colors: [
+                                  AppTheme.primaryNavy,
+                                  AppTheme.primaryNavyLight,
                                 ],
                               ),
-                              const SizedBox(height: 12),
-                              Text(
-                                'Headline (optional)',
-                                style: TextStyle(
-                                  color: AppTheme.textSecondary,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              TextField(
-                                controller: v.headline,
-                                onChanged: (_) => setState(() {}),
-                                decoration: InputDecoration(
-                                  hintText:
-                                      'e.g. Now Hiring: Human Resource Assistant',
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(10),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: AppTheme.primaryNavy.withValues(
+                                    alpha: 0.28,
                                   ),
-                                  filled: true,
-                                  fillColor: Colors.white,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
-                                    vertical: 12,
-                                  ),
+                                  blurRadius: 16,
+                                  offset: const Offset(0, 6),
                                 ),
-                                maxLines: 1,
-                              ),
-                              const SizedBox(height: 14),
-                              Text(
-                                'Description (optional)',
-                                style: TextStyle(
-                                  color: AppTheme.textSecondary,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              TextField(
-                                controller: v.body,
-                                onChanged: (_) => setState(() {}),
-                                decoration: InputDecoration(
-                                  hintText:
-                                      'Short description for this position.',
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.white,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
-                                    vertical: 12,
-                                  ),
-                                  alignLabelWithHint: true,
-                                ),
-                                maxLines: 3,
-                              ),
-                              const SizedBox(height: 14),
-                              Text(
-                                'Max applicants (optional)',
-                                style: TextStyle(
-                                  color: AppTheme.textSecondary,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Counts only applicants still in process. Document declined, exam failed, final interview failed, or hired (registered) frees a slot.',
-                                style: TextStyle(
-                                  color: AppTheme.textSecondary.withOpacity(0.9),
-                                  fontSize: 11.5,
-                                  height: 1.35,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              TextField(
-                                controller: v.maxApplicants,
-                                onChanged: (_) => setState(() {}),
-                                keyboardType: TextInputType.number,
-                                decoration: InputDecoration(
-                                  hintText:
-                                      'Leave blank for no limit (e.g. 50)',
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.white,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
-                                    vertical: 12,
+                              ],
+                            ),
+                            child: SizedBox(
+                              width: double.infinity,
+                              child: FilledButton.icon(
+                                onPressed: _saving ? null : _save,
+                                icon: _saving
+                                    ? const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                    : const Icon(Icons.save_rounded, size: 20),
+                                label: Text(
+                                  _saving
+                                      ? 'Saving...'
+                                      : 'Save and display on landing page',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 15,
                                   ),
                                 ),
-                                maxLines: 1,
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: Colors.transparent,
+                                  foregroundColor: Colors.white,
+                                  shadowColor: Colors.transparent,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 16,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                ),
                               ),
-                            ],
+                            ),
                           ),
-                        ),
-                      );
-                    }),
-                    const SizedBox(height: 28),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: _saving ? null : _save,
-                        icon: _saving
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.save_rounded, size: 20),
-                        label: Text(
-                          _saving
-                              ? 'Saving...'
-                              : 'Save and display on landing page',
-                        ),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppTheme.primaryNavy,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
+                        ],
                       ),
-                    ),
-                  ],
-                ),
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -8392,19 +9422,6 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     final bei = _examAnswersSubsection(exam.answersJson, 'bei');
     final a = bei?['answers'];
     return a is List && a.isNotEmpty;
-  }
-
-  Future<void> _openBeiGrading(
-    BuildContext context,
-    RecruitmentApplication app,
-    RecruitmentExamResult exam,
-  ) async {
-    await showRspBeiGradingDialog(
-      context: context,
-      applicant: app,
-      exam: exam,
-      onSaved: _load,
-    );
   }
 
   static const Color _kPassBg = Color(0xFFE8F5E9);
@@ -8488,285 +9505,260 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     );
   }
 
-  Widget _scoreBreakdownGuideBullet(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '•',
-            style: TextStyle(
-              color: AppTheme.primaryNavy,
-              fontWeight: FontWeight.w900,
-              fontSize: 14,
-              height: 1.35,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              text,
-              style: TextStyle(
-                fontSize: 13,
-                height: 1.45,
-                color: AppTheme.textSecondary,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _scoreBreakdownSidePanel() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: AppTheme.primaryNavy.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.07)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                Icons.info_outline_rounded,
-                size: 22,
-                color: AppTheme.primaryNavy,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Scoring guide',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          _scoreBreakdownGuideBullet(
-            'General, Math, and General information columns are filled automatically from the applicant’s multiple-choice answers.',
-          ),
-          _scoreBreakdownGuideBullet(
-            'BEI shows an average only after every behavioral question is scored (0–100). Use the grade icon in this table or Grade BEI on the main applications list.',
-          ),
-          _scoreBreakdownGuideBullet(
-            'Overall screening % averages all sections that apply. Pass / fail uses a 60% cutoff on that overall value.',
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildScoreBreakdownDataTable(BuildContext dialogContext) {
-    final borderColor = Colors.black.withValues(alpha: 0.08);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: borderColor),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: Scrollbar(
-          thumbVisibility: true,
-          child: SingleChildScrollView(
-            scrollDirection: Axis.vertical,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: DataTable(
-                columnSpacing: 28,
-                horizontalMargin: 16,
-                headingRowHeight: 48,
-                dataRowMinHeight: 52,
-                dataRowMaxHeight: 72,
-                border: TableBorder(
-                  top: BorderSide(color: borderColor),
-                  bottom: BorderSide(color: borderColor),
-                  horizontalInside: BorderSide(color: borderColor),
-                ),
-                dividerThickness: 0,
-                headingRowColor: WidgetStateProperty.all(
-                  AppTheme.primaryNavy.withValues(alpha: 0.08),
-                ),
-                headingTextStyle: TextStyle(
-                  color: AppTheme.primaryNavy,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 12,
-                  letterSpacing: 0.2,
-                ),
-                dataTextStyle: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 13,
-                ),
-                columns: [
-                  const DataColumn(label: Text('Applicant')),
-                  const DataColumn(label: Text('Position')),
-                  const DataColumn(label: Text('General'), numeric: true),
-                  const DataColumn(label: Text('Math'), numeric: true),
-                  const DataColumn(label: Text('Gen. info'), numeric: true),
-                  const DataColumn(label: Text('BEI'), numeric: true),
-                  const DataColumn(
-                    label: Text('Grade'),
+    final borderColor = AppTheme.dashHairlineOf(dialogContext);
+    final headerBg = AppTheme.primaryNavy.withValues(alpha: 0.09);
+    return SizedBox.expand(
+      child: Scrollbar(
+        thickness: 8,
+        radius: const Radius.circular(8),
+        thumbVisibility: true,
+        interactive: true,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.vertical,
+          primary: false,
+          child: Scrollbar(
+            controller: _horizontalScrollController,
+            thickness: 8,
+            radius: const Radius.circular(8),
+            thumbVisibility: true,
+            interactive: true,
+            notificationPredicate: (n) => n.metrics.axis == Axis.horizontal,
+            child: ScrollConfiguration(
+              behavior: ScrollConfiguration.of(dialogContext).copyWith(
+                dragDevices: const {
+                  PointerDeviceKind.touch,
+                  PointerDeviceKind.mouse,
+                  PointerDeviceKind.trackpad,
+                  PointerDeviceKind.stylus,
+                },
+              ),
+              child: SingleChildScrollView(
+                controller: _horizontalScrollController,
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.fromLTRB(6, 10, 14, 14),
+                child: DataTable(
+                  columnSpacing: 34,
+                  horizontalMargin: 24,
+                  headingRowHeight: 56,
+                  dataRowMinHeight: 62,
+                  dataRowMaxHeight: 100,
+                  border: TableBorder(
+                    horizontalInside: BorderSide(color: borderColor),
+                    verticalInside: BorderSide.none,
                   ),
-                  const DataColumn(label: Text('Result')),
-                ],
-                rows: _applications.map((app) {
-                  final exam = _examResults[app.id.toLowerCase()];
-                  double? generalScore;
-                  double? mathScore;
-                  double? infoScore;
-                  double? beiScore;
-                  final answersJson = exam?.answersJson;
-                  if (answersJson != null) {
-                    generalScore = _sectionScorePercent(answersJson, 'general');
-                    mathScore = _sectionScorePercent(answersJson, 'math');
-                    infoScore = _sectionScorePercent(
-                      answersJson,
-                      'general_info',
-                    );
-                    beiScore = _beiSectionScorePercent(answersJson);
-                  }
+                  dividerThickness: 0,
+                  headingRowColor: WidgetStateProperty.all(headerBg),
+                  headingTextStyle: TextStyle(
+                    color: AppTheme.letterheadNavy,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 11.5,
+                    letterSpacing: 0.55,
+                    height: 1.25,
+                  ),
+                  dataTextStyle: TextStyle(
+                    color: AppTheme.dashTextPrimaryOf(dialogContext),
+                    fontSize: 13.5,
+                    height: 1.3,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  columns: const [
+                    DataColumn(
+                      label: SizedBox(width: 220, child: Text('Applicant')),
+                    ),
+                    DataColumn(
+                      label: SizedBox(width: 200, child: Text('Position')),
+                    ),
+                    DataColumn(
+                      label: SizedBox(width: 84, child: Text('General')),
+                      numeric: true,
+                    ),
+                    DataColumn(
+                      label: SizedBox(width: 84, child: Text('Math')),
+                      numeric: true,
+                    ),
+                    DataColumn(
+                      label: SizedBox(width: 92, child: Text('Gen. info')),
+                      numeric: true,
+                    ),
+                    DataColumn(
+                      label: SizedBox(width: 74, child: Text('BEI')),
+                      numeric: true,
+                    ),
+                    DataColumn(
+                      label: SizedBox(width: 96, child: Text('Grade')),
+                    ),
+                    DataColumn(
+                      label: SizedBox(width: 120, child: Text('Result')),
+                    ),
+                  ],
+                  rows: _applications.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final app = entry.value;
+                    final exam = _examResults[app.id.toLowerCase()];
+                    double? generalScore;
+                    double? mathScore;
+                    double? infoScore;
+                    double? beiScore;
+                    final answersJson = exam?.answersJson;
+                    if (answersJson != null) {
+                      generalScore = _sectionScorePercent(
+                        answersJson,
+                        'general',
+                      );
+                      mathScore = _sectionScorePercent(answersJson, 'math');
+                      infoScore = _sectionScorePercent(
+                        answersJson,
+                        'general_info',
+                      );
+                      beiScore = _beiSectionScorePercent(answersJson);
+                    }
 
-                  String scoreLabel(double? v) =>
-                      v == null ? '—' : '${v.toStringAsFixed(0)}%';
+                    String scoreLabel(double? v) =>
+                        v == null ? '—' : '${v.toStringAsFixed(0)}%';
 
-                  final canGradeBei =
-                      exam != null && _hasBeiAnswers(exam);
+                    final canGradeBei = exam != null && _hasBeiAnswers(exam);
 
-                  return DataRow(
-                    cells: [
-                      DataCell(
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(
-                            minWidth: 150,
-                            maxWidth: 220,
-                          ),
-                          child: Text(
-                            app.fullName,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            softWrap: true,
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(
-                            minWidth: 80,
-                            maxWidth: 140,
-                          ),
-                          child: Text(
-                            (app.positionAppliedFor != null &&
-                                    app.positionAppliedFor!.trim().isNotEmpty)
-                                ? app.positionAppliedFor!.trim()
-                                : '—',
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            softWrap: true,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: AppTheme.textSecondary.withValues(
-                                alpha: 0.95,
+                    return DataRow(
+                      color: WidgetStateProperty.resolveWith((states) {
+                        if (index.isOdd) {
+                          return AppTheme.dashMutedSurfaceOf(dialogContext);
+                        }
+                        return AppTheme.dashPanelOf(dialogContext);
+                      }),
+                      cells: [
+                        DataCell(
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(
+                              minWidth: 220,
+                              maxWidth: 300,
+                            ),
+                            child: Text(
+                              app.fullName,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              softWrap: true,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13.5,
                               ),
                             ),
                           ),
                         ),
-                      ),
-                      DataCell(
-                        Text(
-                          scoreLabel(generalScore),
-                          textAlign: TextAlign.end,
-                          style: _scoreBreakdownScoreStyle(
-                            isNA: generalScore == null,
-                            value: generalScore,
+                        DataCell(
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(
+                              minWidth: 200,
+                              maxWidth: 280,
+                            ),
+                            child: Text(
+                              (app.positionAppliedFor != null &&
+                                      app.positionAppliedFor!.trim().isNotEmpty)
+                                  ? app.positionAppliedFor!.trim()
+                                  : '—',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              softWrap: true,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: AppTheme.textSecondary.withValues(
+                                  alpha: 0.95,
+                                ),
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                      DataCell(
-                        Text(
-                          scoreLabel(mathScore),
-                          textAlign: TextAlign.end,
-                          style: _scoreBreakdownScoreStyle(
-                            isNA: mathScore == null,
-                            value: mathScore,
+                        DataCell(
+                          Text(
+                            scoreLabel(generalScore),
+                            textAlign: TextAlign.end,
+                            style: _scoreBreakdownScoreStyle(
+                              isNA: generalScore == null,
+                              value: generalScore,
+                            ),
                           ),
                         ),
-                      ),
-                      DataCell(
-                        Text(
-                          scoreLabel(infoScore),
-                          textAlign: TextAlign.end,
-                          style: _scoreBreakdownScoreStyle(
-                            isNA: infoScore == null,
-                            value: infoScore,
+                        DataCell(
+                          Text(
+                            scoreLabel(mathScore),
+                            textAlign: TextAlign.end,
+                            style: _scoreBreakdownScoreStyle(
+                              isNA: mathScore == null,
+                              value: mathScore,
+                            ),
                           ),
                         ),
-                      ),
-                      DataCell(
-                        Text(
-                          scoreLabel(beiScore),
-                          textAlign: TextAlign.end,
-                          style: _scoreBreakdownScoreStyle(
-                            isNA: beiScore == null,
-                            value: beiScore,
+                        DataCell(
+                          Text(
+                            scoreLabel(infoScore),
+                            textAlign: TextAlign.end,
+                            style: _scoreBreakdownScoreStyle(
+                              isNA: infoScore == null,
+                              value: infoScore,
+                            ),
                           ),
                         ),
-                      ),
-                      DataCell(
-                        Center(
-                          child: canGradeBei
-                              ? IconButton(
-                                  tooltip: 'Grade BEI',
-                                  icon: Icon(
-                                    Icons.rate_review_outlined,
-                                    color: AppTheme.primaryNavy,
-                                    size: 22,
-                                  ),
-                                  onPressed: () {
-                                    showRspBeiGradingDialog(
-                                      context: dialogContext,
-                                      applicant: app,
-                                      exam: exam,
-                                      onSaved: _load,
-                                    );
-                                  },
-                                )
-                              : Tooltip(
-                                  message: 'No BEI answers on file',
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(8),
-                                    child: Icon(
-                                      Icons.remove_rounded,
-                                      size: 20,
-                                      color: AppTheme.textSecondary
-                                          .withValues(alpha: 0.3),
+                        DataCell(
+                          Text(
+                            scoreLabel(beiScore),
+                            textAlign: TextAlign.end,
+                            style: _scoreBreakdownScoreStyle(
+                              isNA: beiScore == null,
+                              value: beiScore,
+                            ),
+                          ),
+                        ),
+                        DataCell(
+                          Center(
+                            child: canGradeBei
+                                ? IconButton.filled(
+                                    tooltip: 'Grade BEI',
+                                    style: IconButton.styleFrom(
+                                      backgroundColor: AppTheme.primaryNavy
+                                          .withValues(alpha: 0.14),
+                                      foregroundColor: AppTheme.primaryNavy,
+                                      padding: const EdgeInsets.all(10),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                        side: BorderSide(
+                                          color: AppTheme.primaryNavy
+                                              .withValues(alpha: 0.35),
+                                        ),
+                                      ),
+                                    ),
+                                    icon: const Icon(
+                                      Icons.rate_review_rounded,
+                                      size: 22,
+                                    ),
+                                    onPressed: () {
+                                      showRspBeiGradingDialog(
+                                        context: dialogContext,
+                                        applicant: app,
+                                        exam: exam,
+                                        onSaved: _load,
+                                      );
+                                    },
+                                  )
+                                : Tooltip(
+                                    message: 'No BEI answers on file',
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(8),
+                                      child: Icon(
+                                        Icons.remove_rounded,
+                                        size: 20,
+                                        color: AppTheme.textSecondary
+                                            .withValues(alpha: 0.35),
+                                      ),
                                     ),
                                   ),
-                                ),
+                          ),
                         ),
-                      ),
-                      DataCell(
-                        _scoreBreakdownStatusPill(exam: exam),
-                      ),
-                    ],
-                  );
-                }).toList(),
+                        DataCell(_scoreBreakdownStatusPill(exam: exam)),
+                      ],
+                    );
+                  }).toList(),
+                ),
               ),
             ),
           ),
@@ -8780,34 +9772,74 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
       context: context,
       builder: (ctx) {
         final hasData = _applications.isNotEmpty;
-        final borderColor = Colors.black.withValues(alpha: 0.08);
+        final hairline = AppTheme.dashHairlineOf(ctx);
+        final panel = AppTheme.dashPanelOf(ctx);
         return AlertDialog(
-          backgroundColor: AppTheme.offWhite,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          backgroundColor: panel,
+          surfaceTintColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 18,
+            vertical: 22,
+          ),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: hairline),
           ),
-          titlePadding: const EdgeInsets.fromLTRB(24, 22, 24, 8),
-          contentPadding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-          title: Column(
+          titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+          contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+          actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+          title: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Applicant score breakdown',
-                style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.3,
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      AppTheme.primaryNavy.withValues(alpha: 0.16),
+                      AppTheme.primaryNavyLight.withValues(alpha: 0.08),
+                    ],
+                  ),
+                  border: Border.all(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.22),
+                  ),
+                ),
+                child: const Icon(
+                  Icons.analytics_outlined,
+                  size: 26,
+                  color: AppTheme.primaryNavy,
                 ),
               ),
-              const SizedBox(height: 6),
-              Text(
-                'Summary of screening scores by section. Grade BEI from the icon column when answers exist.',
-                style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 13,
-                  height: 1.35,
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Applicant score breakdown',
+                      style: TextStyle(
+                        color: AppTheme.dashTextPrimaryOf(ctx),
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.4,
+                        height: 1.15,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'View section scores below. Grade BEI from the Grade column when answers exist; overall scores update automatically.',
+                      style: TextStyle(
+                        color: AppTheme.dashTextSecondaryOf(ctx),
+                        fontSize: 14,
+                        height: 1.5,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -8816,46 +9848,56 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
               ? Builder(
                   builder: (_) {
                     final mq = MediaQuery.sizeOf(ctx);
-                    final contentWidth = (mq.width - 48).clamp(280.0, 1120.0);
-                    final contentHeight = (mq.height * 0.58).clamp(300.0, 560.0);
-                    final useWide = contentWidth >= 760;
-                    final table = _buildScoreBreakdownDataTable(ctx);
-                    final side = _scoreBreakdownSidePanel();
+                    final contentWidth = (mq.width - 36).clamp(300.0, 1080.0);
+                    final contentHeight = (mq.height * 0.68).clamp(
+                      360.0,
+                      720.0,
+                    );
                     return SizedBox(
                       width: contentWidth,
                       height: contentHeight,
-                      child: useWide
-                          ? Row(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                Expanded(
-                                  flex: 13,
-                                  child: table,
-                                ),
-                                VerticalDivider(
-                                  width: 1,
-                                  thickness: 1,
-                                  color: borderColor,
-                                ),
-                                Expanded(
-                                  flex: 9,
-                                  child: SingleChildScrollView(
-                                    padding: const EdgeInsets.only(left: 14),
-                                    child: side,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          color: AppTheme.dashMutedSurfaceOf(ctx),
+                          border: Border.all(color: hairline),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Container(
+                                height: 3,
+                                decoration: const BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      AppTheme.primaryNavy,
+                                      AppTheme.primaryNavyLight,
+                                    ],
                                   ),
                                 ),
-                              ],
-                            )
-                          : SingleChildScrollView(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  table,
-                                  const SizedBox(height: 16),
-                                  side,
-                                ],
                               ),
-                            ),
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: DecoratedBox(
+                                      decoration: BoxDecoration(
+                                        color: panel,
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(color: hairline),
+                                      ),
+                                      child: _buildScoreBreakdownDataTable(ctx),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     );
                   },
                 )
@@ -8874,20 +9916,40 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                   ),
                 ),
           actions: [
-            FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.primaryNavy,
-                foregroundColor: AppTheme.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 12,
+            DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                gradient: const LinearGradient(
+                  colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
                 ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.25),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: FilledButton.icon(
+                onPressed: () => Navigator.of(ctx).pop(),
+                icon: const Icon(Icons.check_rounded, size: 20),
+                label: const Text(
+                  'Close',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.transparent,
+                  foregroundColor: Colors.white,
+                  shadowColor: Colors.transparent,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 14,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
               ),
-              child: const Text('Close'),
             ),
           ],
         );
@@ -8986,9 +10048,9 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   Future<void> _showEditApplicantDialog(RecruitmentApplication app) async {
     final result =
         await showDialog<({String fullName, String email, String? phone})?>(
-      context: context,
-      builder: (ctx) => _EditApplicantBasicDialog(app: app),
-    );
+          context: context,
+          builder: (ctx) => _EditApplicantBasicDialog(app: app),
+        );
     if (result == null || !mounted) return;
     try {
       final updated = await RecruitmentRepo.instance.updateApplicationBasicInfo(
@@ -9002,14 +10064,14 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
         final i = _applications.indexWhere((a) => a.id == app.id);
         if (i >= 0) _applications[i] = updated;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Applicant details saved.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Applicant details saved.')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to save: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
     }
   }
 
@@ -9079,117 +10141,328 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     return TableCell(
       verticalAlignment: TableCellVerticalAlignment.middle,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: SizedBox(width: width, child: child),
+      ),
+    );
+  }
+
+  /// Readable status pill with color by outcome (tooltip shows raw value).
+  Widget _applicationStatusBadge(String status) {
+    final raw = status.trim();
+    final s = raw.toLowerCase();
+    late Color bg;
+    late Color fg;
+    late IconData icon;
+    if (s.contains('passed') ||
+        s == 'registered' ||
+        s.contains('approved') ||
+        s.contains('hire')) {
+      bg = const Color(0xFFE8F5E9);
+      fg = const Color(0xFF2E7D32);
+      icon = Icons.check_circle_outline_rounded;
+    } else if (s.contains('declined') ||
+        s.contains('failed') ||
+        s.contains('reject')) {
+      bg = const Color(0xFFFFEBEE);
+      fg = const Color(0xFFC62828);
+      icon = Icons.cancel_outlined;
+    } else if (s.contains('pending') ||
+        s.contains('submitted') ||
+        s.contains('review') ||
+        s.contains('exam')) {
+      bg = AppTheme.primaryNavy.withValues(alpha: 0.12);
+      fg = AppTheme.primaryNavyDark;
+      icon = Icons.schedule_rounded;
+    } else {
+      bg = AppTheme.sectionAlt;
+      fg = AppTheme.textSecondary;
+      icon = Icons.label_outline_rounded;
+    }
+    final display = raw.isEmpty ? _kNa : raw.replaceAll('_', ' ');
+    return Tooltip(
+      message: raw.isEmpty ? '' : raw,
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 158),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+            decoration: BoxDecoration(
+              color: bg,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: fg.withValues(alpha: 0.22)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 4,
+                  offset: const Offset(0, 1),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 14, color: fg),
+                const SizedBox(width: 5),
+                Flexible(
+                  child: Text(
+                    display,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: fg,
+                      height: 1.25,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _examOutcomeChip(bool passed) {
+    final fg = passed ? const Color(0xFF2E7D32) : const Color(0xFFC62828);
+    final bg = passed ? const Color(0xFFE8F5E9) : const Color(0xFFFFEBEE);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: fg.withValues(alpha: 0.25)),
+      ),
+      child: Text(
+        passed ? 'Passed' : 'Failed',
+        maxLines: 1,
+        softWrap: false,
+        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: fg),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final hairline = AppTheme.dashHairlineOf(context);
+    final panel = AppTheme.dashPanelOf(context);
+    final muted = AppTheme.dashMutedSurfaceOf(context);
+
+    final viewScoreBtn = Tooltip(
+      message:
+          'Open the score table to grade BEI, see section scores, and pass/fail.',
+      child: FilledButton.icon(
+        onPressed: _loading ? null : _showApplicantScoreBreakdownDialog,
+        icon: const Icon(Icons.assessment_outlined, size: 18),
+        label: const Text('View score'),
+        style: FilledButton.styleFrom(
+          backgroundColor: AppTheme.primaryNavy,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+    );
+
+    final syncBtn = Tooltip(
+      message:
+          'Link files already in storage to applications that show "No file" (e.g. after fixing RLS).',
+      child: TextButton.icon(
+        onPressed:
+            (_loading || _syncing) ? null : _syncAttachmentsFromStorage,
+        icon: _syncing
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.sync_rounded, size: 20),
+        label: Text(
+          _syncing ? 'Syncing...' : 'Sync attachments from storage',
+        ),
+        style: TextButton.styleFrom(
+          foregroundColor: AppTheme.primaryNavy,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        ),
+      ),
+    );
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Applications & Exam Results',
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppTheme.primaryNavy.withValues(alpha: 0.14),
+                    AppTheme.primaryNavyLight.withValues(alpha: 0.08),
+                  ],
+                ),
+                border: Border.all(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.2),
+                ),
+              ),
+              child: const Icon(
+                Icons.assignment_outlined,
+                size: 26,
+                color: AppTheme.primaryNavy,
               ),
             ),
             const SizedBox(width: 16),
-            IconButton(
-              icon: const Icon(Icons.refresh_rounded),
-              onPressed: _loading ? null : _load,
-              tooltip: 'Refresh',
-            ),
-            const SizedBox(width: 8),
-            OutlinedButton.icon(
-              onPressed: _loading ? null : _showApplicantScoreBreakdownDialog,
-              icon: const Icon(Icons.assessment_rounded, size: 18),
-              label: const Text('View Scores'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-                side: const BorderSide(color: AppTheme.primaryNavy, width: 2),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-            ),
-            Tooltip(
-              message:
-                  'Link files already in storage to applications that show "No file" (e.g. after fixing RLS).',
-              child: TextButton.icon(
-                onPressed: (_loading || _syncing)
-                    ? null
-                    : _syncAttachmentsFromStorage,
-                icon: _syncing
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.sync_rounded, size: 20),
-                label: Text(
-                  _syncing ? 'Syncing...' : 'Sync attachments from storage',
-                ),
-                style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.primaryNavy,
-                ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Applications & Exam Results',
+                          style: TextStyle(
+                            color: AppTheme.dashTextPrimaryOf(context),
+                            fontSize: 26,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.4,
+                            height: 1.15,
+                          ),
+                        ),
+                      ),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: panel,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: hairline),
+                        ),
+                        child: IconButton(
+                          icon: const Icon(Icons.refresh_rounded, size: 22),
+                          onPressed: _loading ? null : _load,
+                          tooltip: 'Refresh',
+                          style: IconButton.styleFrom(
+                            foregroundColor: AppTheme.primaryNavy,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Monitor all documents (basic info) and screening exam results from applicants. '
+                    'Use View score to open the score table — grade BEI and review section results there.',
+                    style: TextStyle(
+                      color: AppTheme.dashTextSecondaryOf(context),
+                      fontSize: 14,
+                      height: 1.5,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
         ),
-        const SizedBox(height: 8),
-        Text(
-          'Monitor all documents (basic info) and screening exam results from applicants.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+        const SizedBox(height: 20),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: muted,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: hairline),
+          ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              if (constraints.maxWidth < 640) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    viewScoreBtn,
+                    const SizedBox(height: 10),
+                    syncBtn,
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  viewScoreBtn,
+                  const Spacer(),
+                  syncBtn,
+                ],
+              );
+            },
+          ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 20),
         Container(
           decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
+            color: panel,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: hairline),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
+                color: AppTheme.primaryNavy.withValues(alpha: 0.06),
+                blurRadius: 32,
+                offset: const Offset(0, 14),
+              ),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
               ),
             ],
           ),
-          child: _loading
-              ? const Padding(
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                height: 4,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
+                  ),
+                ),
+              ),
+              if (_loading)
+                const Padding(
                   padding: EdgeInsets.all(48),
                   child: Center(child: CircularProgressIndicator()),
                 )
-              : _applications.isEmpty
-              ? Padding(
+              else if (_applications.isEmpty)
+                Padding(
                   padding: const EdgeInsets.all(32),
                   child: Center(
                     child: Text(
                       'No applications yet. Applicants will appear here after they submit Step 1 from the recruitment flow.',
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.textSecondary.withValues(alpha: 0.92),
                         fontSize: 14,
+                        height: 1.45,
                       ),
                     ),
                   ),
                 )
-              : LayoutBuilder(
+              else
+                LayoutBuilder(
                   builder: (context, constraints) {
                     final scrollWidth = constraints.maxWidth.isFinite
                         ? constraints.maxWidth
                         : MediaQuery.sizeOf(context).width;
-                    const fixedTableWidth = 2234.0;
+                    const fixedTableWidth = 2698.0;
                     final tableWidth = scrollWidth > fixedTableWidth
                         ? scrollWidth
                         : fixedTableWidth;
@@ -9210,42 +10483,110 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                               constraints: BoxConstraints(minWidth: tableWidth),
                               child: Table(
                                 columnWidths: {
-                                  0: const FixedColumnWidth(160),
-                                  1: const FixedColumnWidth(260),
-                                  2: const FixedColumnWidth(140),
-                                  3: const FixedColumnWidth(200),
-                                  4: const FixedColumnWidth(170),
-                                  5: const FixedColumnWidth(76),
-                                  6: const FixedColumnWidth(108),
-                                  7: const FixedColumnWidth(188),
-                                  8: const FixedColumnWidth(188),
-                                  9: const FixedColumnWidth(188),
-                                  10: const FixedColumnWidth(200),
-                                  11: const FixedColumnWidth(248),
-                                  12: const FixedColumnWidth(108),
+                                  0: const FixedColumnWidth(140), // First
+                                  1: const FixedColumnWidth(140), // Middle
+                                  2: const FixedColumnWidth(140), // Last
+                                  3: const FixedColumnWidth(90), // Suffix
+                                  4: const FixedColumnWidth(90), // Gender
+                                  5: const FixedColumnWidth(260), // Email
+                                  6: const FixedColumnWidth(140), // Phone
+                                  7: const FixedColumnWidth(
+                                    200,
+                                  ), // Position applied
+                                  8: const FixedColumnWidth(170), // Status
+                                  9: const FixedColumnWidth(100), // Exam
+                                  10: const FixedColumnWidth(108), // Exam score
+                                  11: const FixedColumnWidth(
+                                    188,
+                                  ), // Application letter
+                                  12: const FixedColumnWidth(188), // Resume
+                                  13: const FixedColumnWidth(188), // TOR
+                                  14: const FixedColumnWidth(
+                                    200,
+                                  ), // Eligibility/trainings
+                                  15: const FixedColumnWidth(
+                                    248,
+                                  ), // Document review
+                                  16: const FixedColumnWidth(108), // Actions
                                 },
                                 defaultVerticalAlignment:
                                     TableCellVerticalAlignment.middle,
                                 border: TableBorder.symmetric(
                                   inside: BorderSide(
-                                    color: Colors.black.withOpacity(0.08),
+                                    color: Colors.black.withValues(alpha: 0.07),
                                   ),
                                 ),
                                 children: [
                                   TableRow(
                                     decoration: BoxDecoration(
-                                      color: AppTheme.primaryNavy.withOpacity(
-                                        0.08,
+                                      color: AppTheme.primaryNavy.withValues(
+                                        alpha: 0.08,
+                                      ),
+                                      border: Border(
+                                        bottom: BorderSide(
+                                          color: AppTheme.primaryNavy
+                                              .withValues(alpha: 0.2),
+                                        ),
                                       ),
                                     ),
                                     children: [
                                       _tableCell(
-                                        160,
-                                        const Text(
-                                          'Name',
+                                        140,
+                                        Text(
+                                          'First name',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
+                                          ),
+                                        ),
+                                      ),
+                                      _tableCell(
+                                        140,
+                                        const Text(
+                                          'Middle name',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
+                                          ),
+                                        ),
+                                      ),
+                                      _tableCell(
+                                        140,
+                                        const Text(
+                                          'Last name',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
+                                          ),
+                                        ),
+                                      ),
+                                      _tableCell(
+                                        90,
+                                        const Text(
+                                          'Suffix',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
+                                          ),
+                                        ),
+                                      ),
+                                      _tableCell(
+                                        90,
+                                        const Text(
+                                          'Gender',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
@@ -9254,8 +10595,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         const Text(
                                           'Email',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
@@ -9264,8 +10607,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         const Text(
                                           'Phone',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
@@ -9274,8 +10619,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         const Text(
                                           'Position applied',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
@@ -9284,38 +10631,46 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         const Text(
                                           'Status',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
                                       _tableCell(
-                                        76,
+                                        100,
                                         const Text(
                                           'Exam',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
                                       _tableCell(
                                         108,
-                                        const Text(
-                                          'Score / BEI',
+                                        Text(
+                                          'Exam score',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 12,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
                                       _tableCell(
                                         188,
-                                        const Text(
+                                        Text(
                                           'Application letter',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 12,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
@@ -9324,8 +10679,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         const Text(
                                           'Resume',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
@@ -9334,18 +10691,22 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         const Text(
                                           'TOR',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
                                       _tableCell(
                                         200,
-                                        const Text(
+                                        Text(
                                           'Eligibility / trainings (prelim.)',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 11,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
@@ -9354,8 +10715,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         const Text(
                                           'Document review',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
@@ -9364,33 +10727,119 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         const Text(
                                           'Actions',
                                           style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11.5,
+                                            letterSpacing: 0.35,
+                                            color: AppTheme.letterheadNavy,
                                           ),
                                         ),
                                       ),
                                     ],
                                   ),
-                                  ..._applications.map((app) {
+                                  ...List.generate(_applications.length, (ri) {
+                                    final app = _applications[ri];
                                     final exam =
                                         _examResults[app.id.toLowerCase()];
                                     final textStyle = TextStyle(
                                       fontSize: 13,
                                       color: AppTheme.textPrimary,
+                                      fontWeight: FontWeight.w500,
                                     );
+                                    String? beiSummaryLine;
+                                    if (exam != null && _hasBeiAnswers(exam)) {
+                                      final beiPct = _beiSectionScorePercent(
+                                        exam.answersJson,
+                                      );
+                                      beiSummaryLine = beiPct == null
+                                          ? 'BEI: pending'
+                                          : 'BEI: ${beiPct.toStringAsFixed(0)}%';
+                                    }
+
+                                    final full = app.fullName.trim();
+                                    final parts = full
+                                        .split(RegExp(r'\s+'))
+                                        .where((p) => p.trim().isNotEmpty)
+                                        .toList();
+                                    final fallbackFirst = parts.isNotEmpty
+                                        ? parts.first
+                                        : '—';
+                                    final fallbackLast = parts.length >= 2
+                                        ? parts.last
+                                        : '—';
+                                    final firstName =
+                                        (app.firstName ?? '').trim().isNotEmpty
+                                        ? app.firstName!.trim()
+                                        : fallbackFirst;
+                                    final middleName = (app.middleName ?? '')
+                                        .trim();
+                                    final lastName =
+                                        (app.lastName ?? '').trim().isNotEmpty
+                                        ? app.lastName!.trim()
+                                        : fallbackLast;
+                                    final suffix = (app.suffix ?? '').trim();
+                                    final gender = (app.sex ?? '').trim();
+
                                     return TableRow(
+                                      decoration: ri.isOdd
+                                          ? BoxDecoration(
+                                              color: AppTheme.sectionAlt
+                                                  .withValues(alpha: 0.4),
+                                            )
+                                          : null,
                                       children: [
                                         _tableCell(
-                                          160,
+                                          140,
                                           Tooltip(
                                             message: app.fullName,
                                             child: Text(
-                                              app.fullName,
+                                              firstName,
                                               style: textStyle,
                                               overflow: TextOverflow.ellipsis,
                                               maxLines: 2,
                                               softWrap: true,
                                             ),
+                                          ),
+                                        ),
+                                        _tableCell(
+                                          140,
+                                          Text(
+                                            middleName.isEmpty
+                                                ? '—'
+                                                : middleName,
+                                            style: textStyle,
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 2,
+                                            softWrap: true,
+                                          ),
+                                        ),
+                                        _tableCell(
+                                          140,
+                                          Text(
+                                            lastName,
+                                            style: textStyle,
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 2,
+                                            softWrap: true,
+                                          ),
+                                        ),
+                                        _tableCell(
+                                          90,
+                                          Text(
+                                            suffix.isEmpty ? '—' : suffix,
+                                            style: textStyle,
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 1,
+                                            softWrap: false,
+                                          ),
+                                        ),
+                                        _tableCell(
+                                          90,
+                                          Text(
+                                            gender.isEmpty ? '—' : gender,
+                                            style: textStyle,
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 1,
+                                            softWrap: false,
                                           ),
                                         ),
                                         _tableCell(
@@ -9426,7 +10875,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                                           .trim()
                                                           .isNotEmpty)
                                                   ? app.positionAppliedFor!
-                                                      .trim()
+                                                        .trim()
                                                   : _kNa,
                                               style: textStyle,
                                               overflow: TextOverflow.ellipsis,
@@ -9437,72 +10886,66 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         ),
                                         _tableCell(
                                           170,
-                                          Tooltip(
-                                            message: app.status,
-                                            child: Text(
-                                              app.status,
-                                              style: textStyle,
-                                              overflow: TextOverflow.ellipsis,
-                                              maxLines: 1,
-                                            ),
-                                          ),
+                                          _applicationStatusBadge(app.status),
                                         ),
                                         _tableCell(
-                                          76,
-                                          Text(
-                                            exam == null
-                                                ? _kNa
-                                                : (exam.passed
-                                                      ? 'Passed'
-                                                      : 'Failed'),
-                                            style: textStyle,
-                                          ),
+                                          100,
+                                          exam == null
+                                              ? Text(
+                                                  _kNa,
+                                                  style: textStyle.copyWith(
+                                                    color:
+                                                        AppTheme.textSecondary,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                )
+                                              : Align(
+                                                  alignment:
+                                                      Alignment.centerLeft,
+                                                  child: _examOutcomeChip(
+                                                    exam.passed,
+                                                  ),
+                                                ),
                                         ),
                                         _tableCell(
                                           108,
                                           exam == null
                                               ? Text(_kNa, style: textStyle)
-                                              : Column(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.start,
-                                                  mainAxisSize:
-                                                      MainAxisSize.min,
-                                                  children: [
-                                                    Text(
-                                                      '${exam.scorePercent.toStringAsFixed(0)}%',
-                                                      style: textStyle,
-                                                    ),
-                                                    if (_hasBeiAnswers(exam))
-                                                      TextButton(
-                                                        style: TextButton
-                                                            .styleFrom(
-                                                          padding:
-                                                              EdgeInsets.zero,
-                                                          minimumSize:
-                                                              Size.zero,
-                                                          tapTargetSize:
-                                                              MaterialTapTargetSize
-                                                                  .shrinkWrap,
-                                                          foregroundColor:
-                                                              AppTheme
-                                                                  .primaryNavy,
+                                              : Tooltip(
+                                                  message:
+                                                      'Open View score to grade BEI and see all sections.',
+                                                  child: Column(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    children: [
+                                                      Text(
+                                                        '${exam.scorePercent.toStringAsFixed(0)}%',
+                                                        style: textStyle,
+                                                      ),
+                                                      if (beiSummaryLine !=
+                                                          null) ...[
+                                                        const SizedBox(
+                                                          height: 2,
                                                         ),
-                                                        onPressed: () =>
-                                                            _openBeiGrading(
-                                                          context,
-                                                          app,
-                                                          exam,
-                                                        ),
-                                                        child: const Text(
-                                                          'Grade BEI',
+                                                        Text(
+                                                          beiSummaryLine,
                                                           style: TextStyle(
                                                             fontSize: 11,
                                                             fontWeight:
                                                                 FontWeight.w600,
+                                                            color: AppTheme
+                                                                .textSecondary
+                                                                .withValues(
+                                                                  alpha: 0.9,
+                                                                ),
                                                           ),
                                                         ),
-                                                      ),
-                                                  ],
+                                                      ],
+                                                    ],
+                                                  ),
                                                 ),
                                         ),
                                         TableCell(
@@ -9595,40 +11038,48 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                               IconButton(
                                                 onPressed: () =>
                                                     _showEditApplicantDialog(
-                                                  app,
-                                                ),
+                                                      app,
+                                                    ),
                                                 icon: const Icon(
                                                   Icons.edit_outlined,
                                                   size: 20,
                                                 ),
-                                                tooltip: 'Edit name, email, phone',
+                                                tooltip:
+                                                    'Edit name, email, phone',
                                                 style: IconButton.styleFrom(
                                                   foregroundColor:
                                                       AppTheme.primaryNavy,
-                                                  padding:
-                                                      const EdgeInsets.all(6),
-                                                  minimumSize:
-                                                      const Size(32, 32),
+                                                  padding: const EdgeInsets.all(
+                                                    6,
+                                                  ),
+                                                  minimumSize: const Size(
+                                                    32,
+                                                    32,
+                                                  ),
                                                 ),
                                               ),
                                               IconButton(
                                                 onPressed: () =>
                                                     _confirmDeleteApplicantRow(
-                                                  context,
-                                                  app,
-                                                ),
+                                                      context,
+                                                      app,
+                                                    ),
                                                 icon: const Icon(
                                                   Icons.delete_outline_rounded,
                                                   size: 20,
                                                 ),
                                                 tooltip: 'Delete applicant',
                                                 style: IconButton.styleFrom(
-                                                  foregroundColor:
-                                                      const Color(0xFFC62828),
-                                                  padding:
-                                                      const EdgeInsets.all(6),
-                                                  minimumSize:
-                                                      const Size(32, 32),
+                                                  foregroundColor: const Color(
+                                                    0xFFC62828,
+                                                  ),
+                                                  padding: const EdgeInsets.all(
+                                                    6,
+                                                  ),
+                                                  minimumSize: const Size(
+                                                    32,
+                                                    32,
+                                                  ),
                                                 ),
                                               ),
                                             ],
@@ -9646,6 +11097,8 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                     );
                   },
                 ),
+            ],
+          ),
         ),
       ],
     );

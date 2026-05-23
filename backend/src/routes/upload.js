@@ -42,13 +42,12 @@ const upload = multer({
   },
 });
 
-// Separate storage for training report attachments (images + documents)
+// Separate storage for training report attachments (images + PDF only)
 const trainingStorage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, trainingReportDir),
   filename: (_req, file, cb) => {
     const ext = path.extname(file.originalname) || '.dat';
-    const safeExt = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.pdf', '.doc', '.docx']
-            .includes(ext.toLowerCase())
+    const safeExt = ['.jpg', '.jpeg', '.png', '.pdf'].includes(ext.toLowerCase())
       ? ext
       : '.dat';
     cb(null, `${uuidv4()}${safeExt}`);
@@ -59,9 +58,7 @@ const trainingUpload = multer({
   storage: trainingStorage,
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (_req, file, cb) => {
-    const allowed = /\.(jpg|jpeg|png|gif|webp|pdf|doc|docx)$/i.test(
-      file.originalname
-    );
+    const allowed = /\.(jpg|jpeg|png|pdf)$/i.test(file.originalname);
     cb(null, allowed);
   },
 });
@@ -133,7 +130,7 @@ module.exports = router;
 
 /**
  * POST /api/upload/training-report
- * multipart/form-data: file (image or document)
+ * multipart/form-data: file (JPG/PNG/PDF only)
  * Returns relative path and metadata; caller links it to a report row.
  */
 router.post(

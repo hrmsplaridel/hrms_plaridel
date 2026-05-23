@@ -60,6 +60,7 @@ extension LeaveTypeExtension on LeaveType {
 
   /// Employee can file this leave type; false = admin-only.
   bool get employeeCanFile => switch (this) {
+        LeaveType.mandatoryForcedLeave => false,
         _ => true,
       };
 
@@ -101,7 +102,7 @@ LeaveType leaveTypeFromString(String? s) {
     );
     if (enumName == normalized || label == normalized) return e;
   }
-  return LeaveType.vacationLeave;
+  return LeaveType.others;
 }
 
 /// Detail options in the official form for vacation/special privilege leave.

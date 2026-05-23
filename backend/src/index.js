@@ -3,7 +3,9 @@ const express = require('express');
 const cors = require('cors');
 const { pool } = require('./config/db');
 const { initWebSocket } = require('./websockets/biometricStream');
+const { initAppEventsWebSocket } = require('./websockets/appEvents');
 const { scheduleLeaveMonthlyAccrualCron } = require('./jobs/leaveMonthlyAccrualScheduler');
+const { generalApiLimiter } = require('./middleware/rateLimiters');
 
 const authRoutes = require('./routes/auth');
 const departmentsRoutes = require('./routes/departments');
@@ -28,15 +30,27 @@ const rspJobVacanciesRoutes = require('./routes/rspJobVacancies');
 const rspExamQuestionsRoutes = require('./routes/rspExamQuestions');
 const rspExamTimeLimitsRoutes = require('./routes/rspExamTimeLimits');
 const rspApplicationsRoutes = require('./routes/rspApplications');
+const rspEmailVerificationPublicRoutes = require('./routes/rspEmailVerificationPublic');
 const rspStorageRoutes = require('./routes/rspStorage');
 const rspLdSavedEntriesRoutes = require('./routes/rspLdSavedEntries');
 const leaveRoutes = require('./routes/leaveRoutes');
 const notificationsRoutes = require('./routes/notifications');
 const locatorSlipsRoutes = require('./routes/locatorSlips');
+const contactPublicRoutes = require('./routes/contactPublic');
+const {
+  isEmailJsConfiguredForHireEmail,
+  isEmailJsContactConfigured,
+} = require('./utils/emailJsMail');
 
 const { startDocutrackerEscalationWorker } = require('./services/docutrackerEscalationWorker');
 
 const app = express();
+
+// Behind nginx/Caddy on Kamatera (HTTPS) so req.ip / rate limits see real client IP
+if (process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true') {
+  app.set('trust proxy', 1);
+}
+
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0'; // 0.0.0.0 = accessible from LAN
 
@@ -50,11 +64,15 @@ if (!process.env.JWT_REFRESH_SECRET) {
 }
 
 // Middleware (large limit: RSP/L&D forms e.g. turn-around tables with many JSON rows)
-app.use(cors());
+const corsOrigins = process.env.CORS_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean);
+if (corsOrigins && corsOrigins.length > 0) {
+  app.use(cors({ origin: corsOrigins }));
+} else {
+  app.use(cors());
+}
 app.use(express.json({ limit: '15mb' }));
 
 // --- Routes ---
-
 // Health
 app.get('/health', (_req, res) => {
   res.json({ ok: true, message: 'HRMS API is running' });
@@ -89,6 +107,7 @@ app.get('/health/db', async (_req, res) => {
 });
 
 // API routes
+app.use('/api', generalApiLimiter);
 app.use('/auth', authRoutes);
 app.use('/api/departments', departmentsRoutes);
 app.use('/api/offices', officesRoutes);
@@ -112,17 +131,42 @@ app.use('/api/rsp/job-vacancies', rspJobVacanciesRoutes);
 app.use('/api/rsp/exam-questions', rspExamQuestionsRoutes);
 app.use('/api/rsp/exam-time-limits', rspExamTimeLimitsRoutes);
 app.use('/api/rsp/applications', rspApplicationsRoutes);
+app.use('/api/rsp/email-verification', rspEmailVerificationPublicRoutes);
 app.use('/api/rsp/storage', rspStorageRoutes);
 app.use('/api/rsp-ld-saved-entries', rspLdSavedEntriesRoutes);
 app.use('/api/leave', leaveRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/locator-slips', locatorSlipsRoutes);
+app.use('/api/contact', contactPublicRoutes);
 
 // --- Start server ---
 const server = app.listen(PORT, HOST, () => {
   console.log(`HRMS API listening on http://${HOST}:${PORT}`);
   console.log('  GET  /health           - app health');
   console.log('  GET  /health/db        - database health');
+  if (isEmailJsConfiguredForHireEmail()) {
+    console.log('  EmailJS hire email     - enabled (POST …/send-hire-email)');
+  } else {
+    console.log(
+      '  EmailJS hire email     - off (set EMAILJS_SERVICE_ID, EMAILJS_PUBLIC_KEY, EMAILJS_TEMPLATE_HIRE_CREDENTIALS_ID; else SMTP)',
+    );
+  }
+  if (isEmailJsContactConfigured()) {
+    console.log('  EmailJS contact form   - enabled (POST /api/contact)');
+  }
+  if (rspEmailVerificationPublicRoutes.rspEmailOtpEnrollmentActive?.()) {
+    console.log(
+      '  RSP email OTP          - enabled (GET/POST /api/rsp/email-verification/*)',
+    );
+  }
+  if (isEmailJsConfiguredForHireEmail() || isEmailJsContactConfigured()) {
+    console.log(
+      '  EmailJS security      - allow non-browser API: https://dashboard.emailjs.com/admin/account/security',
+    );
+    console.log(
+      '  EmailJS strict mode   - set EMAILJS_PRIVATE_KEY if dashboard requires Private Key (403)',
+    );
+  }
   console.log('  POST /auth/login       - login');
   console.log('  POST /auth/register    - register');
   console.log('  POST /auth/refresh     - new access token (refresh token body)');
@@ -148,5 +192,33 @@ const server = app.listen(PORT, HOST, () => {
   }
 });
 
-// Initialize WebSocket server for Biometrics/DTR updates
-initWebSocket(server);
+// Initialize WebSocket servers and route upgrade requests by path.
+const biometricWss = initWebSocket();
+const appEventsWss = initAppEventsWebSocket();
+
+server.on('upgrade', (req, socket, head) => {
+  let pathname;
+  try {
+    pathname = new URL(req.url, `http://${req.headers.host || 'localhost'}`)
+      .pathname;
+  } catch (_) {
+    socket.destroy();
+    return;
+  }
+
+  const targetWss =
+    pathname === '/ws/biometrics'
+      ? biometricWss
+      : pathname === '/ws/app'
+        ? appEventsWss
+        : null;
+
+  if (!targetWss) {
+    socket.destroy();
+    return;
+  }
+
+  targetWss.handleUpgrade(req, socket, head, (ws) => {
+    targetWss.emit('connection', ws, req);
+  });
+});

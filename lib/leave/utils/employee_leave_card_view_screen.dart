@@ -377,9 +377,6 @@ class _LeaveCardGrid extends StatelessWidget {
           minimumRows,
           bodyRows,
         ].reduce((a, b) => a > b ? a : b);
-        final dynamicRowHeight = (bodyHeight > 0 && targetRows > 0)
-            ? (bodyHeight / targetRows).clamp(0.0, _rowHeight)
-            : _rowHeight;
         final filledEntries = [
           ...entries,
           ...List.generate(
@@ -482,24 +479,25 @@ class _LeaveCardGrid extends StatelessWidget {
                 ),
               ),
               ...filledEntries.map(
-                (entry) => _gridRow(
-                  cells: [
-                    _GridCellSpec(entry.period, flex: 17),
-                    _GridCellSpec(
-                      entry.particulars,
-                      flex: 22,
-                      align: TextAlign.left,
-                    ),
-                    _GridCellSpec(entry.vacEarned, flex: 10),
-                    _GridCellSpec(entry.vacAbsWithPay, flex: 12),
-                    _GridCellSpec(entry.vacAbsWithoutPay, flex: 14),
-                    _GridCellSpec(entry.slEarned, flex: 10),
-                    _GridCellSpec(entry.slAbsWithPay, flex: 12),
-                    _GridCellSpec(entry.slAbsWithoutPay, flex: 14),
-                    _GridCellSpec(entry.dateTakenOnApplication, flex: 16),
-                  ],
-                  height: dynamicRowHeight,
-                  fontSize: 10.5,
+                (entry) => Expanded(
+                  child: _gridRow(
+                    cells: [
+                      _GridCellSpec(entry.period, flex: 17),
+                      _GridCellSpec(
+                        entry.particulars,
+                        flex: 22,
+                        align: TextAlign.left,
+                      ),
+                      _GridCellSpec(entry.vacEarned, flex: 10),
+                      _GridCellSpec(entry.vacAbsWithPay, flex: 12),
+                      _GridCellSpec(entry.vacAbsWithoutPay, flex: 14),
+                      _GridCellSpec(entry.slEarned, flex: 10),
+                      _GridCellSpec(entry.slAbsWithPay, flex: 12),
+                      _GridCellSpec(entry.slAbsWithoutPay, flex: 14),
+                      _GridCellSpec(entry.dateTakenOnApplication, flex: 16),
+                    ],
+                    fontSize: 10.5,
+                  ),
                 ),
               ),
             ],
@@ -511,46 +509,43 @@ class _LeaveCardGrid extends StatelessWidget {
 
   Widget _gridRow({
     required List<_GridCellSpec> cells,
-    required double height,
+    double? height,
     double fontSize = 11,
     bool bold = false,
   }) {
-    return SizedBox(
-      height: height,
-      child: Row(
-        children: cells
-            .map(
-              (cell) => Expanded(
-                flex: cell.flex,
-                child: Container(
-                  height: double.infinity,
-                  alignment: Alignment.center,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 4,
-                    vertical: 2,
+    final row = Row(
+      children: cells
+          .map(
+            (cell) => Expanded(
+              flex: cell.flex,
+              child: Container(
+                height: double.infinity,
+                alignment: Alignment.center,
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                decoration: const BoxDecoration(
+                  border: Border(
+                    left: BorderSide(color: Colors.black87, width: 0.8),
+                    top: BorderSide(color: Colors.black87, width: 0.8),
                   ),
-                  decoration: const BoxDecoration(
-                    border: Border(
-                      left: BorderSide(color: Colors.black87, width: 0.8),
-                      top: BorderSide(color: Colors.black87, width: 0.8),
-                    ),
-                  ),
-                  child: Text(
-                    cell.text,
-                    textAlign: cell.align,
-                    style: TextStyle(
-                      fontSize: fontSize,
-                      height: 1.1,
-                      color: Colors.black87,
-                      fontWeight: bold ? FontWeight.w700 : FontWeight.w400,
-                    ),
+                ),
+                child: Text(
+                  cell.text,
+                  textAlign: cell.align,
+                  style: TextStyle(
+                    fontSize: fontSize,
+                    height: 1.1,
+                    color: Colors.black87,
+                    fontWeight: bold ? FontWeight.w700 : FontWeight.w400,
                   ),
                 ),
               ),
-            )
-            .toList(),
-      ),
+            ),
+          )
+          .toList(),
     );
+    return height == null
+        ? SizedBox.expand(child: row)
+        : SizedBox(height: height, child: row);
   }
 
   Widget _mergedHeaderCell({
@@ -677,7 +672,7 @@ class _LeaveCardEntry {
 
     return _LeaveCardEntry(
       period: period,
-      particulars: request.leaveType.displayName,
+      particulars: request.leaveTypeLabel,
       vacEarned: _fmtNum(vacationEarnedDays),
       vacAbsWithPay: isVacation ? _fmtNum(withPay) : '',
       vacAbsWithoutPay: isVacation ? _fmtNum(withoutPay) : '',

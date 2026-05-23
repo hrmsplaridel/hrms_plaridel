@@ -100,25 +100,34 @@ class _ServiceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: AppTheme.white,
-      borderRadius: BorderRadius.circular(4),
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(4),
-        hoverColor: AppTheme.primaryNavy.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(12),
+        hoverColor: AppTheme.primaryNavy.withValues(alpha: 0.06),
         child: Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(4),
+            color: AppTheme.white,
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(color: AppTheme.lightGray),
+            boxShadow: AppTheme.cardShadow,
           ),
           child: Row(
             children: [
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: AppTheme.primaryNavy.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(4),
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
                 ),
                 child: Icon(icon, color: AppTheme.primaryNavy, size: 24),
               ),

@@ -264,5 +264,26 @@ router.patch('/:id/seen', protect, requireAdmin, async (req, res) => {
   }
 });
 
+/**
+ * DELETE /api/training-daily-reports/:id
+ * Admin removes a report (and cascaded attachment rows). Cannot be undone.
+ */
+router.delete('/:id', protect, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `DELETE FROM training_daily_reports WHERE id = $1 RETURNING id`,
+      [id]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+    res.status(204).send();
+  } catch (err) {
+    console.error('[trainingDailyReports DELETE]', err);
+    res.status(500).json({ error: 'Failed to delete training daily report' });
+  }
+});
+
 module.exports = router;
 

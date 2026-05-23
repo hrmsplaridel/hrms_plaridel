@@ -344,7 +344,7 @@ class DtrExport {
           style: const pw.TextStyle(fontSize: 5.5),
         ),
         // Extra space for handwritten signature above the "Verified" text.
-        pw.SizedBox(height: 8),
+        pw.SizedBox(height: 9),
         // Line for certifying officer (above the "Verified" text, like the handwritten signature line).
         pw.Container(width: lineWidth, height: 1, color: PdfColors.black),
         // Extra space for handwritten signature above MEEDO A-Manager.
@@ -467,7 +467,7 @@ class DtrExport {
     final doc = pw.Document(theme: theme);
     doc.addPage(
       pw.Page(
-        pageFormat: PdfPageFormat.letter,
+        pageFormat: PdfPageFormat.legal,
         margin: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         build: (context) => pw.Row(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -511,8 +511,9 @@ class DtrExport {
     if (t == 'on time') return PdfColor.fromInt(0xFF2E7D32); // green
     if (t == 'late') return PdfColor.fromInt(0xFFC62828); // red
     if (t == 'undertime') return PdfColor.fromInt(0xFFE65100); // orange
-    if (t == 'late + undertime')
-      return PdfColor.fromInt(0xFFBF360C); // deep orange
+    if (t == 'late + undertime') {
+      return PdfColor.fromInt(0xFFBF360C);
+    } // deep orange
     if (t == 'absent') return PdfColor.fromInt(0xFFE65100); // orange
     if (t == 'holiday') return PdfColor.fromInt(0xFF7B1FA2); // purple
     if (t.contains('leave')) return PdfColor.fromInt(0xFF1976D2); // blue
@@ -534,7 +535,7 @@ class DtrExport {
     if (center) align = pw.TextAlign.center;
     if (right) align = pw.TextAlign.right;
     return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+      padding: const pw.EdgeInsets.symmetric(horizontal: 3, vertical: 8.5),
       child: pw.Text(
         text,
         style: pw.TextStyle(
@@ -908,7 +909,7 @@ class DtrExport {
           },
           children: tableRows,
         ),
-        pw.SizedBox(height: 4),
+        pw.SizedBox(height: 9),
         _buildFormFooter(totals, policy, noteLines: noteLines),
       ],
     );

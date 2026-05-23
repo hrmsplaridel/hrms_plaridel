@@ -4,15 +4,26 @@ const fs = require('fs');
 const multer = require('multer');
 const { pool } = require('../config/db');
 const {
-  assertPositionApplicationSlotAvailable,
+  assertPositionAcceptingApplications,
 } = require('../utils/jobVacancySlots');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
 const { isAttachmentPathAllowedInDb } = require('../utils/rspAttachmentPolicy');
 const { resolveLocalRspAttachment, RSP_SUBDIR } = require('../utils/rspLocalAttachment');
 const { sendSmtpMail, isSmtpConfigured } = require('../utils/smtpMail');
+const {
+  notifyNewRecruitmentApplication,
+  isEmailJsConfiguredForHireEmail,
+  sendHireCredentialsEmailJs,
+} = require('../utils/emailJsMail');
+const { verifyRspEmailVerificationToken } = require('../utils/rspEmailVerifyToken');
+const rspEmailVerificationPublicRoutes = require('./rspEmailVerificationPublic');
 
 const router = express.Router();
+
+function rspStep1RequiresEmailOtp() {
+  return rspEmailVerificationPublicRoutes.rspEmailOtpEnrollmentActive?.() === true;
+}
 const protect = [authMiddleware, requireAdmin];
 
 /** BEI needs HR scores for every narrative answer before final pass/fail. */
@@ -55,7 +66,8 @@ function parseRspDocKind(value) {
 }
 
 const RSP_APPLICATION_ROW_SELECT = `
-  id, full_name, email, phone, resume_notes, position_applied_for,
+  id, full_name, first_name, middle_name, last_name, suffix, sex,
+  email, phone, resume_notes, position_applied_for,
   attachment_path, attachment_name,
   doc_application_letter_path, doc_application_letter_name,
   doc_resume_path, doc_resume_name,
@@ -175,7 +187,12 @@ async function ensureRspApplicationsTables() {
       ADD COLUMN IF NOT EXISTS final_interview_passed BOOLEAN,
       ADD COLUMN IF NOT EXISTS hired_user_id UUID,
       ADD COLUMN IF NOT EXISTS hr_account_setup_done BOOLEAN NOT NULL DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS position_applied_for TEXT;
+      ADD COLUMN IF NOT EXISTS position_applied_for TEXT,
+      ADD COLUMN IF NOT EXISTS first_name TEXT,
+      ADD COLUMN IF NOT EXISTS middle_name TEXT,
+      ADD COLUMN IF NOT EXISTS last_name TEXT,
+      ADD COLUMN IF NOT EXISTS suffix TEXT,
+      ADD COLUMN IF NOT EXISTS sex TEXT;
   `);
 
   await pool.query(`
@@ -200,7 +217,12 @@ router.post('/', async (req, res) => {
   try {
     await ensureRspApplicationsTables();
     const {
-      fullName,
+      firstName,
+      middleName,
+      lastName,
+      suffix,
+      sex,
+      fullName, // legacy
       email,
       phone,
       resumeNotes,
@@ -208,14 +230,49 @@ router.post('/', async (req, res) => {
       status = 'submitted',
     } = req.body || {};
 
-    if (!fullName || typeof fullName !== 'string') {
-      return res.status(400).json({ error: 'fullName is required' });
+    const optStr = (v) =>
+      typeof v === 'string' && v.trim().length ? v.trim() : null;
+
+    const fn = optStr(firstName);
+    const mn = optStr(middleName);
+    const ln = optStr(lastName);
+    const sx = optStr(sex);
+    const suf = optStr(suffix);
+
+    const legacyFull = optStr(fullName);
+    const computedFull =
+      [fn, mn, ln].filter(Boolean).join(' ') + (suf ? ` ${suf}` : '');
+    const finalFullName = (computedFull.trim().length ? computedFull.trim() : legacyFull) || '';
+
+    if (!finalFullName) {
+      return res.status(400).json({
+        error: 'firstName and lastName are required (or legacy fullName).',
+        code: 'NAME_REQUIRED',
+      });
     }
     if (!email || typeof email !== 'string') {
       return res.status(400).json({ error: 'email is required' });
     }
 
     const normalizedEmail = email.trim().toLowerCase();
+
+    if (rspStep1RequiresEmailOtp()) {
+      const token = req.body?.emailVerificationToken;
+      if (!token || typeof token !== 'string' || !token.trim()) {
+        return res.status(403).json({
+          error:
+            'Verify your email before submitting. Tap “Send code”, then enter the code sent to your inbox.',
+          code: 'EMAIL_NOT_VERIFIED',
+        });
+      }
+      if (!verifyRspEmailVerificationToken(token.trim(), normalizedEmail)) {
+        return res.status(403).json({
+          error:
+            'Email verification expired or does not match this address. Send a new code and verify again.',
+          code: 'EMAIL_VERIFY_TOKEN_INVALID',
+        });
+      }
+    }
 
     let position =
       positionAppliedFor == null
@@ -224,7 +281,7 @@ router.post('/', async (req, res) => {
     if (position === '') position = null;
 
     if (position) {
-      const cap = await assertPositionApplicationSlotAvailable(position);
+      const cap = await assertPositionAcceptingApplications(position);
       if (!cap.ok) {
         return res.status(cap.status).json({
           error: cap.error,
@@ -236,13 +293,20 @@ router.post('/', async (req, res) => {
     const result = await pool.query(
       `
       INSERT INTO public.recruitment_applications
-        (full_name, email, phone, resume_notes, position_applied_for, status, created_at, updated_at)
+        (full_name, first_name, middle_name, last_name, suffix, sex,
+         email, phone, resume_notes, position_applied_for, status, created_at, updated_at)
       VALUES
-        ($1, $2, $3, $4, $5, $6, now(), now())
+        ($1, $2, $3, $4, $5, $6,
+         $7, $8, $9, $10, $11, now(), now())
       RETURNING ${RSP_APPLICATION_ROW_SELECT}
       `,
       [
-        fullName.trim(),
+        finalFullName,
+        fn,
+        mn,
+        ln,
+        suf,
+        sx,
         normalizedEmail,
         phone ?? null,
         resumeNotes ?? null,
@@ -251,7 +315,16 @@ router.post('/', async (req, res) => {
       ]
     );
 
-    return res.json({ ok: true, application: result.rows[0] });
+    const application = result.rows[0];
+    void (async () => {
+      try {
+        await notifyNewRecruitmentApplication(application);
+      } catch (e) {
+        console.error('[rspApplications EmailJS]', e?.message || e);
+      }
+    })();
+
+    return res.json({ ok: true, application });
   } catch (err) {
     console.error('[rspApplications POST /]', err);
     return res.status(500).json({
@@ -588,14 +661,15 @@ router.put('/:applicationId/hired-link', protect, async (req, res) => {
 });
 
 // POST /api/rsp/applications/:applicationId/send-hire-email
-// Admin: sends congratulations + login details to the applicant email on file (SMTP).
+// Admin: sends congratulations + login details (EmailJS hire template, or SMTP fallback).
 router.post('/:applicationId/send-hire-email', protect, async (req, res) => {
   try {
-    if (!isSmtpConfigured()) {
+    const useEmailJs = isEmailJsConfiguredForHireEmail();
+    if (!useEmailJs && !isSmtpConfigured()) {
       return res.status(503).json({
         error: 'Email is not configured on the server',
         details:
-          'Set SMTP_HOST, SMTP_USER, SMTP_PASS, and SMTP_FROM in the API .env file.',
+          'Set EMAILJS_SERVICE_ID, EMAILJS_PUBLIC_KEY, and EMAILJS_TEMPLATE_HIRE_CREDENTIALS_ID; or set SMTP_HOST, SMTP_USER, SMTP_PASS, and SMTP_FROM in the API .env file.',
       });
     }
     await ensureRspApplicationsTables();
@@ -638,22 +712,37 @@ router.post('/:applicationId/send-hire-email', protect, async (req, res) => {
     const accountDone = row.hr_account_setup_done === true;
     const accountNote = accountDone
       ? 'Your employee account is ready. Please sign in to the HRMS and change your password after your first login if you are prompted to do so.'
-      : 'If you cannot sign in yet, we may still be finishing your access in the system — please reply to this email and we will assist you.';
+      : 'If you cannot sign in yet, we may still be finishing your access in the system. Please reply to this email and we will assist you.';
 
-    const subject = 'Congratulations — LGU Plaridel employment';
-    const text =
-      `Dear ${name},\n\n` +
-      'Congratulations! We are pleased to inform you that you have passed the final interview and are hired by LGU Plaridel.\n\n' +
-      'Your login details:\n' +
-      `Username: ${u}\n` +
-      `Password: ${p}\n\n` +
-      `${accountNote}\n\n` +
-      'Best regards,\n' +
-      'Human Resources\n' +
-      'LGU Plaridel';
+    if (useEmailJs) {
+      await sendHireCredentialsEmailJs({
+        to,
+        applicantName: name,
+        username: u,
+        password: p,
+        accountNote,
+      });
+    } else {
+      const subject = 'Congratulations — LGU Plaridel employment';
+      const text =
+        `Dear ${name},\n\n` +
+        'Congratulations! We are pleased to inform you that you have passed the final interview and are hired by LGU Plaridel.\n\n' +
+        'Your login details:\n' +
+        `Username: ${u}\n` +
+        `Password: ${p}\n\n` +
+        `${accountNote}\n\n` +
+        'Best regards,\n' +
+        'Human Resources\n' +
+        'LGU Plaridel';
 
-    await sendSmtpMail({ to, subject, text });
-    return res.json({ ok: true, message: 'Email sent', to });
+      await sendSmtpMail({ to, subject, text });
+    }
+    return res.json({
+      ok: true,
+      message: 'Email sent',
+      to,
+      via: useEmailJs ? 'emailjs' : 'smtp',
+    });
   } catch (err) {
     console.error('[rspApplications POST send-hire-email]', err);
     const msg = err?.message ? String(err.message) : String(err);

@@ -11,12 +11,18 @@ class DocuTrackerStyles {
   static const Color warningOrange = Color(0xFFF59E0B);
   static const Color secondaryBlue = Color(0xFF3B82F6);
 
-  static InputDecoration inputDecoration(String hint, [IconData? icon]) {
-    return InputDecoration(
+  static InputDecoration inputDecoration(
+    BuildContext context,
+    String hint, [
+    IconData? icon,
+  ]) {
+    return AppTheme.dashInputDecoration(
+      context,
       hintText: hint,
       prefixIcon: icon != null
           ? Icon(icon, color: AppTheme.primaryNavy, size: 22)
           : null,
+<<<<<<< HEAD
       filled: true,
       fillColor: AppTheme.offWhite,
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -28,13 +34,18 @@ class DocuTrackerStyles {
         borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: AppTheme.primaryNavy, width: 1.5),
       ),
+=======
+>>>>>>> origin/main
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      radius: 12,
     );
   }
 
-  static InputDecoration dropdownDecoration(String hint) {
-    return InputDecoration(
+  static InputDecoration dropdownDecoration(BuildContext context, String hint) {
+    return AppTheme.dashInputDecoration(
+      context,
       hintText: hint,
+<<<<<<< HEAD
       filled: true,
       fillColor: AppTheme.offWhite,
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -46,7 +57,10 @@ class DocuTrackerStyles {
         borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: AppTheme.primaryNavy, width: 1.5),
       ),
+=======
+>>>>>>> origin/main
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      radius: 12,
     );
   }
 
@@ -163,6 +177,7 @@ class DocuTrackerStyles {
         child: child,
       );
 
+<<<<<<< HEAD
   static BoxDecoration cardDecoration() => DocuTrackerTokens.cardDecoration();
 
   static BoxDecoration listCardDecoration() => DocuTrackerTokens.cardDecoration();
@@ -197,4 +212,11 @@ class DocuTrackerStyles {
       ),
     );
   }
+=======
+  static BoxDecoration cardDecoration(BuildContext context) =>
+      AppTheme.dashSurfaceCard(context, radius: 20);
+
+  static BoxDecoration listCardDecoration(BuildContext context) =>
+      AppTheme.dashSurfaceCard(context, radius: 16);
+>>>>>>> origin/main
 }

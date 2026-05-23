@@ -57,14 +57,17 @@ class DtrAttendanceAnalyticsSection extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
-                  color: AppTheme.textPrimary,
+                  color: AppTheme.dashTextPrimaryOf(context),
                   letterSpacing: -0.2,
                 ),
               ),
               const SizedBox(height: 4),
               Text(
                 'Present, Late, Undertime, Absent — last 30 days (by calendar day)',
-                style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                style: TextStyle(
+                  fontSize: 13,
+                  color: AppTheme.dashTextSecondaryOf(context),
+                ),
               ),
               const SizedBox(height: 16),
               AttendanceTrendLineChart(
@@ -98,7 +101,7 @@ class DtrAttendanceAnalyticsSection extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _cardSectionTitle('Leave Distribution'),
+                      _cardSectionTitle(context, 'Leave Distribution'),
                       const SizedBox(height: 16),
                       LeaveDistributionPieChart(
                         leaveByType: leaveMap,
@@ -127,7 +130,7 @@ class DtrAttendanceAnalyticsSection extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _cardSectionTitle('Leave Distribution'),
+                    _cardSectionTitle(context, 'Leave Distribution'),
                     const SizedBox(height: 16),
                     LeaveDistributionPieChart(
                       leaveByType: leaveMap,
@@ -150,7 +153,7 @@ class DtrAttendanceAnalyticsSection extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
-                  color: AppTheme.textPrimary,
+                  color: AppTheme.dashTextPrimaryOf(context),
                   letterSpacing: -0.2,
                 ),
               ),
@@ -166,13 +169,13 @@ class DtrAttendanceAnalyticsSection extends StatelessWidget {
     );
   }
 
-  static Widget _cardSectionTitle(String text) {
+  static Widget _cardSectionTitle(BuildContext context, String text) {
     return Text(
       text,
       style: TextStyle(
         fontSize: 15,
         fontWeight: FontWeight.w600,
-        color: AppTheme.textPrimary,
+        color: AppTheme.dashTextPrimaryOf(context),
       ),
     );
   }
@@ -305,14 +308,17 @@ class _AnalyticsHeader extends StatelessWidget {
           style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.w700,
-            color: AppTheme.textPrimary,
+            color: AppTheme.dashTextPrimaryOf(context),
             letterSpacing: -0.2,
           ),
         ),
         const SizedBox(height: 4),
         Text(
           'Last 30 days',
-          style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+          style: TextStyle(
+            fontSize: 13,
+            color: AppTheme.dashTextSecondaryOf(context),
+          ),
         ),
       ],
     );
@@ -364,44 +370,40 @@ class _DepartmentDropdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: AppTheme.white,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: DropdownButtonHideUnderline(
-          child: DropdownButton<String>(
-            value: items.contains(value)
-                ? value
-                : DtrProvider.analyticsAllDepartmentsLabel,
-            isExpanded: true,
-            icon: Icon(
-              Icons.keyboard_arrow_down_rounded,
-              color: AppTheme.textSecondary,
-            ),
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-              color: AppTheme.textPrimary,
-            ),
-            items: items
-                .map((e) => DropdownMenuItem<String>(value: e, child: Text(e)))
-                .toList(),
-            onChanged: (v) {
-              if (v != null) onChanged(v);
-            },
+    final fieldStyle = AppTheme.dashFieldTextStyle(context).copyWith(
+      fontSize: 14,
+      fontWeight: FontWeight.w500,
+    );
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: AppTheme.dashInputFillOf(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.dashInputBorderOf(context)),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: items.contains(value)
+              ? value
+              : DtrProvider.analyticsAllDepartmentsLabel,
+          isExpanded: true,
+          dropdownColor: AppTheme.dashPanelOf(context),
+          icon: Icon(
+            Icons.keyboard_arrow_down_rounded,
+            color: AppTheme.dashTextSecondaryOf(context),
           ),
+          style: fieldStyle,
+          items: items
+              .map(
+                (e) => DropdownMenuItem<String>(
+                  value: e,
+                  child: Text(e, style: fieldStyle),
+                ),
+              )
+              .toList(),
+          onChanged: (v) {
+            if (v != null) onChanged(v);
+          },
         ),
       ),
     );
@@ -417,18 +419,7 @@ class _AnalyticsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+      decoration: AppTheme.dashSurfaceCard(context),
       child: child,
     );
   }
@@ -442,12 +433,15 @@ class _RecentAttendanceTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const headerStyle = TextStyle(
+    final headerStyle = TextStyle(
       fontSize: 12,
       fontWeight: FontWeight.w600,
-      color: Color(0xFF495057),
+      color: AppTheme.dashTextSecondaryOf(context),
     );
-    const cellStyle = TextStyle(fontSize: 13, color: Color(0xFF212529));
+    final cellStyle = TextStyle(
+      fontSize: 13,
+      color: AppTheme.dashTextPrimaryOf(context),
+    );
 
     if (loading) {
       return const Padding(
@@ -473,7 +467,7 @@ class _RecentAttendanceTable extends StatelessWidget {
       borderRadius: BorderRadius.circular(8),
       child: DecoratedBox(
         decoration: BoxDecoration(
-          border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+          border: Border.all(color: AppTheme.dashHairlineOf(context)),
           borderRadius: BorderRadius.circular(8),
         ),
         child: LayoutBuilder(
@@ -494,9 +488,9 @@ class _RecentAttendanceTable extends StatelessWidget {
                   children: [
                     TableRow(
                       decoration: BoxDecoration(
-                        color: AppTheme.lightGray.withValues(alpha: 0.65),
+                        color: AppTheme.dashMutedSurfaceOf(context),
                       ),
-                      children: const [
+                      children: [
                         _TableHeaderCell('Employee Name', style: headerStyle),
                         _TableHeaderCell('Department', style: headerStyle),
                         _TableHeaderCell('Time In', style: headerStyle),
@@ -508,11 +502,11 @@ class _RecentAttendanceTable extends StatelessWidget {
                       TableRow(
                         decoration: BoxDecoration(
                           color: i.isEven
-                              ? AppTheme.white
-                              : AppTheme.offWhite.withValues(alpha: 0.85),
+                              ? AppTheme.dashPanelOf(context)
+                              : AppTheme.dashMutedSurfaceOf(context),
                           border: Border(
                             top: BorderSide(
-                              color: Colors.black.withValues(alpha: 0.06),
+                              color: AppTheme.dashHairlineOf(context),
                             ),
                           ),
                         ),

@@ -102,7 +102,8 @@ class _ManagePositionState extends State<ManagePosition> {
       _positions = (data).map((e) {
         final m = e as Map<String, dynamic>;
         final dept = m['departments'];
-        final deptName = m['department_name'] as String? ??
+        final deptName =
+            m['department_name'] as String? ??
             (dept is Map ? dept['name'] as String? : null);
         final posNum = m['position_number'];
         return _PositionRecord(
@@ -112,7 +113,9 @@ class _ManagePositionState extends State<ManagePosition> {
           departmentId: m['department_id'] as String?,
           departmentName: deptName,
           isActive: m['is_active'] as bool? ?? true,
-          positionNumber: posNum is int ? posNum : (posNum != null ? int.tryParse(posNum.toString()) : null),
+          positionNumber: posNum is int
+              ? posNum
+              : (posNum != null ? int.tryParse(posNum.toString()) : null),
         );
       }).toList();
     } on DioException catch (e) {
@@ -149,14 +152,17 @@ class _ManagePositionState extends State<ManagePosition> {
       return;
     }
     try {
-      await ApiClient.instance.post('/api/positions', data: {
-        'name': title,
-        'description': _descriptionController.text.trim().isEmpty
-            ? null
-            : _descriptionController.text.trim(),
-        'department_id': _selectedDepartmentId,
-        'is_active': true,
-      });
+      await ApiClient.instance.post(
+        '/api/positions',
+        data: {
+          'name': title,
+          'description': _descriptionController.text.trim().isEmpty
+              ? null
+              : _descriptionController.text.trim(),
+          'department_id': _selectedDepartmentId,
+          'is_active': true,
+        },
+      );
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -166,10 +172,11 @@ class _ManagePositionState extends State<ManagePosition> {
       }
     } on DioException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(
-            content: Text('Failed to add: ${e.response?.data ?? e.message}')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to add: ${e.response?.data ?? e.message}'),
+          ),
+        );
       }
     }
   }
@@ -190,13 +197,16 @@ class _ManagePositionState extends State<ManagePosition> {
       return;
     }
     try {
-      await ApiClient.instance.put('/api/positions/${p.id}', data: {
-        'name': title,
-        'description': _descriptionController.text.trim().isEmpty
-            ? null
-            : _descriptionController.text.trim(),
-        'department_id': _selectedDepartmentId,
-      });
+      await ApiClient.instance.put(
+        '/api/positions/${p.id}',
+        data: {
+          'name': title,
+          'description': _descriptionController.text.trim().isEmpty
+              ? null
+              : _descriptionController.text.trim(),
+          'department_id': _selectedDepartmentId,
+        },
+      );
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -206,10 +216,11 @@ class _ManagePositionState extends State<ManagePosition> {
       }
     } on DioException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(
-            content: Text('Failed to update: ${e.response?.data ?? e.message}')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to update: ${e.response?.data ?? e.message}'),
+          ),
+        );
       }
     }
   }
@@ -244,7 +255,10 @@ class _ManagePositionState extends State<ManagePosition> {
     );
     if (ok != true || !mounted) return;
     try {
-      await ApiClient.instance.put('/api/positions/${p.id}', data: {'is_active': false});
+      await ApiClient.instance.put(
+        '/api/positions/${p.id}',
+        data: {'is_active': false},
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('${p.name} has been deactivated.')),
@@ -254,10 +268,13 @@ class _ManagePositionState extends State<ManagePosition> {
       }
     } on DioException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(
-            content: Text('Failed to deactivate: ${e.response?.data ?? e.message}')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Failed to deactivate: ${e.response?.data ?? e.message}',
+            ),
+          ),
+        );
       }
     }
   }
@@ -326,12 +343,12 @@ class _ManagePositionState extends State<ManagePosition> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
         ],
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -349,7 +366,7 @@ class _ManagePositionState extends State<ManagePosition> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             decoration: BoxDecoration(
-              color: AppTheme.lightGray.withOpacity(0.4),
+              color: AppTheme.lightGray.withValues(alpha: 0.4),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Row(
@@ -403,7 +420,7 @@ class _ManagePositionState extends State<ManagePosition> {
               child: Text(
                 'No positions',
                 style: TextStyle(
-                  color: AppTheme.textSecondary.withOpacity(0.8),
+                  color: AppTheme.textSecondary.withValues(alpha: 0.8),
                   fontSize: 14,
                 ),
               ),
@@ -413,7 +430,7 @@ class _ManagePositionState extends State<ManagePosition> {
               final isSelected = _selectedPosition?.id == p.id;
               return Material(
                 color: isSelected
-                    ? AppTheme.primaryNavy.withOpacity(0.08)
+                    ? AppTheme.primaryNavy.withValues(alpha: 0.08)
                     : Colors.transparent,
                 child: InkWell(
                   onTap: () => _selectPosition(p),
@@ -473,13 +490,13 @@ class _ManagePositionState extends State<ManagePosition> {
       decoration: InputDecoration(
         hintText: 'Search',
         hintStyle: TextStyle(
-          color: AppTheme.textSecondary.withOpacity(0.8),
+          color: AppTheme.textSecondary.withValues(alpha: 0.8),
           fontSize: 14,
         ),
         prefixIcon: Icon(
           Icons.search_rounded,
           size: 20,
-          color: AppTheme.textSecondary.withOpacity(0.7),
+          color: AppTheme.textSecondary.withValues(alpha: 0.7),
         ),
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(
@@ -487,7 +504,7 @@ class _ManagePositionState extends State<ManagePosition> {
           vertical: 12,
         ),
         filled: true,
-        fillColor: AppTheme.lightGray.withOpacity(0.5),
+        fillColor: AppTheme.lightGray.withValues(alpha: 0.5),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide.none,
@@ -500,7 +517,7 @@ class _ManagePositionState extends State<ManagePosition> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
-        color: AppTheme.lightGray.withOpacity(0.5),
+        color: AppTheme.lightGray.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: Colors.transparent),
       ),
@@ -529,7 +546,7 @@ class _ManagePositionState extends State<ManagePosition> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
-        color: AppTheme.lightGray.withOpacity(0.5),
+        color: AppTheme.lightGray.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: Colors.transparent),
       ),
@@ -558,12 +575,12 @@ class _ManagePositionState extends State<ManagePosition> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
         ],
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -592,7 +609,8 @@ class _ManagePositionState extends State<ManagePosition> {
           ),
           const SizedBox(height: 6),
           DropdownButtonFormField<String?>(
-            value: _departments.any((d) => d['id'] == _selectedDepartmentId)
+            initialValue:
+                _departments.any((d) => d['id'] == _selectedDepartmentId)
                 ? _selectedDepartmentId
                 : null,
             decoration: _inputDecoration('Select department'),
@@ -600,7 +618,7 @@ class _ManagePositionState extends State<ManagePosition> {
             isExpanded: true,
             icon: Icon(
               Icons.arrow_drop_down_rounded,
-              color: AppTheme.textSecondary.withOpacity(0.8),
+              color: AppTheme.textSecondary.withValues(alpha: 0.8),
             ),
             items: [
               const DropdownMenuItem(
@@ -698,7 +716,7 @@ class _ManagePositionState extends State<ManagePosition> {
   InputDecoration _inputDecoration(String hint) => InputDecoration(
     hintText: hint,
     hintStyle: TextStyle(
-      color: AppTheme.textSecondary.withOpacity(0.7),
+      color: AppTheme.textSecondary.withValues(alpha: 0.7),
       fontSize: 14,
     ),
     filled: true,

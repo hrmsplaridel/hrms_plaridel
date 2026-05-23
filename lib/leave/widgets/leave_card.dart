@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../landingpage/constants/app_theme.dart';
 import '../models/leave_request.dart';
-import '../models/leave_type.dart';
 import 'leave_status_chip.dart';
 
 class LeaveCard extends StatelessWidget {
@@ -40,12 +39,12 @@ class LeaveCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: isSelected
-                  ? AppTheme.primaryNavy.withOpacity(0.25)
-                  : Colors.black.withOpacity(0.06),
+                  ? AppTheme.primaryNavy.withValues(alpha: 0.25)
+                  : Colors.black.withValues(alpha: 0.06),
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: Colors.black.withValues(alpha: 0.05),
                 blurRadius: 12,
                 offset: const Offset(0, 4),
               ),
@@ -62,7 +61,7 @@ class LeaveCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          request.leaveType.displayName,
+                          request.leaveTypeLabel,
                           style: TextStyle(
                             color: AppTheme.textPrimary,
                             fontSize: 16,
@@ -140,8 +139,9 @@ class LeaveCard extends StatelessWidget {
 }
 
 String _formatRange(LeaveRequest request) {
-  if (request.startDate == null || request.endDate == null)
+  if (request.startDate == null || request.endDate == null) {
     return 'Date not set';
+  }
   return '${_formatDate(request.startDate!)} – ${_formatDate(request.endDate!)}';
 }
 
@@ -158,7 +158,7 @@ class _MetaChip extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.offWhite,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Text.rich(
         TextSpan(

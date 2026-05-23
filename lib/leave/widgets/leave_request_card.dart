@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../landingpage/constants/app_theme.dart';
 import '../models/leave_request.dart';
-import '../models/leave_type.dart';
 import 'leave_status_chip.dart';
 
 class LeaveRequestCard extends StatelessWidget {
@@ -25,9 +24,9 @@ class LeaveRequestCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final title = variant == LeaveRequestCardVariant.adminQueue
         ? (request.employeeName ?? 'Unknown employee')
-        : request.leaveType.displayName;
+        : request.leaveTypeLabel;
     final subtitle = variant == LeaveRequestCardVariant.adminQueue
-        ? request.leaveType.displayName
+        ? request.leaveTypeLabel
         : _formatRange(request);
 
     final content = Container(

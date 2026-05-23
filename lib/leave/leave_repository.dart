@@ -9,6 +9,7 @@ class LeaveRequestQuery {
     this.userId,
     this.status,
     this.leaveType,
+    this.leaveTypeName,
     this.startDateFrom,
     this.startDateTo,
     this.createdFrom,
@@ -19,6 +20,7 @@ class LeaveRequestQuery {
   final String? userId;
   final LeaveRequestStatus? status;
   final LeaveType? leaveType;
+  final String? leaveTypeName;
   final DateTime? startDateFrom;
   final DateTime? startDateTo;
   final DateTime? createdFrom;
@@ -28,11 +30,10 @@ class LeaveRequestQuery {
   /// Convert to URL query-param map for the API layer.
   Map<String, dynamic> toQueryParams() => {
     if (status != null) 'status': status!.value,
-    if (leaveType != null) 'leave_type': leaveType!.value,
+    if (_effectiveLeaveTypeName != null) 'leave_type': _effectiveLeaveTypeName,
     if (userId != null && userId!.isNotEmpty) 'user_id': userId,
     if (limit != null) 'limit': limit,
-    if (startDateFrom != null)
-      'start_date_from': _toDateStr(startDateFrom!),
+    if (startDateFrom != null) 'start_date_from': _toDateStr(startDateFrom!),
     if (startDateTo != null) 'start_date_to': _toDateStr(startDateTo!),
     if (createdFrom != null) 'created_from': createdFrom!.toIso8601String(),
     if (createdTo != null) 'created_to': createdTo!.toIso8601String(),
@@ -40,6 +41,12 @@ class LeaveRequestQuery {
 
   static String _toDateStr(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  String? get _effectiveLeaveTypeName {
+    final raw = leaveTypeName?.trim();
+    if (raw != null && raw.isNotEmpty) return raw;
+    return leaveType?.value;
+  }
 }
 
 /// Approval payload used by HR/admin actions.
@@ -132,6 +139,157 @@ class ForcedLeaveDeductionResult {
   final DateTime? appliedAt;
 }
 
+/// Admin payload for monthly VL/SL accrual.
+class MonthlyLeaveAccrualInput {
+  const MonthlyLeaveAccrualInput({
+    required this.dryRun,
+    this.targetMonth,
+    this.maxCatchUpMonths = 1,
+  });
+
+  final bool dryRun;
+  final String? targetMonth;
+  final int maxCatchUpMonths;
+}
+
+/// One employee/leave-type row returned by the monthly accrual preview/apply API.
+class MonthlyLeaveAccrualDetail {
+  const MonthlyLeaveAccrualDetail({
+    required this.userId,
+    required this.employeeName,
+    required this.leaveType,
+    required this.action,
+    this.reason,
+    this.monthsCredited,
+    this.daysAdded,
+    this.lastAccrualDate,
+    this.createdBalanceRow = false,
+    this.hireProrated = false,
+    this.daysWorked,
+    this.daysInMonth,
+  });
+
+  final String userId;
+  final String employeeName;
+  final LeaveType leaveType;
+  final String action;
+  final String? reason;
+  final int? monthsCredited;
+  final double? daysAdded;
+  final String? lastAccrualDate;
+  final bool createdBalanceRow;
+  final bool hireProrated;
+  final int? daysWorked;
+  final int? daysInMonth;
+
+  bool get willChangeBalance => action == 'would_apply' || action == 'applied';
+
+  factory MonthlyLeaveAccrualDetail.fromJson(Map<String, dynamic> json) {
+    return MonthlyLeaveAccrualDetail(
+      userId: json['user_id']?.toString() ?? '',
+      employeeName: json['employee_name']?.toString() ?? 'Unnamed employee',
+      leaveType: leaveTypeFromString(json['leave_type']?.toString()),
+      action: json['action']?.toString() ?? '',
+      reason: json['reason']?.toString(),
+      monthsCredited: _parseInt(json['months_credited']),
+      daysAdded: _parseDoubleValue(json['days_added']),
+      lastAccrualDate: json['last_accrual_date']?.toString(),
+      createdBalanceRow: json['created_balance_row'] == true,
+      hireProrated: json['hire_prorated'] == true,
+      daysWorked: _parseInt(json['days_worked']),
+      daysInMonth: _parseInt(json['days_in_month']),
+    );
+  }
+}
+
+/// Result returned by POST /api/leave/admin/monthly-accrual.
+class MonthlyLeaveAccrualResult {
+  const MonthlyLeaveAccrualResult({
+    required this.targetYearMonth,
+    required this.rate,
+    required this.leaveTypes,
+    required this.maxCatchUpMonths,
+    required this.dryRun,
+    required this.rowsUpdated,
+    required this.rowsSkipped,
+    required this.missingBalanceRowsCreated,
+    required this.missingBalanceRowsDetected,
+    required this.details,
+  });
+
+  final String targetYearMonth;
+  final double rate;
+  final List<LeaveType> leaveTypes;
+  final int maxCatchUpMonths;
+  final bool dryRun;
+  final int rowsUpdated;
+  final int rowsSkipped;
+  final int missingBalanceRowsCreated;
+  final int missingBalanceRowsDetected;
+  final List<MonthlyLeaveAccrualDetail> details;
+
+  factory MonthlyLeaveAccrualResult.fromJson(Map<String, dynamic> json) {
+    final rawLeaveTypes = json['leaveTypes'] ?? json['leave_types'];
+    final rawDetails = json['details'];
+    return MonthlyLeaveAccrualResult(
+      targetYearMonth:
+          json['targetYearMonth']?.toString() ??
+          json['target_year_month']?.toString() ??
+          '',
+      rate: _parseDoubleValue(json['rate']) ?? 0,
+      leaveTypes: rawLeaveTypes is List
+          ? rawLeaveTypes
+                .map((item) => leaveTypeFromString(item?.toString()))
+                .toList()
+          : const <LeaveType>[],
+      maxCatchUpMonths:
+          _parseInt(json['maxCatchUpMonths']) ??
+          _parseInt(json['max_catch_up_months']) ??
+          1,
+      dryRun: json['dryRun'] == true || json['dry_run'] == true,
+      rowsUpdated:
+          _parseInt(json['rowsUpdated']) ??
+          _parseInt(json['rows_updated']) ??
+          0,
+      rowsSkipped:
+          _parseInt(json['rowsSkipped']) ??
+          _parseInt(json['rows_skipped']) ??
+          0,
+      missingBalanceRowsCreated:
+          _parseInt(json['missingBalanceRowsCreated']) ??
+          _parseInt(json['missing_balance_rows_created']) ??
+          0,
+      missingBalanceRowsDetected:
+          _parseInt(json['missingBalanceRowsDetected']) ??
+          _parseInt(json['missing_balance_rows_detected']) ??
+          0,
+      details: rawDetails is List
+          ? rawDetails
+                .whereType<Map>()
+                .map(
+                  (item) => MonthlyLeaveAccrualDetail.fromJson(
+                    Map<String, dynamic>.from(item),
+                  ),
+                )
+                .toList()
+          : const <MonthlyLeaveAccrualDetail>[],
+    );
+  }
+}
+
+int? _parseInt(dynamic value) {
+  if (value == null) return null;
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return int.tryParse(value.toString());
+}
+
+double? _parseDoubleValue(dynamic value) {
+  if (value == null) return null;
+  if (value is num) return value.toDouble();
+  return double.tryParse(value.toString());
+}
+
 /// Backend-neutral contract for leave data access.
 ///
 /// Implement this with:
@@ -178,7 +336,7 @@ abstract class LeaveRepository {
   );
 
   /// Create or update a balance record.
-  Future<LeaveBalance> upsertBalance(LeaveBalance balance);
+  Future<LeaveBalance> upsertBalance(LeaveBalance balance, {String? remarks});
 
   /// Approve a request and apply any balance changes required by policy.
   Future<LeaveRequest> approveRequest(LeaveApprovalInput input);
@@ -220,8 +378,11 @@ abstract class LeaveRepository {
   /// Check if the current authenticated user is a department head.
   Future<Map<String, dynamic>> checkIsDepartmentHead();
 
-  /// List leave requests pending department head approval for the user's department.
-  Future<List<LeaveRequest>> listDepartmentHeadRequests();
+  /// List leave requests pending department head approval plus requests already
+  /// handled by the current department head.
+  Future<List<LeaveRequest>> listDepartmentHeadRequests({
+    LeaveRequestQuery query = const LeaveRequestQuery(),
+  });
 
   /// Department head approves a request (moves to pending_hr).
   Future<LeaveRequest> departmentHeadApprove(LeaveReviewDecisionInput input);
@@ -235,6 +396,11 @@ abstract class LeaveRepository {
   /// Admin/HR applies year-end forced leave as a vacation balance deduction.
   Future<ForcedLeaveDeductionResult> applyForcedLeaveDeduction(
     ForcedLeaveDeductionInput input,
+  );
+
+  /// Admin/HR previews or applies monthly VL/SL accrual.
+  Future<MonthlyLeaveAccrualResult> runMonthlyAccrual(
+    MonthlyLeaveAccrualInput input,
   );
 
   /// Balance movement audit (GET /api/leave/ledger). Employees: omit [query.userId].

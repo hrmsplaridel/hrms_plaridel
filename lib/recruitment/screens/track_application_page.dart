@@ -103,11 +103,17 @@ class _TrackApplicationPageState extends State<TrackApplicationPage> {
     return Scaffold(
       backgroundColor: AppTheme.offWhite,
       appBar: AppBar(
-        title: const Text('Track Application Status'),
+        title: const Text(
+          'Track Application Status',
+          style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -0.2),
+        ),
         backgroundColor: AppTheme.primaryNavy,
         foregroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
           onPressed: () => Navigator.of(context).pop(),
         ),
         actions: [
@@ -124,62 +130,185 @@ class _TrackApplicationPageState extends State<TrackApplicationPage> {
           final lookupFormInner = Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                'Enter the email address you used when you submitted your application. The system will show your current status and what happens next.',
-                style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: kIsWeb ? 16 : 14,
-                  height: 1.55,
-                  fontWeight: kIsWeb ? FontWeight.w500 : FontWeight.normal,
-                ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: kIsWeb ? 52 : 48,
+                    height: kIsWeb ? 52 : 48,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(14),
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          AppTheme.primaryNavy.withValues(alpha: 0.16),
+                          AppTheme.primaryNavyLight.withValues(alpha: 0.08),
+                        ],
+                      ),
+                      border: Border.all(
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.2),
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.manage_search_rounded,
+                      color: AppTheme.primaryNavy,
+                      size: kIsWeb ? 28 : 24,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Text(
+                      'Enter the email address you used when you submitted your application. The system will show your current status and what happens next.',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: kIsWeb ? 15 : 14,
+                        height: 1.5,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              SizedBox(height: kIsWeb ? 24 : 20),
-              TextField(
-                controller: _emailController,
-                decoration: InputDecoration(
-                  labelText: 'Email',
-                  hintText: 'e.g. applicant@email.com',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  filled: true,
-                  fillColor: Colors.white,
-                  prefixIcon: const Icon(Icons.email_outlined),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+              SizedBox(height: kIsWeb ? 22 : 18),
+              Container(
+                padding: EdgeInsets.all(kIsWeb ? 16 : 14),
+                decoration: BoxDecoration(
+                  color: AppTheme.offWhite,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: AppTheme.lightGray.withValues(alpha: 0.7),
+                  ),
                 ),
-                keyboardType: TextInputType.emailAddress,
-                textInputAction: TextInputAction.done,
-                onSubmitted: (_) => _checkStatus(),
-              ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: _loading ? null : _checkStatus,
-                icon: _loading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.search_rounded, size: 22),
-                label: Text(_loading ? 'Checking...' : 'Check status'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.primaryNavy,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextField(
+                      controller: _emailController,
+                      decoration: InputDecoration(
+                        hintText: 'Email address',
+                        hintStyle: TextStyle(
+                          color: AppTheme.textSecondary.withValues(alpha: 0.65),
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(
+                            color: AppTheme.lightGray.withValues(alpha: 0.85),
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(
+                            color: AppTheme.primaryNavy,
+                            width: 2,
+                          ),
+                        ),
+                        filled: true,
+                        fillColor: AppTheme.white,
+                        prefixIcon: Icon(
+                          Icons.alternate_email_rounded,
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.55),
+                          size: 22,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 18,
+                        ),
+                      ),
+                      keyboardType: TextInputType.emailAddress,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => _checkStatus(),
+                    ),
+                    const SizedBox(height: 14),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: FilledButton.icon(
+                        onPressed: _loading ? null : _checkStatus,
+                        icon: _loading
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.search_rounded, size: 20),
+                        label: Text(
+                          _loading ? 'Checking...' : 'Check status',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.primaryNavy,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 22,
+                            vertical: 14,
+                          ),
+                          minimumSize: const Size(0, 48),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           );
-          final lookupForm = kIsWeb
-              ? Container(
-                  padding: const EdgeInsets.all(28),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: AppTheme.lightGray),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.07),
-                        blurRadius: 24,
-                        offset: const Offset(0, 12),
-                      ),
-                    ],
+          final lookupForm = Container(
+            decoration: BoxDecoration(
+              color: AppTheme.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: AppTheme.lightGray.withValues(alpha: 0.75),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.06),
+                  blurRadius: 28,
+                  offset: const Offset(0, 10),
+                ),
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  height: 4,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                      colors: [
+                        AppTheme.primaryNavyDark,
+                        AppTheme.primaryNavy,
+                        AppTheme.primaryNavyLight,
+                      ],
+                    ),
                   ),
+                ),
+                Padding(
+                  padding: EdgeInsets.all(kIsWeb ? 28 : 22),
                   child: lookupFormInner,
-                )
-              : lookupFormInner;
+                ),
+              ],
+            ),
+          );
 
           return SingleChildScrollView(
             padding: EdgeInsets.symmetric(horizontal: kIsWeb ? 32 : 24, vertical: kIsWeb ? 32 : 24),
@@ -198,7 +327,7 @@ class _TrackApplicationPageState extends State<TrackApplicationPage> {
                           style: TextStyle(
                             fontSize: 28,
                             fontWeight: FontWeight.w800,
-                            color: AppTheme.primaryNavy,
+                            color: AppTheme.textPrimary,
                             letterSpacing: -0.5,
                           ),
                         ),
@@ -206,7 +335,12 @@ class _TrackApplicationPageState extends State<TrackApplicationPage> {
                         Text(
                           'Status updates automatically every 30 seconds after you look up an application.',
                           textAlign: TextAlign.center,
-                          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4),
+                          style: TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 14,
+                            height: 1.45,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                         const SizedBox(height: 28),
                       ],

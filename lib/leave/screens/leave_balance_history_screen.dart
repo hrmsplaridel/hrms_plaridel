@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
+import '../../providers/auth_provider.dart';
+import '../../realtime/app_realtime_provider.dart';
 import '../leave_provider.dart';
 import '../models/leave_balance_ledger.dart';
 import '../models/leave_type.dart';
@@ -45,6 +49,8 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
   bool _employeesLoading = true;
   String? _employeesError;
   List<_EmployeeOption> _employees = const [];
+  StreamSubscription<AppRealtimeEvent>? _leaveRealtimeSub;
+  String? _currentUserId;
 
   @override
   void initState() {
@@ -61,6 +67,40 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
       }
       _load(resetOffset: true);
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _currentUserId = context.watch<AuthProvider>().user?.id;
+    _leaveRealtimeSub ??= context.read<AppRealtimeProvider>().events.listen((
+      event,
+    ) {
+      if (event.name != 'leave_updated') return;
+      if (widget.isAdmin) {
+        final filterUserId = _appliedEmployeeId;
+        if (filterUserId != null &&
+            filterUserId.isNotEmpty &&
+            !event.affectsUser(filterUserId)) {
+          return;
+        }
+      } else {
+        if (!event.affectsUser(_currentUserId)) return;
+      }
+      context.read<LeaveProvider>().invalidateCachedLeaveData();
+      unawaited(_refreshFromRealtime());
+    });
+  }
+
+  @override
+  void dispose() {
+    _leaveRealtimeSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refreshFromRealtime() async {
+    if (!mounted || _loading) return;
+    await _load(resetOffset: true, forceRefresh: true);
   }
 
   Future<void> _loadEmployees() async {
@@ -99,7 +139,10 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
     }
   }
 
-  Future<void> _load({required bool resetOffset}) async {
+  Future<void> _load({
+    required bool resetOffset,
+    bool forceRefresh = false,
+  }) async {
     setState(() {
       _loading = true;
       _error = null;
@@ -119,7 +162,10 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
         limit: _pageSize,
         offset: resetOffset ? 0 : (_result?.offset ?? 0),
       );
-      final page = await context.read<LeaveProvider>().fetchLeaveLedger(q);
+      final page = await context.read<LeaveProvider>().fetchLeaveLedger(
+        q,
+        forceRefresh: forceRefresh,
+      );
       if (!mounted) return;
       setState(() {
         _result = page;
@@ -178,7 +224,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
       _appliedEmployeeId = _draftEmployeeId;
       _appliedLeaveType = _draftLeaveType;
     });
-    _load(resetOffset: true);
+    _load(resetOffset: true, forceRefresh: true);
   }
 
   @override
@@ -200,7 +246,9 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
         actions: [
           IconButton(
             tooltip: 'Refresh',
-            onPressed: _loading ? null : () => _load(resetOffset: true),
+            onPressed: _loading
+                ? null
+                : () => _load(resetOffset: true, forceRefresh: true),
             icon: const Icon(Icons.refresh_rounded),
           ),
         ],
@@ -290,7 +338,9 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
         actions: [
           IconButton(
             tooltip: 'Refresh',
-            onPressed: _loading ? null : () => _load(resetOffset: true),
+            onPressed: _loading
+                ? null
+                : () => _load(resetOffset: true, forceRefresh: true),
             icon: const Icon(Icons.refresh_rounded),
           ),
         ],

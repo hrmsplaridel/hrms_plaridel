@@ -815,7 +815,7 @@ router.get('/', protect, async (req, res) => {
               d.created_at, d.updated_at,
               u.full_name AS employee_name,
               ${joinCols},
-              lt.description AS leave_type_name
+              COALESCE(NULLIF(lt.display_name, ''), NULLIF(lt.description, ''), lt.name) AS leave_type_name
        FROM dtr_daily_summary d
        LEFT JOIN users u ON u.id = d.employee_id
        LEFT JOIN holidays h ON h.id = d.holiday_id
@@ -1464,7 +1464,13 @@ router.post('/', protect, async (req, res) => {
     const r = result.rows[0];
     const recordDateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || date;
     
-    broadcastBiometricUpdate('dtr_refresh', { action: 'manual_inserted', userId: r.employee_id });
+    broadcastBiometricUpdate('dtr_refresh', {
+      action: 'manual_inserted',
+      userId: String(r.employee_id),
+      date: recordDateStr,
+      userIds: [String(r.employee_id)],
+      dates: [recordDateStr],
+    });
     
     res.status(201).json({
       id: r.id,
@@ -1606,7 +1612,13 @@ router.put('/:id', protect, async (req, res) => {
     const r = result.rows[0];
     const recordDateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || toIsoDateStr(existing.attendance_date);
     
-    broadcastBiometricUpdate('dtr_refresh', { action: 'manual_updated', userId: r.employee_id });
+    broadcastBiometricUpdate('dtr_refresh', {
+      action: 'manual_updated',
+      userId: String(r.employee_id),
+      date: recordDateStr,
+      userIds: [String(r.employee_id)],
+      dates: [recordDateStr],
+    });
     
     res.json({
       id: r.id,
@@ -1663,6 +1675,16 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
     }
 
     await client.query('COMMIT');
+    const deletedDateStr = row.attendance_date_iso
+      ? String(row.attendance_date_iso).slice(0, 10)
+      : null;
+    broadcastBiometricUpdate('dtr_refresh', {
+      action: 'manual_deleted',
+      userId: String(row.employee_id),
+      date: deletedDateStr,
+      userIds: [String(row.employee_id)],
+      dates: deletedDateStr ? [deletedDateStr] : [],
+    });
     res.status(204).send();
   } catch (err) {
     try {
@@ -1714,6 +1736,14 @@ router.post('/sync-holidays', protect, requireAdmin, async (req, res) => {
         [h.id, dates, start, end]
       );
       updated += rUp.rowCount;
+    }
+    if (updated > 0) {
+      broadcastBiometricUpdate('dtr_refresh', {
+        action: 'holidays_synced',
+        updated,
+        dateFrom: start,
+        dateTo: end,
+      });
     }
     res.json({ updated });
   } catch (err) {

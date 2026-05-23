@@ -106,16 +106,22 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
 
   String? _validateForm() {
     final workHours = double.tryParse(_workHoursPerDayController.text.trim());
-    if (workHours == null || workHours <= 0) return 'Work Hours Per Day must be greater than 0.';
+    if (workHours == null || workHours <= 0) {
+      return 'Work Hours Per Day must be greater than 0.';
+    }
 
     final maxLateRaw = _maxLateMinutesPerMonthController.text.trim();
     if (maxLateRaw.isNotEmpty) {
       final maxLate = int.tryParse(maxLateRaw);
-      if (maxLate == null || maxLate < 0) return 'Max Late Minutes Per Month must be empty or >= 0.';
+      if (maxLate == null || maxLate < 0) {
+        return 'Max Late Minutes Per Month must be empty or >= 0.';
+      }
     }
 
     final mult = double.tryParse(_deductionMultiplierController.text.trim());
-    if (mult == null || mult <= 0) return 'Deduction Multiplier must be greater than 0.';
+    if (mult == null || mult <= 0) {
+      return 'Deduction Multiplier must be greater than 0.';
+    }
     return null;
   }
 
@@ -132,15 +138,16 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
         final maxLate = m['max_late_minutes_per_month'];
         return _PolicyRecord(
           id: m['id'] as String,
-          policyName: (m['policy_name'] as String?) ??
-              (m['name'] as String? ?? ''),
+          policyName:
+              (m['policy_name'] as String?) ?? (m['name'] as String? ?? ''),
           description: m['description'] as String?,
           workHoursPerDay: (m['work_hours_per_day'] as num?)?.toDouble() ?? 8.0,
           useEquivalentDayConversion:
               m['use_equivalent_day_conversion'] as bool? ?? true,
           deductLate: m['deduct_late'] as bool? ?? false,
-          maxLateMinutesPerMonth:
-              maxLate == null ? null : (maxLate as num?)?.toInt(),
+          maxLateMinutesPerMonth: maxLate == null
+              ? null
+              : (maxLate as num?)?.toInt(),
           convertLateToEquivalentDay:
               m['convert_late_to_equivalent_day'] as bool? ?? true,
           deductUndertime: m['deduct_undertime'] as bool? ?? true,
@@ -169,8 +176,9 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       _nameController.text = p.policyName;
       _descriptionController.text = p.description ?? '';
 
-      _workHoursPerDayController.text =
-          p.workHoursPerDay.toStringAsFixed(p.workHoursPerDay % 1 == 0 ? 0 : 2);
+      _workHoursPerDayController.text = p.workHoursPerDay.toStringAsFixed(
+        p.workHoursPerDay % 1 == 0 ? 0 : 2,
+      );
       _useEquivalentDayConversion = p.useEquivalentDayConversion;
 
       _deductLate = p.deductLate;
@@ -184,10 +192,8 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       _absentEqualsFullDayDeduction = p.absentEqualsFullDayDeduction;
 
       _combineLateAndUndertime = p.combineLateAndUndertime;
-      _deductionMultiplierController.text =
-          p.deductionMultiplier.toStringAsFixed(
-            p.deductionMultiplier % 1 == 0 ? 0 : 3,
-          );
+      _deductionMultiplierController.text = p.deductionMultiplier
+          .toStringAsFixed(p.deductionMultiplier % 1 == 0 ? 0 : 3);
 
       _isDefault = p.isDefault;
       _isActive = p.isActive;
@@ -229,8 +235,9 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
     }
     final validation = _validateForm();
     if (validation != null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(validation)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(validation)));
       return;
     }
     try {
@@ -247,8 +254,8 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           'deduct_late': _deductLate,
           'max_late_minutes_per_month':
               _maxLateMinutesPerMonthController.text.trim().isEmpty
-                  ? null
-                  : int.tryParse(_maxLateMinutesPerMonthController.text.trim()),
+              ? null
+              : int.tryParse(_maxLateMinutesPerMonthController.text.trim()),
           'convert_late_to_equivalent_day': _convertLateToEquivalentDay,
           'deduct_undertime': _deductUndertime,
           'convert_undertime_to_equivalent_day':
@@ -257,20 +264,27 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           'combine_late_and_undertime': _combineLateAndUndertime,
           'deduction_multiplier':
               double.tryParse(_deductionMultiplierController.text.trim()) ??
-                  1.0,
+              1.0,
           'is_default': _isDefault,
           'is_active': _isActive,
         },
       );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Attendance policy added.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Attendance policy added.')),
+        );
         _clearForm();
         _loadPolicies();
       }
     } on DioException catch (e) {
       if (mounted) {
-        final msg = (e.response?.data as Map?)?['error'] ?? e.message ?? 'Failed to add';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to add: $msg')));
+        final msg =
+            (e.response?.data as Map?)?['error'] ??
+            e.message ??
+            'Failed to add';
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to add: $msg')));
       }
     }
   }
@@ -292,8 +306,9 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
     }
     final validation = _validateForm();
     if (validation != null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(validation)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(validation)));
       return;
     }
     try {
@@ -310,8 +325,8 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           'deduct_late': _deductLate,
           'max_late_minutes_per_month':
               _maxLateMinutesPerMonthController.text.trim().isEmpty
-                  ? null
-                  : int.tryParse(_maxLateMinutesPerMonthController.text.trim()),
+              ? null
+              : int.tryParse(_maxLateMinutesPerMonthController.text.trim()),
           'convert_late_to_equivalent_day': _convertLateToEquivalentDay,
           'deduct_undertime': _deductUndertime,
           'convert_undertime_to_equivalent_day':
@@ -320,20 +335,27 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           'combine_late_and_undertime': _combineLateAndUndertime,
           'deduction_multiplier':
               double.tryParse(_deductionMultiplierController.text.trim()) ??
-                  1.0,
+              1.0,
           'is_default': _isDefault,
           'is_active': _isActive,
         },
       );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Attendance policy updated.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Attendance policy updated.')),
+        );
         _clearForm();
         _loadPolicies();
       }
     } on DioException catch (e) {
       if (mounted) {
-        final msg = (e.response?.data as Map?)?['error'] ?? e.message ?? 'Failed to update';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to update: $msg')));
+        final msg =
+            (e.response?.data as Map?)?['error'] ??
+            e.message ??
+            'Failed to update';
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to update: $msg')));
       }
     }
   }
@@ -349,7 +371,10 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           '"${p.policyName}" will no longer appear in active lists.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
@@ -360,16 +385,26 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
     );
     if (ok != true || !mounted) return;
     try {
-      await ApiClient.instance.put('/api/attendance-policies/${p.id}', data: {'is_active': false});
+      await ApiClient.instance.put(
+        '/api/attendance-policies/${p.id}',
+        data: {'is_active': false},
+      );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Policy deactivated.')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Policy deactivated.')));
         _clearForm();
         _loadPolicies();
       }
     } on DioException catch (e) {
       if (mounted) {
-        final msg = (e.response?.data as Map?)?['error'] ?? e.message ?? 'Failed to deactivate';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $msg')));
+        final msg =
+            (e.response?.data as Map?)?['error'] ??
+            e.message ??
+            'Failed to deactivate';
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed: $msg')));
       }
     }
   }
@@ -379,29 +414,44 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
     final w = MediaQuery.of(context).size.width;
     final isNarrow = w < 700;
     final search = _searchController.text.toLowerCase();
-    final filtered = _policies.where((p) =>
-        p.policyName.toLowerCase().contains(search) ||
-        (p.description ?? '').toLowerCase().contains(search)).toList();
+    final filtered = _policies
+        .where(
+          (p) =>
+              p.policyName.toLowerCase().contains(search) ||
+              (p.description ?? '').toLowerCase().contains(search),
+        )
+        .toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           'Attendance Policy',
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: 24, fontWeight: FontWeight.w800),
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: 24,
+            fontWeight: FontWeight.w800,
+          ),
         ),
         const SizedBox(height: 20),
         isNarrow
             ? Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [_buildListPanel(filtered), const SizedBox(height: 24), _buildFormPanel()],
+                children: [
+                  _buildListPanel(filtered),
+                  const SizedBox(height: 24),
+                  _buildFormPanel(),
+                ],
               )
             : Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(flex: 1, child: _buildListPanel(filtered)),
                   const SizedBox(width: 24),
-                  Expanded(flex: 1, child: SingleChildScrollView(child: _buildFormPanel())),
+                  Expanded(
+                    flex: 1,
+                    child: SingleChildScrollView(child: _buildFormPanel()),
+                  ),
                 ],
               ),
       ],
@@ -414,8 +464,14 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       decoration: BoxDecoration(
         color: AppTheme.white,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 16, offset: const Offset(0, 4))],
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -432,16 +488,24 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
                   decoration: InputDecoration(
                     hintText: 'Search',
                     isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
                     filled: true,
-                    fillColor: AppTheme.lightGray.withOpacity(0.5),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                    fillColor: AppTheme.lightGray.withValues(alpha: 0.5),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide.none,
+                    ),
                   ),
                 ),
               ),
               DropdownButton<String>(
                 value: _statusFilter,
-                items: ['Active', 'Inactive', 'All'].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+                items: ['Active', 'Inactive', 'All']
+                    .map((o) => DropdownMenuItem(value: o, child: Text(o)))
+                    .toList(),
                 onChanged: (v) {
                   setState(() => _statusFilter = v ?? 'Active');
                   _loadPolicies();
@@ -451,12 +515,20 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           ),
           const SizedBox(height: 16),
           if (_loading)
-            const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator()))
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(32),
+                child: CircularProgressIndicator(),
+              ),
+            )
           else if (filtered.isEmpty)
             Center(
               child: Padding(
                 padding: const EdgeInsets.all(32),
-                child: Text('No policies', style: TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
+                child: Text(
+                  'No policies',
+                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                ),
               ),
             )
           else
@@ -469,29 +541,47 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
                 final isSelected = _selectedPolicy?.id == p.id;
                 return ListTile(
                   selected: isSelected,
-                  selectedTileColor: AppTheme.primaryNavy.withOpacity(0.08),
+                  selectedTileColor: AppTheme.primaryNavy.withValues(
+                    alpha: 0.08,
+                  ),
                   title: Row(
                     children: [
-                      Text(p.policyName,
-                          style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.textPrimary)),
+                      Text(
+                        p.policyName,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
                       if (p.isDefault) ...[
                         const SizedBox(width: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
-                            color: AppTheme.primaryNavy.withOpacity(0.15),
+                            color: AppTheme.primaryNavy.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(4),
                           ),
-                          child: Text('Default', style: TextStyle(fontSize: 10, color: AppTheme.primaryNavy, fontWeight: FontWeight.w600)),
+                          child: Text(
+                            'Default',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: AppTheme.primaryNavy,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                         ),
                       ],
                     ],
                   ),
                   subtitle: Text(
                     'Work hours/day: ${p.workHoursPerDay % 1 == 0 ? p.workHoursPerDay.toStringAsFixed(0) : p.workHoursPerDay.toStringAsFixed(2)}',
-                    style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
                   onTap: () => _selectPolicy(p),
                 );
@@ -508,8 +598,14 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       decoration: BoxDecoration(
         color: AppTheme.white,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 16, offset: const Offset(0, 4))],
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -518,11 +614,18 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           const SizedBox(height: 12),
           _label('Policy Name'),
           const SizedBox(height: 6),
-          TextFormField(controller: _nameController, decoration: _decoration('Name')),
+          TextFormField(
+            controller: _nameController,
+            decoration: _decoration('Name'),
+          ),
           const SizedBox(height: 16),
           _label('Description'),
           const SizedBox(height: 6),
-          TextFormField(controller: _descriptionController, decoration: _decoration('Description'), maxLines: 2),
+          TextFormField(
+            controller: _descriptionController,
+            decoration: _decoration('Description'),
+            maxLines: 2,
+          ),
           const SizedBox(height: 16),
           Row(
             children: [
@@ -607,8 +710,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           _switchTile(
             title: 'Absent Equals Full Day Deduction',
             value: _absentEqualsFullDayDeduction,
-            onChanged: (v) =>
-                setState(() => _absentEqualsFullDayDeduction = v),
+            onChanged: (v) => setState(() => _absentEqualsFullDayDeduction = v),
           ),
 
           const SizedBox(height: 24),
@@ -637,8 +739,9 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
                   icon: const Icon(Icons.add_rounded, size: 18),
                   label: const Text('Add Policy'),
                   style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF4CAF50),
-                      foregroundColor: Colors.white),
+                    backgroundColor: const Color(0xFF4CAF50),
+                    foregroundColor: Colors.white,
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
@@ -657,7 +760,9 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
             icon: const Icon(Icons.person_off_rounded, size: 18),
             label: const Text('Deactivate'),
             style: FilledButton.styleFrom(
-                backgroundColor: Colors.red, foregroundColor: Colors.white),
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
           ),
         ],
       ),
@@ -665,13 +770,13 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
   }
 
   Widget _sectionTitle(String text) => Text(
-        text,
-        style: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w800,
-          color: AppTheme.textPrimary,
-        ),
-      );
+    text,
+    style: TextStyle(
+      fontSize: 14,
+      fontWeight: FontWeight.w800,
+      color: AppTheme.textPrimary,
+    ),
+  );
 
   Widget _switchTile({
     required String title,
@@ -683,7 +788,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
         Switch(
           value: value,
           onChanged: onChanged,
-          activeColor: AppTheme.primaryNavy,
+          activeThumbColor: AppTheme.primaryNavy,
         ),
         const SizedBox(width: 8),
         Expanded(child: Text(title)),
@@ -692,14 +797,18 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
   }
 
   Widget _label(String text) => Text(
-        text,
-        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textSecondary),
-      );
+    text,
+    style: TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.w600,
+      color: AppTheme.textSecondary,
+    ),
+  );
 
   InputDecoration _decoration(String hint) => InputDecoration(
-        hintText: hint,
-        filled: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-      );
+    hintText: hint,
+    filled: true,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+  );
 }

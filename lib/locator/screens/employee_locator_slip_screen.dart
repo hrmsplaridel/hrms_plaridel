@@ -1,10 +1,32 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../providers/auth_provider.dart';
+import '../../realtime/app_realtime_provider.dart';
 import '../utils/locator_slip_print.dart';
+import '../../widgets/request_filters_bar.dart';
+import '../../widgets/section_header_actions.dart';
+
+const _locatorSlipFilterOptions = <RequestFilterOption<String>>[
+  RequestFilterOption(label: 'All'),
+  RequestFilterOption(value: 'pending', label: 'Pending'),
+  RequestFilterOption(value: 'approved', label: 'Approved'),
+  RequestFilterOption(value: 'rejected', label: 'Rejected'),
+  RequestFilterOption(value: 'cancelled', label: 'Cancelled'),
+];
+
+const _locatorApprovalFilterOptions = <RequestFilterOption<String>>[
+  RequestFilterOption(label: 'All'),
+  RequestFilterOption(value: 'pending', label: 'Pending'),
+  RequestFilterOption(value: 'forwarded', label: 'Forwarded to HR'),
+  RequestFilterOption(value: 'approved', label: 'Approved by HR'),
+  RequestFilterOption(value: 'rejected', label: 'Rejected'),
+  RequestFilterOption(value: 'cancelled', label: 'Cancelled'),
+];
 
 class EmployeeLocatorSlipScreen extends StatefulWidget {
   const EmployeeLocatorSlipScreen({super.key});
@@ -24,11 +46,13 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
   bool _loadingApprovals = false;
   String? _error;
   String? _selectedStatusFilter;
+  String? _selectedApprovalStatusFilter;
   DateTime? _fromDate;
   DateTime? _toDate;
   String _searchQuery = '';
   String? _selectedSlipId;
   String? _selectedApprovalSlipId;
+  StreamSubscription<AppRealtimeEvent>? _locatorRealtimeSub;
 
   @override
   void didChangeDependencies() {
@@ -37,6 +61,24 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
     if (!_loadingMy && _slips.isEmpty) {
       _loadMyRequests();
     }
+    final realtimeProvider = context.read<AppRealtimeProvider>();
+    final authProvider = context.read<AuthProvider>();
+    _locatorRealtimeSub ??= realtimeProvider.events.listen((event) {
+      if (event.name != 'locator_updated') return;
+      final userId = authProvider.user?.id;
+      if (event.affectsUser(userId)) {
+        unawaited(_loadMyRequests());
+      }
+      if (_currentSection == _LocatorSection.approvals) {
+        unawaited(_loadDepartmentHeadRequests());
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _locatorRealtimeSub?.cancel();
+    super.dispose();
   }
 
   List<_LocatorSlipDraft> get _filteredSlips {
@@ -69,6 +111,24 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
       if (_toDate != null &&
           _dateOnly(item.date).isAfter(_dateOnly(_toDate!))) {
         return false;
+      }
+      return true;
+    }).toList();
+  }
+
+  List<_LocatorSlipDraft> get _filteredDeptHeadQueue {
+    return _deptHeadQueue.where((item) {
+      switch (_selectedApprovalStatusFilter) {
+        case 'pending':
+          return item.status == _LocatorSlipStatus.pendingDepartmentHead;
+        case 'forwarded':
+          return item.status == _LocatorSlipStatus.pendingHr;
+        case 'approved':
+          return item.status == _LocatorSlipStatus.approved;
+        case 'rejected':
+          return item.status == _LocatorSlipStatus.rejected;
+        case 'cancelled':
+          return item.status == _LocatorSlipStatus.cancelled;
       }
       return true;
     }).toList();
@@ -148,29 +208,30 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
       subtitle:
           'Use filters to quickly find slips by status, date, office, or reason.',
       icon: Icons.receipt_long_rounded,
-      headerTrailing: Wrap(
-        spacing: 8,
-        runSpacing: 8,
+      headerTrailing: SectionHeaderActions(
         children: [
-          OutlinedButton(
+          SectionHeaderActionButton.outlined(
+            context: context,
             onPressed: selectedSlip == null
                 ? null
                 : () => _showSlipDetails(context, selectedSlip!),
-            child: const Text('View Details'),
+            label: 'View Details',
           ),
-          OutlinedButton(
+          SectionHeaderActionButton.outlined(
+            context: context,
             onPressed: selectedSlip == null
                 ? null
                 : () => _showSlipHistory(context, selectedSlip!),
-            child: const Text('View History'),
+            label: 'View History',
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _LocatorFiltersCard(
-            selectedStatusFilter: _selectedStatusFilter,
+          RequestFiltersBar<String>(
+            options: _locatorSlipFilterOptions,
+            selectedValue: _selectedStatusFilter,
             fromDate: _fromDate,
             toDate: _toDate,
             searchQuery: _searchQuery,
@@ -182,6 +243,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
             onPickFromDate: () => _pickFilterDate(isFrom: true),
             onPickToDate: () => _pickFilterDate(isFrom: false),
             onClearFilters: _clearFilters,
+            formatDate: _formatDate,
           ),
           const SizedBox(height: 16),
           if (_error != null)
@@ -264,36 +326,81 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
   }
 
   void _showSlipHistory(BuildContext context, _LocatorSlipDraft item) {
-    final history = switch (item.status) {
-      _LocatorSlipStatus.approved => [
-        (title: 'Submitted', actor: null),
-        (title: 'Reviewed by Department Head', actor: item.departmentHeadName),
-        (title: 'Approved by HR', actor: item.hrReviewerName),
-      ],
-      _LocatorSlipStatus.rejected => [
-        (title: 'Submitted', actor: null),
-        (title: 'Reviewed by Department Head', actor: item.departmentHeadName),
-        (
-          title: 'Rejected',
-          actor: item.hrReviewerName ?? item.departmentHeadName,
-        ),
-      ],
-      _LocatorSlipStatus.cancelled => [
-        (title: 'Submitted', actor: null),
-        (title: 'Cancelled', actor: null),
-      ],
-      _LocatorSlipStatus.pendingHr => [
-        (title: 'Submitted', actor: null),
-        (title: 'Reviewed by Department Head', actor: item.departmentHeadName),
-        (title: 'Pending HR Admin', actor: item.hrReviewerName),
-      ],
-      _LocatorSlipStatus.pendingDepartmentHead => [
-        (title: 'Submitted', actor: null),
-        (title: 'Pending Department Head', actor: item.departmentHeadName),
-      ],
-      _LocatorSlipStatus.draft => [(title: 'Draft', actor: null)],
-    };
-    final eventDate = _formatDate(item.date);
+    final rawStatus = item.rawStatus;
+    final history =
+        <
+          ({
+            String title,
+            String? actor,
+            DateTime? date,
+            String? remarks,
+            bool completed,
+          })
+        >[
+          (
+            title: item.status == _LocatorSlipStatus.draft
+                ? 'Draft'
+                : 'Submitted',
+            actor: item.employeeName,
+            date: item.createdAt ?? item.date,
+            remarks: null,
+            completed: true,
+          ),
+          if (item.status == _LocatorSlipStatus.pendingDepartmentHead)
+            (
+              title: 'Pending Department Head',
+              actor: item.departmentHeadName,
+              date: null,
+              remarks: null,
+              completed: false,
+            ),
+          if (item.departmentHeadReviewedAt != null ||
+              rawStatus == 'pending_hr' ||
+              rawStatus == 'approved' ||
+              rawStatus == 'rejected_by_hr' ||
+              rawStatus == 'rejected_by_department_head')
+            (
+              title: rawStatus == 'rejected_by_department_head'
+                  ? 'Rejected by Department Head'
+                  : 'Reviewed by Department Head',
+              actor: item.departmentHeadName,
+              date: item.departmentHeadReviewedAt,
+              remarks: item.departmentHeadRemarks,
+              completed: true,
+            ),
+          if (item.status == _LocatorSlipStatus.pendingHr)
+            (
+              title: 'Pending HR Admin',
+              actor: item.hrReviewerName,
+              date: null,
+              remarks: null,
+              completed: false,
+            ),
+          if (rawStatus == 'approved')
+            (
+              title: 'Approved by HR',
+              actor: item.hrReviewerName,
+              date: item.hrReviewedAt,
+              remarks: item.hrRemarks,
+              completed: true,
+            ),
+          if (rawStatus == 'rejected_by_hr')
+            (
+              title: 'Rejected by HR',
+              actor: item.hrReviewerName,
+              date: item.hrReviewedAt,
+              remarks: item.hrRemarks,
+              completed: true,
+            ),
+          if (rawStatus == 'cancelled')
+            (
+              title: 'Cancelled',
+              actor: null,
+              date: item.updatedAt,
+              remarks: null,
+              completed: true,
+            ),
+        ];
     final accent = AppTheme.primaryNavy;
 
     showDialog<void>(
@@ -337,14 +444,16 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
                       final isFirst = index == 0;
                       final isLast = index == history.length - 1;
                       final actor = step.actor?.trim();
-                      String subtitle = eventDate;
+                      String subtitle = step.date == null
+                          ? 'Awaiting action'
+                          : _formatDateTime(step.date!);
                       if (actor != null && actor.isNotEmpty) {
-                        subtitle = '$eventDate by $actor';
+                        subtitle = '$subtitle by $actor';
                       } else if (step.title.contains('Department Head') &&
                           step.title != 'Pending Department Head') {
-                        subtitle = '$eventDate by Department Head';
+                        subtitle = '$subtitle by Department Head';
                       } else if (step.title.contains('HR')) {
-                        subtitle = '$eventDate by HR Admin';
+                        subtitle = '$subtitle by HR Admin';
                       }
                       return Padding(
                         padding: EdgeInsets.only(bottom: isLast ? 0 : 2),
@@ -372,8 +481,10 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
                                         color: accent,
                                         shape: BoxShape.circle,
                                       ),
-                                      child: const Icon(
-                                        Icons.check_rounded,
+                                      child: Icon(
+                                        step.completed
+                                            ? Icons.check_rounded
+                                            : Icons.hourglass_top_rounded,
                                         size: 18,
                                         color: Colors.white,
                                       ),
@@ -406,6 +517,18 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
                                         fontWeight: FontWeight.w600,
                                       ),
                                     ),
+                                    if ((step.remarks ?? '').trim().isNotEmpty)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 4),
+                                        child: Text(
+                                          step.remarks!.trim(),
+                                          style: TextStyle(
+                                            color: AppTheme.textSecondary,
+                                            fontSize: 13,
+                                            height: 1.35,
+                                          ),
+                                        ),
+                                      ),
                                   ],
                                 ),
                               ),
@@ -442,7 +565,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
   }
 
   Widget _buildApprovalsView() {
-    final pending = _deptHeadQueue;
+    final visibleItems = _filteredDeptHeadQueue;
     final screenWidth = MediaQuery.sizeOf(context).width;
     final screenHeight = MediaQuery.sizeOf(context).height;
     final maxListHeight = screenWidth < 600
@@ -450,86 +573,328 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
         : screenWidth < 1024
         ? (screenHeight * 0.5).clamp(320.0, 560.0)
         : (screenHeight * 0.58).clamp(380.0, 700.0);
-    final useScrollableList = pending.length > 3;
+    final useScrollableList = visibleItems.length > 3;
     _LocatorSlipDraft? selectedApproval;
-    for (final item in pending) {
+    for (final item in visibleItems) {
       if (_slipSelectionKey(item) == _selectedApprovalSlipId) {
         selectedApproval = item;
         break;
       }
     }
+    final canReviewSelected =
+        selectedApproval?.status == _LocatorSlipStatus.pendingDepartmentHead;
 
     return _SectionCard(
-      title: 'Locator Slip Approvals',
-      subtitle: 'Department-head review queue for your office/department.',
+      title: 'Locator Slip Requests & History',
+      subtitle:
+          'Review pending locator slips and revisit items you forwarded or rejected.',
       icon: Icons.fact_check_rounded,
-      headerTrailing: Wrap(
-        spacing: 8,
-        runSpacing: 8,
+      headerTrailing: SectionHeaderActions(
         children: [
-          OutlinedButton.icon(
+          SectionHeaderActionButton.outlined(
+            context: context,
             onPressed: selectedApproval == null
+                ? null
+                : () => _showSlipDetails(context, selectedApproval!),
+            icon: Icons.visibility_rounded,
+            label: 'View',
+          ),
+          SectionHeaderActionButton.outlined(
+            context: context,
+            onPressed: selectedApproval == null
+                ? null
+                : () => _showSlipHistory(context, selectedApproval!),
+            icon: Icons.history_rounded,
+            label: 'History',
+          ),
+          SectionHeaderActionButton.outlined(
+            context: context,
+            onPressed: !canReviewSelected
                 ? null
                 : () => _departmentHeadReject(selectedApproval!),
-            icon: const Icon(Icons.close_rounded, size: 18),
-            label: const Text('Reject'),
+            icon: Icons.close_rounded,
+            label: 'Reject',
           ),
-          FilledButton.icon(
-            onPressed: selectedApproval == null
+          SectionHeaderActionButton.filled(
+            context: context,
+            onPressed: !canReviewSelected
                 ? null
                 : () => _departmentHeadApprove(selectedApproval!),
-            icon: const Icon(Icons.check_rounded, size: 18),
-            label: const Text('Approve'),
+            icon: Icons.check_rounded,
+            label: 'Approve',
           ),
         ],
       ),
       child: _loadingApprovals
           ? const _CenteredLoading(message: 'Loading approval queue...')
-          : pending.isEmpty
-          ? const _EmptyState(
-              message: 'No pending locator slip requests for approval.',
-            )
-          : !useScrollableList
-          ? Column(
-              children: List.generate(pending.length, (index) {
-                final item = pending[index];
-                return Padding(
-                  padding: EdgeInsets.only(
-                    bottom: index == pending.length - 1 ? 0 : 10,
-                  ),
-                  child: _LocatorApprovalCard(
-                    item: item,
-                    isSelected:
-                        _slipSelectionKey(item) == _selectedApprovalSlipId,
-                    onTap: () => _toggleApprovalSelection(item),
-                  ),
-                );
-              }),
-            )
-          : ConstrainedBox(
-              constraints: BoxConstraints(maxHeight: maxListHeight),
-              child: Scrollbar(
-                thumbVisibility: true,
-                child: ListView.separated(
-                  primary: false,
-                  physics: const BouncingScrollPhysics(
-                    parent: AlwaysScrollableScrollPhysics(),
-                  ),
-                  itemCount: pending.length,
-                  itemBuilder: (context, index) {
-                    final item = pending[index];
-                    return _LocatorApprovalCard(
-                      item: item,
-                      isSelected:
-                          _slipSelectionKey(item) == _selectedApprovalSlipId,
-                      onTap: () => _toggleApprovalSelection(item),
-                    );
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                RequestFiltersBar<String>(
+                  options: _locatorApprovalFilterOptions,
+                  selectedValue: _selectedApprovalStatusFilter,
+                  visibleCount: visibleItems.length,
+                  totalCount: _deptHeadQueue.length,
+                  showSearch: false,
+                  showDateRange: false,
+                  onStatusChanged: (value) {
+                    setState(() {
+                      _selectedApprovalStatusFilter = value;
+                      _selectedApprovalSlipId = null;
+                    });
                   },
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
                 ),
-              ),
+                const SizedBox(height: 16),
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _ErrorState(message: _error!),
+                  ),
+                if (_deptHeadQueue.isEmpty)
+                  const _EmptyState(
+                    message: 'No locator slip requests or history yet.',
+                  )
+                else if (visibleItems.isEmpty)
+                  const _EmptyState(
+                    message: 'No locator slips match the current filter.',
+                  )
+                else
+                  _approvalItemsTable(
+                    items: visibleItems,
+                    maxHeight: maxListHeight,
+                    useScrollableList: useScrollableList,
+                  ),
+              ],
             ),
     );
+  }
+
+  Widget _approvalItemsTable({
+    required List<_LocatorSlipDraft> items,
+    required double maxHeight,
+    required bool useScrollableList,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tableWidth = constraints.maxWidth < 920
+            ? 920.0
+            : constraints.maxWidth;
+        final purposeWidth = tableWidth - 580;
+        final content = SizedBox(
+          width: tableWidth,
+          child: Column(
+            children: [
+              _approvalTableHeader(purposeWidth),
+              for (var index = 0; index < items.length; index++)
+                _approvalTableRow(
+                  items[index],
+                  purposeWidth: purposeWidth,
+                  isLast: index == items.length - 1,
+                  isSelected:
+                      _slipSelectionKey(items[index]) ==
+                      _selectedApprovalSlipId,
+                  onTap: () => _toggleApprovalSelection(items[index]),
+                ),
+            ],
+          ),
+        );
+
+        final table = ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: content,
+            ),
+          ),
+        );
+
+        if (!useScrollableList) return table;
+
+        return ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxHeight),
+          child: Scrollbar(
+            thumbVisibility: true,
+            child: SingleChildScrollView(
+              primary: false,
+              physics: const BouncingScrollPhysics(
+                parent: AlwaysScrollableScrollPhysics(),
+              ),
+              child: table,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _approvalTableHeader(double purposeWidth) {
+    return Container(
+      height: 44,
+      color: AppTheme.offWhite,
+      child: Row(
+        children: [
+          _approvalHeaderCell('Employee', width: 190),
+          _approvalHeaderCell('Date', width: 120),
+          _approvalHeaderCell('Purpose / Location', width: purposeWidth),
+          _approvalHeaderCell('Time', width: 120),
+          _approvalHeaderCell('Status', width: 150),
+        ],
+      ),
+    );
+  }
+
+  Widget _approvalTableRow(
+    _LocatorSlipDraft item, {
+    required double purposeWidth,
+    required bool isLast,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    final borderColor = Colors.black.withValues(alpha: 0.06);
+    final rowColor = isSelected
+        ? AppTheme.primaryNavy.withValues(alpha: 0.08)
+        : Colors.transparent;
+    final leftBorderColor = isSelected
+        ? AppTheme.primaryNavy
+        : Colors.transparent;
+
+    return Material(
+      color: rowColor,
+      child: InkWell(
+        onTap: onTap,
+        hoverColor: AppTheme.primaryNavy.withValues(alpha: 0.04),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 60),
+          decoration: BoxDecoration(
+            border: Border(
+              left: BorderSide(color: leftBorderColor, width: 4),
+              bottom: isLast ? BorderSide.none : BorderSide(color: borderColor),
+            ),
+          ),
+          child: Row(
+            children: [
+              _approvalBodyCell(
+                width: 186,
+                child: _approvalCellText(item.employeeName, strong: true),
+              ),
+              _approvalBodyCell(
+                width: 120,
+                child: _approvalCellText(_formatDate(item.date)),
+              ),
+              _approvalBodyCell(
+                width: purposeWidth,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _approvalCellText(item.office, strong: true),
+                    if (item.remarks.trim().isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      _approvalCellText(
+                        item.remarks,
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              _approvalBodyCell(
+                width: 120,
+                child: _approvalCellText(_approvalSegmentsText(item)),
+              ),
+              _approvalBodyCell(width: 150, child: _approvalStatusPill(item)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _approvalHeaderCell(String label, {required double width}) {
+    return SizedBox(
+      width: width,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _approvalBodyCell({required double width, required Widget child}) {
+    return SizedBox(
+      width: width,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Align(alignment: Alignment.centerLeft, child: child),
+      ),
+    );
+  }
+
+  Widget _approvalCellText(
+    String text, {
+    bool strong = false,
+    Color? color,
+    double fontSize = 13,
+  }) {
+    return Text(
+      text,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        color: color ?? AppTheme.textPrimary,
+        fontSize: fontSize,
+        fontWeight: strong ? FontWeight.w700 : FontWeight.w500,
+      ),
+    );
+  }
+
+  Widget _approvalStatusPill(_LocatorSlipDraft item) {
+    final (bg, border, textColor) = _statusColors(item.status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: border),
+      ),
+      child: Text(
+        _departmentHeadStatusLabel(item),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: textColor,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  String _approvalSegmentsText(_LocatorSlipDraft item) {
+    final segments = <String>[];
+    if (item.amIn) segments.add('AM IN');
+    if (item.amOut) segments.add('AM OUT');
+    if (item.pmIn) segments.add('PM IN');
+    if (item.pmOut) segments.add('PM OUT');
+    return segments.isEmpty ? '-' : segments.join(', ');
   }
 
   void _toggleApprovalSelection(_LocatorSlipDraft item) {
@@ -1398,8 +1763,15 @@ class _LocatorSlipDraft {
     required this.employeeName,
     required this.office,
     required this.remarks,
+    this.rawStatus,
     this.departmentHeadName,
+    this.departmentHeadReviewedAt,
+    this.departmentHeadRemarks,
     this.hrReviewerName,
+    this.hrReviewedAt,
+    this.hrRemarks,
+    this.createdAt,
+    this.updatedAt,
     required this.amIn,
     required this.amOut,
     required this.pmIn,
@@ -1412,8 +1784,15 @@ class _LocatorSlipDraft {
   final String employeeName;
   final String office;
   final String remarks;
+  final String? rawStatus;
   final String? departmentHeadName;
+  final DateTime? departmentHeadReviewedAt;
+  final String? departmentHeadRemarks;
   final String? hrReviewerName;
+  final DateTime? hrReviewedAt;
+  final String? hrRemarks;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
   final bool amIn;
   final bool amOut;
   final bool pmIn;
@@ -1426,8 +1805,15 @@ class _LocatorSlipDraft {
     String? employeeName,
     String? office,
     String? remarks,
+    String? rawStatus,
     String? departmentHeadName,
+    DateTime? departmentHeadReviewedAt,
+    String? departmentHeadRemarks,
     String? hrReviewerName,
+    DateTime? hrReviewedAt,
+    String? hrRemarks,
+    DateTime? createdAt,
+    DateTime? updatedAt,
     bool? amIn,
     bool? amOut,
     bool? pmIn,
@@ -1440,8 +1826,17 @@ class _LocatorSlipDraft {
       employeeName: employeeName ?? this.employeeName,
       office: office ?? this.office,
       remarks: remarks ?? this.remarks,
+      rawStatus: rawStatus ?? this.rawStatus,
       departmentHeadName: departmentHeadName ?? this.departmentHeadName,
+      departmentHeadReviewedAt:
+          departmentHeadReviewedAt ?? this.departmentHeadReviewedAt,
+      departmentHeadRemarks:
+          departmentHeadRemarks ?? this.departmentHeadRemarks,
       hrReviewerName: hrReviewerName ?? this.hrReviewerName,
+      hrReviewedAt: hrReviewedAt ?? this.hrReviewedAt,
+      hrRemarks: hrRemarks ?? this.hrRemarks,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
       amIn: amIn ?? this.amIn,
       amOut: amOut ?? this.amOut,
       pmIn: pmIn ?? this.pmIn,
@@ -1463,9 +1858,8 @@ class _LocatorSlipDraft {
       return null;
     }
 
-    final status = _LocatorSlipStatus.fromApi(
-      (json['status'] ?? '').toString(),
-    );
+    final rawStatus = (json['status'] ?? '').toString();
+    final status = _LocatorSlipStatus.fromApi(rawStatus);
     final genericReviewer = readName(['reviewer_name', 'approver_name']);
     return _LocatorSlipDraft(
       id: (json['id'] ?? '').toString(),
@@ -1473,6 +1867,7 @@ class _LocatorSlipDraft {
       employeeName: (json['employee_name'] ?? 'Employee').toString(),
       office: (json['office'] ?? '').toString(),
       remarks: (json['reason'] ?? '').toString(),
+      rawStatus: rawStatus,
       departmentHeadName:
           readName([
             'dept_head_reviewer_name',
@@ -1482,6 +1877,8 @@ class _LocatorSlipDraft {
             'department_head_reviewer_name',
           ]) ??
           (status == _LocatorSlipStatus.pendingHr ? genericReviewer : null),
+      departmentHeadReviewedAt: _parseDateTime(json['dept_head_reviewed_at']),
+      departmentHeadRemarks: readName(['dept_head_remarks']),
       hrReviewerName:
           readName([
             'hr_name',
@@ -1493,6 +1890,10 @@ class _LocatorSlipDraft {
                   status == _LocatorSlipStatus.rejected)
               ? genericReviewer
               : null),
+      hrReviewedAt: _parseDateTime(json['hr_reviewed_at']),
+      hrRemarks: readName(['hr_remarks']),
+      createdAt: _parseDateTime(json['created_at']),
+      updatedAt: _parseDateTime(json['updated_at']),
       amIn: json['am_in'] == true,
       amOut: json['am_out'] == true,
       pmIn: json['pm_in'] == true,
@@ -1514,7 +1915,7 @@ enum _LocatorSlipStatus {
   final String label;
 
   static _LocatorSlipStatus fromApi(String status) {
-    switch (status) {
+    switch (status.trim().toLowerCase()) {
       case 'draft':
         return _LocatorSlipStatus.draft;
       case 'pending_department_head':
@@ -1660,88 +2061,6 @@ class _LocatorSlipCard extends StatelessWidget {
   }
 }
 
-class _LocatorApprovalCard extends StatelessWidget {
-  const _LocatorApprovalCard({
-    required this.item,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  final _LocatorSlipDraft item;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: isSelected
-                  ? AppTheme.primaryNavy.withValues(alpha: 0.25)
-                  : Colors.black.withValues(alpha: 0.08),
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                item.employeeName,
-                style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 15,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '${_formatDate(item.date)} • ${item.office}',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  if (item.amIn) _chip('AM IN'),
-                  if (item.amOut) _chip('AM OUT'),
-                  if (item.pmIn) _chip('PM IN'),
-                  if (item.pmOut) _chip('PM OUT'),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Text(
-                item.remarks,
-                style: TextStyle(color: AppTheme.textSecondary, height: 1.4),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _chip(String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppTheme.offWhite,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
-      ),
-      child: Text(text, style: const TextStyle(fontSize: 11)),
-    );
-  }
-}
-
 class _LocatorSectionTabs extends StatelessWidget {
   const _LocatorSectionTabs({required this.current, required this.onChanged});
 
@@ -1761,7 +2080,7 @@ class _LocatorSectionTabs extends StatelessWidget {
           onTap: () => onChanged(_LocatorSection.requests),
         ),
         _tab(
-          label: 'Approvals',
+          label: 'Approvals / History',
           icon: Icons.fact_check_rounded,
           selected: current == _LocatorSection.approvals,
           onTap: () => onChanged(_LocatorSection.approvals),
@@ -1810,236 +2129,6 @@ class _LocatorSectionTabs extends StatelessWidget {
   }
 }
 
-class _LocatorFiltersCard extends StatelessWidget {
-  const _LocatorFiltersCard({
-    required this.selectedStatusFilter,
-    required this.fromDate,
-    required this.toDate,
-    required this.searchQuery,
-    required this.visibleCount,
-    required this.totalCount,
-    required this.onStatusChanged,
-    required this.onSearchChanged,
-    required this.onPickFromDate,
-    required this.onPickToDate,
-    required this.onClearFilters,
-  });
-
-  final String? selectedStatusFilter;
-  final DateTime? fromDate;
-  final DateTime? toDate;
-  final String searchQuery;
-  final int visibleCount;
-  final int totalCount;
-  final ValueChanged<String?> onStatusChanged;
-  final ValueChanged<String> onSearchChanged;
-  final VoidCallback onPickFromDate;
-  final VoidCallback onPickToDate;
-  final VoidCallback onClearFilters;
-
-  @override
-  Widget build(BuildContext context) {
-    const border = Color(0xFFD7DCE2);
-    const activePill = Color(0xFF123B6D);
-    const inactiveText = Color(0xFF2D3640);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            SizedBox(
-              width: 240,
-              height: 36,
-              child: TextFormField(
-                key: ValueKey(searchQuery),
-                initialValue: searchQuery,
-                onChanged: onSearchChanged,
-                style: const TextStyle(
-                  color: Color(0xFF2D3640),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-                decoration: _filterDecoration(
-                  hintText: 'Search',
-                  borderColor: border,
-                  suffixIcon: const Icon(
-                    Icons.search_rounded,
-                    size: 20,
-                    color: Color(0xFF8792A0),
-                  ),
-                ),
-              ),
-            ),
-            _dateButton(
-              label: fromDate == null ? 'From' : _formatDate(fromDate!),
-              onPressed: onPickFromDate,
-              borderColor: border,
-            ),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 2),
-              child: Text(
-                '-',
-                style: TextStyle(
-                  color: Color(0xFF7F8895),
-                  fontWeight: FontWeight.w600,
-                  fontSize: 15,
-                ),
-              ),
-            ),
-            _dateButton(
-              label: toDate == null ? 'To' : _formatDate(toDate!),
-              onPressed: onPickToDate,
-              borderColor: border,
-            ),
-            _statusChip(
-              label: 'All',
-              selected: selectedStatusFilter == null,
-              onTap: () => onStatusChanged(null),
-              selectedColor: activePill,
-              unselectedTextColor: inactiveText,
-            ),
-            ...const ['pending', 'approved', 'rejected', 'cancelled'].map(
-              (statusKey) => _statusChip(
-                label: _statusFilterLabel(statusKey),
-                selected: selectedStatusFilter == statusKey,
-                onTap: () => onStatusChanged(statusKey),
-                selectedColor: activePill,
-                unselectedTextColor: inactiveText,
-              ),
-            ),
-            TextButton(
-              onPressed: onClearFilters,
-              style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF1A568B),
-                textStyle: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                minimumSize: const Size(0, 36),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              child: const Text('Clear'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Text(
-          '$visibleCount of $totalCount',
-          style: TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _dateButton({
-    required String label,
-    required VoidCallback onPressed,
-    required Color borderColor,
-  }) {
-    return SizedBox(
-      height: 36,
-      child: OutlinedButton.icon(
-        onPressed: onPressed,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: const Color(0xFF556070),
-          side: BorderSide(color: borderColor),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-        ),
-        icon: const Icon(
-          Icons.calendar_today_rounded,
-          size: 16,
-          color: Color(0xFF8A95A3),
-        ),
-        label: Text(label),
-      ),
-    );
-  }
-
-  Widget _statusChip({
-    required String label,
-    required bool selected,
-    required VoidCallback onTap,
-    required Color selectedColor,
-    required Color unselectedTextColor,
-  }) {
-    return SizedBox(
-      height: 36,
-      child: TextButton(
-        onPressed: onTap,
-        style: TextButton.styleFrom(
-          backgroundColor: selected ? selectedColor : const Color(0xFFF7F8FA),
-          foregroundColor: selected ? Colors.white : unselectedTextColor,
-          side: const BorderSide(color: Color(0xFFDDE2E8)),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          minimumSize: const Size(0, 36),
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-        ),
-        child: Text(label),
-      ),
-    );
-  }
-
-  static String _statusFilterLabel(String key) {
-    switch (key) {
-      case 'pending':
-        return 'Pending';
-      case 'approved':
-        return 'Approved';
-      case 'rejected':
-        return 'Rejected';
-      case 'cancelled':
-        return 'Cancelled';
-      default:
-        return key;
-    }
-  }
-
-  InputDecoration _filterDecoration({
-    required String hintText,
-    required Color borderColor,
-    Widget? suffixIcon,
-  }) {
-    return InputDecoration(
-      hintText: hintText,
-      hintStyle: const TextStyle(
-        color: Color(0xFF8D96A3),
-        fontSize: 14,
-        fontWeight: FontWeight.w600,
-      ),
-      suffixIcon: suffixIcon,
-      isDense: true,
-      filled: true,
-      fillColor: Colors.white,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: BorderSide(color: borderColor),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: const BorderSide(color: Color(0xFF123B6D), width: 1.2),
-      ),
-    );
-  }
-}
-
 class _InfoCard extends StatelessWidget {
   const _InfoCard({required this.child});
 
@@ -2082,8 +2171,12 @@ class _SectionCard extends StatelessWidget {
   final Widget child;
   final Widget? headerTrailing;
 
+  static const double _mobileBreakpoint = 600;
+
   @override
   Widget build(BuildContext context) {
+    final isMobile = MediaQuery.sizeOf(context).width < _mobileBreakpoint;
+
     return _InfoCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2116,7 +2209,7 @@ class _SectionCard extends StatelessWidget {
                   ],
                 ),
               ),
-              if (headerTrailing != null) ...[
+              if (!isMobile && headerTrailing != null) ...[
                 const SizedBox(width: 12),
                 Flexible(
                   child: Align(
@@ -2127,6 +2220,10 @@ class _SectionCard extends StatelessWidget {
               ],
             ],
           ),
+          if (isMobile && headerTrailing != null) ...[
+            const SizedBox(height: 12),
+            SizedBox(width: double.infinity, child: headerTrailing!),
+          ],
           const SizedBox(height: 18),
           child,
         ],
@@ -2232,6 +2329,39 @@ String _formatDate(DateTime value) {
     'Dec',
   ];
   return '${months[value.month - 1]} ${value.day}, ${value.year}';
+}
+
+String _formatDateTime(DateTime value) {
+  final hour = value.hour % 12 == 0 ? 12 : value.hour % 12;
+  final minute = value.minute.toString().padLeft(2, '0');
+  final meridiem = value.hour >= 12 ? 'PM' : 'AM';
+  return '${_formatDate(value)} $hour:$minute $meridiem';
+}
+
+DateTime? _parseDateTime(dynamic value) {
+  if (value == null) return null;
+  final raw = value.toString().trim();
+  if (raw.isEmpty || raw.toLowerCase() == 'null') return null;
+  return DateTime.tryParse(raw);
+}
+
+String _departmentHeadStatusLabel(_LocatorSlipDraft item) {
+  switch (item.rawStatus) {
+    case 'pending_department_head':
+      return 'Pending';
+    case 'pending_hr':
+    case 'pending':
+      return 'Forwarded to HR';
+    case 'approved':
+      return 'Approved by HR';
+    case 'rejected_by_hr':
+      return 'Rejected by HR';
+    case 'rejected_by_department_head':
+      return 'Rejected';
+    case 'cancelled':
+      return 'Cancelled';
+  }
+  return item.status.label;
 }
 
 (Color, Color, Color) _statusColors(_LocatorSlipStatus status) {

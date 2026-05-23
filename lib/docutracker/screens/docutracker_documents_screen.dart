@@ -308,11 +308,67 @@ class _DocuTrackerDocumentsScreenState
                   ),
                   const SizedBox(width: 8),
                   Expanded(
+<<<<<<< HEAD
                     child: Text(
                       provider.error!,
                       style: TextStyle(
                         color: Colors.red.shade900,
                         fontSize: 13,
+=======
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          RspFormHeader(
+                            formTitle: 'Create Document',
+                            subtitle: 'DocuTracker - Municipality of Plaridel',
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(32, 24, 32, 24),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                TextField(
+                                  decoration: DocuTrackerStyles.inputDecoration(context, 
+                                    'Enter title',
+                                    Icons.title_rounded,
+                                  ),
+                                  onChanged: (v) => title = v,
+                                ),
+                                const SizedBox(height: 20),
+                                DropdownButtonFormField<DocumentType>(
+                                  value: type,
+                                  decoration:
+                                      DocuTrackerStyles.dropdownDecoration(context, 
+                                        'Document Type',
+                                      ),
+                                  items: DocumentType.values
+                                      .map(
+                                        (t) => DropdownMenuItem(
+                                          value: t,
+                                          child: Text(t.displayName),
+                                        ),
+                                      )
+                                      .toList(),
+                                  onChanged: (v) => v != null
+                                      ? setState(() => type = v)
+                                      : null,
+                                ),
+                                const SizedBox(height: 20),
+                                TextField(
+                                  decoration: DocuTrackerStyles.inputDecoration(context, 
+                                    'Description (optional)',
+                                    Icons.notes_rounded,
+                                  ),
+                                  maxLines: 6,
+                                  onChanged: (v) =>
+                                      description = v.isEmpty ? null : v,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+>>>>>>> origin/main
                       ),
                     ),
                   ),
@@ -370,6 +426,7 @@ class _EmptyState extends StatelessWidget {
     final canCreate = onCreateTap != null;
 
     return Container(
+<<<<<<< HEAD
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 72, horizontal: 32),
       decoration: BoxDecoration(
@@ -384,6 +441,10 @@ class _EmptyState extends StatelessWidget {
           ),
         ],
       ),
+=======
+      padding: const EdgeInsets.all(48),
+      decoration: DocuTrackerStyles.listCardDecoration(context),
+>>>>>>> origin/main
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
@@ -826,6 +887,7 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
     }
 
     return Container(
+<<<<<<< HEAD
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
         color: bgColor,
@@ -855,6 +917,24 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                     ? const Color(0xFFDC2626)
                     : (isEscalated ? const Color(0xFF7C3AED) : _statusColor),
                 width: 3,
+=======
+      decoration: DocuTrackerStyles.listCardDecoration(context),
+      child: ListView.separated(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: documents.length,
+        separatorBuilder: (_, __) =>
+            Divider(height: 1, color: Colors.black.withOpacity(0.06)),
+        itemBuilder: (context, i) {
+          final doc = documents[i];
+          return ListTile(
+            leading: CircleAvatar(
+              backgroundColor: AppTheme.primaryNavy.withOpacity(0.12),
+              child: Icon(
+                Icons.description_rounded,
+                color: AppTheme.primaryNavy,
+                size: 24,
+>>>>>>> origin/main
               ),
             ),
           ),

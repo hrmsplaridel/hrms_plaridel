@@ -87,7 +87,15 @@ class MockLeaveRepository implements LeaveRepository {
     var results = _requests.where((r) {
       if (query.userId != null && r.userId != query.userId) return false;
       if (query.status != null && r.status != query.status) return false;
-      if (query.leaveType != null && r.leaveType != query.leaveType) {
+      final leaveTypeName = query.leaveTypeName?.trim();
+      if (leaveTypeName != null &&
+          leaveTypeName.isNotEmpty &&
+          r.effectiveLeaveTypeName != leaveTypeName) {
+        return false;
+      }
+      if ((leaveTypeName == null || leaveTypeName.isEmpty) &&
+          query.leaveType != null &&
+          r.leaveType != query.leaveType) {
         return false;
       }
       if (query.startDateFrom != null &&
@@ -151,7 +159,10 @@ class MockLeaveRepository implements LeaveRepository {
   }
 
   @override
-  Future<LeaveBalance> upsertBalance(LeaveBalance balance) async {
+  Future<LeaveBalance> upsertBalance(
+    LeaveBalance balance, {
+    String? remarks,
+  }) async {
     _ensureDefaultBalances(balance.userId);
     final list = _balancesByUser.putIfAbsent(balance.userId, () => []);
     final index = list.indexWhere((b) => b.leaveType == balance.leaveType);
@@ -325,8 +336,16 @@ class MockLeaveRepository implements LeaveRepository {
   };
 
   @override
-  Future<List<LeaveRequest>> listDepartmentHeadRequests() async =>
-      const <LeaveRequest>[];
+  Future<List<LeaveRequest>> listDepartmentHeadRequests({
+    LeaveRequestQuery query = const LeaveRequestQuery(),
+  }) async => _requests.where((request) {
+    final statusOk = query.status == null || request.status == query.status;
+    final leaveTypeName = query.leaveTypeName?.trim();
+    final leaveTypeOk = leaveTypeName != null && leaveTypeName.isNotEmpty
+        ? request.effectiveLeaveTypeName == leaveTypeName
+        : query.leaveType == null || request.leaveType == query.leaveType;
+    return statusOk && leaveTypeOk;
+  }).toList();
 
   @override
   Future<LeaveRequest> departmentHeadApprove(
@@ -376,6 +395,57 @@ class MockLeaveRepository implements LeaveRepository {
       year: input.year,
       remarks: input.remarks,
       appliedAt: DateTime.now(),
+    );
+  }
+
+  @override
+  Future<MonthlyLeaveAccrualResult> runMonthlyAccrual(
+    MonthlyLeaveAccrualInput input,
+  ) async {
+    final now = DateTime.now();
+    final targetMonth =
+        input.targetMonth ??
+        '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}';
+    final details = <MonthlyLeaveAccrualDetail>[];
+
+    for (final entry in _balancesByUser.entries) {
+      for (final leaveType in const [
+        LeaveType.vacationLeave,
+        LeaveType.sickLeave,
+      ]) {
+        final balance = entry.value.firstWhere(
+          (b) => b.leaveType == leaveType,
+          orElse: () => LeaveBalance(userId: entry.key, leaveType: leaveType),
+        );
+        final action = input.dryRun ? 'would_apply' : 'applied';
+        details.add(
+          MonthlyLeaveAccrualDetail(
+            userId: entry.key,
+            employeeName: balance.employeeName ?? entry.key,
+            leaveType: leaveType,
+            action: action,
+            monthsCredited: 1,
+            daysAdded: 1.25,
+            lastAccrualDate: '$targetMonth-01',
+          ),
+        );
+        if (!input.dryRun) {
+          _adjustEarnedDays(entry.key, leaveType, 1.25, targetMonth);
+        }
+      }
+    }
+
+    return MonthlyLeaveAccrualResult(
+      targetYearMonth: targetMonth,
+      rate: 1.25,
+      leaveTypes: const [LeaveType.vacationLeave, LeaveType.sickLeave],
+      maxCatchUpMonths: input.maxCatchUpMonths,
+      dryRun: input.dryRun,
+      rowsUpdated: details.length,
+      rowsSkipped: 0,
+      missingBalanceRowsCreated: 0,
+      missingBalanceRowsDetected: 0,
+      details: details,
     );
   }
 
@@ -494,6 +564,25 @@ class MockLeaveRepository implements LeaveRepository {
     final next = current.usedDays + delta;
     list[index] = current.copyWith(
       usedDays: next < 0 ? 0 : next,
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  void _adjustEarnedDays(
+    String userId,
+    LeaveType leaveType,
+    double delta,
+    String targetMonth,
+  ) {
+    if (delta == 0) return;
+    _ensureDefaultBalances(userId);
+    final list = _balancesByUser[userId]!;
+    final index = list.indexWhere((b) => b.leaveType == leaveType);
+    if (index < 0) return;
+    final current = list[index];
+    list[index] = current.copyWith(
+      earnedDays: current.earnedDays + delta,
+      lastAccrualDate: DateTime.tryParse('$targetMonth-01'),
       updatedAt: DateTime.now(),
     );
   }
