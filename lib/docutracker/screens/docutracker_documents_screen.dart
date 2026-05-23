@@ -677,6 +677,7 @@ class _DocumentDataTable extends StatelessWidget {
           columnSpacing: 18,
           headingRowHeight: 44,
           dataRowMinHeight: 56,
+          dataRowMaxHeight: 64,
           columns: const [
             DataColumn(label: Text('Document')),
             DataColumn(label: Text('Type')),
