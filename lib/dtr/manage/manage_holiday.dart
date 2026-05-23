@@ -74,7 +74,13 @@ class _ManageHolidayState extends State<ManageHoliday> {
 
   void _updateHolidayFormState(VoidCallback update) {
     if (mounted) setState(update);
-    _drawerSetState?.call(() {});
+    final drawerSetState = _drawerSetState;
+    if (!mounted || drawerSetState == null) return;
+    try {
+      drawerSetState(() {});
+    } catch (_) {
+      _drawerSetState = null;
+    }
   }
 
   @override
@@ -361,56 +367,59 @@ class _ManageHolidayState extends State<ManageHoliday> {
   }
 
   Future<void> _openHolidayDrawer({_HolidayRecord? holiday}) async {
+    _drawerSetState = null;
     if (holiday == null) {
       _clearForm();
     } else {
       _selectHoliday(holiday);
     }
 
-    await showGeneralDialog<void>(
-      context: context,
-      barrierDismissible: true,
-      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-      barrierColor: Colors.black.withValues(alpha: 0.32),
-      transitionDuration: const Duration(milliseconds: 220),
-      pageBuilder: (dialogContext, _, __) {
-        final screenWidth = MediaQuery.of(dialogContext).size.width;
-        final drawerWidth = screenWidth < 720 ? screenWidth : 560.0;
-        return Align(
-          alignment: Alignment.centerRight,
-          child: SizedBox(
-            width: drawerWidth,
-            height: double.infinity,
-            child: Material(
-              color: AppTheme.dashPanelOf(dialogContext),
-              elevation: 18,
-              child: StatefulBuilder(
-                builder: (context, drawerSetState) {
-                  _drawerSetState = drawerSetState;
-                  return _buildHolidayDrawer(dialogContext);
-                },
+    try {
+      await showGeneralDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+        barrierColor: Colors.black.withValues(alpha: 0.32),
+        transitionDuration: const Duration(milliseconds: 220),
+        pageBuilder: (dialogContext, _, __) {
+          final screenWidth = MediaQuery.of(dialogContext).size.width;
+          final drawerWidth = screenWidth < 720 ? screenWidth : 560.0;
+          return Align(
+            alignment: Alignment.centerRight,
+            child: SizedBox(
+              width: drawerWidth,
+              height: double.infinity,
+              child: Material(
+                color: AppTheme.dashPanelOf(dialogContext),
+                elevation: 18,
+                child: StatefulBuilder(
+                  builder: (context, drawerSetState) {
+                    _drawerSetState = drawerSetState;
+                    return _buildHolidayDrawer(dialogContext);
+                  },
+                ),
               ),
             ),
-          ),
-        );
-      },
-      transitionBuilder: (context, animation, _, child) {
-        final curved = CurvedAnimation(
-          parent: animation,
-          curve: Curves.easeOutCubic,
-          reverseCurve: Curves.easeInCubic,
-        );
-        return SlideTransition(
-          position: Tween<Offset>(
-            begin: const Offset(1, 0),
-            end: Offset.zero,
-          ).animate(curved),
-          child: child,
-        );
-      },
-    );
-
-    _drawerSetState = null;
+          );
+        },
+        transitionBuilder: (context, animation, _, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(1, 0),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          );
+        },
+      );
+    } finally {
+      _drawerSetState = null;
+    }
   }
 
   Widget _buildHolidayDrawer(BuildContext drawerContext) {

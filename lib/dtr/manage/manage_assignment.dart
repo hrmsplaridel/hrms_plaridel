@@ -138,7 +138,13 @@ class _ManageAssignmentState extends State<ManageAssignment> {
 
   void _updateAssignmentFormState(VoidCallback update) {
     if (mounted) setState(update);
-    _drawerSetState?.call(() {});
+    final drawerSetState = _drawerSetState;
+    if (!mounted || drawerSetState == null) return;
+    try {
+      drawerSetState(() {});
+    } catch (_) {
+      _drawerSetState = null;
+    }
   }
 
   @override
@@ -657,6 +663,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   }
 
   Future<void> _openAssignmentDrawer({_AssignmentRecord? assignment}) async {
+    _drawerSetState = null;
     if (_selectedEmployeeId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select an employee first.')),
@@ -670,50 +677,52 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       _selectAssignment(assignment);
     }
 
-    await showGeneralDialog<void>(
-      context: context,
-      barrierDismissible: true,
-      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-      barrierColor: Colors.black.withValues(alpha: 0.32),
-      transitionDuration: const Duration(milliseconds: 220),
-      pageBuilder: (dialogContext, _, __) {
-        final screenWidth = MediaQuery.of(dialogContext).size.width;
-        final drawerWidth = screenWidth < 760 ? screenWidth : 620.0;
-        return Align(
-          alignment: Alignment.centerRight,
-          child: SizedBox(
-            width: drawerWidth,
-            height: double.infinity,
-            child: Material(
-              color: AppTheme.dashPanelOf(dialogContext),
-              elevation: 18,
-              child: StatefulBuilder(
-                builder: (context, drawerSetState) {
-                  _drawerSetState = drawerSetState;
-                  return _buildAssignmentDrawer(dialogContext);
-                },
+    try {
+      await showGeneralDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+        barrierColor: Colors.black.withValues(alpha: 0.32),
+        transitionDuration: const Duration(milliseconds: 220),
+        pageBuilder: (dialogContext, _, __) {
+          final screenWidth = MediaQuery.of(dialogContext).size.width;
+          final drawerWidth = screenWidth < 760 ? screenWidth : 620.0;
+          return Align(
+            alignment: Alignment.centerRight,
+            child: SizedBox(
+              width: drawerWidth,
+              height: double.infinity,
+              child: Material(
+                color: AppTheme.dashPanelOf(dialogContext),
+                elevation: 18,
+                child: StatefulBuilder(
+                  builder: (context, drawerSetState) {
+                    _drawerSetState = drawerSetState;
+                    return _buildAssignmentDrawer(dialogContext);
+                  },
+                ),
               ),
             ),
-          ),
-        );
-      },
-      transitionBuilder: (context, animation, _, child) {
-        final curved = CurvedAnimation(
-          parent: animation,
-          curve: Curves.easeOutCubic,
-          reverseCurve: Curves.easeInCubic,
-        );
-        return SlideTransition(
-          position: Tween<Offset>(
-            begin: const Offset(1, 0),
-            end: Offset.zero,
-          ).animate(curved),
-          child: child,
-        );
-      },
-    );
-
-    _drawerSetState = null;
+          );
+        },
+        transitionBuilder: (context, animation, _, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(1, 0),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          );
+        },
+      );
+    } finally {
+      _drawerSetState = null;
+    }
   }
 
   Widget _buildAssignmentDrawer(BuildContext drawerContext) {

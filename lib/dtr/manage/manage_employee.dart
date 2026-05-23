@@ -3560,7 +3560,13 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
+      ).showSnackBar(
+        SnackBar(
+          content: Text(
+            _apiErrorMessageFromDio(e, fallback: 'Failed to update employee.'),
+          ),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _saving = false);
     }

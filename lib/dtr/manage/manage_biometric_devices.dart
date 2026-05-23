@@ -195,7 +195,13 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
 
   void _updateDeviceFormState(VoidCallback update) {
     if (mounted) setState(update);
-    _drawerSetState?.call(() {});
+    final drawerSetState = _drawerSetState;
+    if (!mounted || drawerSetState == null) return;
+    try {
+      drawerSetState(() {});
+    } catch (_) {
+      _drawerSetState = null;
+    }
   }
 
   @override
@@ -420,56 +426,59 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
   }
 
   Future<void> _openDeviceDrawer({_DeviceRecord? device}) async {
+    _drawerSetState = null;
     if (device == null) {
       _clearForm();
     } else {
       _selectDevice(device);
     }
 
-    await showGeneralDialog<void>(
-      context: context,
-      barrierDismissible: true,
-      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-      barrierColor: Colors.black.withValues(alpha: 0.32),
-      transitionDuration: const Duration(milliseconds: 220),
-      pageBuilder: (dialogContext, _, __) {
-        final screenWidth = MediaQuery.of(dialogContext).size.width;
-        final drawerWidth = screenWidth < 720 ? screenWidth : 560.0;
-        return Align(
-          alignment: Alignment.centerRight,
-          child: SizedBox(
-            width: drawerWidth,
-            height: double.infinity,
-            child: Material(
-              color: AppTheme.dashPanelOf(dialogContext),
-              elevation: 18,
-              child: StatefulBuilder(
-                builder: (context, drawerSetState) {
-                  _drawerSetState = drawerSetState;
-                  return _buildDeviceDrawer(dialogContext);
-                },
+    try {
+      await showGeneralDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+        barrierColor: Colors.black.withValues(alpha: 0.32),
+        transitionDuration: const Duration(milliseconds: 220),
+        pageBuilder: (dialogContext, _, __) {
+          final screenWidth = MediaQuery.of(dialogContext).size.width;
+          final drawerWidth = screenWidth < 720 ? screenWidth : 560.0;
+          return Align(
+            alignment: Alignment.centerRight,
+            child: SizedBox(
+              width: drawerWidth,
+              height: double.infinity,
+              child: Material(
+                color: AppTheme.dashPanelOf(dialogContext),
+                elevation: 18,
+                child: StatefulBuilder(
+                  builder: (context, drawerSetState) {
+                    _drawerSetState = drawerSetState;
+                    return _buildDeviceDrawer(dialogContext);
+                  },
+                ),
               ),
             ),
-          ),
-        );
-      },
-      transitionBuilder: (context, animation, _, child) {
-        final curved = CurvedAnimation(
-          parent: animation,
-          curve: Curves.easeOutCubic,
-          reverseCurve: Curves.easeInCubic,
-        );
-        return SlideTransition(
-          position: Tween<Offset>(
-            begin: const Offset(1, 0),
-            end: Offset.zero,
-          ).animate(curved),
-          child: child,
-        );
-      },
-    );
-
-    _drawerSetState = null;
+          );
+        },
+        transitionBuilder: (context, animation, _, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(1, 0),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          );
+        },
+      );
+    } finally {
+      _drawerSetState = null;
+    }
   }
 
   Widget _buildDeviceDrawer(BuildContext drawerContext) {

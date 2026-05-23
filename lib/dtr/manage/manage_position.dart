@@ -72,7 +72,13 @@ class _ManagePositionState extends State<ManagePosition> {
 
   void _updatePositionFormState(VoidCallback update) {
     if (mounted) setState(update);
-    _drawerSetState?.call(() {});
+    final drawerSetState = _drawerSetState;
+    if (!mounted || drawerSetState == null) return;
+    try {
+      drawerSetState(() {});
+    } catch (_) {
+      _drawerSetState = null;
+    }
   }
 
   @override
@@ -312,56 +318,59 @@ class _ManagePositionState extends State<ManagePosition> {
   }
 
   Future<void> _openPositionDrawer({_PositionRecord? position}) async {
+    _drawerSetState = null;
     if (position == null) {
       _clearForm();
     } else {
       _selectPosition(position);
     }
 
-    await showGeneralDialog<void>(
-      context: context,
-      barrierDismissible: true,
-      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-      barrierColor: Colors.black.withValues(alpha: 0.32),
-      transitionDuration: const Duration(milliseconds: 220),
-      pageBuilder: (dialogContext, _, __) {
-        final screenWidth = MediaQuery.of(dialogContext).size.width;
-        final drawerWidth = screenWidth < 720 ? screenWidth : 520.0;
-        return Align(
-          alignment: Alignment.centerRight,
-          child: SizedBox(
-            width: drawerWidth,
-            height: double.infinity,
-            child: Material(
-              color: AppTheme.dashPanelOf(dialogContext),
-              elevation: 18,
-              child: StatefulBuilder(
-                builder: (context, drawerSetState) {
-                  _drawerSetState = drawerSetState;
-                  return _buildPositionDrawer(dialogContext);
-                },
+    try {
+      await showGeneralDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+        barrierColor: Colors.black.withValues(alpha: 0.32),
+        transitionDuration: const Duration(milliseconds: 220),
+        pageBuilder: (dialogContext, _, __) {
+          final screenWidth = MediaQuery.of(dialogContext).size.width;
+          final drawerWidth = screenWidth < 720 ? screenWidth : 520.0;
+          return Align(
+            alignment: Alignment.centerRight,
+            child: SizedBox(
+              width: drawerWidth,
+              height: double.infinity,
+              child: Material(
+                color: AppTheme.dashPanelOf(dialogContext),
+                elevation: 18,
+                child: StatefulBuilder(
+                  builder: (context, drawerSetState) {
+                    _drawerSetState = drawerSetState;
+                    return _buildPositionDrawer(dialogContext);
+                  },
+                ),
               ),
             ),
-          ),
-        );
-      },
-      transitionBuilder: (context, animation, _, child) {
-        final curved = CurvedAnimation(
-          parent: animation,
-          curve: Curves.easeOutCubic,
-          reverseCurve: Curves.easeInCubic,
-        );
-        return SlideTransition(
-          position: Tween<Offset>(
-            begin: const Offset(1, 0),
-            end: Offset.zero,
-          ).animate(curved),
-          child: child,
-        );
-      },
-    );
-
-    _drawerSetState = null;
+          );
+        },
+        transitionBuilder: (context, animation, _, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(1, 0),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          );
+        },
+      );
+    } finally {
+      _drawerSetState = null;
+    }
   }
 
   Widget _buildPositionDrawer(BuildContext drawerContext) {
@@ -545,7 +554,7 @@ class _ManagePositionState extends State<ManagePosition> {
             child: Row(
               children: [
                 SizedBox(
-                  width: 60,
+                  width: 88,
                   child: Text(
                     'ID',
                     style: TextStyle(
@@ -567,9 +576,32 @@ class _ManagePositionState extends State<ManagePosition> {
                   ),
                 ),
                 Expanded(
+                  flex: 1,
+                  child: Text(
+                    'Department',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      color: _headingColor(context),
+                    ),
+                  ),
+                ),
+                Expanded(
                   flex: 2,
                   child: Text(
                     'Description',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      color: _headingColor(context),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 96,
+                  child: Text(
+                    'Action',
+                    textAlign: TextAlign.right,
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 13,
@@ -599,61 +631,90 @@ class _ManagePositionState extends State<ManagePosition> {
               ),
             )
           else
-            ...filtered.map((p) {
-              final isSelected = _selectedPosition?.id == p.id;
-              return Material(
-                color: isSelected
-                    ? (dark
-                          ? AppTheme.primaryNavy.withValues(alpha: 0.35)
-                          : AppTheme.primaryNavy.withValues(alpha: 0.08))
-                    : Colors.transparent,
-                child: InkWell(
-                  onTap: () => _openPositionDrawer(position: p),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                    child: Row(
-                      children: [
-                        SizedBox(
-                          width: 60,
-                          child: Text(
-                            p.displayPositionNo,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: _mutedColor(context),
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          flex: 1,
-                          child: Text(
-                            p.name,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: _headingColor(context),
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          flex: 2,
-                          child: Text(
-                            p.description ?? '—',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: _mutedColor(context),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+            Table(
+              columnWidths: const {
+                0: FixedColumnWidth(88),
+                1: FlexColumnWidth(),
+                2: FlexColumnWidth(),
+                3: FlexColumnWidth(2),
+                4: FixedColumnWidth(96),
+              },
+              children: filtered.map((p) {
+                final isSelected = _selectedPosition?.id == p.id;
+                return TableRow(
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? (dark
+                              ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                              : AppTheme.primaryNavy.withValues(alpha: 0.08))
+                        : null,
                   ),
-                ),
-              );
-            }),
+                  children: [
+                    _tableCell(
+                      p.displayPositionNo,
+                      onTap: () => _openPositionDrawer(position: p),
+                      secondary: true,
+                    ),
+                    _tableCell(
+                      p.name,
+                      onTap: () => _openPositionDrawer(position: p),
+                    ),
+                    _tableCell(
+                      p.departmentName ?? '—',
+                      onTap: () => _openPositionDrawer(position: p),
+                      secondary: true,
+                    ),
+                    _tableCell(
+                      p.description ?? '—',
+                      onTap: () => _openPositionDrawer(position: p),
+                      secondary: true,
+                    ),
+                    _actionCell(p),
+                  ],
+                );
+              }).toList(),
+            ),
         ],
+      ),
+    );
+  }
+
+  Widget _tableCell(
+    String text, {
+    VoidCallback? onTap,
+    bool secondary = false,
+  }) {
+    return TableCell(
+      verticalAlignment: TableCellVerticalAlignment.middle,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Text(
+            text,
+            style: TextStyle(
+              fontSize: secondary ? 12 : 13,
+              color: secondary ? _mutedColor(context) : _headingColor(context),
+            ),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _actionCell(_PositionRecord position) {
+    return TableCell(
+      verticalAlignment: TableCellVerticalAlignment.middle,
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: IconButton(
+          onPressed: () => _openPositionDrawer(position: position),
+          icon: const Icon(Icons.open_in_new_rounded, size: 18),
+          tooltip: 'Open position',
+          color: const Color(0xFFE85D04),
+        ),
       ),
     );
   }
