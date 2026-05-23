@@ -13,7 +13,7 @@ class LeaveTypeDefinition {
     this.requiresAttachmentWhenOverDays,
     this.maxDays,
     this.affectsDtrNormally = true,
-    this.balanceLedgerType = 'others',
+    this.balanceLedgerType = 'none',
   });
 
   final String? id;
@@ -65,7 +65,7 @@ class LeaveTypeDefinition {
       balanceLedgerType:
           json['balance_ledger_type']?.toString() ??
           json['balanceLedgerType']?.toString() ??
-          'others',
+          'none',
     );
   }
 
@@ -126,5 +126,29 @@ class LeaveTypeDefinition {
     if (value == null) return null;
     if (value is num) return value.toDouble();
     return double.tryParse(value.toString());
+  }
+}
+
+extension LeaveTypeDefinitionCreditPolicy on LeaveTypeDefinition {
+  bool get usesLeaveCredits => balanceLedgerType != 'none';
+
+  bool get usesOwnBalance => balanceLedgerType == 'ownBalance';
+
+  String get effectiveBalanceBucket {
+    if (usesOwnBalance) return name;
+    return balanceLedgerType;
+  }
+
+  String get creditPolicyLabel {
+    switch (balanceLedgerType) {
+      case 'vacationLeave':
+        return 'Deducts from Vacation Leave credits';
+      case 'sickLeave':
+        return 'Deducts from Sick Leave credits';
+      case 'ownBalance':
+        return 'Uses its own separate balance';
+      default:
+        return 'No leave credits required';
+    }
   }
 }

@@ -33,7 +33,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   bool _allowsPastDates = true;
   bool _requiresAttachment = false;
   bool _affectsDtrNormally = true;
-  String _balanceLedgerType = 'others';
+  String _balanceLedgerType = 'none';
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
 
@@ -46,19 +46,10 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   Color _hairline(BuildContext context) => AppTheme.dashHairlineOf(context);
 
   static const _ledgerTypes = <String, String>{
-    'vacationLeave': 'Vacation Leave',
-    'sickLeave': 'Sick Leave',
-    'maternityLeave': 'Maternity Leave',
-    'paternityLeave': 'Paternity Leave',
-    'specialPrivilegeLeave': 'Special Privilege Leave',
-    'soloParentLeave': 'Solo Parent Leave',
-    'studyLeave': 'Study Leave',
-    'tenDayVawcLeave': '10-Day VAWC Leave',
-    'rehabilitationPrivilege': 'Rehabilitation Privilege',
-    'specialLeaveBenefitsForWomen': 'Special Leave Benefits for Women',
-    'specialEmergencyCalamityLeave': 'Special Emergency (Calamity) Leave',
-    'adoptionLeave': 'Adoption Leave',
-    'others': 'Others / Custom',
+    'none': 'Does not use leave credits',
+    'vacationLeave': 'Deduct from Vacation Leave',
+    'sickLeave': 'Deduct from Sick Leave',
+    'ownBalance': 'Use own separate balance',
   };
 
   @override
@@ -133,7 +124,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     _affectsDtrNormally = item.affectsDtrNormally;
     _balanceLedgerType = _ledgerTypes.containsKey(item.balanceLedgerType)
         ? item.balanceLedgerType
-        : 'others';
+        : 'none';
   }
 
   void _newCustom() {
@@ -150,7 +141,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       _allowsPastDates = true;
       _requiresAttachment = false;
       _affectsDtrNormally = true;
-      _balanceLedgerType = 'others';
+      _balanceLedgerType = 'none';
     });
   }
 
@@ -652,10 +643,12 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                   const SizedBox(height: 14),
                   if (systemLocked)
                     _ReadOnlyValue(
-                      label: 'Balance ledger bucket',
-                      value: _ledgerTypes[_balanceLedgerType] ?? 'Others',
+                      label: 'Credit handling',
+                      value:
+                          _ledgerTypes[_balanceLedgerType] ??
+                          'Does not use leave credits',
                       helperText:
-                          'Protected types keep their assigned credit bucket.',
+                          'Protected types keep their assigned credit policy.',
                     )
                   else
                     DropdownButtonFormField<String>(
@@ -665,9 +658,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                       dropdownColor: AppTheme.dashPanelOf(context),
                       style: AppTheme.dashFieldTextStyle(context),
                       decoration: _inputDecoration(
-                        'Balance ledger bucket',
+                        'Credit handling',
                         helperText:
-                            'Use Others unless this type should deduct from an existing credit bucket.',
+                            'Choose whether this type deducts VL/SL, has its own balance, or needs no credits.',
                       ),
                       items: _ledgerTypes.entries
                           .map(
@@ -683,7 +676,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                       onChanged: _saving
                           ? null
                           : (v) => setState(
-                              () => _balanceLedgerType = v ?? 'others',
+                              () => _balanceLedgerType = v ?? 'none',
                             ),
                     ),
                 ],

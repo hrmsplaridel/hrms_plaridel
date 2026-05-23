@@ -13,6 +13,8 @@ const { broadcastAppEvent } = require('../websockets/appEvents');
 const router = express.Router();
 const protect = [authMiddleware];
 const LOCATOR_REQUEST_TYPES = new Set(['locator', 'pass_slip', 'work_from_home']);
+const DEFAULT_WORKING_DAYS = [1, 2, 3, 4, 5];
+const WEEKDAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 function notifySafe(fn) {
   Promise.resolve()
@@ -40,6 +42,90 @@ function broadcastLocatorUpdated(action, row = {}, extra = {}) {
 function normalizeRequestType(value) {
   const type = (value || 'locator').toString().trim().toLowerCase();
   return LOCATOR_REQUEST_TYPES.has(type) ? type : null;
+}
+
+function parseDateOnly(value) {
+  const raw = (value || '').toString().trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  const utcDay = parsed.getUTCDay();
+  return {
+    dateStr: raw,
+    isoWeekday: utcDay === 0 ? 7 : utcDay,
+  };
+}
+
+function toDateOnlyString(value) {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    const raw = value.trim();
+    if (!raw) return null;
+    const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+    return match ? match[1] : null;
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const y = value.getFullYear().toString().padStart(4, '0');
+    const m = String(value.getMonth() + 1).padStart(2, '0');
+    const d = String(value.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return null;
+}
+
+function normalizeWorkingDays(value) {
+  if (!Array.isArray(value)) return DEFAULT_WORKING_DAYS;
+  const days = value
+    .map((day) => Number(day))
+    .filter((day) => Number.isInteger(day) && day >= 1 && day <= 7);
+  const unique = [...new Set(days)].sort((a, b) => a - b);
+  return unique.length > 0 ? unique : DEFAULT_WORKING_DAYS;
+}
+
+async function validateLocatorSlipWorkingDay(client, employeeId, dateInfo) {
+  const result = await client.query(
+    `SELECT a.id,
+            a.shift_id,
+            s.name AS shift_name,
+            s.working_days
+     FROM assignments a
+     LEFT JOIN shifts s ON s.id = a.shift_id
+     WHERE a.employee_id = $1::uuid
+       AND (a.is_active IS NULL OR a.is_active = true)
+       AND a.effective_from <= $2::date
+       AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
+     ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
+     LIMIT 1`,
+    [employeeId, dateInfo.dateStr]
+  );
+  const assignment = result.rows[0];
+  if (!assignment || !assignment.shift_id || !assignment.shift_name) {
+    return {
+      ok: false,
+      error: 'You cannot file a locator request for this date because you have no active shift assignment.',
+    };
+  }
+
+  const workingDays = normalizeWorkingDays(assignment.working_days);
+  if (!workingDays.includes(dateInfo.isoWeekday)) {
+    const weekdayName = WEEKDAY_NAMES[dateInfo.isoWeekday - 1] || 'that day';
+    return {
+      ok: false,
+      error: `You cannot file a locator request for ${weekdayName} because it is not included in your assigned shift working days.`,
+    };
+  }
+
+  return { ok: true };
 }
 
 pool
@@ -102,7 +188,7 @@ function mapLocatorRow(row) {
     employee_name: row.employee_name || null,
     department_id: row.department_id || null,
     department_name: row.department_name || null,
-    slip_date: row.slip_date ? String(row.slip_date).slice(0, 10) : null,
+    slip_date: toDateOnlyString(row.slip_date_text || row.slip_date),
     am_in: row.am_in === true,
     am_out: row.am_out === true,
     pm_in: row.pm_in === true,
@@ -163,6 +249,7 @@ router.get('/my', protect, async (req, res) => {
     }
     const rows = await pool.query(
       `SELECT ls.*,
+              ls.slip_date::text AS slip_date_text,
               u.full_name AS employee_name,
               d.name AS department_name,
               dh.full_name AS dept_head_reviewer_name,
@@ -200,6 +287,8 @@ router.post('/submit', protect, async (req, res) => {
   const pmOut = req.body?.pm_out === true;
 
   if (!slipDate) return res.status(400).json({ error: 'slip_date is required' });
+  const slipDateInfo = parseDateOnly(slipDate);
+  if (!slipDateInfo) return res.status(400).json({ error: 'Invalid slip_date' });
   if (!requestType) return res.status(400).json({ error: 'Invalid request_type' });
   if (!office) return res.status(400).json({ error: 'office is required' });
   if (!reason) return res.status(400).json({ error: 'reason is required' });
@@ -215,6 +304,11 @@ router.post('/submit', protect, async (req, res) => {
     const ownDept = await getEmployeeDepartment(client, userId);
     const submitStatus = deptInfo ? 'pending_department_head' : 'pending_hr';
     const departmentId = deptInfo?.departmentId || ownDept?.departmentId || null;
+    const workingDayCheck = await validateLocatorSlipWorkingDay(client, userId, slipDateInfo);
+    if (!workingDayCheck.ok) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: workingDayCheck.error });
+    }
 
     const inserted = await client.query(
       `INSERT INTO locator_slips (
@@ -243,6 +337,7 @@ router.post('/submit', protect, async (req, res) => {
 
     const out = await pool.query(
       `SELECT ls.*,
+              ls.slip_date::text AS slip_date_text,
               u.full_name AS employee_name,
               d.name AS department_name,
               dh.full_name AS dept_head_reviewer_name,
@@ -321,6 +416,7 @@ router.patch('/:id/cancel', protect, async (req, res) => {
     await client.query('COMMIT');
     const out = await pool.query(
       `SELECT ls.*,
+              ls.slip_date::text AS slip_date_text,
               u.full_name AS employee_name,
               d.name AS department_name,
               dh.full_name AS dept_head_reviewer_name,
@@ -363,6 +459,7 @@ router.get('/department-head', protect, async (req, res) => {
     }
     const rows = await client.query(
       `SELECT ls.*,
+              ls.slip_date::text AS slip_date_text,
               u.full_name AS employee_name,
               d.name AS department_name,
               dh.full_name AS dept_head_reviewer_name,
@@ -438,6 +535,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
 
     const out = await pool.query(
       `SELECT ls.*,
+              ls.slip_date::text AS slip_date_text,
               u.full_name AS employee_name,
               d.name AS department_name,
               dh.full_name AS dept_head_reviewer_name,
@@ -529,6 +627,7 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
     );
     const out = await pool.query(
       `SELECT ls.*,
+              ls.slip_date::text AS slip_date_text,
               u.full_name AS employee_name,
               d.name AS department_name,
               dh.full_name AS dept_head_reviewer_name,
@@ -569,6 +668,7 @@ router.get('/admin', protect, requireAdminOrHr, async (req, res) => {
     }
     const rows = await pool.query(
       `SELECT ls.*,
+              ls.slip_date::text AS slip_date_text,
               u.full_name AS employee_name,
               d.name AS department_name,
               dh.full_name AS dept_head_reviewer_name,
@@ -644,6 +744,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
 
     const out = await pool.query(
       `SELECT ls.*,
+              ls.slip_date::text AS slip_date_text,
               u.full_name AS employee_name,
               d.name AS department_name,
               dh.full_name AS dept_head_reviewer_name,
@@ -723,6 +824,7 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
 
     const out = await pool.query(
       `SELECT ls.*,
+              ls.slip_date::text AS slip_date_text,
               u.full_name AS employee_name,
               d.name AS department_name,
               dh.full_name AS dept_head_reviewer_name,

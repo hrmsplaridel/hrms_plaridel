@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -210,6 +211,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
         break;
       }
     }
+    final canCancelSelected = _canCancelSlip(selectedSlip);
     final useScrollableList = visibleSlips.length > 3;
 
     return _SectionCard(
@@ -232,6 +234,14 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
                 ? null
                 : () => _showSlipHistory(context, selectedSlip!),
             label: 'View History',
+          ),
+          SectionHeaderActionButton.outlined(
+            context: context,
+            onPressed: !canCancelSelected
+                ? null
+                : () => _cancelSlip(selectedSlip!),
+            icon: Icons.close_rounded,
+            label: 'Cancel',
           ),
         ],
       ),
@@ -271,44 +281,10 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
               ? const _EmptyState(
                   message: 'No locator requests match the current filters.',
                 )
-              : !useScrollableList
-              ? Column(
-                  children: List.generate(visibleSlips.length, (index) {
-                    final item = visibleSlips[index];
-                    return Padding(
-                      padding: EdgeInsets.only(
-                        bottom: index == visibleSlips.length - 1 ? 0 : 10,
-                      ),
-                      child: _LocatorSlipCard(
-                        item: item,
-                        isSelected: item.id == _selectedSlipId,
-                        onTap: () => _toggleSlipSelection(item),
-                      ),
-                    );
-                  }),
-                )
-              : ConstrainedBox(
-                  constraints: BoxConstraints(maxHeight: maxListHeight),
-                  child: Scrollbar(
-                    thumbVisibility: true,
-                    child: ListView.separated(
-                      primary: false,
-                      physics: const BouncingScrollPhysics(
-                        parent: AlwaysScrollableScrollPhysics(),
-                      ),
-                      itemCount: visibleSlips.length,
-                      itemBuilder: (context, index) {
-                        final item = visibleSlips[index];
-                        return _LocatorSlipCard(
-                          item: item,
-                          isSelected:
-                              _slipSelectionKey(item) == _selectedSlipId,
-                          onTap: () => _toggleSlipSelection(item),
-                        );
-                      },
-                      separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    ),
-                  ),
+              : _myRequestsTable(
+                  items: visibleSlips,
+                  maxHeight: maxListHeight,
+                  useScrollableList: useScrollableList,
                 ),
         ],
       ),
@@ -325,6 +301,13 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
   String _slipSelectionKey(_LocatorSlipDraft item) {
     return item.id ??
         '${item.date.toIso8601String()}-${item.requestType.code}-${item.office}-${item.employeeName}-${item.remarks}';
+  }
+
+  bool _canCancelSlip(_LocatorSlipDraft? item) {
+    final id = item?.id?.trim();
+    if (item == null || id == null || id.isEmpty) return false;
+    return item.status == _LocatorSlipStatus.pendingDepartmentHead ||
+        item.status == _LocatorSlipStatus.pendingHr;
   }
 
   void _showSlipDetails(BuildContext context, _LocatorSlipDraft item) {
@@ -681,6 +664,165 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
     );
   }
 
+  Widget _myRequestsTable({
+    required List<_LocatorSlipDraft> items,
+    required double maxHeight,
+    required bool useScrollableList,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tableWidth = constraints.maxWidth < 900
+            ? 900.0
+            : constraints.maxWidth;
+        final purposeWidth = tableWidth - 500;
+        final content = SizedBox(
+          width: tableWidth,
+          child: Column(
+            children: [
+              _myRequestsTableHeader(context, purposeWidth),
+              for (var index = 0; index < items.length; index++)
+                _myRequestsTableRow(
+                  context,
+                  items[index],
+                  purposeWidth: purposeWidth,
+                  isLast: index == items.length - 1,
+                  isSelected: _slipSelectionKey(items[index]) == _selectedSlipId,
+                  onTap: () => _toggleSlipSelection(items[index]),
+                ),
+            ],
+          ),
+        );
+
+        final table = ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border.all(color: AppTheme.dashHairlineOf(context)),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: content,
+            ),
+          ),
+        );
+
+        if (!useScrollableList) return table;
+
+        return ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxHeight),
+          child: Scrollbar(
+            thumbVisibility: true,
+            child: SingleChildScrollView(
+              primary: false,
+              physics: const BouncingScrollPhysics(
+                parent: AlwaysScrollableScrollPhysics(),
+              ),
+              child: table,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _myRequestsTableHeader(BuildContext context, double purposeWidth) {
+    return Container(
+      height: 44,
+      color: AppTheme.dashMutedSurfaceOf(context),
+      child: Row(
+        children: [
+          _approvalHeaderCell(context, 'Date', width: 120),
+          _approvalHeaderCell(context, 'Type', width: 110),
+          _approvalHeaderCell(context, 'Location / Purpose', width: purposeWidth),
+          _approvalHeaderCell(context, 'Time', width: 120),
+          _approvalHeaderCell(context, 'Status', width: 150),
+        ],
+      ),
+    );
+  }
+
+  Widget _myRequestsTableRow(
+    BuildContext context,
+    _LocatorSlipDraft item, {
+    required double purposeWidth,
+    required bool isLast,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    final dark = _isDark(context);
+    final borderColor = AppTheme.dashHairlineOf(context);
+    final rowColor = isSelected
+        ? (dark
+              ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+              : AppTheme.primaryNavy.withValues(alpha: 0.08))
+        : Colors.transparent;
+    final leftBorderColor = isSelected
+        ? AppTheme.primaryNavy
+        : Colors.transparent;
+
+    return Material(
+      color: rowColor,
+      child: InkWell(
+        onTap: onTap,
+        hoverColor: AppTheme.primaryNavy.withValues(alpha: 0.04),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 60),
+          decoration: BoxDecoration(
+            border: Border(
+              left: BorderSide(color: leftBorderColor, width: 4),
+              bottom: isLast ? BorderSide.none : BorderSide(color: borderColor),
+            ),
+          ),
+          child: Row(
+            children: [
+              _approvalBodyCell(
+                width: 116,
+                child: _approvalCellText(
+                  context,
+                  _formatDate(item.date),
+                  strong: true,
+                ),
+              ),
+              _approvalBodyCell(
+                width: 110,
+                child: _approvalCellText(
+                  context,
+                  item.requestType.shortLabel,
+                  strong: true,
+                ),
+              ),
+              _approvalBodyCell(
+                width: purposeWidth,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _approvalCellText(context, item.office, strong: true),
+                    if (item.remarks.trim().isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      _approvalCellText(
+                        context,
+                        item.remarks,
+                        color: _mutedColor(context),
+                        fontSize: 12,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              _approvalBodyCell(
+                width: 120,
+                child: _approvalCellText(context, _approvalSegmentsText(item)),
+              ),
+              _approvalBodyCell(width: 150, child: _myRequestStatusPill(item)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _approvalItemsTable({
     required List<_LocatorSlipDraft> items,
     required double maxHeight,
@@ -923,6 +1065,28 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
     );
   }
 
+  Widget _myRequestStatusPill(_LocatorSlipDraft item) {
+    final (bg, border, textColor) = _statusColors(item.status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: border),
+      ),
+      child: Text(
+        item.status.label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: textColor,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
   String _approvalSegmentsText(_LocatorSlipDraft item) {
     final segments = <String>[];
     if (item.amIn) segments.add('AM IN');
@@ -965,7 +1129,20 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
           'office': created.office,
           'reason': created.remarks,
         },
+        options: Options(
+          validateStatus: (status) => status != null && status < 500,
+        ),
       );
+      if ((res.statusCode ?? 500) >= 400) {
+        if (!mounted) return;
+        final message = _apiResponseMessage(
+          res.data,
+          fallback: 'Failed to submit request.',
+        );
+        setState(() => _loadingMy = false);
+        await _showLocatorErrorDialog(message);
+        return;
+      }
       final data = res.data;
       _LocatorSlipDraft? inserted;
       if (data != null) {
@@ -981,7 +1158,73 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
       _showLocatorSnack(msg);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Failed to submit request: $e');
+      final message = _apiErrorMessage(
+        e,
+        fallback: 'Failed to submit request.',
+      );
+      setState(() => _loadingMy = false);
+      await _showLocatorErrorDialog(message);
+    } finally {
+      if (mounted) setState(() => _loadingMy = false);
+    }
+  }
+
+  Future<void> _cancelSlip(_LocatorSlipDraft item) async {
+    if (!_canCancelSlip(item)) return;
+    final id = item.id!.trim();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cancel locator request?'),
+        content: const Text(
+          'This will cancel the request. You can file a new request anytime.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('No'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Yes, cancel'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    setState(() {
+      _error = null;
+      _loadingMy = true;
+    });
+    try {
+      final res = await ApiClient.instance.patch<Map<String, dynamic>>(
+        '/api/locator-slips/$id/cancel',
+        data: const {},
+      );
+      final data = res.data;
+      if (!mounted) return;
+      setState(() {
+        _selectedSlipId = null;
+        if (data != null) {
+          final updated = _LocatorSlipDraft.fromApi(data);
+          final index = _slips.indexWhere((slip) => slip.id == updated.id);
+          if (index >= 0) {
+            _slips[index] = updated;
+          }
+        }
+      });
+      await _loadMyRequests();
+      if (!mounted) return;
+      _showLocatorSnack('Request cancelled.');
+    } catch (e) {
+      if (!mounted) return;
+      setState(
+        () => _error = _apiErrorMessage(
+          e,
+          fallback: 'Failed to cancel request.',
+        ),
+      );
     } finally {
       if (mounted) setState(() => _loadingMy = false);
     }
@@ -1023,7 +1266,12 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Failed to load locator requests: $e');
+      setState(
+        () => _error = _apiErrorMessage(
+          e,
+          fallback: 'Failed to load locator requests.',
+        ),
+      );
     } finally {
       if (mounted) setState(() => _loadingMy = false);
     }
@@ -1068,7 +1316,9 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
       _showLocatorSnack('Approved and sent to HR for final approval.');
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Approve failed: $e');
+      setState(
+        () => _error = _apiErrorMessage(e, fallback: 'Approve failed.'),
+      );
     }
   }
 
@@ -1085,7 +1335,9 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
       _showLocatorSnack('Request rejected.');
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Reject failed: $e');
+      setState(
+        () => _error = _apiErrorMessage(e, fallback: 'Reject failed.'),
+      );
     }
   }
 
@@ -1142,6 +1394,23 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
         content: Text(message),
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      ),
+    );
+  }
+
+  Future<void> _showLocatorErrorDialog(String message) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Request not allowed'),
+        content: Text(message),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('OK'),
+          ),
+        ],
       ),
     );
   }
@@ -2019,8 +2288,6 @@ class _LocatorSlipDraft {
   }
 
   factory _LocatorSlipDraft.fromApi(Map<String, dynamic> json) {
-    final rawDate = (json['slip_date'] ?? '').toString();
-    final parsedDate = DateTime.tryParse(rawDate);
     String? readName(List<String> keys) {
       for (final key in keys) {
         final value = (json[key] ?? '').toString().trim();
@@ -2036,7 +2303,7 @@ class _LocatorSlipDraft {
     final genericReviewer = readName(['reviewer_name', 'approver_name']);
     return _LocatorSlipDraft(
       id: (json['id'] ?? '').toString(),
-      date: parsedDate ?? DateTime.now(),
+      date: _parseDateOnly(json['slip_date']) ?? DateTime(1970, 1, 1),
       employeeName: (json['employee_name'] ?? 'Employee').toString(),
       requestType: LocatorRequestType.fromCode(json['request_type']),
       office: (json['office'] ?? '').toString(),
@@ -2111,153 +2378,6 @@ enum _LocatorSlipStatus {
 }
 
 enum _LocatorSection { requests, approvals }
-
-class _LocatorSlipCard extends StatelessWidget {
-  const _LocatorSlipCard({
-    required this.item,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  final _LocatorSlipDraft item;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: AppTheme.dashPanelOf(context),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: isSelected
-                  ? AppTheme.primaryNavy.withValues(alpha: 0.25)
-                  : AppTheme.dashHairlineOf(context),
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    Icons.schedule_rounded,
-                    color: AppTheme.primaryNavy,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _formatDate(item.date),
-                      style: TextStyle(
-                        color: AppTheme.dashTextPrimaryOf(context),
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  _requestTypePill(context, item.requestType),
-                  const SizedBox(width: 6),
-                  _statusPill(item.status),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Text(
-                '${item.requestType.locationLabel}: ${item.office}',
-                style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  if (item.amIn) _timeChip(context, 'AM IN'),
-                  if (item.amOut) _timeChip(context, 'AM OUT'),
-                  if (item.pmIn) _timeChip(context, 'PM IN'),
-                  if (item.pmOut) _timeChip(context, 'PM OUT'),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Text(
-                item.remarks,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: AppTheme.dashTextSecondaryOf(context),
-                  height: 1.4,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _statusPill(_LocatorSlipStatus status) {
-    final (bg, border, textColor) = _statusColors(status);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: border),
-      ),
-      child: Text(
-        status.label,
-        style: TextStyle(
-          color: textColor,
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-
-  Widget _requestTypePill(BuildContext context, LocatorRequestType type) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppTheme.dashMutedSurfaceOf(context),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: AppTheme.dashHairlineOf(context)),
-      ),
-      child: Text(
-        type.shortLabel,
-        style: TextStyle(
-          color: AppTheme.dashTextPrimaryOf(context),
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-
-  Widget _timeChip(BuildContext context, String label) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppTheme.dashMutedSurfaceOf(context),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: AppTheme.dashHairlineOf(context)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: AppTheme.dashTextPrimaryOf(context),
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-}
 
 class _LocatorSectionTabs extends StatelessWidget {
   const _LocatorSectionTabs({required this.current, required this.onChanged});
@@ -2540,11 +2660,49 @@ String _formatDateTime(DateTime value) {
   return '${_formatDate(value)} $hour:$minute $meridiem';
 }
 
+String _apiErrorMessage(Object error, {required String fallback}) {
+  if (error is DioException) {
+    final responseMessage = _apiResponseMessage(
+      error.response?.data,
+      fallback: '',
+    );
+    if (responseMessage.isNotEmpty) return responseMessage;
+    final message = error.message?.trim();
+    if (message != null && message.isNotEmpty) return '$fallback $message';
+  }
+  final text = error.toString().trim();
+  if (text.isEmpty) return fallback;
+  return '$fallback $text';
+}
+
+String _apiResponseMessage(dynamic data, {required String fallback}) {
+  if (data is Map) {
+    final message = data['error'] ?? data['message'];
+    final text = message?.toString().trim();
+    if (text != null && text.isNotEmpty) return text;
+  }
+  if (data is String && data.trim().isNotEmpty) return data.trim();
+  return fallback;
+}
+
 DateTime? _parseDateTime(dynamic value) {
   if (value == null) return null;
   final raw = value.toString().trim();
   if (raw.isEmpty || raw.toLowerCase() == 'null') return null;
   return DateTime.tryParse(raw);
+}
+
+DateTime? _parseDateOnly(dynamic value) {
+  if (value == null) return null;
+  final raw = value.toString().trim();
+  if (raw.isEmpty || raw.toLowerCase() == 'null') return null;
+  final match = RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(raw);
+  if (match == null) return null;
+  final year = int.tryParse(match.group(1)!);
+  final month = int.tryParse(match.group(2)!);
+  final day = int.tryParse(match.group(3)!);
+  if (year == null || month == null || day == null) return null;
+  return DateTime(year, month, day);
 }
 
 String _departmentHeadStatusLabel(_LocatorSlipDraft item) {

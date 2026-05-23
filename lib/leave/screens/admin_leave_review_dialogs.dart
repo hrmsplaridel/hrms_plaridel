@@ -4,7 +4,6 @@ import '../../landingpage/constants/app_theme.dart';
 import '../leave_repository.dart';
 import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
-import '../models/leave_type.dart';
 import 'admin_leave_screen_utils.dart';
 
 class AdminLeaveApproveDialog extends StatefulWidget {
@@ -12,10 +11,12 @@ class AdminLeaveApproveDialog extends StatefulWidget {
     super.key,
     required this.request,
     this.leaveBalance,
+    this.creditSummary,
   });
 
   final LeaveRequest request;
   final LeaveBalance? leaveBalance;
+  final String? creditSummary;
 
   @override
   State<AdminLeaveApproveDialog> createState() => _AdminLeaveApproveDialogState();
@@ -65,11 +66,12 @@ class _AdminLeaveApproveDialogState extends State<AdminLeaveApproveDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final balanceLabel = widget.leaveBalance != null
-        ? '${widget.leaveBalance!.leaveType.displayName}: '
-              '${widget.leaveBalance!.availableDays.toStringAsFixed(1)} available '
-              '(${widget.leaveBalance!.remainingDays.toStringAsFixed(1)} remaining excl. pending)'
-        : 'No balance record for this leave type';
+    final balanceLabel = widget.creditSummary ??
+        (widget.leaveBalance != null
+            ? '${widget.leaveBalance!.leaveTypeLabel}: '
+                  '${widget.leaveBalance!.availableDays.toStringAsFixed(1)} available '
+                  '(${widget.leaveBalance!.remainingDays.toStringAsFixed(1)} remaining excl. pending)'
+            : 'No balance record for this leave type');
 
     return AlertDialog(
       title: const Text('Approve Leave Request'),
@@ -131,7 +133,7 @@ class _AdminLeaveApproveDialogState extends State<AdminLeaveApproveDialog> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Current Leave Balance:',
+                        'Credit Handling:',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,

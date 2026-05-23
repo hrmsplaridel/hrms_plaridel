@@ -28,7 +28,6 @@ import '../../../dtr/dtr_routes.dart';
 import '../../../dtr/manage/manage_employee.dart';
 import '../../../dtr/manage/manage_assignment.dart';
 import '../../../dtr/manage/manage_department.dart';
-import '../../../dtr/manage/manage_office.dart';
 import '../../../dtr/manage/manage_position.dart';
 import '../../../dtr/manage/manage_shift.dart';
 import '../../../dtr/manage/manage_holiday.dart';
@@ -1822,7 +1821,7 @@ class _DtrContentState extends State<_DtrContent> {
   /// 0 = menu, 1 = Time Logs, 2 = Reports, 3 = Employees, 4 = Assignment,
   /// 5 = Department, 6 = Position, 7 = Shift, 8 = Leave Management,
   /// 9–10 = Holiday / Policy via [_ManageContent], 11 = Biometric Devices,
-  /// 12 = Locator Slip Management, 13 = Offices
+  /// 12 = Locator Slip Management
   int _dtrSectionIndex = 0;
   int? _pendingDtrSectionIndex;
 
@@ -1978,12 +1977,6 @@ class _DtrContentState extends State<_DtrContent> {
                       onTap: () => _openDtrSection(5),
                     ),
                     FeatureCard(
-                      title: 'Office',
-                      subtitle: 'Manage branch or site offices (DocuTracker routing).',
-                      icon: Icons.domain_rounded,
-                      onTap: () => setState(() => _dtrSectionIndex = 13),
-                    ),
-                    FeatureCard(
                       title: 'Position',
                       subtitle: 'Manage positions.',
                       icon: Icons.work_rounded,
@@ -2042,8 +2035,6 @@ class _DtrContentState extends State<_DtrContent> {
                 const ManageBiometricDevices()
               else if (_dtrSectionIndex == 12)
                 const AdminLocatorManagementScreen()
-              else if (_dtrSectionIndex == 13)
-                const ManageOffice()
               else
                 _ManageContent(
                   subIndex: _dtrSectionIndex - 3,

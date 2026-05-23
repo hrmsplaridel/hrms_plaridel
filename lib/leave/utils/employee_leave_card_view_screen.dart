@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../leave_provider.dart';
 import '../leave_repository.dart';
+import '../leave_type_definition_cache.dart';
 import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
@@ -27,15 +29,23 @@ class EmployeeLeaveCardViewScreen extends StatefulWidget {
 class _EmployeeLeaveCardViewScreenState
     extends State<EmployeeLeaveCardViewScreen> {
   static const double _legalPaperAspectRatio = 8.5 / 14.0;
+  static const int _rowsPerCardPage = 16;
 
   bool _loading = true;
   bool _printing = false;
   String? _error;
   List<LeaveRequest> _requests = const [];
+  int _pageIndex = 0;
 
-  /// Current VL / SL earned totals from [leave_balances] (same on each ledger row).
+  /// Current VL / SL totals from [leave_balances].
   double _vacationEarnedDays = 0;
   double _sickEarnedDays = 0;
+  double _vacationRemainingDays = 0;
+  double _sickRemainingDays = 0;
+  String _service = '';
+  String? _officeDepartment;
+  DateTime? _firstDayOfService;
+  Map<String, String> _balanceLedgerTypes = const {};
 
   @override
   void initState() {
@@ -50,20 +60,41 @@ class _EmployeeLeaveCardViewScreenState
     });
     try {
       final repository = context.read<LeaveProvider>().repository;
-      final rows = await repository.listRequests(
-        query: LeaveRequestQuery(userId: widget.userId, limit: 1000),
+      final definitions = await LeaveTypeDefinitionCache.instance.listAll(
+        includeInactive: true,
       );
-      rows.sort((a, b) {
-        final aDate = a.startDate ?? a.dateFiled ?? DateTime(1900);
-        final bDate = b.startDate ?? b.dateFiled ?? DateTime(1900);
-        return aDate.compareTo(bDate);
-      });
+      final balanceLedgerTypes = {
+        for (final item in definitions) item.name: item.balanceLedgerType,
+      };
+      final rows = await repository.listRequests(
+        query: LeaveRequestQuery(
+          userId: widget.userId,
+          status: LeaveRequestStatus.approved,
+          limit: 500,
+        ),
+      );
+      final cardRows = rows
+          .where((request) => _isLeaveCardRequest(request, balanceLedgerTypes))
+          .toList()
+        ..sort((a, b) {
+          final aDate = a.startDate ?? a.dateFiled ?? DateTime(1900);
+          final bDate = b.startDate ?? b.dateFiled ?? DateTime(1900);
+          return aDate.compareTo(bDate);
+        });
       final balances = await repository.getBalancesForUser(widget.userId);
-      final earned = _vlSlEarnedFromBalances(balances);
+      final totals = _vlSlTotalsFromBalances(balances);
+      final profile = await _loadEmployeeProfile();
       setState(() {
-        _requests = rows;
-        _vacationEarnedDays = earned.$1;
-        _sickEarnedDays = earned.$2;
+        _requests = cardRows;
+        _vacationEarnedDays = totals.vacationEarned;
+        _sickEarnedDays = totals.sickEarned;
+        _vacationRemainingDays = totals.vacationRemaining;
+        _sickRemainingDays = totals.sickRemaining;
+        _service = profile.service;
+        _officeDepartment = profile.officeDepartment;
+        _firstDayOfService = profile.firstDayOfService;
+        _balanceLedgerTypes = balanceLedgerTypes;
+        _pageIndex = 0;
         _loading = false;
       });
     } catch (e) {
@@ -76,9 +107,11 @@ class _EmployeeLeaveCardViewScreenState
 
   @override
   Widget build(BuildContext context) {
-    final office = _requests
-        .map((e) => (e.officeDepartment ?? '').trim())
-        .firstWhere((e) => e.isNotEmpty, orElse: () => 'N/A');
+    final office = _officeDepartment?.trim().isNotEmpty == true
+        ? _officeDepartment!.trim()
+        : _requests
+              .map((e) => (e.officeDepartment ?? '').trim())
+              .firstWhere((e) => e.isNotEmpty, orElse: () => 'N/A');
     return Scaffold(
       backgroundColor: AppTheme.offWhite,
       appBar: AppBar(
@@ -112,23 +145,20 @@ class _EmployeeLeaveCardViewScreenState
 
   Future<void> _printLeaveCard(String office) async {
     if (_printing) return;
-    final firstDayOfService = _requests
-        .map((e) => e.createdAt ?? e.dateFiled)
-        .whereType<DateTime>()
-        .fold<DateTime?>(null, (prev, next) {
-          if (prev == null) return next;
-          return next.isBefore(prev) ? next : prev;
-        });
 
     setState(() => _printing = true);
     try {
       await LeaveCardPrintView.print(
         employeeName: widget.employeeName,
+        service: _service,
         officeDepartment: office,
-        firstDayOfService: firstDayOfService,
+        firstDayOfService: _firstDayOfService,
         requests: _requests,
         vacationEarnedDays: _vacationEarnedDays,
         sickEarnedDays: _sickEarnedDays,
+        vacationRemainingDays: _vacationRemainingDays,
+        sickRemainingDays: _sickRemainingDays,
+        balanceLedgerTypes: _balanceLedgerTypes,
       );
     } catch (e) {
       if (!mounted) return;
@@ -138,6 +168,15 @@ class _EmployeeLeaveCardViewScreenState
     } finally {
       if (mounted) setState(() => _printing = false);
     }
+  }
+
+  Future<_LeaveCardEmployeeProfile> _loadEmployeeProfile() async {
+    final res = await ApiClient.instance.get<Map<String, dynamic>>(
+      '/api/employees/${widget.userId}',
+    );
+    return _LeaveCardEmployeeProfile.fromJson(
+      res.data ?? const <String, dynamic>{},
+    );
   }
 
   Widget _buildErrorState() {
@@ -174,135 +213,245 @@ class _EmployeeLeaveCardViewScreenState
   }
 
   Widget _buildCardLayout(String office) {
-    final entries = _requests
-        .map(
-          (r) => _LeaveCardEntry.fromRequest(
-            r,
-            vacationEarnedDays: _vacationEarnedDays,
-            sickEarnedDays: _sickEarnedDays,
-          ),
-        )
-        .toList();
+    final entries = _buildLeaveCardEntries(
+      _requests,
+      vacationEarnedDays: _vacationEarnedDays,
+      sickEarnedDays: _sickEarnedDays,
+      vacationRemainingDays: _vacationRemainingDays,
+      sickRemainingDays: _sickRemainingDays,
+      balanceLedgerTypes: _balanceLedgerTypes,
+    );
+    final pages = _chunkEntries(entries, _rowsPerCardPage);
+    final pageCount = pages.length;
+    final pageIndex = _pageIndex >= pageCount ? pageCount - 1 : _pageIndex;
+    final pageEntries = pages[pageIndex];
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 900),
-          child: AspectRatio(
-            aspectRatio: _legalPaperAspectRatio,
-            child: Container(
-              decoration: BoxDecoration(
-                color: const Color(0xFFE9EEB8),
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(
-                  color: Colors.black.withOpacity(0.35),
-                  width: 1.1,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _LeaveCardPageControls(
+                pageIndex: pageIndex,
+                pageCount: pageCount,
+                onPrevious: pageIndex > 0
+                    ? () => setState(() => _pageIndex = pageIndex - 1)
+                    : null,
+                onNext: pageIndex < pageCount - 1
+                    ? () => setState(() => _pageIndex = pageIndex + 1)
+                    : null,
+              ),
+              const SizedBox(height: 10),
+              AspectRatio(
+                aspectRatio: _legalPaperAspectRatio,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE9EEB8),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(
+                      color: Colors.black.withOpacity(0.35),
+                      width: 1.1,
+                    ),
+                  ),
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Center(
+                        child: Text(
+                          'MUNICIPAL GOVERNMENT OF PLARIDEL',
+                          style: TextStyle(
+                            color: Colors.black87,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      const Center(
+                        child: Text(
+                          "EMPLOYEE'S LEAVE CARD",
+                          style: TextStyle(
+                            color: Colors.black87,
+                            fontSize: 30,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            flex: 4,
+                            child: Column(
+                              children: [
+                                _LabeledLineField(
+                                  label: 'NAME',
+                                  value: widget.employeeName,
+                                ),
+                                const SizedBox(height: 2),
+                                _LabeledLineField(
+                                  label: 'SERVICE',
+                                  value: _service,
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            flex: 3,
+                            child: _LabeledLineField(
+                              label: 'DIVISION / OFFICE',
+                              value: office,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            flex: 2,
+                            child: _LabeledLineField(
+                              label: 'FIRST DAY OF',
+                              value: _firstDayOfService != null
+                                  ? _fmtDate(_firstDayOfService!)
+                                  : '',
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Expanded(
+                        child: _LeaveCardGrid(
+                          entries: pageEntries,
+                          rowsPerPage: _rowsPerCardPage,
+                        ),
+                      ),
+                      const SizedBox(height: 26),
+                      Row(
+                        children: const [
+                          Spacer(),
+                          SizedBox(
+                            width: 300,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Text(
+                                  'Prepared by:',
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                                SizedBox(height: 34),
+                                Divider(height: 1, color: Colors.black87),
+                                SizedBox(height: 6),
+                                Text(
+                                  '(In-Charge)',
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    color: Colors.black87,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Center(
-                    child: Text(
-                      'MUNICIPAL GOVERNMENT OF PLARIDEL',
-                      style: TextStyle(
-                        color: Colors.black87,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  const Center(
-                    child: Text(
-                      "EMPLOYEE'S LEAVE CARD",
-                      style: TextStyle(
-                        color: Colors.black87,
-                        fontSize: 30,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        flex: 4,
-                        child: Column(
-                          children: [
-                            _LabeledLineField(
-                              label: 'NAME',
-                              value: widget.employeeName,
-                            ),
-                            const SizedBox(height: 2),
-                            const _LabeledLineField(
-                              label: 'SERVICE',
-                              value: '',
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        flex: 3,
-                        child: _LabeledLineField(
-                          label: 'DIVISION / OFFICE',
-                          value: office,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      const Expanded(
-                        flex: 2,
-                        child: _LabeledLineField(
-                          label: 'FIRST DAY OF',
-                          value: '',
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Expanded(child: _LeaveCardGrid(entries: entries)),
-                  const SizedBox(height: 26),
-                  Row(
-                    children: const [
-                      Spacer(),
-                      SizedBox(
-                        width: 300,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Text(
-                              'Prepared by:',
-                              style: TextStyle(
-                                fontSize: 15,
-                                color: Colors.black87,
-                              ),
-                            ),
-                            SizedBox(height: 34),
-                            Divider(height: 1, color: Colors.black87),
-                            SizedBox(height: 6),
-                            Text(
-                              '(In-Charge)',
-                              style: TextStyle(
-                                fontSize: 15,
-                                color: Colors.black87,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
+            ],
           ),
         ),
       ),
+    );
+  }
+
+  List<List<_LeaveCardEntry>> _chunkEntries(
+    List<_LeaveCardEntry> entries,
+    int pageSize,
+  ) {
+    if (entries.isEmpty) return [const <_LeaveCardEntry>[]];
+    final pages = <List<_LeaveCardEntry>>[];
+    for (var i = 0; i < entries.length; i += pageSize) {
+      final end = (i + pageSize) > entries.length
+          ? entries.length
+          : i + pageSize;
+      pages.add(entries.sublist(i, end));
+    }
+    return pages;
+  }
+}
+
+class _LeaveCardPageControls extends StatelessWidget {
+  const _LeaveCardPageControls({
+    required this.pageIndex,
+    required this.pageCount,
+    required this.onPrevious,
+    required this.onNext,
+  });
+
+  final int pageIndex;
+  final int pageCount;
+  final VoidCallback? onPrevious;
+  final VoidCallback? onNext;
+
+  @override
+  Widget build(BuildContext context) {
+    final textColor = AppTheme.dashTextPrimaryOf(context);
+    final mutedColor = AppTheme.dashTextSecondaryOf(context);
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        Text(
+          'Page ${pageIndex + 1} of $pageCount',
+          style: TextStyle(
+            color: mutedColor,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Container(
+          decoration: BoxDecoration(
+            color: AppTheme.dashPanelOf(context),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppTheme.dashHairlineOf(context)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: 'Previous page',
+                onPressed: onPrevious,
+                icon: Icon(
+                  Icons.chevron_left_rounded,
+                  color: onPrevious == null ? mutedColor : textColor,
+                ),
+              ),
+              SizedBox(
+                height: 28,
+                child: VerticalDivider(
+                  width: 1,
+                  color: AppTheme.dashHairlineOf(context),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Next page',
+                onPressed: onNext,
+                icon: Icon(
+                  Icons.chevron_right_rounded,
+                  color: onNext == null ? mutedColor : textColor,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -348,162 +497,155 @@ class _LabeledLineField extends StatelessWidget {
 }
 
 class _LeaveCardGrid extends StatelessWidget {
-  const _LeaveCardGrid({required this.entries});
+  const _LeaveCardGrid({required this.entries, required this.rowsPerPage});
 
   final List<_LeaveCardEntry> entries;
+  final int rowsPerPage;
   static const double _groupHeaderHeight = 30;
   static const double _detailHeaderHeight = 56;
-  static const double _rowHeight = 34;
-  static const int _periodFlex = 17;
-  static const int _particularsFlex = 22;
-  static const int _vacationGroupFlex = 36;
-  static const int _sickGroupFlex = 36;
+  static const int _periodFlex = 15;
+  static const int _particularsFlex = 21;
+  static const int _vacationGroupFlex = 44;
+  static const int _sickGroupFlex = 44;
   static const int _dateTakenFlex = 16;
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final dpr = MediaQuery.maybeDevicePixelRatioOf(context) ?? 1.0;
-        final overflowSafetyPx = (2.0 / dpr).clamp(0.5, 2.0);
-        final availableHeight = constraints.maxHeight;
-        final headerHeight = _groupHeaderHeight + _detailHeaderHeight;
-        final bodyHeight = (availableHeight - headerHeight - overflowSafetyPx)
-            .clamp(0.0, double.infinity);
-        final bodyRows = bodyHeight > 0 ? (bodyHeight / _rowHeight).ceil() : 0;
-        final minimumRows = 16;
-        final targetRows = [
-          entries.length,
-          minimumRows,
-          bodyRows,
-        ].reduce((a, b) => a > b ? a : b);
-        final filledEntries = [
-          ...entries,
-          ...List.generate(
-            (entries.length < targetRows) ? targetRows - entries.length : 0,
-            (_) => const _LeaveCardEntry.empty(),
-          ),
-        ];
+    final targetRows = entries.length > rowsPerPage
+        ? entries.length
+        : rowsPerPage;
+    final filledEntries = [
+      ...entries,
+      ...List.generate(
+        entries.length < targetRows ? targetRows - entries.length : 0,
+        (_) => const _LeaveCardEntry.empty(),
+      ),
+    ];
 
-        return Container(
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.black87, width: 1),
-          ),
-          child: Column(
-            children: [
-              SizedBox(
-                height: _groupHeaderHeight + _detailHeaderHeight,
-                child: Row(
-                  children: [
-                    Expanded(
-                      flex: _periodFlex,
-                      child: _mergedHeaderCell(
-                        text: 'PERIOD',
-                        showRightBorder: true,
-                      ),
-                    ),
-                    Expanded(
-                      flex: _particularsFlex,
-                      child: _mergedHeaderCell(
-                        text: 'PARTICULARS',
-                        showRightBorder: true,
-                      ),
-                    ),
-                    Expanded(
-                      flex: _vacationGroupFlex,
-                      child: Column(
-                        children: [
-                          _headerGroupTitleCell(
-                            text: 'VACATION LEAVE',
-                            height: _groupHeaderHeight,
-                          ),
-                          Expanded(
-                            child: _gridRow(
-                              cells: const [
-                                _GridCellSpec('EARNED', flex: 10),
-                                _GridCellSpec(
-                                  'ABSENCE UNDER TIME WITH PAY',
-                                  flex: 12,
-                                ),
-                                _GridCellSpec(
-                                  'ABSENCE UNDER TIME WITHOUT PAY',
-                                  flex: 14,
-                                ),
-                              ],
-                              height: _detailHeaderHeight,
-                              fontSize: 9,
-                              bold: true,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      flex: _sickGroupFlex,
-                      child: Column(
-                        children: [
-                          _headerGroupTitleCell(
-                            text: 'SICK LEAVE',
-                            height: _groupHeaderHeight,
-                          ),
-                          Expanded(
-                            child: _gridRow(
-                              cells: const [
-                                _GridCellSpec('EARNED', flex: 10),
-                                _GridCellSpec(
-                                  'ABSENCE UNDER TIME WITH PAY',
-                                  flex: 12,
-                                ),
-                                _GridCellSpec(
-                                  'ABSENCE UNDER TIME WITHOUT PAY',
-                                  flex: 14,
-                                ),
-                              ],
-                              height: _detailHeaderHeight,
-                              fontSize: 9,
-                              bold: true,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      flex: _dateTakenFlex,
-                      child: _mergedHeaderCell(
-                        text: 'DATE TAKEN ON\nAPPLICATION',
-                        showRightBorder: false,
-                        showLeftBorder: true,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              ...filledEntries.map(
-                (entry) => Expanded(
-                  child: _gridRow(
-                    cells: [
-                      _GridCellSpec(entry.period, flex: 17),
-                      _GridCellSpec(
-                        entry.particulars,
-                        flex: 22,
-                        align: TextAlign.left,
-                      ),
-                      _GridCellSpec(entry.vacEarned, flex: 10),
-                      _GridCellSpec(entry.vacAbsWithPay, flex: 12),
-                      _GridCellSpec(entry.vacAbsWithoutPay, flex: 14),
-                      _GridCellSpec(entry.slEarned, flex: 10),
-                      _GridCellSpec(entry.slAbsWithPay, flex: 12),
-                      _GridCellSpec(entry.slAbsWithoutPay, flex: 14),
-                      _GridCellSpec(entry.dateTakenOnApplication, flex: 16),
-                    ],
-                    fontSize: 10.5,
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.black87, width: 1),
+      ),
+      child: Column(
+        children: [
+          SizedBox(
+            height: _groupHeaderHeight + _detailHeaderHeight,
+            child: Row(
+              children: [
+                Expanded(
+                  flex: _periodFlex,
+                  child: _mergedHeaderCell(
+                    text: 'PERIOD',
+                    showRightBorder: true,
                   ),
                 ),
-              ),
-            ],
+                Expanded(
+                  flex: _particularsFlex,
+                  child: _mergedHeaderCell(
+                    text: 'PARTICULARS',
+                    showRightBorder: true,
+                  ),
+                ),
+                Expanded(
+                  flex: _vacationGroupFlex,
+                  child: Column(
+                    children: [
+                      _headerGroupTitleCell(
+                        text: 'VACATION LEAVE',
+                        height: _groupHeaderHeight,
+                      ),
+                      Expanded(
+                        child: _gridRow(
+                          cells: const [
+                            _GridCellSpec('EARNED', flex: 9),
+                            _GridCellSpec(
+                              'ABSENCE UNDER TIME WITH PAY',
+                              flex: 12,
+                            ),
+                            _GridCellSpec('BALANCE', flex: 9),
+                            _GridCellSpec(
+                              'ABSENCE UNDER TIME WITHOUT PAY',
+                              flex: 14,
+                            ),
+                          ],
+                          height: _detailHeaderHeight,
+                          fontSize: 9,
+                          bold: true,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  flex: _sickGroupFlex,
+                  child: Column(
+                    children: [
+                      _headerGroupTitleCell(
+                        text: 'SICK LEAVE',
+                        height: _groupHeaderHeight,
+                      ),
+                      Expanded(
+                        child: _gridRow(
+                          cells: const [
+                            _GridCellSpec('EARNED', flex: 9),
+                            _GridCellSpec(
+                              'ABSENCE UNDER TIME WITH PAY',
+                              flex: 12,
+                            ),
+                            _GridCellSpec('BALANCE', flex: 9),
+                            _GridCellSpec(
+                              'ABSENCE UNDER TIME WITHOUT PAY',
+                              flex: 14,
+                            ),
+                          ],
+                          height: _detailHeaderHeight,
+                          fontSize: 9,
+                          bold: true,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  flex: _dateTakenFlex,
+                  child: _mergedHeaderCell(
+                    text: 'DATE TAKEN ON\nAPPLICATION',
+                    showRightBorder: false,
+                    showLeftBorder: true,
+                  ),
+                ),
+              ],
+            ),
           ),
-        );
-      },
+          ...filledEntries.map(
+            (entry) => Expanded(
+              child: _gridRow(
+                cells: [
+                  _GridCellSpec(entry.period, flex: _periodFlex),
+                  _GridCellSpec(
+                    entry.particulars,
+                    flex: _particularsFlex,
+                    align: TextAlign.left,
+                  ),
+                  _GridCellSpec(entry.vacEarned, flex: 9),
+                  _GridCellSpec(entry.vacAbsWithPay, flex: 12),
+                  _GridCellSpec(entry.vacBalance, flex: 9),
+                  _GridCellSpec(entry.vacAbsWithoutPay, flex: 14),
+                  _GridCellSpec(entry.slEarned, flex: 9),
+                  _GridCellSpec(entry.slAbsWithPay, flex: 12),
+                  _GridCellSpec(entry.slBalance, flex: 9),
+                  _GridCellSpec(entry.slAbsWithoutPay, flex: 14),
+                  _GridCellSpec(
+                    entry.dateTakenOnApplication,
+                    flex: _dateTakenFlex,
+                  ),
+                ],
+                fontSize: 10.5,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -624,9 +766,11 @@ class _LeaveCardEntry {
     required this.particulars,
     required this.vacEarned,
     required this.vacAbsWithPay,
+    required this.vacBalance,
     required this.vacAbsWithoutPay,
     required this.slEarned,
     required this.slAbsWithPay,
+    required this.slBalance,
     required this.slAbsWithoutPay,
     required this.dateTakenOnApplication,
   });
@@ -636,9 +780,11 @@ class _LeaveCardEntry {
       particulars = '',
       vacEarned = '',
       vacAbsWithPay = '',
+      vacBalance = '',
       vacAbsWithoutPay = '',
       slEarned = '',
       slAbsWithPay = '',
+      slBalance = '',
       slAbsWithoutPay = '',
       dateTakenOnApplication = '';
 
@@ -646,9 +792,11 @@ class _LeaveCardEntry {
   final String particulars;
   final String vacEarned;
   final String vacAbsWithPay;
+  final String vacBalance;
   final String vacAbsWithoutPay;
   final String slEarned;
   final String slAbsWithPay;
+  final String slBalance;
   final String slAbsWithoutPay;
   final String dateTakenOnApplication;
 
@@ -656,45 +804,237 @@ class _LeaveCardEntry {
     LeaveRequest request, {
     required double vacationEarnedDays,
     required double sickEarnedDays,
+    required double vacationBalanceDays,
+    required double sickBalanceDays,
+    required double withPayDays,
+    required double withoutPayDays,
+    required Map<String, String> balanceLedgerTypes,
   }) {
     final start = request.startDate;
     final end = request.endDate;
     final period = (start != null && end != null)
         ? '${_fmtDate(start)} - ${_fmtDate(end)}'
         : (start != null ? _fmtDate(start) : '—');
-    final withPay =
-        request.approvedDaysWithPay ?? request.workingDaysApplied ?? 0;
-    final withoutPay = request.approvedDaysWithoutPay ?? 0;
-    final isSick = request.leaveType == LeaveType.sickLeave;
-    final isVacation =
-        request.leaveType == LeaveType.vacationLeave ||
-        request.leaveType == LeaveType.mandatoryForcedLeave;
+    final isSick = _isSickLedgerRequest(request, balanceLedgerTypes);
+    final isVacation = _isVacationLedgerRequest(request, balanceLedgerTypes);
+    final actionDate = request.reviewedAt ?? request.dateFiled;
 
     return _LeaveCardEntry(
       period: period,
       particulars: request.leaveTypeLabel,
       vacEarned: _fmtNum(vacationEarnedDays),
-      vacAbsWithPay: isVacation ? _fmtNum(withPay) : '',
-      vacAbsWithoutPay: isVacation ? _fmtNum(withoutPay) : '',
+      vacAbsWithPay: isVacation ? _fmtNum(withPayDays) : '',
+      vacBalance: _fmtNum(vacationBalanceDays),
+      vacAbsWithoutPay: isVacation ? _fmtNum(withoutPayDays) : '',
       slEarned: _fmtNum(sickEarnedDays),
-      slAbsWithPay: isSick ? _fmtNum(withPay) : '',
-      slAbsWithoutPay: isSick ? _fmtNum(withoutPay) : '',
-      dateTakenOnApplication: request.dateFiled != null
-          ? _fmtDate(request.dateFiled!)
-          : '',
+      slAbsWithPay: isSick ? _fmtNum(withPayDays) : '',
+      slBalance: _fmtNum(sickBalanceDays),
+      slAbsWithoutPay: isSick ? _fmtNum(withoutPayDays) : '',
+      dateTakenOnApplication: actionDate != null ? _fmtDate(actionDate) : '',
     );
   }
 }
 
-/// Vacation / sick earned days from API balances (`leave_balances.earned_days`).
-(double, double) _vlSlEarnedFromBalances(List<LeaveBalance> balances) {
-  var vl = 0.0;
-  var sl = 0.0;
-  for (final b in balances) {
-    if (b.leaveType == LeaveType.vacationLeave) vl = b.earnedDays;
-    if (b.leaveType == LeaveType.sickLeave) sl = b.earnedDays;
+List<_LeaveCardEntry> _buildLeaveCardEntries(
+  List<LeaveRequest> requests, {
+  required double vacationEarnedDays,
+  required double sickEarnedDays,
+  required double vacationRemainingDays,
+  required double sickRemainingDays,
+  required Map<String, String> balanceLedgerTypes,
+}) {
+  final cardRequests = requests
+      .where((request) => _isLeaveCardRequest(request, balanceLedgerTypes))
+      .toList();
+  final vacationUsedInRows = cardRequests
+      .where((request) => _isVacationLedgerRequest(request, balanceLedgerTypes))
+      .fold<double>(0, (sum, request) => sum + _withPayDays(request));
+  final sickUsedInRows = cardRequests
+      .where((request) => _isSickLedgerRequest(request, balanceLedgerTypes))
+      .fold<double>(0, (sum, request) => sum + _withPayDays(request));
+  var vacationBalance = vacationRemainingDays + vacationUsedInRows;
+  var sickBalance = sickRemainingDays + sickUsedInRows;
+
+  return cardRequests.map((request) {
+    final withPayDays = _withPayDays(request);
+    final withoutPayDays = _withoutPayDays(request);
+    if (_isVacationLedgerRequest(request, balanceLedgerTypes)) {
+      vacationBalance -= withPayDays;
+    }
+    if (_isSickLedgerRequest(request, balanceLedgerTypes)) {
+      sickBalance -= withPayDays;
+    }
+    return _LeaveCardEntry.fromRequest(
+      request,
+      vacationEarnedDays: vacationEarnedDays,
+      sickEarnedDays: sickEarnedDays,
+      vacationBalanceDays: vacationBalance,
+      sickBalanceDays: sickBalance,
+      withPayDays: withPayDays,
+      withoutPayDays: withoutPayDays,
+      balanceLedgerTypes: balanceLedgerTypes,
+    );
+  }).toList();
+}
+
+bool _isLeaveCardRequest(
+  LeaveRequest request,
+  Map<String, String> balanceLedgerTypes,
+) {
+  return request.status == LeaveRequestStatus.approved &&
+      (_isVacationLedgerRequest(request, balanceLedgerTypes) ||
+          _isSickLedgerRequest(request, balanceLedgerTypes));
+}
+
+bool _isVacationLedgerRequest(
+  LeaveRequest request,
+  Map<String, String> balanceLedgerTypes,
+) {
+  return _leaveCardLedgerType(request, balanceLedgerTypes) ==
+      LeaveType.vacationLeave.value;
+}
+
+bool _isSickLedgerRequest(
+  LeaveRequest request,
+  Map<String, String> balanceLedgerTypes,
+) {
+  return _leaveCardLedgerType(request, balanceLedgerTypes) ==
+      LeaveType.sickLeave.value;
+}
+
+String _leaveCardLedgerType(
+  LeaveRequest request,
+  Map<String, String> balanceLedgerTypes,
+) {
+  final name = request.effectiveLeaveTypeName;
+  final configured = balanceLedgerTypes[name]?.trim();
+  final policy = configured == null || configured.isEmpty
+      ? switch (request.leaveType) {
+          LeaveType.vacationLeave => LeaveType.vacationLeave.value,
+          LeaveType.sickLeave => LeaveType.sickLeave.value,
+          LeaveType.mandatoryForcedLeave => LeaveType.vacationLeave.value,
+          _ => 'none',
+        }
+      : configured;
+  return policy == 'ownBalance' ? name : policy;
+}
+
+double _withPayDays(LeaveRequest request) {
+  final approvedWithPay = request.approvedDaysWithPay;
+  if (approvedWithPay != null) {
+    return approvedWithPay.isFinite && approvedWithPay > 0
+        ? approvedWithPay
+        : 0;
   }
-  return (vl, sl);
+  final applied = request.workingDaysApplied ?? 0;
+  final withoutPay = request.approvedDaysWithoutPay;
+  if (withoutPay != null && withoutPay > 0) {
+    final paid = applied - withoutPay;
+    return paid.isFinite && paid > 0 ? paid : 0;
+  }
+  final value = applied;
+  return value.isFinite && value > 0 ? value : 0;
+}
+
+double _withoutPayDays(LeaveRequest request) {
+  final value = request.approvedDaysWithoutPay ?? 0;
+  return value.isFinite && value > 0 ? value : 0;
+}
+
+_LeaveCardTotals _vlSlTotalsFromBalances(List<LeaveBalance> balances) {
+  var vacationEarned = 0.0;
+  var sickEarned = 0.0;
+  var vacationRemaining = 0.0;
+  var sickRemaining = 0.0;
+  for (final b in balances) {
+    if (b.effectiveLeaveTypeName == LeaveType.vacationLeave.value) {
+      vacationEarned = b.earnedDays;
+      vacationRemaining = b.remainingDays;
+    }
+    if (b.effectiveLeaveTypeName == LeaveType.sickLeave.value) {
+      sickEarned = b.earnedDays;
+      sickRemaining = b.remainingDays;
+    }
+  }
+  return _LeaveCardTotals(
+    vacationEarned: vacationEarned,
+    sickEarned: sickEarned,
+    vacationRemaining: vacationRemaining,
+    sickRemaining: sickRemaining,
+  );
+}
+
+class _LeaveCardTotals {
+  const _LeaveCardTotals({
+    required this.vacationEarned,
+    required this.sickEarned,
+    required this.vacationRemaining,
+    required this.sickRemaining,
+  });
+
+  final double vacationEarned;
+  final double sickEarned;
+  final double vacationRemaining;
+  final double sickRemaining;
+}
+
+class _LeaveCardEmployeeProfile {
+  const _LeaveCardEmployeeProfile({
+    required this.service,
+    this.officeDepartment,
+    this.firstDayOfService,
+  });
+
+  final String service;
+  final String? officeDepartment;
+  final DateTime? firstDayOfService;
+
+  factory _LeaveCardEmployeeProfile.fromJson(Map<String, dynamic> json) {
+    return _LeaveCardEmployeeProfile(
+      service: _formatService(json['employment_type']),
+      officeDepartment: _cleanProfileText(json['current_department_name']),
+      firstDayOfService: _parseProfileDate(json['date_hired']),
+    );
+  }
+}
+
+String _formatService(dynamic value) {
+  final raw = value?.toString().trim() ?? '';
+  if (raw.isEmpty) return '';
+  switch (raw.toLowerCase()) {
+    case 'regular':
+      return 'Permanent';
+    case 'contractual':
+      return 'Contractual';
+    case 'job_order':
+    case 'job order':
+      return 'Job Order';
+    case 'casual':
+      return 'Casual';
+    default:
+      return raw
+          .replaceAll('_', ' ')
+          .split(' ')
+          .where((part) => part.trim().isNotEmpty)
+          .map((part) {
+            final clean = part.trim().toLowerCase();
+            return '${clean[0].toUpperCase()}${clean.substring(1)}';
+          })
+          .join(' ');
+  }
+}
+
+String? _cleanProfileText(dynamic value) {
+  final text = value?.toString().trim();
+  return text == null || text.isEmpty ? null : text;
+}
+
+DateTime? _parseProfileDate(dynamic value) {
+  if (value == null) return null;
+  if (value is DateTime) return value;
+  final text = value.toString().trim();
+  if (text.isEmpty) return null;
+  return DateTime.tryParse(text);
 }
 
 String _fmtNum(double value) {

@@ -7,6 +7,7 @@ import '../../landingpage/constants/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../leave_provider.dart';
 import '../leave_type_definition_cache.dart';
+import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
 import '../models/leave_type_definition.dart';
@@ -37,7 +38,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   late LeaveType _leaveType;
   late String _leaveTypeName;
   List<LeaveTypeDefinition> _leaveTypeDefinitions = const [];
+  List<LeaveBalance> _creditBalances = const [];
+  List<LeaveRequest> _creditRequests = const [];
   bool _loadingLeaveTypes = false;
+  bool _loadingCreditContext = false;
   LeaveLocationOption? _locationOption;
   SickLeaveNature? _sickLeaveNature;
   StudyLeavePurpose? _studyPurpose;
@@ -97,6 +101,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       text: initial?.workingDaysApplied?.toString() ?? '',
     );
     _loadLeaveTypes();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadCreditContext());
   }
 
   @override
@@ -185,6 +190,27 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     }
   }
 
+  Future<void> _loadCreditContext() async {
+    final userId = context.read<AuthProvider>().user?.id;
+    if (userId == null || userId.isEmpty) return;
+    setState(() => _loadingCreditContext = true);
+    try {
+      final repository = context.read<LeaveProvider>().repository;
+      final balancesFuture = repository.getBalancesForUser(userId);
+      final requestsFuture = repository.listMyRequests(userId, limit: 500);
+      final balances = await balancesFuture;
+      final requests = await requestsFuture;
+      if (!mounted) return;
+      setState(() {
+        _creditBalances = balances;
+        _creditRequests = requests;
+        _loadingCreditContext = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingCreditContext = false);
+    }
+  }
+
   void _selectLeaveTypeDefinition(
     LeaveTypeDefinition definition, {
     bool resetDetails = true,
@@ -246,6 +272,78 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
           ),
         )
         .toList();
+  }
+
+  String get _selectedCreditPolicy {
+    final raw = _selectedLeaveTypeDefinition?.balanceLedgerType.trim();
+    if (raw != null && raw.isNotEmpty) return raw;
+    return switch (_leaveType) {
+      LeaveType.vacationLeave => 'vacationLeave',
+      LeaveType.sickLeave => 'sickLeave',
+      LeaveType.mandatoryForcedLeave => 'vacationLeave',
+      _ => 'none',
+    };
+  }
+
+  String get _selectedCreditBucket {
+    final policy = _selectedCreditPolicy;
+    return policy == 'ownBalance' ? _leaveTypeName : policy;
+  }
+
+  LeaveBalance? _balanceForBucket(String bucket) {
+    for (final balance in _creditBalances) {
+      if (balance.effectiveLeaveTypeName == bucket) return balance;
+    }
+    return null;
+  }
+
+  double _specialPrivilegeUsedForYear(int year) {
+    final currentId = (_savedRequest ?? widget.initialRequest)?.id;
+    return _creditRequests.where((request) {
+      if (request.effectiveLeaveTypeName != LeaveType.specialPrivilegeLeave.value) {
+        return false;
+      }
+      if (currentId != null && currentId.isNotEmpty && request.id == currentId) {
+        return false;
+      }
+      if (!(request.status.isPending ||
+          request.status == LeaveRequestStatus.approved)) {
+        return false;
+      }
+      final start = request.startDate;
+      final end = request.endDate;
+      if (start == null || end == null) return false;
+      return start.year <= year && end.year >= year;
+    }).fold<double>(0, (total, request) {
+      final days = _workingDaysInYear(request.startDate, request.endDate, year);
+      return total + (days > 0 ? days : request.workingDaysApplied ?? 0);
+    });
+  }
+
+  double _workingDaysInYear(DateTime? start, DateTime? end, int year) {
+    if (start == null || end == null) return 0;
+    var d = DateTime(
+      start.year < year ? year : start.year,
+      start.year < year ? 1 : start.month,
+      start.year < year ? 1 : start.day,
+    );
+    final last = DateTime(
+      end.year > year ? year : end.year,
+      end.year > year ? 12 : end.month,
+      end.year > year ? 31 : end.day,
+    );
+    var count = 0;
+    while (!d.isAfter(last)) {
+      if (d.weekday != DateTime.saturday && d.weekday != DateTime.sunday) {
+        count += 1;
+      }
+      d = d.add(const Duration(days: 1));
+    }
+    return count.toDouble();
+  }
+
+  String _formatDays(double days) {
+    return days % 1 == 0 ? days.toStringAsFixed(0) : days.toStringAsFixed(1);
   }
 
   Future<void> _saveDraft() async {
@@ -616,6 +714,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                             leaveType: _leaveType,
                             definition: _selectedLeaveTypeDefinition,
                           ),
+                          const SizedBox(height: 12),
+                          _buildCreditPolicyPanel(),
 
                           if (_leaveType == LeaveType.others &&
                               _leaveTypeName == LeaveType.others.value) ...[
@@ -817,6 +917,83 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildCreditPolicyPanel() {
+    final policy = _selectedCreditPolicy;
+    final isSpecialPrivilege =
+        _leaveTypeName == LeaveType.specialPrivilegeLeave.value;
+
+    IconData icon = Icons.info_outline_rounded;
+    String title = 'Credit handling';
+    String message;
+
+    if (isSpecialPrivilege) {
+      final year = _startDate?.year ?? DateTime.now().year;
+      final used = _specialPrivilegeUsedForYear(year);
+      final remaining = (3 - used).clamp(0, 3).toDouble();
+      icon = Icons.event_available_outlined;
+      title = 'Special Privilege Leave';
+      message = _loadingCreditContext
+          ? 'Checking yearly entitlement...'
+          : '${_formatDays(remaining)} of 3 day(s) remaining for $year. This leave does not deduct VL or SL credits.';
+    } else if (policy == 'none') {
+      icon = Icons.remove_done_outlined;
+      message = 'No leave credits required. This request will not deduct Vacation or Sick Leave credits.';
+    } else {
+      final bucket = _selectedCreditBucket;
+      final balance = _balanceForBucket(bucket);
+      final bucketLabel = switch (bucket) {
+        'vacationLeave' => 'Vacation Leave',
+        'sickLeave' => 'Sick Leave',
+        _ => _selectedLeaveTypeLabel,
+      };
+      icon = Icons.account_balance_wallet_outlined;
+      message = balance == null
+          ? 'Deducts from $bucketLabel credits. No balance row is available yet.'
+          : 'Deducts from $bucketLabel credits. Available: ${balance.availableDays.toStringAsFixed(1)} day(s), pending: ${balance.pendingDays.toStringAsFixed(1)}.';
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: AppTheme.primaryNavy),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: AppTheme.dashTextPrimaryOf(context),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  message,
+                  style: TextStyle(
+                    color: AppTheme.dashTextSecondaryOf(context),
+                    fontSize: 13,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

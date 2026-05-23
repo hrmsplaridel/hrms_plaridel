@@ -13,6 +13,7 @@ import '../leave_type_definition_cache.dart';
 import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
+import '../models/leave_type_definition.dart';
 import '../utils/employee_leave_card_view_screen.dart';
 import 'leave_balance_history_screen.dart';
 import 'leave_type_management_screen.dart';
@@ -60,6 +61,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   List<AdminLeaveLeaveTypeFilterOption> _configuredLeaveTypeOptions = const [];
   String? _departmentFilter;
   String? _employeeFilter;
+  List<LeaveTypeDefinition> _leaveTypeDefinitions = const [];
   // #11: Date range filters.
   DateTime? _startDateFrom;
   DateTime? _startDateTo;
@@ -194,7 +196,10 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
               .toList()
             ..sort((a, b) => a.label.compareTo(b.label));
       if (!mounted) return;
-      setState(() => _configuredLeaveTypeOptions = options);
+      setState(() {
+        _leaveTypeDefinitions = definitions;
+        _configuredLeaveTypeOptions = options;
+      });
     } catch (_) {
       // Request rows still supply used leave types if rules cannot be loaded.
     }
@@ -228,6 +233,113 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       );
     }
     return byValue.values.toList()..sort((a, b) => a.label.compareTo(b.label));
+  }
+
+  LeaveTypeDefinition? _definitionForRequest(LeaveRequest request) {
+    final name = request.effectiveLeaveTypeName;
+    for (final item in _leaveTypeDefinitions) {
+      if (item.name == name) return item;
+    }
+    return null;
+  }
+
+  String _creditPolicyForRequest(LeaveRequest request) {
+    final raw = _definitionForRequest(request)?.balanceLedgerType.trim();
+    if (raw != null && raw.isNotEmpty) return raw;
+    return switch (request.leaveType) {
+      LeaveType.vacationLeave => 'vacationLeave',
+      LeaveType.sickLeave => 'sickLeave',
+      LeaveType.mandatoryForcedLeave => 'vacationLeave',
+      _ => 'none',
+    };
+  }
+
+  String _creditBucketForRequest(LeaveRequest request) {
+    final policy = _creditPolicyForRequest(request);
+    return policy == 'ownBalance' ? request.effectiveLeaveTypeName : policy;
+  }
+
+  LeaveBalance? _balanceForBucket(List<LeaveBalance> balances, String bucket) {
+    for (final balance in balances) {
+      if (balance.effectiveLeaveTypeName == bucket) return balance;
+    }
+    return null;
+  }
+
+  String _formatAdminDays(double days) {
+    return days % 1 == 0 ? days.toStringAsFixed(0) : days.toStringAsFixed(1);
+  }
+
+  double _workingDaysInYear(DateTime? start, DateTime? end, int year) {
+    if (start == null || end == null) return 0;
+    var d = DateTime(
+      start.year < year ? year : start.year,
+      start.year < year ? 1 : start.month,
+      start.year < year ? 1 : start.day,
+    );
+    final last = DateTime(
+      end.year > year ? year : end.year,
+      end.year > year ? 12 : end.month,
+      end.year > year ? 31 : end.day,
+    );
+    var count = 0;
+    while (!d.isAfter(last)) {
+      if (d.weekday != DateTime.saturday && d.weekday != DateTime.sunday) {
+        count += 1;
+      }
+      d = d.add(const Duration(days: 1));
+    }
+    return count.toDouble();
+  }
+
+  Future<String> _creditSummaryForRequest({
+    required LeaveRequest request,
+    required List<LeaveBalance> balances,
+  }) async {
+    final policy = _creditPolicyForRequest(request);
+    if (request.effectiveLeaveTypeName == LeaveType.specialPrivilegeLeave.value) {
+      final year = request.startDate?.year ?? DateTime.now().year;
+      final requests = await context.read<LeaveProvider>().repository.listRequests(
+        query: LeaveRequestQuery(
+          userId: request.userId,
+          leaveTypeName: LeaveType.specialPrivilegeLeave.value,
+          limit: 500,
+        ),
+      );
+      final currentId = request.id;
+      final used = requests.where((item) {
+        if (currentId != null && currentId.isNotEmpty && item.id == currentId) {
+          return false;
+        }
+        if (!(item.status.isPending || item.status == LeaveRequestStatus.approved)) {
+          return false;
+        }
+        final start = item.startDate;
+        final end = item.endDate;
+        if (start == null || end == null) return false;
+        return start.year <= year && end.year >= year;
+      }).fold<double>(
+        0,
+        (total, item) =>
+            total + _workingDaysInYear(item.startDate, item.endDate, year),
+      );
+      final remaining = (3 - used).clamp(0, 3).toDouble();
+      return 'Special Privilege Leave: ${_formatAdminDays(remaining)} of 3 day(s) remaining for $year. No VL/SL deduction.';
+    }
+    if (policy == 'none') {
+      return 'No leave credit deduction for this leave type.';
+    }
+    final bucket = _creditBucketForRequest(request);
+    final balance = _balanceForBucket(balances, bucket);
+    final bucketLabel = switch (bucket) {
+      'vacationLeave' => 'Vacation Leave',
+      'sickLeave' => 'Sick Leave',
+      _ => request.leaveTypeLabel,
+    };
+    if (balance == null) {
+      return '$bucketLabel credits: no balance row is available yet.';
+    }
+    return '$bucketLabel credits: ${balance.availableDays.toStringAsFixed(1)} available (${balance.remainingDays.toStringAsFixed(1)} remaining excl. pending).';
   }
 
   Future<void> _safeAutoRefresh({bool forceRefresh = false}) async {
@@ -557,17 +669,26 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       userId,
       forceRefresh: true,
     );
-    LeaveBalance? leaveBalance;
-    final ledgerType = request.leaveType.balanceLedgerType;
+    final creditBucket = _creditBucketForRequest(request);
+    final leaveBalance = _balanceForBucket(balances, creditBucket);
+    String creditSummary;
     try {
-      leaveBalance = balances.firstWhere((b) => b.leaveType == ledgerType);
-    } catch (_) {}
+      creditSummary = await _creditSummaryForRequest(
+        request: request,
+        balances: balances,
+      );
+    } catch (_) {
+      creditSummary = 'Credit policy could not be refreshed. Final approval will still be validated by the server.';
+    }
 
     if (!mounted) return;
     final input = await showDialog<LeaveApprovalInput>(
       context: context,
-      builder: (_) =>
-          AdminLeaveApproveDialog(request: request, leaveBalance: leaveBalance),
+      builder: (_) => AdminLeaveApproveDialog(
+        request: request,
+        leaveBalance: leaveBalance,
+        creditSummary: creditSummary,
+      ),
     );
     if (input == null || !mounted) return;
 

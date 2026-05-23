@@ -91,10 +91,19 @@ const protect = [authMiddleware];
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
 const LEAVE_ATTACHMENT_SUBDIR = 'leave-attachments';
 const SYSTEM_LEAVE_TYPE_NAMES = Object.freeze(Object.keys(LEAVE_TYPE_RULES));
-const BALANCE_LEDGER_LEAVE_TYPES = new Set([
+const NO_CREDIT_LEDGER_TYPE = 'none';
+const OWN_BALANCE_LEDGER_TYPE = 'ownBalance';
+const BALANCE_LEDGER_CONFIG_TYPES = new Set([
+  NO_CREDIT_LEDGER_TYPE,
+  OWN_BALANCE_LEDGER_TYPE,
   'vacationLeave',
-  'mandatoryForcedLeave',
   'sickLeave',
+]);
+const CREDIT_BALANCE_BUCKET_TYPES = new Set([
+  'vacationLeave',
+  'sickLeave',
+]);
+const SYSTEM_NO_CREDIT_LEAVE_TYPES = new Set([
   'maternityLeave',
   'paternityLeave',
   'specialPrivilegeLeave',
@@ -107,6 +116,18 @@ const BALANCE_LEDGER_LEAVE_TYPES = new Set([
   'adoptionLeave',
   'others',
 ]);
+const LEGACY_NO_CREDIT_LEDGER_TYPES = new Set([
+  ...SYSTEM_NO_CREDIT_LEAVE_TYPES,
+  'others',
+]);
+const SPECIAL_PRIVILEGE_LEAVE_TYPE = 'specialPrivilegeLeave';
+const SPECIAL_PRIVILEGE_LEAVE_ANNUAL_LIMIT = 3;
+const SPECIAL_PRIVILEGE_LEAVE_USAGE_STATUSES = [
+  'pending',
+  'pending_department_head',
+  'pending_hr',
+  'approved',
+];
 
 initLeaveRequestHistory(pool);
 initLeaveBalanceLedger(pool);
@@ -123,9 +144,21 @@ pool
         ADD COLUMN IF NOT EXISTS requires_attachment_when_over_days NUMERIC,
         ADD COLUMN IF NOT EXISTS max_days NUMERIC,
         ADD COLUMN IF NOT EXISTS affects_dtr_normally BOOLEAN NOT NULL DEFAULT true,
-        ADD COLUMN IF NOT EXISTS balance_ledger_type TEXT NOT NULL DEFAULT 'others',
+        ADD COLUMN IF NOT EXISTS balance_ledger_type TEXT NOT NULL DEFAULT 'none',
         ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT false,
         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+    `);
+
+    await pool.query(`
+      ALTER TABLE leave_types
+        ALTER COLUMN balance_ledger_type SET DEFAULT 'none';
+    `);
+
+    await pool.query(`
+      UPDATE leave_types
+      SET balance_ledger_type = 'none',
+          updated_at = COALESCE(updated_at, now())
+      WHERE COALESCE(NULLIF(balance_ledger_type, ''), 'none') = 'others';
     `);
 
     await pool.query(`
@@ -175,8 +208,8 @@ pool
           affects_dtr_normally = true,
           balance_ledger_type = CASE
             WHEN name = 'mandatoryForcedLeave' THEN 'vacationLeave'
-            WHEN name = ANY($1::text[]) THEN name
-            ELSE 'others'
+            WHEN name IN ('vacationLeave', 'sickLeave') THEN name
+            ELSE 'none'
           END,
           is_active = true
       WHERE name = ANY($1::text[]);
@@ -318,6 +351,98 @@ async function hasOverlappingLeaveRequest(client, userId, startStr, endStr, excl
   return q.rows.length > 0;
 }
 
+function calendarYearsForDateRange(startStr, endStr) {
+  const startYear = parseInt(String(startStr || '').slice(0, 4), 10);
+  const endYear = parseInt(String(endStr || '').slice(0, 4), 10);
+  if (!Number.isInteger(startYear) || !Number.isInteger(endYear)) return [];
+  const from = Math.min(startYear, endYear);
+  const to = Math.max(startYear, endYear);
+  const years = [];
+  for (let year = from; year <= to; year += 1) years.push(year);
+  return years;
+}
+
+function maxIsoDate(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return a > b ? a : b;
+}
+
+function minIsoDate(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return a < b ? a : b;
+}
+
+function formatDayCount(days) {
+  const n = Number(days);
+  if (!Number.isFinite(n)) return '0';
+  return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/\.?0+$/, '');
+}
+
+async function workingDaysWithinYear(client, startStr, endStr, year) {
+  if (!startStr || !endStr) return 0;
+  const from = maxIsoDate(startStr, `${year}-01-01`);
+  const to = minIsoDate(endStr, `${year}-12-31`);
+  if (!from || !to || to < from) return 0;
+  return (await computeNumberOfDays(from, to, client)) ?? 0;
+}
+
+async function assertSpecialPrivilegeLeaveAnnualLimit(
+  client,
+  { userId, leaveTypeName, startStr, endStr, excludeId = null }
+) {
+  if (leaveTypeName !== SPECIAL_PRIVILEGE_LEAVE_TYPE) return;
+  if (!client || !userId || !startStr || !endStr) return;
+
+  const years = calendarYearsForDateRange(startStr, endStr);
+  if (years.length === 0) return;
+
+  const queryFrom = `${Math.min(...years)}-01-01`;
+  const queryTo = `${Math.max(...years)}-12-31`;
+  const existing = await client.query(
+    `SELECT lr.id, lr.start_date, lr.end_date
+     FROM leave_requests lr
+     INNER JOIN leave_types lt ON lt.id = lr.leave_type_id
+     WHERE (lr.user_id = $1::uuid OR lr.employee_id = $1::uuid)
+       AND lt.name = $2
+       AND lr.status = ANY($3::text[])
+       AND lr.start_date <= $5::date
+       AND lr.end_date >= $4::date
+       AND ($6::uuid IS NULL OR lr.id <> $6::uuid)`,
+    [
+      userId,
+      SPECIAL_PRIVILEGE_LEAVE_TYPE,
+      SPECIAL_PRIVILEGE_LEAVE_USAGE_STATUSES,
+      queryFrom,
+      queryTo,
+      excludeId,
+    ]
+  );
+
+  for (const year of years) {
+    const requestedDays = await workingDaysWithinYear(client, startStr, endStr, year);
+    if (requestedDays <= 0) continue;
+
+    let usedDays = 0;
+    for (const row of existing.rows) {
+      const existingStart = toIsoDateStr(row.start_date);
+      const existingEnd = toIsoDateStr(row.end_date);
+      usedDays += await workingDaysWithinYear(client, existingStart, existingEnd, year);
+    }
+
+    const remaining = Math.max(0, SPECIAL_PRIVILEGE_LEAVE_ANNUAL_LIMIT - usedDays);
+    if (usedDays + requestedDays > SPECIAL_PRIVILEGE_LEAVE_ANNUAL_LIMIT + 0.0001) {
+      const err = new Error(
+        `Special Privilege Leave is limited to ${SPECIAL_PRIVILEGE_LEAVE_ANNUAL_LIMIT} days per calendar year. ` +
+        `You only have ${formatDayCount(remaining)} day(s) remaining for ${year}; this request needs ${formatDayCount(requestedDays)} day(s).`
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+  }
+}
+
 function systemLeaveTypeDisplayName(name) {
   const labels = {
     vacationLeave: 'Vacation Leave',
@@ -362,12 +487,30 @@ function leaveTypeRuleDefaults(name) {
   };
 }
 
+function defaultLedgerTypeForLeaveType(leaveTypeName) {
+  if (leaveTypeName === 'mandatoryForcedLeave') return 'vacationLeave';
+  if (leaveTypeName === 'vacationLeave' || leaveTypeName === 'sickLeave') {
+    return leaveTypeName;
+  }
+  return NO_CREDIT_LEDGER_TYPE;
+}
+
 function normalizeLedgerType(value, leaveTypeName) {
   const raw = (value || '').toString().trim();
-  if (BALANCE_LEDGER_LEAVE_TYPES.has(raw)) return raw;
-  if (leaveTypeName === 'mandatoryForcedLeave') return 'vacationLeave';
-  if (BALANCE_LEDGER_LEAVE_TYPES.has(leaveTypeName)) return leaveTypeName;
-  return 'others';
+  if (raw === 'mandatoryForcedLeave') return 'vacationLeave';
+  if (BALANCE_LEDGER_CONFIG_TYPES.has(raw)) return raw;
+  if (CREDIT_BALANCE_BUCKET_TYPES.has(raw)) return raw;
+  if (LEGACY_NO_CREDIT_LEDGER_TYPES.has(raw)) return NO_CREDIT_LEDGER_TYPE;
+  if (raw && raw === leaveTypeName && !SYSTEM_LEAVE_TYPE_NAMES.includes(leaveTypeName)) {
+    return OWN_BALANCE_LEDGER_TYPE;
+  }
+  return defaultLedgerTypeForLeaveType(leaveTypeName);
+}
+
+function creditBalanceLabel(ledgerType, leaveTypeName) {
+  if (ledgerType === 'vacationLeave') return 'Vacation Leave';
+  if (ledgerType === 'sickLeave') return 'Sick Leave';
+  return systemLeaveTypeDisplayName(leaveTypeName || ledgerType || 'leave');
 }
 
 function leaveTypeRowToApi(row = {}) {
@@ -755,6 +898,9 @@ router.put('/types/:id', protect, requireAdminOrHr, async (req, res) => {
     const payload = leaveTypePayloadFromBody(req.body || {}, existing);
     const nextName = isSystem ? existing.name : payload.name;
     const nextActive = isSystem ? true : payload.isActive;
+    const nextBalanceLedgerType = isSystem
+      ? defaultLedgerTypeForLeaveType(nextName)
+      : payload.balanceLedgerType;
     if (!nextName || !payload.displayName) {
       return res.status(400).json({ error: 'Leave type name is required' });
     }
@@ -794,7 +940,7 @@ router.put('/types/:id', protect, requireAdminOrHr, async (req, res) => {
         payload.requiresAttachmentWhenOverDays,
         payload.maxDays,
         payload.affectsDtrNormally,
-        payload.balanceLedgerType,
+        nextBalanceLedgerType,
         req.params.id,
       ]
     );
@@ -833,24 +979,33 @@ function canModifyAttachment(status) {
 
 /**
  * CSC practice: mandatory/forced leave is charged against vacation leave credits.
- * Maps a leave_requests.leave type name to the leave_balances row key.
+ * Maps a leave_requests.leave type name to a leave_balances row key, or null
+ * when the type is configured as a no-credit entitlement/statutory leave.
  */
 function balanceLedgerLeaveType(leaveTypeName) {
   if (!leaveTypeName) return leaveTypeName;
-  if (leaveTypeName === 'mandatoryForcedLeave') return 'vacationLeave';
-  return BALANCE_LEDGER_LEAVE_TYPES.has(leaveTypeName) ? leaveTypeName : 'others';
+  const configured = defaultLedgerTypeForLeaveType(leaveTypeName);
+  if (configured === NO_CREDIT_LEDGER_TYPE) return null;
+  if (configured === OWN_BALANCE_LEDGER_TYPE) return leaveTypeName;
+  return configured;
 }
 
-async function resolveBalanceLedgerLeaveType(client, leaveTypeName) {
-  const fallback = balanceLedgerLeaveType(leaveTypeName);
-  if (!client || !leaveTypeName || BALANCE_LEDGER_LEAVE_TYPES.has(leaveTypeName)) {
-    return fallback;
-  }
+async function resolveBalanceLedgerConfigType(client, leaveTypeName) {
+  if (!leaveTypeName) return NO_CREDIT_LEDGER_TYPE;
+  const fallback = defaultLedgerTypeForLeaveType(leaveTypeName);
+  if (!client) return fallback;
   const q = await client.query(
     'SELECT balance_ledger_type FROM leave_types WHERE name = $1 LIMIT 1',
     [leaveTypeName]
   );
   return normalizeLedgerType(q.rows[0]?.balance_ledger_type, leaveTypeName);
+}
+
+async function resolveBalanceLedgerLeaveType(client, leaveTypeName) {
+  const configured = await resolveBalanceLedgerConfigType(client, leaveTypeName);
+  if (configured === NO_CREDIT_LEDGER_TYPE) return null;
+  if (configured === OWN_BALANCE_LEDGER_TYPE) return leaveTypeName;
+  return configured;
 }
 
 /** Matches Flutter LeaveBalance.remainingDays: earned - used + adjusted */
@@ -889,6 +1044,7 @@ async function assertEnoughAvailableForPendingReservation(client, userId, leaveT
   const d = deltaDays != null ? parseFloat(deltaDays) : 0;
   if (!userId || !leaveTypeName || !Number.isFinite(d) || d <= 0) return;
   const ledgerType = await resolveBalanceLedgerLeaveType(client, leaveTypeName);
+  if (!ledgerType) return;
   const bal = await client.query(
     `SELECT earned_days, used_days, pending_days, adjusted_days
      FROM leave_balances
@@ -901,8 +1057,9 @@ async function assertEnoughAvailableForPendingReservation(client, userId, leaveT
   if (d > available) {
     const remaining = ledgerRemainingFromBalancesRow(bal.rows[0]);
     const pending = bal.rows.length > 0 ? parseFloat(bal.rows[0].pending_days ?? 0) : 0;
+    const bucketLabel = creditBalanceLabel(ledgerType, leaveTypeName);
     const err = new Error(
-      `Insufficient leave balance for ${leaveTypeName}. Available ${available.toFixed(2)} (remaining ${remaining.toFixed(2)}, pending ${pending.toFixed(2)}), requested ${d.toFixed(2)}.`
+      `Insufficient ${bucketLabel} balance. Available ${available.toFixed(2)} (remaining ${remaining.toFixed(2)}, pending ${pending.toFixed(2)}), requested ${d.toFixed(2)}.`
     );
     err.statusCode = 400;
     throw err;
@@ -924,6 +1081,7 @@ async function upsertLeaveBalanceDeduction(
   const decrementPendingDays = options.decrementPendingDays === true;
 
   const ledgerType = await resolveBalanceLedgerLeaveType(client, leaveTypeName);
+  if (!ledgerType) return null;
 
   const bal = await client.query(
     `SELECT earned_days, used_days, pending_days, adjusted_days
@@ -940,8 +1098,9 @@ async function upsertLeaveBalanceDeduction(
   if (decrementPendingDays) {
     // Final approval: convert pending → used. Pool headroom is "remaining" (earned - used + adj); days were already in pending.
     if (!allowNegative && days > remaining) {
+      const bucketLabel = creditBalanceLabel(ledgerType, leaveTypeName);
       const err = new Error(
-        `Insufficient leave balance for ${leaveTypeName}. Remaining ${remaining.toFixed(2)}, requested ${days.toFixed(2)}.`
+        `Insufficient ${bucketLabel} balance. Remaining ${remaining.toFixed(2)}, requested ${days.toFixed(2)}.`
       );
       err.statusCode = 400;
       throw err;
@@ -949,10 +1108,8 @@ async function upsertLeaveBalanceDeduction(
   } else {
     // Forced deduction (and any use not tied to a pending reservation): cannot take more than available.
     if (!allowNegative && days > available) {
-      const prefix =
-        leaveTypeName === 'mandatoryForcedLeave'
-          ? 'Insufficient vacation leave balance (mandatory/forced leave uses vacation credits)'
-          : `Insufficient leave balance for ${leaveTypeName}`;
+      const bucketLabel = creditBalanceLabel(ledgerType, leaveTypeName);
+      const prefix = `Insufficient ${bucketLabel} balance`;
       const msg = `${prefix}. Available ${available.toFixed(2)} (remaining ${remaining.toFixed(2)}, pending ${pending.toFixed(2)}), requested ${days.toFixed(2)}.`;
       const err = new Error(msg);
       err.statusCode = 400;
@@ -1035,6 +1192,78 @@ async function upsertLeaveBalanceDeduction(
   }
 
   return remainingOut;
+}
+
+async function reservePendingLeaveBalance(
+  client,
+  { userId, leaveTypeName, days, leaveRequestId, actorUserId, actorKind = 'user', action = 'leave_submitted', remarks = null, metadataJson = null }
+) {
+  const d = days != null ? parseFloat(days) : 0;
+  if (!userId || !leaveTypeName || !Number.isFinite(d) || d <= 0) return null;
+  const ledgerType = await resolveBalanceLedgerLeaveType(client, leaveTypeName);
+  if (!ledgerType) return null;
+
+  await assertEnoughAvailableForPendingReservation(client, userId, leaveTypeName, d);
+  const beforeSnap = await fetchBalanceSnapshot(client, userId, ledgerType);
+  await client.query(
+    `INSERT INTO leave_balances (user_id, leave_type, earned_days, used_days, pending_days, adjusted_days, as_of_date, last_accrual_date, created_at, updated_at)
+     VALUES ($1::uuid, $2::text, 0, 0, $3::numeric, 0, now()::date, now()::date, now(), now())
+     ON CONFLICT (user_id, leave_type)
+     DO UPDATE SET pending_days = COALESCE(leave_balances.pending_days, 0) + EXCLUDED.pending_days,
+                   updated_at = now()`,
+    [userId, ledgerType, d]
+  );
+  const afterSnap = await fetchBalanceSnapshot(client, userId, ledgerType);
+  await insertLeaveBalanceLedger(client, {
+    userId,
+    leaveType: ledgerType,
+    action,
+    affectedBucket: 'pending',
+    daysChanged: afterSnap.pending_days - beforeSnap.pending_days,
+    oldValue: beforeSnap.pending_days,
+    newValue: afterSnap.pending_days,
+    relatedLeaveRequestId: leaveRequestId || null,
+    actorUserId: actorUserId || null,
+    actorKind,
+    remarks,
+    metadataJson: metadataJson || { number_of_days: d },
+  });
+  return ledgerType;
+}
+
+async function releasePendingLeaveBalance(
+  client,
+  { userId, leaveTypeName, days, leaveRequestId, actorUserId, actorKind = 'admin', action, remarks = null, metadataJson = null }
+) {
+  const d = days != null ? parseFloat(days) : 0;
+  if (!userId || !leaveTypeName || !Number.isFinite(d) || d <= 0) return null;
+  const ledgerType = await resolveBalanceLedgerLeaveType(client, leaveTypeName);
+  if (!ledgerType) return null;
+
+  const beforeSnap = await fetchBalanceSnapshot(client, userId, ledgerType);
+  await client.query(
+    `UPDATE leave_balances
+     SET pending_days = GREATEST(0, COALESCE(pending_days, 0) - $3::numeric),
+         updated_at = now()
+     WHERE user_id = $1::uuid AND leave_type = $2::text`,
+    [userId, ledgerType, d]
+  );
+  const afterSnap = await fetchBalanceSnapshot(client, userId, ledgerType);
+  await insertLeaveBalanceLedger(client, {
+    userId,
+    leaveType: ledgerType,
+    action,
+    affectedBucket: 'pending',
+    daysChanged: afterSnap.pending_days - beforeSnap.pending_days,
+    oldValue: beforeSnap.pending_days,
+    newValue: afterSnap.pending_days,
+    relatedLeaveRequestId: leaveRequestId || null,
+    actorUserId: actorUserId || null,
+    actorKind,
+    remarks,
+    metadataJson,
+  });
+  return ledgerType;
 }
 
 async function applyApprovedLeaveToDtr(client, userId, leaveRequestId, startDateStr, endDateStr) {
@@ -1275,6 +1504,13 @@ router.post('/submit', protect, async (req, res) => {
         return res.status(400).json({ error: 'Overlapping leave request exists' });
       }
 
+      await assertSpecialPrivilegeLeaveAnnualLimit(client, {
+        userId,
+        leaveTypeName: String(leave_type),
+        startStr,
+        endStr,
+      });
+
       const q = await client.query(
         `INSERT INTO leave_requests (
             employee_id,
@@ -1327,35 +1563,14 @@ router.post('/submit', protect, async (req, res) => {
       if (pendingDeltaSubmit != null && pendingDeltaSubmit > 0) {
         const leaveTypeName = leave_type ? String(leave_type) : null;
         if (leaveTypeName) {
-          await assertEnoughAvailableForPendingReservation(
-            client,
+          await reservePendingLeaveBalance(client, {
             userId,
             leaveTypeName,
-            pendingDeltaSubmit
-          );
-          const ledgerType = await resolveBalanceLedgerLeaveType(client, leaveTypeName);
-          const beforeSnapSubmit = await fetchBalanceSnapshot(client, userId, ledgerType);
-          await client.query(
-            `INSERT INTO leave_balances (user_id, leave_type, earned_days, used_days, pending_days, adjusted_days, as_of_date, last_accrual_date, created_at, updated_at)
-             VALUES ($1::uuid, $2::text, 0, 0, $3::numeric, 0, now()::date, now()::date, now(), now())
-             ON CONFLICT (user_id, leave_type)
-             DO UPDATE SET pending_days = COALESCE(leave_balances.pending_days, 0) + EXCLUDED.pending_days,
-                           updated_at = now()`,
-            [userId, ledgerType, pendingDeltaSubmit]
-          );
-          const afterSnapSubmit = await fetchBalanceSnapshot(client, userId, ledgerType);
-          await insertLeaveBalanceLedger(client, {
-            userId,
-            leaveType: ledgerType,
-            action: 'leave_submitted',
-            affectedBucket: 'pending',
-            daysChanged: afterSnapSubmit.pending_days - beforeSnapSubmit.pending_days,
-            oldValue: beforeSnapSubmit.pending_days,
-            newValue: afterSnapSubmit.pending_days,
-            relatedLeaveRequestId: row.id,
+            days: pendingDeltaSubmit,
+            leaveRequestId: row.id,
             actorUserId: userId,
             actorKind: 'user',
-            remarks: null,
+            action: 'leave_submitted',
             metadataJson: { number_of_days: pendingDeltaSubmit },
           });
         }
@@ -1490,6 +1705,21 @@ router.put('/:id', protect, async (req, res) => {
         }
       }
 
+      if (
+        (nextStatus === 'pending' || nextStatus === 'pending_department_head' || nextStatus === 'pending_hr') &&
+        leave_type &&
+        startStr &&
+        endStr
+      ) {
+        await assertSpecialPrivilegeLeaveAnnualLimit(client, {
+          userId,
+          leaveTypeName: String(leave_type),
+          startStr,
+          endStr,
+          excludeId: id,
+        });
+      }
+
       const q = await client.query(
         `UPDATE leave_requests
          SET leave_type_id = COALESCE($1::uuid, leave_type_id),
@@ -1527,32 +1757,16 @@ router.put('/:id', protect, async (req, res) => {
       if (leaveTypeName && effectiveDays != null && effectiveDays > 0) {
         if (isPendingTarget && !wasPending) {
           // Moving INTO a pending status: increment pending_days.
-          await assertEnoughAvailableForPendingReservation(client, userId, leaveTypeName, effectiveDays);
-          const ledgerType = await resolveBalanceLedgerLeaveType(client, leaveTypeName);
-          const beforePut = await fetchBalanceSnapshot(client, userId, ledgerType);
-          await client.query(
-            `INSERT INTO leave_balances (user_id, leave_type, earned_days, used_days, pending_days, adjusted_days, as_of_date, last_accrual_date, created_at, updated_at)
-             VALUES ($1::uuid, $2::text, 0, 0, $3::numeric, 0, now()::date, now()::date, now(), now())
-             ON CONFLICT (user_id, leave_type)
-             DO UPDATE SET pending_days = COALESCE(leave_balances.pending_days, 0) + EXCLUDED.pending_days,
-                           updated_at = now()`,
-            [userId, ledgerType, effectiveDays]
-          );
-          const afterPut = await fetchBalanceSnapshot(client, userId, ledgerType);
           const putAction =
             historyAction === 'resubmitted' ? 'leave_resubmitted' : 'leave_submitted';
-          await insertLeaveBalanceLedger(client, {
+          await reservePendingLeaveBalance(client, {
             userId,
-            leaveType: ledgerType,
-            action: putAction,
-            affectedBucket: 'pending',
-            daysChanged: afterPut.pending_days - beforePut.pending_days,
-            oldValue: beforePut.pending_days,
-            newValue: afterPut.pending_days,
-            relatedLeaveRequestId: row.id,
+            leaveTypeName,
+            days: effectiveDays,
+            leaveRequestId: row.id,
             actorUserId: userId,
             actorKind: 'user',
-            remarks: null,
+            action: putAction,
             metadataJson: { number_of_days: effectiveDays, history_action: historyAction },
           });
         }
@@ -1651,27 +1865,14 @@ router.patch('/:id/cancel', protect, async (req, res) => {
         );
         const ltName = ltRow.rows[0]?.name || null;
         if (ltName) {
-          const ledgerType = await resolveBalanceLedgerLeaveType(client, ltName);
-          const beforeCancel = await fetchBalanceSnapshot(client, cancelUserId, ledgerType);
-          await client.query(
-            `UPDATE leave_balances
-             SET pending_days = GREATEST(0, COALESCE(pending_days, 0) - $3::numeric),
-                 updated_at = now()
-             WHERE user_id = $1::uuid AND leave_type = $2::text`,
-            [cancelUserId, ledgerType, cancelDays]
-          );
-          const afterCancel = await fetchBalanceSnapshot(client, cancelUserId, ledgerType);
-          await insertLeaveBalanceLedger(client, {
+          await releasePendingLeaveBalance(client, {
             userId: cancelUserId,
-            leaveType: ledgerType,
-            action: 'leave_cancelled',
-            affectedBucket: 'pending',
-            daysChanged: afterCancel.pending_days - beforeCancel.pending_days,
-            oldValue: beforeCancel.pending_days,
-            newValue: afterCancel.pending_days,
-            relatedLeaveRequestId: id,
+            leaveTypeName: ltName,
+            days: cancelDays,
+            leaveRequestId: id,
             actorUserId: userId,
             actorKind: 'user',
+            action: 'leave_cancelled',
             remarks: reason || null,
             metadataJson: { cancel_days: cancelDays },
           });
@@ -2115,8 +2316,12 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
       return res.status(403).json({ error: 'You are not a department head' });
     }
     const existing = await client.query(
-      `SELECT lr.id, lr.status, lr.user_id, lr.employee_id
+      `SELECT lr.id, lr.status, lr.user_id, lr.employee_id,
+              lr.start_date, lr.end_date,
+              COALESCE(lr.number_of_days, lr.total_days) AS days,
+              lt.name AS leave_type_name
        FROM leave_requests lr
+       LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
        LEFT JOIN assignments a ON a.employee_id = COALESCE(lr.user_id, lr.employee_id)
                               AND (a.is_active IS NULL OR a.is_active = true)
        WHERE lr.id = $1
@@ -2132,6 +2337,13 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
     const { nextStatus, historyAction } = validateDepartmentHeadTransition({
       currentStatus: r.status,
       desiredStatus: 'pending_hr',
+    });
+    await assertSpecialPrivilegeLeaveAnnualLimit(client, {
+      userId: r.user_id || r.employee_id,
+      leaveTypeName: r.leave_type_name || null,
+      startStr: toIsoDateStr(r.start_date),
+      endStr: toIsoDateStr(r.end_date),
+      excludeId: id,
     });
     await client.query(
       `UPDATE leave_requests
@@ -2233,26 +2445,14 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
     const rejectUserId = r.user_id || r.employee_id;
     const rejectLtName = r.leave_type_name || null;
     if (rejectDays && rejectDays > 0 && rejectUserId && rejectLtName) {
-      const ledgerType = await resolveBalanceLedgerLeaveType(client, rejectLtName);
-      const beforeDhRej = await fetchBalanceSnapshot(client, rejectUserId, ledgerType);
-      await client.query(
-        `UPDATE leave_balances
-         SET pending_days = GREATEST(0, COALESCE(pending_days, 0) - $3::numeric), updated_at = now()
-         WHERE user_id = $1::uuid AND leave_type = $2::text`,
-        [rejectUserId, ledgerType, rejectDays]
-      );
-      const afterDhRej = await fetchBalanceSnapshot(client, rejectUserId, ledgerType);
-      await insertLeaveBalanceLedger(client, {
+      await releasePendingLeaveBalance(client, {
         userId: rejectUserId,
-        leaveType: ledgerType,
-        action: 'leave_rejected',
-        affectedBucket: 'pending',
-        daysChanged: afterDhRej.pending_days - beforeDhRej.pending_days,
-        oldValue: beforeDhRej.pending_days,
-        newValue: afterDhRej.pending_days,
-        relatedLeaveRequestId: id,
+        leaveTypeName: rejectLtName,
+        days: rejectDays,
+        leaveRequestId: id,
         actorUserId: reviewerId,
         actorKind: 'user',
+        action: 'leave_rejected',
         remarks,
         metadataJson: { stage: 'department_head' },
       });
@@ -2344,26 +2544,14 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
     const returnUserId = r.user_id || r.employee_id;
     const returnLtName = r.leave_type_name || null;
     if (returnDays && returnDays > 0 && returnUserId && returnLtName) {
-      const ledgerType = await resolveBalanceLedgerLeaveType(client, returnLtName);
-      const beforeDhRet = await fetchBalanceSnapshot(client, returnUserId, ledgerType);
-      await client.query(
-        `UPDATE leave_balances
-         SET pending_days = GREATEST(0, COALESCE(pending_days, 0) - $3::numeric), updated_at = now()
-         WHERE user_id = $1::uuid AND leave_type = $2::text`,
-        [returnUserId, ledgerType, returnDays]
-      );
-      const afterDhRet = await fetchBalanceSnapshot(client, returnUserId, ledgerType);
-      await insertLeaveBalanceLedger(client, {
+      await releasePendingLeaveBalance(client, {
         userId: returnUserId,
-        leaveType: ledgerType,
-        action: 'leave_returned',
-        affectedBucket: 'pending',
-        daysChanged: afterDhRet.pending_days - beforeDhRet.pending_days,
-        oldValue: beforeDhRet.pending_days,
-        newValue: afterDhRet.pending_days,
-        relatedLeaveRequestId: id,
+        leaveTypeName: returnLtName,
+        days: returnDays,
+        leaveRequestId: id,
         actorUserId: reviewerId,
         actorKind: 'user',
+        action: 'leave_returned',
         remarks,
         metadataJson: { stage: 'department_head' },
       });
@@ -2490,6 +2678,14 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Overlapping leave request exists' });
       }
+
+      await assertSpecialPrivilegeLeaveAnnualLimit(client, {
+        userId: targetUserId,
+        leaveTypeName,
+        startStr,
+        endStr,
+        excludeId: id,
+      });
 
       // Deduct balance ONLY on approval (and only once because we block re-approving approved status).
       // Clear submit-time pending_days and add to used_days (same days, same balanceLedgerLeaveType as submit).
@@ -2632,27 +2828,14 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
     const rejectUserId = currentRow.user_id || currentRow.employee_id;
     const rejectLtName = currentRow.leave_type_name || null;
     if (rejectDays && rejectDays > 0 && rejectUserId && rejectLtName) {
-      const ledgerType = await resolveBalanceLedgerLeaveType(client, rejectLtName);
-      const beforeHrRej = await fetchBalanceSnapshot(client, rejectUserId, ledgerType);
-      await client.query(
-        `UPDATE leave_balances
-         SET pending_days = GREATEST(0, COALESCE(pending_days, 0) - $3::numeric),
-             updated_at = now()
-         WHERE user_id = $1::uuid AND leave_type = $2::text`,
-        [rejectUserId, ledgerType, rejectDays]
-      );
-      const afterHrRej = await fetchBalanceSnapshot(client, rejectUserId, ledgerType);
-      await insertLeaveBalanceLedger(client, {
+      await releasePendingLeaveBalance(client, {
         userId: rejectUserId,
-        leaveType: ledgerType,
-        action: 'leave_rejected',
-        affectedBucket: 'pending',
-        daysChanged: afterHrRej.pending_days - beforeHrRej.pending_days,
-        oldValue: beforeHrRej.pending_days,
-        newValue: afterHrRej.pending_days,
-        relatedLeaveRequestId: id,
+        leaveTypeName: rejectLtName,
+        days: rejectDays,
+        leaveRequestId: id,
         actorUserId: reviewerId,
         actorKind: 'admin',
+        action: 'leave_rejected',
         remarks,
         metadataJson: { stage: 'hr' },
       });
@@ -2759,29 +2942,31 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
     //    — request status is 'returned', not a pending workflow; employee may resubmit (submit adds pending again).
     if (revokeDays && revokeDays > 0 && targetUserId && ltName) {
       const ledgerType = await resolveBalanceLedgerLeaveType(client, ltName);
-      const beforeRev = await fetchBalanceSnapshot(client, targetUserId, ledgerType);
-      await client.query(
-        `UPDATE leave_balances
-         SET used_days = GREATEST(0, COALESCE(used_days, 0) - $3::numeric),
-             updated_at = now()
-         WHERE user_id = $1::uuid AND leave_type = $2::text`,
-        [targetUserId, ledgerType, revokeDays]
-      );
-      const afterRev = await fetchBalanceSnapshot(client, targetUserId, ledgerType);
-      await insertLeaveBalanceLedger(client, {
-        userId: targetUserId,
-        leaveType: ledgerType,
-        action: 'leave_revoked',
-        affectedBucket: 'used',
-        daysChanged: afterRev.used_days - beforeRev.used_days,
-        oldValue: beforeRev.used_days,
-        newValue: afterRev.used_days,
-        relatedLeaveRequestId: id,
-        actorUserId: reviewerId,
-        actorKind: 'admin',
-        remarks: remarks || null,
-        metadataJson: { revoke_days: revokeDays },
-      });
+      if (ledgerType) {
+        const beforeRev = await fetchBalanceSnapshot(client, targetUserId, ledgerType);
+        await client.query(
+          `UPDATE leave_balances
+           SET used_days = GREATEST(0, COALESCE(used_days, 0) - $3::numeric),
+               updated_at = now()
+           WHERE user_id = $1::uuid AND leave_type = $2::text`,
+          [targetUserId, ledgerType, revokeDays]
+        );
+        const afterRev = await fetchBalanceSnapshot(client, targetUserId, ledgerType);
+        await insertLeaveBalanceLedger(client, {
+          userId: targetUserId,
+          leaveType: ledgerType,
+          action: 'leave_revoked',
+          affectedBucket: 'used',
+          daysChanged: afterRev.used_days - beforeRev.used_days,
+          oldValue: beforeRev.used_days,
+          newValue: afterRev.used_days,
+          relatedLeaveRequestId: id,
+          actorUserId: reviewerId,
+          actorKind: 'admin',
+          remarks: remarks || null,
+          metadataJson: { revoke_days: revokeDays },
+        });
+      }
     }
 
     // 3. Remove DTR on_leave entries that were written by this approval.
@@ -2907,27 +3092,14 @@ router.patch('/:id/return', protect, requireAdminOrHr, async (req, res) => {
     const returnUserId = currentRow.user_id || currentRow.employee_id;
     const returnLtName = currentRow.leave_type_name || null;
     if (returnDays && returnDays > 0 && returnUserId && returnLtName) {
-      const ledgerType = await resolveBalanceLedgerLeaveType(client, returnLtName);
-      const beforeHrRet = await fetchBalanceSnapshot(client, returnUserId, ledgerType);
-      await client.query(
-        `UPDATE leave_balances
-         SET pending_days = GREATEST(0, COALESCE(pending_days, 0) - $3::numeric),
-             updated_at = now()
-         WHERE user_id = $1::uuid AND leave_type = $2::text`,
-        [returnUserId, ledgerType, returnDays]
-      );
-      const afterHrRet = await fetchBalanceSnapshot(client, returnUserId, ledgerType);
-      await insertLeaveBalanceLedger(client, {
+      await releasePendingLeaveBalance(client, {
         userId: returnUserId,
-        leaveType: ledgerType,
-        action: 'leave_returned',
-        affectedBucket: 'pending',
-        daysChanged: afterHrRet.pending_days - beforeHrRet.pending_days,
-        oldValue: beforeHrRet.pending_days,
-        newValue: afterHrRet.pending_days,
-        relatedLeaveRequestId: id,
+        leaveTypeName: returnLtName,
+        days: returnDays,
+        leaveRequestId: id,
         actorUserId: reviewerId,
         actorKind: 'admin',
+        action: 'leave_returned',
         remarks,
         metadataJson: { stage: 'hr' },
       });
@@ -3101,10 +3273,16 @@ router.get('/balances/:userId', protect, async (req, res) => {
   }
   try {
     const rows = await pool.query(
-      `SELECT lb.*, u.full_name AS employee_name
+      `SELECT lb.*, u.full_name AS employee_name,
+              COALESCE(lt.display_name, lt.description, lb.leave_type) AS leave_type_display_name
        FROM leave_balances lb
        LEFT JOIN users u ON u.id = lb.user_id
+       LEFT JOIN leave_types lt ON lt.name = lb.leave_type
        WHERE lb.user_id = $1::uuid
+         AND (
+           lb.leave_type IN ('vacationLeave', 'sickLeave')
+           OR lt.balance_ledger_type = 'ownBalance'
+         )
        ORDER BY lb.leave_type ASC`,
       [targetId]
     );
@@ -3113,6 +3291,7 @@ router.get('/balances/:userId', protect, async (req, res) => {
       id: r.id,
       user_id: r.user_id,
       leave_type: r.leave_type,
+      leave_type_display_name: r.leave_type_display_name || r.leave_type,
       employee_name: r.employee_name || null,
       earned_days: r.earned_days != null ? parseFloat(r.earned_days) : 0,
       used_days: r.used_days != null ? parseFloat(r.used_days) : 0,
@@ -3129,30 +3308,13 @@ router.get('/balances/:userId', protect, async (req, res) => {
   }
 });
 
-const ALLOWED_BALANCE_LEAVE_TYPES = new Set([
-  'vacationLeave',
-  'mandatoryForcedLeave',
-  'sickLeave',
-  'maternityLeave',
-  'paternityLeave',
-  'specialPrivilegeLeave',
-  'soloParentLeave',
-  'studyLeave',
-  'tenDayVawcLeave',
-  'rehabilitationPrivilege',
-  'specialLeaveBenefitsForWomen',
-  'specialEmergencyCalamityLeave',
-  'adoptionLeave',
-  'others',
-]);
-
 // PUT /api/leave/balances/:userId — admin/HR: create or replace one leave_balances row
 router.put('/balances/:userId', protect, requireAdminOrHr, async (req, res) => {
   const reviewerId = req.user?.id;
   const targetId = req.params.userId;
   const b = req.body || {};
   const leaveType = (b.leave_type ?? b.leaveType ?? '').toString().trim();
-  if (!leaveType || !ALLOWED_BALANCE_LEAVE_TYPES.has(leaveType)) {
+  if (!leaveType) {
     return res.status(400).json({ error: 'Invalid or missing leave_type' });
   }
   const earned = parseFloat(b.earned_days ?? b.earnedDays);
@@ -3179,6 +3341,19 @@ router.put('/balances/:userId', protect, requireAdminOrHr, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const balanceBucket = await resolveBalanceLedgerLeaveType(client, leaveType);
+    if (!balanceBucket) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: 'This leave type does not use leave credits and cannot have a leave balance row.',
+      });
+    }
+    if (balanceBucket !== leaveType) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: `${systemLeaveTypeDisplayName(leaveType)} uses the ${creditBalanceLabel(balanceBucket, leaveType)} balance bucket. Update that bucket instead.`,
+      });
+    }
     const prev = await client.query(
       `SELECT earned_days, used_days, pending_days, adjusted_days, as_of_date, last_accrual_date
        FROM leave_balances

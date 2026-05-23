@@ -8,8 +8,29 @@ import 'models/leave_type.dart';
 
 /// Mandatory/forced leave has no separate balance row; it uses vacation credits (CSC).
 List<LeaveBalance> _filterDisplayBalances(List<LeaveBalance> raw) {
+  const noCreditSystemTypes = {
+    'mandatoryForcedLeave',
+    'maternityLeave',
+    'paternityLeave',
+    'specialPrivilegeLeave',
+    'soloParentLeave',
+    'studyLeave',
+    'tenDayVawcLeave',
+    'rehabilitationPrivilege',
+    'specialLeaveBenefitsForWomen',
+    'specialEmergencyCalamityLeave',
+    'adoptionLeave',
+    'others',
+  };
   return raw
-      .where((b) => b.leaveType != LeaveType.mandatoryForcedLeave)
+      .where((b) {
+        final typeName = b.effectiveLeaveTypeName;
+        if (typeName == LeaveType.vacationLeave.value ||
+            typeName == LeaveType.sickLeave.value) {
+          return true;
+        }
+        return !noCreditSystemTypes.contains(typeName);
+      })
       .toList();
 }
 
@@ -120,7 +141,7 @@ class LeaveProvider extends ChangeNotifier {
   LeaveBalance? balanceForType(LeaveType leaveType) {
     try {
       final ledger = leaveType.balanceLedgerType;
-      return _balances.firstWhere((b) => b.leaveType == ledger);
+      return _balances.firstWhere((b) => b.effectiveLeaveTypeName == ledger.value);
     } catch (_) {
       return null;
     }

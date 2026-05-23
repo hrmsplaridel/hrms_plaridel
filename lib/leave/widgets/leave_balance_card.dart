@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../landingpage/constants/app_theme.dart';
 import '../models/leave_balance.dart';
-import '../models/leave_type.dart';
 
 class LeaveBalanceCard extends StatelessWidget {
   const LeaveBalanceCard({
@@ -25,7 +24,7 @@ class LeaveBalanceCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            balance.leaveType.displayName,
+            balance.leaveTypeLabel,
             style: TextStyle(
               color: AppTheme.dashTextPrimaryOf(context),
               fontWeight: FontWeight.w700,
