@@ -34,7 +34,6 @@ class _DocuTrackerMainState extends State<DocuTrackerMain> {
   Widget build(BuildContext context) {
     final useSidebarNav = widget.section != null;
 
-<<<<<<< HEAD
     return ColoredBox(
       color: DocuTrackerTokens.canvas,
       child: DocuTrackerResponsiveBody(
@@ -58,33 +57,6 @@ class _DocuTrackerMainState extends State<DocuTrackerMain> {
           ],
         ),
       ),
-=======
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'DocuTracker',
-          style: TextStyle(
-            color: AppTheme.dashTextPrimaryOf(context),
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          useSidebarNav
-              ? 'Document routing and workflow tracking.'
-              : 'Document routing and workflow tracking. Choose a feature below.',
-          style: TextStyle(
-            color: AppTheme.dashTextSecondaryOf(context),
-            fontSize: 14,
-          ),
-        ),
-        if (!useSidebarNav) ...[const SizedBox(height: 24), _buildSectionNav()],
-        const SizedBox(height: 24),
-        _buildContent(),
-      ],
->>>>>>> origin/main
     );
   }
 
@@ -97,7 +69,6 @@ class _DocuTrackerMainState extends State<DocuTrackerMain> {
 
     if (sections.length <= 1) return const SizedBox.shrink();
 
-<<<<<<< HEAD
     return Align(
       alignment: Alignment.centerLeft,
       child: SegmentedButton<DocuTrackerSection>(
@@ -118,57 +89,6 @@ class _DocuTrackerMainState extends State<DocuTrackerMain> {
               label: Padding(
                 padding: const EdgeInsets.only(left: 2),
                 child: Text(s.title),
-=======
-    final dark = AppTheme.dashIsDark(context);
-
-    return Wrap(
-      spacing: 12,
-      runSpacing: 8,
-      children: sections.map((section) {
-        final isSelected = _currentSection == section;
-        final bg = isSelected
-            ? (dark
-                ? AppTheme.primaryNavy.withValues(alpha: 0.38)
-                : AppTheme.primaryNavy.withValues(alpha: 0.12))
-            : (dark
-                ? AppTheme.dashMutedSurfaceOf(context)
-                : AppTheme.lightGray.withValues(alpha: 0.6));
-        final fg = isSelected
-            ? (dark ? Colors.white : AppTheme.primaryNavy)
-            : AppTheme.dashTextPrimaryOf(context);
-        final iconColor = isSelected
-            ? (dark ? Colors.white : AppTheme.primaryNavy)
-            : AppTheme.dashTextSecondaryOf(context);
-
-        return Material(
-          color: bg,
-          borderRadius: BorderRadius.circular(10),
-          child: InkWell(
-            onTap: () => setState(() => _currentSection = section),
-            borderRadius: BorderRadius.circular(10),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    _iconForSection(section),
-                    size: 20,
-                    color: iconColor,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    section.title,
-                    style: TextStyle(
-                      color: fg,
-                      fontWeight: isSelected
-                          ? FontWeight.w600
-                          : FontWeight.w500,
-                      fontSize: 14,
-                    ),
-                  ),
-                ],
->>>>>>> origin/main
               ),
             ),
         ],

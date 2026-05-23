@@ -436,7 +436,7 @@ class _DocuTrackerStepAssigneesEditorScreenState
                                                       _empSearchController,
                                                   decoration:
                                                       DocuTrackerStyles.inputDecoration(
-                                                        'Search name',
+                                                        context, 'Search name',
                                                         Icons.search_rounded,
                                                       ),
                                                 ),
@@ -713,7 +713,7 @@ class _DocuTrackerStepAssigneesEditorScreenState
                           child: DropdownButtonFormField<String>(
                             initialValue: _documentType,
                             decoration: DocuTrackerStyles.dropdownDecoration(
-                              'Document type',
+                              context, 'Document type',
                             ),
                             items: [
                               for (final t in typeOptions)
@@ -735,7 +735,7 @@ class _DocuTrackerStepAssigneesEditorScreenState
                           child: TextFormField(
                             initialValue: _workflowVersion?.toString() ?? '',
                             decoration: DocuTrackerStyles.inputDecoration(
-                              'Version',
+                              context, 'Version',
                               Icons.tag_rounded,
                             ),
                             keyboardType: TextInputType.number,

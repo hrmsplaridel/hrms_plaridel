@@ -504,7 +504,7 @@ class _WorkflowStepEditorPanelState extends State<WorkflowStepEditorPanel> {
                   TextField(
                     controller: _labelController,
                     decoration: DocuTrackerStyles.inputDecoration(
-                      'Step label (shown in the flow)',
+                      context, 'Step label (shown in the flow)',
                       Icons.label_rounded,
                     ),
                     onChanged: (_) => setState(() => _dialogError = null),
@@ -528,7 +528,7 @@ class _WorkflowStepEditorPanelState extends State<WorkflowStepEditorPanel> {
                       DropdownButtonFormField<String>(
                         key: ValueKey<String>('user-dept-$_departmentDropdownValue'),
                         initialValue: _departmentDropdownValue,
-                        decoration: DocuTrackerStyles.dropdownDecoration('Department'),
+                        decoration: DocuTrackerStyles.dropdownDecoration(context, 'Department'),
                         hint: const Text('Select department'),
                         isExpanded: true,
                         items: _departments
@@ -553,7 +553,7 @@ class _WorkflowStepEditorPanelState extends State<WorkflowStepEditorPanel> {
                       TextField(
                         controller: _departmentManualController,
                         decoration: DocuTrackerStyles.inputDecoration(
-                          'Department id (UUID)',
+                          context, 'Department id (UUID)',
                           Icons.apartment_rounded,
                         ),
                         onChanged: (_) {
@@ -589,7 +589,7 @@ class _WorkflowStepEditorPanelState extends State<WorkflowStepEditorPanel> {
                       DropdownButtonFormField<String>(
                         key: ValueKey<String>('primary-$_departmentDropdownValue-$_primaryUserId'),
                         initialValue: _primaryUserId,
-                        decoration: DocuTrackerStyles.dropdownDecoration('Primary reviewer'),
+                        decoration: DocuTrackerStyles.dropdownDecoration(context, 'Primary reviewer'),
                         hint: const Text('Choose a person'),
                         isExpanded: true,
                         items: [
@@ -635,7 +635,7 @@ class _WorkflowStepEditorPanelState extends State<WorkflowStepEditorPanel> {
                         DropdownButtonFormField<String>(
                           key: ValueKey<String>('add-backup-${_backupUserIds.length}'),
                           initialValue: null,
-                          decoration: DocuTrackerStyles.dropdownDecoration('Add backup'),
+                          decoration: DocuTrackerStyles.dropdownDecoration(context, 'Add backup'),
                           hint: const Text('Choose someone to add'),
                           isExpanded: true,
                           items: [
@@ -705,7 +705,7 @@ class _WorkflowStepEditorPanelState extends State<WorkflowStepEditorPanel> {
                     TextField(
                       controller: _empSearchController,
                       decoration: DocuTrackerStyles.inputDecoration(
-                        'Search employees (name)',
+                        context, 'Search employees (name)',
                         Icons.search_rounded,
                       ),
                     ),
@@ -805,7 +805,7 @@ class _WorkflowStepEditorPanelState extends State<WorkflowStepEditorPanel> {
                             controller: _usersManualController,
                             maxLines: 2,
                             decoration: DocuTrackerStyles.inputDecoration(
-                              'User IDs — first = primary, rest = backups (comma-separated)',
+                              context, 'User IDs — first = primary, rest = backups (comma-separated)',
                               Icons.edit_note_rounded,
                             ),
                             onChanged: (_) => setState(() {
@@ -822,7 +822,7 @@ class _WorkflowStepEditorPanelState extends State<WorkflowStepEditorPanel> {
                     controller: _deadlineController,
                     keyboardType: TextInputType.number,
                     decoration: DocuTrackerStyles.inputDecoration(
-                      'Deadline for this step (hours, optional)',
+                      context, 'Deadline for this step (hours, optional)',
                       Icons.timer_rounded,
                     ),
                     onChanged: (_) => setState(() => _dialogError = null),

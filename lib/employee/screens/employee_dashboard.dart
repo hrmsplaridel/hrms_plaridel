@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../landingpage/constants/app_theme.dart';
@@ -8,8 +8,6 @@ import '../../../data/time_record.dart';
 import '../../../dtr/widgets/attendance_display.dart';
 import '../../../dtr/widgets/attendance_source_badge.dart';
 import '../../../docutracker/docutracker_main.dart';
-import '../../../docutracker/docutracker_notification_sheet.dart';
-import '../../../docutracker/docutracker_provider.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
 import '../../../leave/leave_provider.dart';
@@ -111,27 +109,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
     super.dispose();
   }
 
-<<<<<<< HEAD
-  static const _navItems = [
-    'Dashboard',
-    'My Attendance',
-    'My Leave',
-    'Locator Slip',
-    'Training Reports',
-    'DocuTracker',
-    'Announcements',
-  ];
-
-  void _prefetchDocuTrackerNotificationsIfNeeded(int index) {
-    if (index != 5) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      context.read<DocuTrackerProvider>().loadNotifications(forceRefresh: true);
-    });
-  }
-
-=======
->>>>>>> origin/main
   Future<void> _handleOpenNotifications() async {
     final result = await openNotificationsPanel(context);
     if (!mounted) return;
@@ -254,38 +231,16 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                   selectedIndex: _selectedNavIndex,
                   showBrand: true,
                   onTap: (i) {
-<<<<<<< HEAD
-                    setState(() => _selectedNavIndex = i);
-                    _prefetchDocuTrackerNotificationsIfNeeded(i);
-=======
                     _onNavSelected(i);
->>>>>>> origin/main
                     if (context.mounted) Navigator.of(context).pop();
                   },
                 ),
               ),
             ),
       body: SafeArea(
-<<<<<<< HEAD
-        child: Row(
-          children: [
-            if (isWide)
-              _EmployeeSidebar(
-                displayName: displayName,
-                avatarPath: avatarPath,
-                selectedIndex: _selectedNavIndex,
-                onTap: (i) {
-                  setState(() => _selectedNavIndex = i);
-                  _prefetchDocuTrackerNotificationsIfNeeded(i);
-                },
-              ),
-            Expanded(
-              child: Column(
-=======
         child: isWide
             ? Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
->>>>>>> origin/main
                 children: [
                   _EmployeeSidebar(
                     railMode: true,
@@ -293,21 +248,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                     showBrand: false,
                     displayName: displayName,
                     avatarPath: avatarPath,
-<<<<<<< HEAD
-                    showMenuButton: !isWide,
-                    showDocuTrackerBell: _selectedNavIndex == 5,
-                    onOpenNotifications: _handleOpenNotifications,
-                    onProfileTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const ProfileAndSettingsPage(),
-                        ),
-                      );
-                    },
-=======
                     selectedIndex: _selectedNavIndex,
                     onTap: _onNavSelected,
->>>>>>> origin/main
                   ),
                   Expanded(
                     child: Column(
@@ -400,7 +342,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
 ///
 /// Admin portal mode ([adminPortal]: true): Clock In only (no Attendance /
 /// Leave Balance cards), no upcoming leave, monthly overview, then the full
-/// **My Attendance** table on the same scroll — admin-only layout.
+/// **My Attendance** table on the same scroll ΓÇö admin-only layout.
 class EmployeeAttendanceOverviewSection extends StatelessWidget {
   const EmployeeAttendanceOverviewSection({
     super.key,
@@ -499,7 +441,7 @@ class EmployeeAttendanceOverviewSection extends StatelessWidget {
   }
 }
 
-/// Clock In card only — used for admin My Attendance overview (no Attendance /
+/// Clock In card only ΓÇö used for admin My Attendance overview (no Attendance /
 /// Leave Balance strip).
 class _EmployeeClockInOnlySummary extends StatelessWidget {
   const _EmployeeClockInOnlySummary();
@@ -701,7 +643,7 @@ class _EmployeeSidebar extends StatelessWidget {
           child: Column(
             children: [
               Text(
-                '© ${DateTime.now().year} HRMS',
+                '┬⌐ ${DateTime.now().year} HRMS',
                 style: TextStyle(
                   color: AppTheme.dashTextSecondaryOf(
                     context,
@@ -748,326 +690,6 @@ class _EmployeeSidebar extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                         color: AppTheme.primaryNavy,
                       ),
-<<<<<<< HEAD
-                      child: Text(
-                        'Terms',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.white.withOpacity(0.7),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-        ],
-      ),
-    );
-  }
-}
-
-class _EmployeeNavTile extends StatelessWidget {
-  const _EmployeeNavTile({
-    required this.icon,
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final bgColor = selected
-        ? Colors.white.withOpacity(0.22)
-        : Colors.transparent;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(10),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: bgColor,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              children: [
-                Icon(icon, size: 22, color: Colors.white),
-                const SizedBox(width: 14),
-                Text(
-                  label,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w500,
-                    fontSize: 14,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Light gray top bar: search, notifications (badge), settings, user.
-class _EmployeeTopBar extends StatelessWidget {
-  const _EmployeeTopBar({
-    required this.displayName,
-    required this.email,
-    this.avatarPath,
-    this.showMenuButton = false,
-    this.showDocuTrackerBell = false,
-    required this.onOpenNotifications,
-    this.onProfileTap,
-  });
-
-  final String displayName;
-  final String email;
-  final String? avatarPath;
-  final bool showMenuButton;
-  final bool showDocuTrackerBell;
-  final Future<void> Function() onOpenNotifications;
-  final VoidCallback? onProfileTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final isCompact = MediaQuery.of(context).size.width < 600;
-    return Container(
-      height: isCompact ? 56 : 64,
-      padding: EdgeInsets.symmetric(
-        horizontal: isCompact ? 16 : 24,
-        vertical: isCompact ? 6 : 8,
-      ),
-      decoration: BoxDecoration(
-        color: AppTheme.lightGray,
-        border: Border(
-          bottom: BorderSide(color: Colors.black.withOpacity(0.06)),
-        ),
-      ),
-      child: Row(
-        children: [
-          if (showMenuButton)
-            IconButton(
-              icon: const Icon(Icons.menu_rounded),
-              onPressed: () => Scaffold.of(context).openDrawer(),
-              color: AppTheme.textPrimary,
-              tooltip: 'Menu',
-              style: IconButton.styleFrom(
-                backgroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-          if (showMenuButton && !isCompact) const SizedBox(width: 12),
-          Expanded(
-            child: isCompact
-                ? const SizedBox.shrink()
-                : Container(
-                    height: 40,
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.black.withOpacity(0.08)),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.search_rounded,
-                          size: 20,
-                          color: AppTheme.textSecondary,
-                        ),
-                        const SizedBox(width: 10),
-                        Text(
-                          'Search',
-                          style: TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-          ),
-          if (isCompact) const Spacer(),
-          if (showDocuTrackerBell) ...[
-            DocuTrackerBellIconButton(
-              isAdmin: false,
-              compact: isCompact,
-            ),
-            SizedBox(width: isCompact ? 2 : 6),
-          ],
-          Consumer<NotificationProvider>(
-            builder: (context, np, _) {
-              final c = np.unreadCount;
-              return Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  IconButton(
-                    icon: Icon(
-                      Icons.notifications_outlined,
-                      color: AppTheme.textPrimary,
-                      size: isCompact ? 22 : 24,
-                    ),
-                    tooltip: 'HR notifications',
-                    onPressed: () {
-                      onOpenNotifications();
-                    },
-                  ),
-                  if (c > 0)
-                    Positioned(
-                      right: -2,
-                      top: -2,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 5,
-                          vertical: 1,
-                        ),
-                        constraints: const BoxConstraints(
-                          minWidth: 18,
-                          minHeight: 18,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFE53935),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.white, width: 1.2),
-                        ),
-                        child: Text(
-                          c > 99 ? '99+' : '$c',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              );
-            },
-          ),
-          const SizedBox(width: 8),
-          _EmployeeUserMenu(
-            displayName: displayName,
-            email: email,
-            avatarPath: avatarPath,
-            isCompact: isCompact,
-            onProfileTap: onProfileTap,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _EmployeeUserMenu extends StatelessWidget {
-  const _EmployeeUserMenu({
-    required this.displayName,
-    required this.email,
-    this.avatarPath,
-    this.isCompact = false,
-    this.onProfileTap,
-  });
-
-  final String displayName;
-  final String email;
-  final String? avatarPath;
-  final bool isCompact;
-  final VoidCallback? onProfileTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<String>(
-      offset: const Offset(0, 48),
-      padding: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      elevation: 8,
-      shadowColor: Colors.black.withOpacity(0.15),
-      child: Padding(
-        padding: const EdgeInsets.only(left: 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            UserAvatar(avatarPath: avatarPath, radius: isCompact ? 16 : 18),
-            if (!isCompact) ...[
-              const SizedBox(width: 10),
-              Text(
-                displayName,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-              const SizedBox(width: 4),
-              Icon(
-                Icons.keyboard_arrow_down_rounded,
-                size: 20,
-                color: AppTheme.textSecondary,
-              ),
-            ],
-          ],
-        ),
-      ),
-      itemBuilder: (context) => [
-        PopupMenuItem<String>(
-          enabled: false,
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  UserAvatar(
-                    avatarPath: avatarPath,
-                    radius: 28,
-                    backgroundColor: AppTheme.primaryNavy.withOpacity(0.12),
-                    placeholderIconColor: AppTheme.primaryNavy,
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          displayName,
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.textPrimary,
-                          ),
-                        ),
-                        if (email.isNotEmpty) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            email,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: AppTheme.textSecondary,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 1,
-                          ),
-                        ],
-                      ],
-=======
->>>>>>> origin/main
                     ),
                   ),
                 ],
@@ -1346,7 +968,7 @@ class _EmployeeSummaryCards extends StatelessWidget {
 }
 
 String _formatTime(DateTime? dt) {
-  if (dt == null) return '—';
+  if (dt == null) return 'ΓÇö';
   final local = dt.toLocal();
   final h = local.hour;
   final m = local.minute;
@@ -1492,7 +1114,7 @@ class _ClockInCard extends StatelessWidget {
               ],
               const SizedBox(height: 6),
               Text(
-                'Location: —',
+                'Location: ΓÇö',
                 style: TextStyle(
                   color: AppTheme.dashTextSecondaryOf(context),
                   fontSize: 12,
@@ -1593,7 +1215,7 @@ class _ClockInCard extends StatelessWidget {
                               ? 'Holiday'
                               : isComplete
                               ? 'Clocked Out'
-                              : (nextAction ?? '—'),
+                              : (nextAction ?? 'ΓÇö'),
                         ),
                 ),
               ),
@@ -1759,7 +1381,7 @@ class _LeaveBalanceCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      hasData ? totalRemaining.toStringAsFixed(1) : '—',
+                      hasData ? totalRemaining.toStringAsFixed(1) : 'ΓÇö',
                       style: TextStyle(
                         color: AppTheme.dashTextPrimaryOf(context),
                         fontSize: 28,
@@ -1784,7 +1406,7 @@ class _LeaveBalanceCard extends StatelessWidget {
                             label: 'Vacation',
                             value: vacationDays != null
                                 ? vacationDays.toStringAsFixed(1)
-                                : '—',
+                                : 'ΓÇö',
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -1794,7 +1416,7 @@ class _LeaveBalanceCard extends StatelessWidget {
                             label: 'Sick',
                             value: sickDays != null
                                 ? sickDays.toStringAsFixed(1)
-                                : '—',
+                                : 'ΓÇö',
                           ),
                         ),
                       ],
@@ -1927,12 +1549,12 @@ class _PayslipCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            '—',
+            'ΓÇö',
             style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
           ),
           const SizedBox(height: 8),
           Text(
-            '—',
+            'ΓÇö',
             style: TextStyle(
               color: AppTheme.textPrimary,
               fontSize: 24,
@@ -1941,7 +1563,7 @@ class _PayslipCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Next Payday: —',
+            'Next Payday: ΓÇö',
             style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
           ),
           const SizedBox(height: 16),
@@ -2276,7 +1898,7 @@ class _EmployeeAttendanceContentState
   }
 
   static String _formatTime(DateTime? dt) {
-    if (dt == null) return '—';
+    if (dt == null) return 'ΓÇö';
     final local = dt.toLocal();
     final h = local.hour;
     final m = local.minute;
@@ -2297,7 +1919,7 @@ class _EmployeeAttendanceContentState
         segment == 'AM IN' &&
         (r.status == 'on_field' || r.locatorSlipId != null))
       return 'On Field';
-    return '—';
+    return 'ΓÇö';
   }
 
   static const List<String> _shortWeekdays = [

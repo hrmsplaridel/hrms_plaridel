@@ -247,7 +247,6 @@ class _DocuTrackerDashboardScreenState
 
   Widget _buildEmptyState() {
     return Container(
-<<<<<<< HEAD
       padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
       decoration: DocuTrackerTokens.cardDecoration(),
       child: Center(
@@ -275,21 +274,6 @@ class _DocuTrackerDashboardScreenState
               style: DocuTrackerTokens.subtitleStyle(),
             ),
           ],
-=======
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.dashPanelOf(context),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.dashHairlineOf(context)),
-      ),
-      child: Center(
-        child: Text(
-          'No documents yet.',
-          style: TextStyle(
-            color: AppTheme.dashTextPrimaryOf(context),
-            fontSize: 13,
-          ),
->>>>>>> origin/main
         ),
       ),
     );
@@ -548,15 +532,10 @@ class _DocuTrackerDashboardScreenState
         ),
         Container(
           decoration: highlightOverdue
-<<<<<<< HEAD
               ? DocuTrackerStyles.listCardDecoration().copyWith(
                   border: Border.all(color: Colors.red.withValues(alpha: 0.35)),
-=======
-              ? DocuTrackerStyles.listCardDecoration(context).copyWith(
-                  border: Border.all(color: Colors.red.withOpacity(0.3)),
->>>>>>> origin/main
                 )
-              : DocuTrackerStyles.listCardDecoration(context),
+              : DocuTrackerStyles.listCardDecoration(),
           child: docs.isEmpty
               ? Padding(
                   padding: const EdgeInsets.all(24),
