@@ -2,9 +2,65 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const {
+  transitionDocument,
+  addDocumentRemark,
+  createDocument: createDocumentEngine,
+  getEffectivePermissionExplanation,
+  listDocuments,
+} = require('../services/docutrackerWorkflowService');
+const {
+  ACTIVE_WORKFLOW_STATUSES_FOR_OVERDUE,
+} = require('../services/docutrackerStatusSemantics');
+
+const { coalesceDocumentTitle } = require('../utils/docutrackerDisplayTitle');
+const { sameEntityId } = require('../utils/sameEntityId');
 
 const router = express.Router();
 const protect = [authMiddleware];
+
+// Role/user permission rows cover baseline access and draft-start capability.
+// Runtime workflow actions (approve/forward/reject/return) are enforced by
+// current holder / step-assignee logic.
+const GENERAL_PERMISSION_ACTIONS = new Set([
+  'view',
+  'create',
+  'create_draft',
+  'download',
+  'submit',
+]);
+
+function normalizeGeneralPermissionAction(action) {
+  const a = String(action || '').trim().toLowerCase();
+  if (!a) return a;
+  if (a === 'create' || a === 'createdraft') return 'create_draft';
+  return a;
+}
+
+function generalPermissionActionVariants(action) {
+  const normalized = normalizeGeneralPermissionAction(action);
+  if (!normalized) return [];
+  if (normalized === 'create_draft') return ['create_draft', 'create'];
+  return [normalized];
+}
+
+/** Fields that must not be changed via PUT by non-admins (use transitions or admin tools). */
+const DOCUTRACKER_PUT_WORKFLOW_FIELDS = [
+  'document_type',
+  'current_holder_id',
+  'current_step',
+  'status',
+  'sent_time',
+  'deadline_time',
+  'reviewed_time',
+  'escalation_level',
+  'needs_admin_intervention',
+];
+
+function putBodyTouchesWorkflowFields(body) {
+  if (!body || typeof body !== 'object') return false;
+  return DOCUTRACKER_PUT_WORKFLOW_FIELDS.some((k) => body[k] !== undefined);
+}
 
 /**
  * Utility: map DB row to document response DTO.
@@ -15,7 +71,7 @@ function mapDocumentRow(row) {
     id: row.id,
     document_number: row.document_number,
     document_type: row.document_type,
-    title: row.title,
+    title: coalesceDocumentTitle(row),
     description: row.description,
     source_module: row.source_module,
     source_table: row.source_table,
@@ -31,6 +87,7 @@ function mapDocumentRow(row) {
     sent_time: row.sent_time,
     deadline_time: row.deadline_time,
     reviewed_time: row.reviewed_time,
+    workflow_version: row.workflow_version,
     escalation_level: row.escalation_level,
     needs_admin_intervention: row.needs_admin_intervention,
     created_at: row.created_at,
@@ -50,17 +107,17 @@ function normalizeDocStatus(s) {
   return map[x] || x;
 }
 
+const { canUserPerformDocumentAction } = require('../services/docutrackerWorkflowService');
+
 async function assertDocumentReadable(req, documentId) {
   const isAdmin = req.user.role === 'admin';
   if (isAdmin) return true;
-  const r = await pool.query(
-    `SELECT created_by, current_holder_id FROM docutracker_documents WHERE id = $1`,
-    [documentId]
-  );
-  const row = r.rows[0];
-  if (!row) return false;
-  const uid = req.user.id;
-  return row.created_by === uid || row.current_holder_id === uid;
+
+  const r = await pool.query(`SELECT * FROM docutracker_documents WHERE id = $1`, [documentId]);
+  const docRow = r.rows[0];
+  if (!docRow) return false;
+
+  return canUserPerformDocumentAction(pool, { user: req.user, document: docRow, action: 'view' });
 }
 
 /**
@@ -90,64 +147,22 @@ router.get('/documents', protect, async (req, res) => {
       offset = 0,
     } = req.query;
 
-    const where = [];
-    const params = [];
-    let i = 1;
-
-    if (type && type !== 'All') {
-      where.push(`d.document_type = $${i++}`);
-      params.push(type);
-    }
-    if (status && status !== 'All') {
-      where.push(`d.status = $${i++}`);
-      params.push(normalizeDocStatus(status));
-    }
-    if (holderId) {
-      where.push(`d.current_holder_id = $${i++}`);
-      params.push(holderId);
-    }
-    if (createdBy) {
-      where.push(`d.created_by = $${i++}`);
-      params.push(createdBy);
-    }
-    if (sourceModule) {
-      where.push(`d.source_module = $${i++}`);
-      params.push(sourceModule);
-    }
-    if (sourceTable) {
-      where.push(`d.source_table = $${i++}`);
-      params.push(sourceTable);
-    }
-    if (q) {
-      where.push(`(d.title ILIKE $${i} OR d.description ILIKE $${i})`);
-      params.push(`%${q}%`);
-      i += 1;
-    }
-
-    const isAdmin = req.user.role === 'admin';
-    if (!isAdmin) {
-      where.push(`(d.created_by = $${i} OR d.current_holder_id = $${i})`);
-      params.push(req.user.id);
-      i += 1;
-    }
-
-    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const limitVal = Number.isNaN(Number(limit)) ? 50 : Math.min(Number(limit), 200);
     const offsetVal = Number.isNaN(Number(offset)) ? 0 : Math.max(Number(offset), 0);
 
-    params.push(limitVal, offsetVal);
+    const { documents } = await listDocuments(pool, req.user, {
+      type: type && type !== 'All' ? String(type) : undefined,
+      status: status && status !== 'All' ? String(status) : undefined,
+      holderId: holderId ? String(holderId) : undefined,
+      createdBy: createdBy ? String(createdBy) : undefined,
+      q: q ? String(q) : undefined,
+      sourceModule: sourceModule ? String(sourceModule) : undefined,
+      sourceTable: sourceTable ? String(sourceTable) : undefined,
+      limit: limitVal,
+      offset: offsetVal,
+    });
 
-    const result = await pool.query(
-      `SELECT d.*, creator.full_name AS creator_name
-       FROM docutracker_documents d
-       LEFT JOIN users creator ON creator.id = d.created_by
-       ${whereSql}
-       ORDER BY d.created_at DESC
-       LIMIT $${i} OFFSET $${i + 1}`,
-      params
-    );
-
-    res.json(result.rows.map(mapDocumentRow));
+    res.json(documents.map((row) => mapDocumentRow(row)));
   } catch (err) {
     console.error('[docutracker GET /documents]', err);
     res.status(500).json({ error: 'Failed to fetch documents' });
@@ -176,83 +191,26 @@ router.get('/documents', protect, async (req, res) => {
 router.post('/documents', protect, async (req, res) => {
   try {
     const b = req.body || {};
-    const {
-      document_type,
-      title,
-      description,
-      file_path,
-      file_name,
-      current_holder_id,
-      deadline_time,
-      source_module,
-      source_table,
-      source_record_id,
-      source_title,
-      document_number,
-      current_step,
-      status,
-      sent_time,
-      reviewed_time,
-      escalation_level,
-      needs_admin_intervention,
-    } = b;
-
-    if (!document_type || !title) {
-      return res.status(400).json({ error: 'document_type and title are required' });
-    }
-
-    const result = await pool.query(
-      `INSERT INTO docutracker_documents
-       (document_type, title, description,
-        source_module, source_table, source_record_id, source_title,
-        file_path, file_name,
-        created_by, current_holder_id, deadline_time,
-        document_number, current_step, status, sent_time, reviewed_time,
-        escalation_level, needs_admin_intervention)
-       VALUES ($1, $2, $3,
-               $4, $5, $6, $7,
-               $8, $9,
-               $10, $11, $12,
-               $13, $14, COALESCE($15, 'pending'), $16, $17,
-               COALESCE($18, 0), COALESCE($19, false))
-       RETURNING *`,
-      [
-        document_type,
-        title,
-        description || null,
-        source_module || null,
-        source_table || null,
-        source_record_id || null,
-        source_title || null,
-        file_path || null,
-        file_name || null,
-        req.user.id,
-        current_holder_id || null,
-        deadline_time || null,
-        document_number || null,
-        current_step ?? 1,
-        status != null ? normalizeDocStatus(status) : null,
-        sent_time || null,
-        reviewed_time || null,
-        escalation_level ?? null,
-        needs_admin_intervention ?? null,
-      ]
-    );
-
-    const doc = result.rows[0];
-
-    // Log initial creation in history
-    await pool.query(
-      `INSERT INTO docutracker_document_history
-       (document_id, action, actor_id, to_status, remarks)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [doc.id, 'created', req.user.id, doc.status, description || null]
-    );
-
-    res.status(201).json(mapDocumentRow(doc));
+    const created = await createDocumentEngine(pool, req.user, {
+      document_type: b.document_type,
+      title: b.title,
+      description: b.description,
+      file_path: b.file_path,
+      file_name: b.file_name,
+      current_holder_id: b.current_holder_id,
+      deadline_time: b.deadline_time,
+      source_module: b.source_module,
+      source_table: b.source_table,
+      source_record_id: b.source_record_id,
+      source_title: b.source_title,
+      document_number: b.document_number,
+      status: b.status != null ? normalizeDocStatus(b.status) : undefined,
+    });
+    res.status(201).json(created);
   } catch (err) {
     console.error('[docutracker POST /documents]', err);
-    res.status(500).json({ error: 'Failed to create document' });
+    const mapped = mapWorkflowServiceError(err);
+    res.status(mapped.status).json({ error: mapped.error });
   }
 });
 
@@ -294,8 +252,9 @@ router.get('/documents-overdue', protect, requireAdmin, async (_req, res) => {
        LEFT JOIN users creator ON creator.id = d.created_by
        WHERE d.deadline_time IS NOT NULL
          AND d.deadline_time < now()
-         AND d.status NOT IN ('approved', 'rejected', 'cancelled')
-       ORDER BY d.deadline_time ASC`
+         AND d.status = ANY($1::text[])
+       ORDER BY d.deadline_time ASC`,
+      [ACTIVE_WORKFLOW_STATUSES_FOR_OVERDUE]
     );
     res.json(result.rows.map(mapDocumentRow));
   } catch (err) {
@@ -325,9 +284,29 @@ router.get('/notifications', protect, async (req, res) => {
 });
 
 /**
- * POST /api/docutracker/notifications
+ * POST /api/docutracker/notifications/mark-all-read
+ * Marks every notification read for the authenticated user.
  */
-router.post('/notifications', protect, async (req, res) => {
+router.post('/notifications/mark-all-read', protect, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE docutracker_notifications
+       SET read = true
+       WHERE user_id = $1 AND read = false`,
+      [req.user.id]
+    );
+    res.json({ updated: result.rowCount });
+  } catch (err) {
+    console.error('[docutracker POST /notifications/mark-all-read]', err);
+    res.status(500).json({ error: 'Failed to mark notifications read' });
+  }
+});
+
+/**
+ * POST /api/docutracker/notifications
+ * Admin-only: prevents forging notifications for arbitrary users.
+ */
+router.post('/notifications', protect, requireAdmin, async (req, res) => {
   try {
     const { document_id, user_id, type, title, body, read } = req.body || {};
     if (!document_id || !user_id || !type) {
@@ -344,6 +323,30 @@ router.post('/notifications', protect, async (req, res) => {
   } catch (err) {
     console.error('[docutracker POST /notifications]', err);
     res.status(500).json({ error: 'Failed to create notification' });
+  }
+});
+
+/**
+ * PATCH /api/docutracker/notifications/:id/read
+ * Marks a single notification read for the authenticated user.
+ */
+router.patch('/notifications/:id/read', protect, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `UPDATE docutracker_notifications
+       SET read = true
+       WHERE id = $1 AND user_id = $2
+       RETURNING *`,
+      [id, req.user.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Notification not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[docutracker PATCH /notifications/:id/read]', err);
+    res.status(500).json({ error: 'Failed to update notification' });
   }
 });
 
@@ -451,7 +454,7 @@ router.post('/documents/:id/history', protect, async (req, res) => {
       [
         id,
         b.action || null,
-        b.actor_id || req.user.id,
+        req.user.id,
         b.actor_name || null,
         b.from_step ?? null,
         b.to_step ?? null,
@@ -479,6 +482,11 @@ router.put('/documents/:id', protect, async (req, res) => {
   try {
     if (!(await assertDocumentReadable(req, id))) {
       return res.status(403).json({ error: 'Forbidden' });
+    }
+    if (req.user?.role !== 'admin' && putBodyTouchesWorkflowFields(b)) {
+      return res.status(403).json({
+        error: 'Only administrators can change workflow fields on a document; use the transition API for routing.',
+      });
     }
     const result = await pool.query(
       `UPDATE docutracker_documents SET
@@ -551,10 +559,23 @@ router.get('/documents/:id', protect, async (req, res) => {
 
     const [routingResult, historyResult] = await Promise.all([
       pool.query(
-        `SELECT *
-         FROM docutracker_routing_records
-         WHERE document_id = $1
-         ORDER BY step_order ASC`,
+        `SELECT rr.*,
+                COALESCE(
+                  ARRAY_AGG(a.user_id) FILTER (WHERE a.user_id IS NOT NULL),
+                  '{}'::uuid[]
+                ) AS assignee_ids,
+                COALESCE(
+                  ARRAY_AGG(u.full_name) FILTER (WHERE u.full_name IS NOT NULL),
+                  '{}'::text[]
+                ) AS assignee_names
+         FROM docutracker_routing_records rr
+         LEFT JOIN docutracker_routing_record_assignees a
+           ON a.routing_record_id = rr.id
+         LEFT JOIN users u
+           ON u.id = a.user_id
+         WHERE rr.document_id = $1
+         GROUP BY rr.id
+         ORDER BY rr.step_order ASC`,
         [id]
       ),
       pool.query(
@@ -578,11 +599,54 @@ router.get('/documents/:id', protect, async (req, res) => {
 });
 
 /**
+ * GET /api/docutracker/permission-explain
+ *
+ * Query:
+ * - document_type (required)
+ * - action (required)
+ * - document_id (optional) -> enables workflow checks + relationship checks
+ *
+ * Returns an explanation of the effective decision for the CURRENT user.
+ */
+router.get('/permission-explain', protect, async (req, res) => {
+  try {
+    const document_type = String(req.query.document_type || '').trim();
+    const action = String(req.query.action || '').trim();
+    const document_id = String(req.query.document_id || '').trim();
+    if (!document_type || !action) {
+      return res.status(400).json({ error: 'document_type and action are required' });
+    }
+
+    let document = null;
+    if (document_id) {
+      if (!(await assertDocumentReadable(req, document_id))) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+      const docRes = await pool.query(`SELECT * FROM docutracker_documents WHERE id = $1`, [document_id]);
+      document = docRes.rows?.[0] || null;
+      if (!document) return res.status(404).json({ error: 'Document not found' });
+    }
+
+    const exp = await getEffectivePermissionExplanation(pool, {
+      user: req.user,
+      action,
+      documentType: document_type,
+      document,
+    });
+    return res.json(exp);
+  } catch (err) {
+    console.error('[docutracker GET /permission-explain]', err);
+    return res.status(500).json({ error: 'Failed to explain permission' });
+  }
+});
+
+/**
  * PATCH /api/docutracker/documents/:id
  * Allows updating status, current_holder_id, current_step and optional remarks.
  * Body: { status?, current_holder_id?, current_step?, remarks?, needs_admin_intervention? }
+ * Admin-only (same fields are workflow-sensitive).
  */
-router.patch('/documents/:id', protect, async (req, res) => {
+router.patch('/documents/:id', protect, requireAdmin, async (req, res) => {
   const { id } = req.params;
   const {
     status,
@@ -684,14 +748,26 @@ router.get('/routing-configs', protect, async (req, res) => {
     const params = [];
     let where = '';
     if (document_type) {
-      where = 'WHERE document_type = $1';
+      where = 'WHERE v.document_type = $1';
       params.push(document_type);
     }
+
+    // Return the latest (highest) version per document_type.
     const result = await pool.query(
-      `SELECT *
-       FROM docutracker_routing_configs
+      `SELECT v.document_type,
+              v.steps,
+              v.review_deadline_hours,
+              v.version
+       FROM docutracker_routing_config_versions v
+       JOIN (
+         SELECT document_type, MAX(version) AS version
+         FROM docutracker_routing_config_versions
+         GROUP BY document_type
+       ) latest
+         ON latest.document_type = v.document_type
+        AND latest.version = v.version
        ${where}
-       ORDER BY document_type`,
+       ORDER BY v.document_type`,
       params
     );
     res.json(result.rows);
@@ -713,22 +789,474 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'document_type and steps[] are required' });
     }
 
-    const result = await pool.query(
-      `INSERT INTO docutracker_routing_configs
-       (document_type, steps, review_deadline_hours)
-       VALUES ($1, $2::jsonb, COALESCE($3, 1))
-       ON CONFLICT (document_type)
-       DO UPDATE SET steps = EXCLUDED.steps,
-                     review_deadline_hours = COALESCE(EXCLUDED.review_deadline_hours, docutracker_routing_configs.review_deadline_hours),
-                     updated_at = now()
-       RETURNING *`,
-      [document_type, JSON.stringify(steps), review_deadline_hours ?? null]
+    // Validate step structure before saving (basic guards).
+    const normalizedSteps = steps
+      .map((s) => ({
+        step_order: Number(s.step_order ?? s.stepOrder ?? 0),
+        assignee_type: String(s.assignee_type ?? s.assigneeType ?? '').trim().toLowerCase(),
+        role_id: s.role_id ?? s.roleId ?? null,
+        department_id: s.department_id ?? s.departmentId ?? null,
+        user_ids: Array.isArray(s.user_ids) ? s.user_ids : Array.isArray(s.userIds) ? s.userIds : null,
+        label: s.label ?? null,
+        enabled: s.enabled !== false,
+        deadline_hours:
+          s.deadline_hours != null
+            ? Number(s.deadline_hours)
+            : s.deadlineHours != null
+              ? Number(s.deadlineHours)
+              : null,
+      }))
+      .filter((s) => Number.isFinite(s.step_order) && s.step_order > 0)
+      .sort((a, b) => a.step_order - b.step_order);
+
+    if (normalizedSteps.length === 0) {
+      return res.status(400).json({ error: 'Workflow must have at least 1 step.' });
+    }
+    if (normalizedSteps[0].step_order !== 1) {
+      return res.status(400).json({ error: 'Workflow must start at step 1.' });
+    }
+    for (let i = 1; i < normalizedSteps.length; i += 1) {
+      if (normalizedSteps[i].step_order !== normalizedSteps[i - 1].step_order + 1) {
+        return res.status(400).json({ error: 'Step numbers must be contiguous (no gaps).' });
+      }
+    }
+    // Validate enabled + assignee config for enabled steps.
+    if (!normalizedSteps.some((s) => s.enabled)) {
+      return res.status(400).json({ error: 'At least one step must be enabled.' });
+    }
+    for (const s of normalizedSteps) {
+      if (!s.enabled) continue;
+      if (!['user', 'role', 'department', 'office'].includes(s.assignee_type)) {
+        return res.status(400).json({ error: `Invalid assignee_type for step ${s.step_order}.` });
+      }
+      // Selected-person workflow enforcement: enabled steps must be explicit user assignments.
+      if (s.assignee_type !== 'user') {
+        return res.status(400).json({
+          error: `Step ${s.step_order} must route to specific user(s) (assignee_type='user') for workflow actions.`,
+        });
+      }
+      if (s.deadline_hours != null && (!Number.isFinite(s.deadline_hours) || s.deadline_hours <= 0)) {
+        return res.status(400).json({ error: `Invalid deadline_hours for step ${s.step_order}.` });
+      }
+      if (s.assignee_type === 'user') {
+        const ids = Array.isArray(s.user_ids) ? s.user_ids.filter(Boolean) : [];
+        if (ids.length === 0) {
+          return res.status(400).json({ error: `User step ${s.step_order} must include user_ids.` });
+        }
+      }
+      if (s.assignee_type === 'role' && !s.role_id) {
+        return res.status(400).json({ error: `Role step ${s.step_order} must include role_id.` });
+      }
+      if (s.assignee_type === 'department' && !s.department_id) {
+        return res.status(400).json({ error: `Department step ${s.step_order} must include department_id.` });
+      }
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // If a "user" step provides a department_id, enforce that the PRIMARY user
+      // currently belongs to that department (active assignment).
+      // Backup users are admin-curated selections and bypass the department constraint.
+      for (const s of normalizedSteps) {
+        if (!s.enabled) continue;
+        const ids = Array.isArray(s.user_ids) ? s.user_ids.filter(Boolean) : [];
+        if (!ids.length) continue;
+
+        // Inactive users cannot be assigned (check ALL users: primary + backups).
+        const activeRes = await client.query(
+          `SELECT id::text AS id
+           FROM users
+           WHERE id = ANY($1::uuid[])
+             AND (is_active IS NULL OR is_active = true)`,
+          [ids]
+        );
+        const active = new Set((activeRes.rows || []).map((r) => r.id));
+        const inactive = ids.filter((id) => !active.has(String(id)));
+        if (inactive.length) {
+          return res.status(400).json({
+            error: `Step ${s.step_order} contains inactive users.`,
+            inactive_user_ids: inactive,
+          });
+        }
+
+        // Department membership: only validate the PRIMARY user (first in list).
+        if (s.assignee_type !== 'user') continue;
+        const deptId = s.department_id;
+        if (!deptId) continue;
+        const primaryId = ids[0]; // Only the primary user is department-scoped.
+        const r = await client.query(
+          `SELECT u.id::text AS id
+           FROM users u
+           JOIN assignments a
+             ON a.employee_id = u.id
+           WHERE a.department_id = $1::uuid
+             AND u.id = $2::uuid
+             AND (a.is_active IS NULL OR a.is_active = true)
+             AND a.effective_from <= CURRENT_DATE
+             AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
+             AND (u.is_active IS NULL OR u.is_active = true)`,
+          [deptId, primaryId]
+        );
+        if (r.rowCount === 0) {
+          return res.status(400).json({
+            error: `The primary user for step ${s.step_order} is not assigned to the selected department.`,
+            invalid_user_ids: [primaryId],
+            department_id: deptId,
+          });
+        }
+      }
+
+      const nextVersionRes = await client.query(
+        `SELECT COALESCE(MAX(version), 0)::int + 1 AS next_version
+         FROM docutracker_routing_config_versions
+         WHERE document_type = $1`,
+        [document_type]
+      );
+      const nextVersion = nextVersionRes.rows?.[0]?.next_version ?? 1;
+
+      const vRes = await client.query(
+        `INSERT INTO docutracker_routing_config_versions
+         (document_type, version, steps, review_deadline_hours, created_by)
+         VALUES ($1, $2, $3::jsonb, COALESCE($4, 1), $5)
+         RETURNING document_type, steps, review_deadline_hours, version`,
+        [
+          document_type,
+          nextVersion,
+          JSON.stringify(normalizedSteps),
+          review_deadline_hours ?? null,
+          req.user?.id ?? null,
+        ]
+      );
+
+      // Keep docutracker_routing_configs as a convenient "latest config" cache for other queries,
+      // but routing for documents should use workflow_version (versions table) for safety.
+      await client.query(
+        `INSERT INTO docutracker_routing_configs
+         (document_type, steps, review_deadline_hours)
+         VALUES ($1, $2::jsonb, COALESCE($3, 1))
+         ON CONFLICT (document_type)
+         DO UPDATE SET steps = EXCLUDED.steps,
+                       review_deadline_hours = COALESCE(EXCLUDED.review_deadline_hours, docutracker_routing_configs.review_deadline_hours),
+                       updated_at = now()`,
+        [document_type, JSON.stringify(normalizedSteps), review_deadline_hours ?? null]
+      );
+
+      // Write normalized workflow steps + assignees for this new version.
+      // This makes step-level "selected persons per department" the durable source of truth.
+      // Safe to rerun: we clear previous rows for (document_type, version) then reinsert.
+      await client.query(
+        `DELETE FROM docutracker_workflow_steps
+         WHERE document_type = $1
+           AND workflow_version = $2`,
+        [document_type, nextVersion]
+      );
+
+      const stepIdByOrder = new Map();
+      for (const s of normalizedSteps) {
+        const ins = await client.query(
+          `INSERT INTO docutracker_workflow_steps
+           (document_type, workflow_version, step_order, department_id, label, enabled)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id`,
+          [
+            document_type,
+            nextVersion,
+            s.step_order,
+            s.department_id || null, // null is fine; no ::uuid cast needed for null
+            s.label || null,
+            s.enabled !== false,
+          ]
+        );
+        stepIdByOrder.set(s.step_order, ins.rows?.[0]?.id);
+      }
+
+      for (const s of normalizedSteps) {
+        if (s.assignee_type !== 'user') continue;
+        const stepId = stepIdByOrder.get(s.step_order);
+        if (!stepId) continue;
+        const ids = Array.isArray(s.user_ids) ? s.user_ids.map(String).map((x) => x.trim()).filter(Boolean) : [];
+        if (!ids.length) continue;
+
+        for (let i = 0; i < ids.length; i += 1) {
+          const uid = ids[i];
+          const isPrimary = i === 0;
+          const backupRank = isPrimary ? null : i; // 1..N for backups
+          await client.query(
+            `INSERT INTO docutracker_workflow_step_assignees
+             (step_id, user_id, is_primary, backup_rank, is_enabled, allowed_actions)
+             VALUES ($1, $2::uuid, $3, $4, true, $5::text[])`,
+            [
+              stepId,
+              uid,
+              isPrimary,
+              backupRank,
+              ['approve', 'forward', 'reject', 'return'],
+            ]
+          );
+        }
+      }
+
+      await client.query('COMMIT');
+      res.status(201).json(vRes.rows[0]);
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('[docutracker POST /routing-configs] error:', err?.message || err);
+    console.error('[docutracker POST /routing-configs] stack:', err?.stack);
+    res.status(500).json({ error: err?.message || 'Failed to save routing config' });
+  }
+});
+
+/**
+ * GET /api/docutracker/workflow-steps
+ * Admin-only.
+ *
+ * Query:
+ * - document_type (required)
+ * - workflow_version (required)
+ *
+ * Returns steps + assignees from normalized tables.
+ */
+router.get('/workflow-steps', protect, requireAdmin, async (req, res) => {
+  try {
+    const document_type = String(req.query.document_type || '').trim();
+    const workflow_version = Number(req.query.workflow_version);
+    if (!document_type || !Number.isFinite(workflow_version) || workflow_version < 1) {
+      return res.status(400).json({ error: 'document_type and workflow_version are required' });
+    }
+
+    const r = await pool.query(
+      `SELECT
+         s.id AS step_id,
+         s.document_type,
+         s.workflow_version,
+         s.step_order,
+         s.department_id,
+         s.label,
+         s.enabled,
+         COALESCE(
+           jsonb_agg(
+             jsonb_build_object(
+               'id', a.id,
+               'user_id', a.user_id,
+               'full_name', u.full_name,
+               'department_name', cur.current_department_name,
+               'is_primary', a.is_primary,
+               'backup_rank', a.backup_rank,
+               'is_enabled', a.is_enabled,
+               'allowed_actions', a.allowed_actions
+             )
+             ORDER BY a.is_primary DESC, a.backup_rank ASC NULLS LAST, u.full_name NULLS LAST
+           ) FILTER (WHERE a.id IS NOT NULL),
+           '[]'::jsonb
+         ) AS assignees
+       FROM docutracker_workflow_steps s
+       LEFT JOIN docutracker_workflow_step_assignees a
+         ON a.step_id = s.id
+       LEFT JOIN users u
+         ON u.id = a.user_id
+       LEFT JOIN LATERAL (
+         SELECT d.name AS current_department_name
+         FROM assignments asn
+         LEFT JOIN departments d ON d.id = asn.department_id
+         WHERE asn.employee_id = u.id
+           AND (asn.is_active IS NULL OR asn.is_active = true)
+           AND asn.effective_from <= CURRENT_DATE
+           AND (asn.effective_to IS NULL OR asn.effective_to >= CURRENT_DATE)
+         ORDER BY asn.effective_from DESC
+         LIMIT 1
+       ) cur ON true
+       WHERE s.document_type = $1
+         AND s.workflow_version = $2
+       GROUP BY s.id
+       ORDER BY s.step_order ASC`,
+      [document_type, workflow_version]
     );
 
-    res.status(201).json(result.rows[0]);
+    return res.json(r.rows);
   } catch (err) {
-    console.error('[docutracker POST /routing-configs]', err);
-    res.status(500).json({ error: 'Failed to save routing config' });
+    console.error('[docutracker GET /workflow-steps]', err);
+    return res.status(500).json({ error: 'Failed to fetch workflow steps' });
+  }
+});
+
+/**
+ * PUT /api/docutracker/workflow-steps/:stepId/assignees
+ * Admin-only.
+ *
+ * Body:
+ * {
+ *   assignees: [
+ *     {
+ *       user_id: uuid,
+ *       is_primary: boolean,
+ *       backup_rank: int|null,
+ *       is_enabled: boolean,
+ *       allowed_actions: string[]
+ *     }
+ *   ]
+ * }
+ *
+ * Replaces the assignee set for the step.
+ */
+router.put('/workflow-steps/:stepId/assignees', protect, requireAdmin, async (req, res) => {
+  const stepId = String(req.params.stepId || '').trim();
+  try {
+    if (!stepId) return res.status(400).json({ error: 'stepId is required' });
+    const body = req.body || {};
+    const input = Array.isArray(body.assignees) ? body.assignees : null;
+    if (!input) return res.status(400).json({ error: 'assignees[] is required' });
+
+    const allowedActionSet = new Set(['approve', 'forward', 'reject', 'return']);
+    const normalized = input
+      .map((a) => ({
+        user_id: a.user_id ?? a.userId ?? null,
+        is_primary: a.is_primary === true || a.isPrimary === true,
+        backup_rank:
+          a.backup_rank != null
+            ? Number(a.backup_rank)
+            : a.backupRank != null
+              ? Number(a.backupRank)
+              : null,
+        is_enabled: a.is_enabled !== false && a.isEnabled !== false,
+        allowed_actions: Array.isArray(a.allowed_actions)
+          ? a.allowed_actions
+          : Array.isArray(a.allowedActions)
+            ? a.allowedActions
+            : [],
+      }))
+      .filter((a) => typeof a.user_id === 'string' && a.user_id.trim().length > 0);
+
+    // Basic validation: at most one primary; ranks unique; actions whitelisted.
+    if (normalized.length === 0) {
+      return res.status(400).json({ error: 'Each step must have at least one assigned user.' });
+    }
+    const primaries = normalized.filter((a) => a.is_primary);
+    if (primaries.length !== 1) {
+      return res.status(400).json({ error: 'Each step must have exactly one primary assignee.' });
+    }
+    const seenRanks = new Set();
+    const seenUsers = new Set();
+    for (const a of normalized) {
+      const uid = String(a.user_id).trim();
+      if (seenUsers.has(uid)) {
+        return res.status(400).json({ error: 'Duplicate user_id in assignees.' });
+      }
+      seenUsers.add(uid);
+      if (a.is_primary && a.backup_rank != null) {
+        return res.status(400).json({ error: 'Primary assignee must not have backup_rank.' });
+      }
+      if (!a.is_primary) {
+        if (!Number.isFinite(a.backup_rank) || a.backup_rank <= 0) {
+          return res.status(400).json({ error: 'Backup assignees require backup_rank >= 1.' });
+        }
+        if (seenRanks.has(a.backup_rank)) {
+          return res.status(400).json({ error: 'Duplicate backup_rank in assignees.' });
+        }
+        seenRanks.add(a.backup_rank);
+      }
+      const deduped = Array.from(new Set(a.allowed_actions.map((x) => String(x).trim()).filter(Boolean)));
+      for (const act of deduped) {
+        if (!allowedActionSet.has(act)) {
+          return res.status(400).json({ error: `Invalid allowed action '${act}'.` });
+        }
+      }
+      a.allowed_actions = deduped;
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const stepExists = await client.query(
+        `SELECT id, department_id
+         FROM docutracker_workflow_steps
+         WHERE id = $1::uuid
+         LIMIT 1`,
+        [stepId]
+      );
+      if (!stepExists.rowCount) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Workflow step not found' });
+      }
+      const deptId = stepExists.rows[0]?.department_id || null;
+
+      // Ensure assigned users are active.
+      const ids = normalized.map((a) => String(a.user_id).trim());
+      const activeRes = await client.query(
+        `SELECT id::text AS id
+         FROM users
+         WHERE id = ANY($1::uuid[])
+           AND (is_active IS NULL OR is_active = true)`,
+        [ids]
+      );
+      const active = new Set((activeRes.rows || []).map((r) => r.id));
+      const inactive = ids.filter((id) => !active.has(String(id)));
+      if (inactive.length) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          error: 'Inactive users cannot be assigned.',
+          inactive_user_ids: inactive,
+        });
+      }
+
+      // If the step is department-scoped, ensure every assigned user currently belongs to that department.
+      if (deptId) {
+        const deptRes = await client.query(
+          `SELECT u.id::text AS id
+           FROM users u
+           JOIN assignments a
+             ON a.employee_id = u.id
+           WHERE a.department_id = $1::uuid
+             AND u.id = ANY($2::uuid[])
+             AND (a.is_active IS NULL OR a.is_active = true)
+             AND a.effective_from <= CURRENT_DATE
+             AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
+             AND (u.is_active IS NULL OR u.is_active = true)`,
+          [deptId, ids]
+        );
+        const allowed = new Set((deptRes.rows || []).map((x) => x.id));
+        const invalid = ids.filter((id) => !allowed.has(String(id)));
+        if (invalid.length) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({
+            error: 'Assigned users must belong to the step department.',
+            invalid_user_ids: invalid,
+            department_id: deptId,
+          });
+        }
+      }
+
+      await client.query(
+        `DELETE FROM docutracker_workflow_step_assignees WHERE step_id = $1::uuid`,
+        [stepId]
+      );
+
+      for (const a of normalized) {
+        await client.query(
+          `INSERT INTO docutracker_workflow_step_assignees
+             (step_id, user_id, is_primary, backup_rank, is_enabled, allowed_actions)
+           VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::text[])`,
+          [stepId, a.user_id, a.is_primary, a.backup_rank, a.is_enabled, a.allowed_actions]
+        );
+      }
+
+      await client.query('COMMIT');
+      return res.json({ ok: true, step_id: stepId, updated: normalized.length });
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('[docutracker PUT /workflow-steps/:stepId/assignees]', err);
+    return res.status(500).json({ error: 'Failed to update step assignees' });
   }
 });
 
@@ -747,13 +1275,22 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
 router.get('/permissions', protect, requireAdmin, async (req, res) => {
   try {
     const { document_type, action = 'view', search } = req.query;
+    const normalizedAction = normalizeGeneralPermissionAction(action);
+    const actionVariants = generalPermissionActionVariants(normalizedAction);
     if (!document_type) {
       return res.status(400).json({ error: 'document_type is required' });
     }
+    if (!GENERAL_PERMISSION_ACTIONS.has(String(normalizedAction))) {
+      return res.status(400).json({
+        error: `Invalid action '${action}'. Role-based permissions only support: ${Array.from(
+          GENERAL_PERMISSION_ACTIONS
+        ).join(', ')}`,
+      });
+    }
 
-    const params = [document_type, action];
+    const params = [document_type, actionVariants, normalizedAction];
     const where = [];
-    let i = 3;
+    let i = 4;
 
     // only active employees by default
     where.push('(u.is_active IS NULL OR u.is_active = true)');
@@ -774,12 +1311,21 @@ router.get('/permissions', protect, requireAdmin, async (req, res) => {
          u.role,
          COALESCE(u.is_active, true) AS is_active,
          p.id AS permission_id,
+        p.action AS permission_action,
          COALESCE(p.granted, false) AS granted
        FROM users u
-       LEFT JOIN docutracker_permissions p
-         ON p.user_id = u.id
-        AND p.document_type = $1
-        AND p.action = $2
+       LEFT JOIN LATERAL (
+         SELECT pp.id, pp.action, pp.granted
+         FROM docutracker_permissions pp
+         WHERE pp.user_id = u.id
+           AND pp.document_type = $1
+           AND pp.action = ANY($2::text[])
+         ORDER BY
+           CASE WHEN pp.action = $3 THEN 0 ELSE 1 END,
+           pp.updated_at DESC NULLS LAST,
+           pp.created_at DESC NULLS LAST
+         LIMIT 1
+       ) p ON true
        ${whereSql}
        ORDER BY u.full_name`,
       params
@@ -793,6 +1339,7 @@ router.get('/permissions', protect, requireAdmin, async (req, res) => {
         role: r.role ?? 'employee',
         is_active: r.is_active,
         permission_id: r.permission_id,
+        permission_action: r.permission_action,
         granted: r.granted,
       }))
     );
@@ -825,16 +1372,25 @@ router.post('/permissions', protect, requireAdmin, async (req, res) => {
         error: 'document_type and action are required, plus user_id or role_id',
       });
     }
+    const normalizedAction = normalizeGeneralPermissionAction(action);
+    const actionVariants = generalPermissionActionVariants(normalizedAction);
+    if (!GENERAL_PERMISSION_ACTIONS.has(String(normalizedAction))) {
+      return res.status(400).json({
+        error: `Invalid action '${action}'. Role-based permissions only support: ${Array.from(
+          GENERAL_PERMISSION_ACTIONS
+        ).join(', ')}`,
+      });
+    }
 
     const grantedBool = !!granted;
 
     const existing = await pool.query(
       user_id
         ? `SELECT id FROM docutracker_permissions
-           WHERE user_id = $1 AND document_type = $2 AND action = $3`
+           WHERE user_id = $1 AND document_type = $2 AND action = ANY($3::text[])`
         : `SELECT id FROM docutracker_permissions
-           WHERE role_id = $1 AND user_id IS NULL AND document_type = $2 AND action = $3`,
-      user_id ? [user_id, document_type, action] : [role_id, document_type, action]
+           WHERE role_id = $1 AND user_id IS NULL AND document_type = $2 AND action = ANY($3::text[])`,
+      user_id ? [user_id, document_type, actionVariants] : [role_id, document_type, actionVariants]
     );
 
     let row;
@@ -843,10 +1399,11 @@ router.post('/permissions', protect, requireAdmin, async (req, res) => {
       const update = await pool.query(
         `UPDATE docutracker_permissions
          SET granted = $1,
+             action = $3,
              updated_at = now()
          WHERE id = $2
          RETURNING *`,
-        [grantedBool, permId]
+        [grantedBool, permId, normalizedAction]
       );
       row = update.rows[0];
     } else {
@@ -855,7 +1412,7 @@ router.post('/permissions', protect, requireAdmin, async (req, res) => {
            (user_id, role_id, document_type, action, granted)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING *`,
-        [user_id || null, role_id || null, document_type, action, grantedBool]
+        [user_id || null, role_id || null, document_type, normalizedAction, grantedBool]
       );
       row = insert.rows[0];
     }
@@ -871,6 +1428,140 @@ router.post('/permissions', protect, requireAdmin, async (req, res) => {
   } catch (err) {
     console.error('[docutracker POST /permissions]', err);
     res.status(500).json({ error: 'Failed to update permission' });
+  }
+});
+
+/**
+ * DELETE /api/docutracker/permissions
+ * Admin-only.
+ *
+ * Body:
+ * {
+ *   user_id?: uuid,
+ *   role_id?: text,
+ *   document_type: text,   // '*' or specific
+ *   action?: text          // optional: delete only one action
+ * }
+ *
+ * Deletes explicit permission rows so the system falls back to defaults.
+ */
+router.delete('/permissions', protect, requireAdmin, async (req, res) => {
+  try {
+    const { user_id, role_id, document_type, action } = req.body || {};
+    if ((!user_id && !role_id) || !document_type) {
+      return res.status(400).json({
+        error: 'document_type is required, plus user_id or role_id',
+      });
+    }
+    if (user_id && role_id) {
+      return res.status(400).json({
+        error: 'Provide only one scope: user_id OR role_id',
+      });
+    }
+
+    const params = [];
+    const where = [];
+    let i = 1;
+
+    if (user_id) {
+      where.push(`user_id = $${i++}::uuid`);
+      params.push(user_id);
+    } else {
+      where.push(`role_id = $${i++}`);
+      params.push(role_id);
+      where.push(`user_id IS NULL`);
+    }
+
+    where.push(`document_type = $${i++}`);
+    params.push(document_type);
+
+    if (action) {
+      const normalizedAction = normalizeGeneralPermissionAction(action);
+      if (!GENERAL_PERMISSION_ACTIONS.has(String(normalizedAction))) {
+        return res.status(400).json({
+          error: `Invalid action '${action}'. Role-based permissions only support: ${Array.from(
+            GENERAL_PERMISSION_ACTIONS
+          ).join(', ')}`,
+        });
+      }
+      where.push(`action = $${i++}`);
+      params.push(normalizedAction);
+    }
+
+    const sql = `DELETE FROM docutracker_permissions WHERE ${where.join(' AND ')}`;
+    const result = await pool.query(sql, params);
+    res.json({ deleted: result.rowCount || 0 });
+  } catch (err) {
+    console.error('[docutracker DELETE /permissions]', err);
+    res.status(500).json({ error: 'Failed to reset permissions' });
+  }
+});
+
+function mapWorkflowServiceError(err) {
+  const code = err?.code;
+  if (code === 'FORBIDDEN') return { status: 403, error: err.message || 'Forbidden' };
+  if (code === 'NOT_FOUND') return { status: 404, error: err.message || 'Not found' };
+  if (code === 'VALIDATION') return { status: 400, error: err.message || 'Bad request' };
+  return { status: 500, error: err?.message || 'Internal server error' };
+}
+
+/**
+ * POST /api/docutracker/documents/:id/transition
+ *
+ * Body:
+ * {
+ *   action: 'submit' | 'forward' | 'approve' | 'reject' | 'return',
+ *   remarks?: string,
+ *   target_holder_id?: uuid,
+ *   idempotency_key?: string
+ * }
+ *
+ * Runs the workflow transition transactionally:
+ * - updates docutracker_documents
+ * - creates/updates docutracker_routing_records
+ * - inserts docutracker_document_history
+ * - inserts docutracker_notifications (with event_key + dedupe)
+ * - stores docutracker_transition_requests when idempotency_key is supplied
+ */
+router.post('/documents/:id/transition', protect, async (req, res) => {
+  const { id } = req.params;
+  const b = req.body || {};
+  try {
+    const action = String(b.action || '').trim();
+    if (!action) return res.status(400).json({ error: 'action is required' });
+
+    const updated = await transitionDocument(pool, req.user, id, action, {
+      remarks: b.remarks,
+      target_holder_id: b.target_holder_id,
+      current_holder_id: b.current_holder_id,
+      idempotency_key: b.idempotency_key,
+    });
+    return res.json(updated);
+  } catch (err) {
+    console.error('[docutracker POST /documents/:id/transition]', err);
+    const mapped = mapWorkflowServiceError(err);
+    return res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
+/**
+ * POST /api/docutracker/documents/:id/remark
+ *
+ * Body:
+ * { remarks: string }
+ *
+ * Inserts an audit trail "remark" entry in a DB transaction.
+ */
+router.post('/documents/:id/remark', protect, async (req, res) => {
+  const { id } = req.params;
+  const b = req.body || {};
+  try {
+    const ok = await addDocumentRemark(pool, req.user, id, { remarks: b.remarks });
+    return res.status(201).json({ ok: !!ok });
+  } catch (err) {
+    console.error('[docutracker POST /documents/:id/remark]', err);
+    const mapped = mapWorkflowServiceError(err);
+    return res.status(mapped.status).json({ error: mapped.error });
   }
 });
 

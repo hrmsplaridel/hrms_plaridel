@@ -9,6 +9,7 @@ class DocumentRoutingConfig {
     required this.documentType,
     required this.steps,
     this.reviewDeadlineHours = 1,
+    this.version = 1,
   });
 
   final DocumentType documentType;
@@ -16,6 +17,9 @@ class DocumentRoutingConfig {
 
   /// Default review deadline in hours (Step 5: Review Time Limit).
   final int reviewDeadlineHours;
+
+  /// Latest workflow version for this document type.
+  final int version;
 
   factory DocumentRoutingConfig.fromJson(Map<String, dynamic> json) {
     final stepsRaw = json['steps'];
@@ -28,6 +32,7 @@ class DocumentRoutingConfig {
           : [],
       reviewDeadlineHours:
           (json['review_deadline_hours'] as num?)?.toInt() ?? 1,
+      version: (json['version'] as num?)?.toInt() ?? 1,
     );
   }
 
@@ -35,6 +40,7 @@ class DocumentRoutingConfig {
         'document_type': documentType.value,
         'steps': steps.map((s) => s.toJson()).toList(),
         'review_deadline_hours': reviewDeadlineHours,
+        'version': version,
       };
 
   /// Default configs for built-in document types.
@@ -44,12 +50,12 @@ class DocumentRoutingConfig {
           steps: [
             const WorkflowStep(
               stepOrder: 1,
-              assigneeType: 'role',
+              assigneeType: 'user',
               label: 'HR Staff',
             ),
             const WorkflowStep(
               stepOrder: 2,
-              assigneeType: 'department',
+              assigneeType: 'user',
               label: 'Department Head',
             ),
             const WorkflowStep(
@@ -65,22 +71,22 @@ class DocumentRoutingConfig {
           steps: [
             const WorkflowStep(
               stepOrder: 1,
-              assigneeType: 'department',
+              assigneeType: 'user',
               label: 'Requesting Department',
             ),
             const WorkflowStep(
               stepOrder: 2,
-              assigneeType: 'department',
+              assigneeType: 'user',
               label: 'Procurement',
             ),
             const WorkflowStep(
               stepOrder: 3,
-              assigneeType: 'department',
+              assigneeType: 'user',
               label: 'Accounting',
             ),
             const WorkflowStep(
               stepOrder: 4,
-              assigneeType: 'role',
+              assigneeType: 'user',
               label: 'Approving Officer',
             ),
           ],

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../widgets/rsp_form_header_footer.dart';
 import '../docutracker_provider.dart';
@@ -9,7 +10,57 @@ import '../models/document_action.dart';
 import '../models/document_permission.dart';
 import '../models/document_routing_config.dart';
 import '../models/document_type.dart';
-import 'docutracker_setup_permissions_screen.dart';
+import '../models/workflow_step.dart';
+import '../security/docutracker_roles.dart';
+import '../services/employee_directory_lookup.dart';
+import '../theme/docutracker_tokens.dart';
+import '../widgets/docutracker_module_header.dart';
+import '../widgets/docutracker_responsive_body.dart';
+import 'docutracker_workflow_editor_screen.dart';
+import 'docutracker_permission_editor_screen.dart';
+import 'docutracker_step_assignees_editor_screen.dart';
+
+/// Groups list rows by role/user + document type so one person does not repeat per action.
+String _permissionGroupKey(DocumentPermission p) =>
+    '${p.roleId ?? ''}\x1F${p.userId ?? ''}\x1F${p.documentType}';
+
+/// One row per action key; stable order by [DocumentAction.name].
+List<DocumentPermission> _dedupePermissionsByAction(
+  List<DocumentPermission> items,
+) {
+  final byAction = <DocumentAction, DocumentPermission>{};
+  for (final p in items) {
+    byAction[p.action] = p;
+  }
+  final out = byAction.values.toList()
+    ..sort((a, b) => a.action.name.compareTo(b.action.name));
+  return out;
+}
+
+Color _permissionActionColor(DocumentAction action) {
+  switch (action) {
+    case DocumentAction.approve:
+      return const Color(0xFF4CAF50);
+    case DocumentAction.reject:
+      return Colors.red.shade400;
+    case DocumentAction.forward:
+      return const Color(0xFF2196F3);
+    case DocumentAction.returnDoc:
+      return Colors.orange.shade600;
+    case DocumentAction.createDraft:
+      return const Color(0xFF9C27B0);
+    case DocumentAction.view:
+      return const Color(0xFF607D8B);
+    case DocumentAction.download:
+      return const Color(0xFF00BCD4);
+    case DocumentAction.edit:
+      return const Color(0xFF795548);
+    case DocumentAction.submit:
+      return const Color(0xFF009688);
+    case DocumentAction.delete:
+      return const Color(0xFFE53935);
+  }
+}
 
 /// Admin panel for DocuTracker (Step 4: Admin Privilege Management).
 /// Manage per-role or per-user privileges: View, Edit, Download, Delete,
@@ -28,6 +79,11 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
   String? _selectedUserId;
   String? _selectedDocumentType;
   final _searchController = TextEditingController();
+  final EmployeeDirectoryLookup _employeeDirectory = EmployeeDirectoryLookup();
+  final Map<String, String> _departmentNameById = {};
+
+  /// Narrow layout: 0 = workflows card, 1 = permissions card.
+  int _adminTab = 0;
 
   @override
   void initState() {
@@ -41,15 +97,189 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
     super.dispose();
   }
 
+  Future<void> _loadDepartmentNames() async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/departments',
+      );
+      final data = res.data ?? [];
+      final map = <String, String>{};
+      for (final e in data) {
+        final m = e as Map<String, dynamic>;
+        final id = m['id']?.toString();
+        if (id == null || id.isEmpty) continue;
+        map[id] = m['name']?.toString() ?? '—';
+      }
+      if (mounted)
+        setState(
+          () => _departmentNameById
+            ..clear()
+            ..addAll(map),
+        );
+    } catch (_) {}
+  }
+
   Future<void> _load() async {
     final provider = context.read<DocuTrackerProvider>();
-    await provider.loadRoutingConfigs();
+    await Future.wait([
+      provider.loadRoutingConfigs(),
+      _employeeDirectory.load(),
+      _loadDepartmentNames(),
+    ]);
+    if (!mounted) return;
     await provider.loadPermissions(
       roleId: null,
       userId: _selectedUserId,
       userOnly: true,
       documentType: _selectedDocumentType,
     );
+    if (!mounted) return;
+    final ids = provider.permissions
+        .map((p) => p.userId)
+        .whereType<String>()
+        .toSet();
+    await _employeeDirectory.ensureIds(ids);
+    if (mounted) setState(() {});
+  }
+
+  String _formatPermissionTarget(DocumentPermission p) {
+    if (p.roleId != null) return 'Role: ${p.roleId}';
+    final uid = p.userId;
+    if (uid == null || uid.isEmpty) return '—';
+    return _employeeDirectory.formatUserLine(uid);
+  }
+
+  /// One row per person/role + document type; all actions shown as chips in that row.
+  List<Widget> _buildGroupedPermissionRows(List<DocumentPermission> filtered) {
+    final buckets = <String, List<DocumentPermission>>{};
+    for (final p in filtered) {
+      buckets.putIfAbsent(_permissionGroupKey(p), () => []).add(p);
+    }
+    final sortedKeys = buckets.keys.toList()
+      ..sort((ka, kb) {
+        final aa = buckets[ka]!.first;
+        final bb = buckets[kb]!.first;
+        final la = _formatPermissionTarget(aa);
+        final lb = _formatPermissionTarget(bb);
+        final byLabel = la.toLowerCase().compareTo(lb.toLowerCase());
+        if (byLabel != 0) return byLabel;
+        final byDt = aa.documentType.compareTo(bb.documentType);
+        if (byDt != 0) return byDt;
+        return ka.compareTo(kb);
+      });
+    return sortedKeys.asMap().entries.map((e) {
+      final perms = _dedupePermissionsByAction(buckets[e.value]!);
+      final first = perms.first;
+      return _PermissionGroupRow(
+        permissions: perms,
+        targetLabel: _formatPermissionTarget(first),
+        onEdit: () => _openPermissionEditorForRow(first),
+        isEven: e.key.isEven,
+      );
+    }).toList();
+  }
+
+  /// One row per document type (highest version wins if the API ever returns duplicates).
+  List<DocumentRoutingConfig> _routingConfigsForDisplay(
+    DocuTrackerProvider provider,
+  ) {
+    final byType = <String, DocumentRoutingConfig>{};
+    for (final c in provider.routingConfigs) {
+      final key = c.documentType.value;
+      final prev = byType[key];
+      if (prev == null || c.version > prev.version) {
+        byType[key] = c;
+      }
+    }
+    final out = byType.values.toList()
+      ..sort(
+        (a, b) => a.documentType.displayName.toLowerCase().compareTo(
+          b.documentType.displayName.toLowerCase(),
+        ),
+      );
+    return out;
+  }
+
+  Future<void> _createNewWorkflow(
+    BuildContext context,
+    DocuTrackerProvider provider,
+  ) async {
+    final type = await showDialog<DocumentType>(
+      context: context,
+      builder: (ctx) {
+        var selected = DocumentType.values.first;
+        return StatefulBuilder(
+          builder: (ctx, setModal) {
+            return AlertDialog(
+              title: const Text('New workflow'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Pick a document type. Add steps in the editor; saving publishes the next workflow version for that type.',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 13,
+                      height: 1.3,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<DocumentType>(
+                    key: ValueKey<DocumentType>(selected),
+                    initialValue: selected,
+                    decoration: DocuTrackerStyles.dropdownDecoration(
+context,                       'Document type',
+                    ),
+                    items: [
+                      for (final t in DocumentType.values)
+                        DropdownMenuItem(value: t, child: Text(t.displayName)),
+                    ],
+                    onChanged: (v) {
+                      if (v == null) return;
+                      setModal(() => selected = v);
+                    },
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, selected),
+                  child: const Text('Continue'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    if (type == null || !context.mounted) return;
+    final configs = _routingConfigsForDisplay(provider);
+    DocumentRoutingConfig? existing;
+    for (final c in configs) {
+      if (c.documentType == type) {
+        existing = c;
+        break;
+      }
+    }
+    final baseVersion = existing?.version ?? 1;
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => DocuTrackerWorkflowEditorScreen(
+          initialConfig: DocumentRoutingConfig(
+            documentType: type,
+            steps: const [],
+            reviewDeadlineHours: 24,
+            version: baseVersion,
+          ),
+        ),
+      ),
+    );
+    if (saved == true && mounted) await _load();
   }
 
   @override
@@ -57,55 +287,189 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
     final provider = context.watch<DocuTrackerProvider>();
     final isNarrow = MediaQuery.of(context).size.width < 700;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Admin',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w800,
+    return DocuTrackerResponsiveBody(
+      maxWidth: DocuTrackerTokens.maxContentWidth,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const DocuTrackerModuleHeader(
+            title: 'Admin',
+            subtitle:
+                'Workflows define who routes each step; permissions control view / create / download by document type. '
+                'Use the toggle below to switch between the two.',
           ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Manage per-role or per-user privileges and workflow configurations.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-        ),
-        const SizedBox(height: 24),
-        isNarrow ? _buildNarrowLayout(provider) : _buildWideLayout(provider),
-      ],
+          const SizedBox(height: 16),
+          _buildAdminSectionToggle(),
+          const SizedBox(height: 16),
+          isNarrow
+              ? _buildNarrowLayout(context, provider)
+              : _buildWideLayout(context, provider),
+        ],
+      ),
     );
   }
 
-  Widget _buildWideLayout(DocuTrackerProvider provider) {
+  /// Switch between workflow routing UI and document permission matrix (single focus area).
+  Widget _buildAdminSectionToggle() {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: SegmentedButton<int>(
+        multiSelectionEnabled: false,
+        emptySelectionAllowed: false,
+        showSelectedIcon: false,
+        style: ButtonStyle(
+          visualDensity: VisualDensity.compact,
+          padding: WidgetStateProperty.all(
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          ),
+        ),
+        segments: const [
+          ButtonSegment<int>(
+            value: 0,
+            icon: Icon(Icons.account_tree_outlined, size: 18),
+            label: Padding(
+              padding: EdgeInsets.only(left: 2),
+              child: Text('Workflows'),
+            ),
+          ),
+          ButtonSegment<int>(
+            value: 1,
+            icon: Icon(Icons.lock_outline_rounded, size: 18),
+            label: Padding(
+              padding: EdgeInsets.only(left: 2),
+              child: Text('Permissions'),
+            ),
+          ),
+        ],
+        selected: {_adminTab},
+        onSelectionChanged: (Set<int> next) {
+          if (next.isEmpty) return;
+          setState(() => _adminTab = next.first);
+        },
+      ),
+    );
+  }
+
+  Widget _buildWideLayout(BuildContext context, DocuTrackerProvider provider) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(flex: 2, child: _buildLeftPanel(provider)),
+        Expanded(
+          flex: 2,
+          child: _adminTab == 0
+              ? _buildWorkflowsManagementCard(context, provider)
+              : _buildPermissionsManagementCard(provider),
+        ),
         const SizedBox(width: 24),
         SizedBox(width: 280, child: _buildRightPanel(provider)),
       ],
     );
   }
 
-  Widget _buildNarrowLayout(DocuTrackerProvider provider) {
+  Widget _buildNarrowLayout(
+    BuildContext context,
+    DocuTrackerProvider provider,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _buildLeftPanel(provider),
+        if (_adminTab == 0)
+          _buildWorkflowsManagementCard(context, provider)
+        else
+          _buildPermissionsManagementCard(provider),
         const SizedBox(height: 24),
         _buildRightPanel(provider),
       ],
     );
   }
 
-  Widget _buildLeftPanel(DocuTrackerProvider provider) {
+  Widget _buildWorkflowsManagementCard(
+    BuildContext context,
+    DocuTrackerProvider provider,
+  ) {
+    final configs = _routingConfigsForDisplay(provider);
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: DocuTrackerStyles.listCardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.account_tree_rounded,
+                color: AppTheme.primaryNavy,
+                size: 24,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Workflows',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Routes are per document type. Use Edit on a card to change steps; use New workflow to draft another version from scratch.',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.tonalIcon(
+                onPressed: provider.loading
+                    ? null
+                    : () => _createNewWorkflow(context, provider),
+                icon: const Icon(Icons.add_rounded, size: 20),
+                label: const Text('New workflow'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (configs.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'No workflow definitions loaded. Tap New workflow to create one, or Refresh if you expect data from the server.',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+              ),
+            )
+          else
+            ...configs.map(
+              (config) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _RoutingConfigCard(
+                  config: config,
+                  employeeDirectory: _employeeDirectory,
+                  departmentNameById: _departmentNameById,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPermissionsManagementCard(DocuTrackerProvider provider) {
     final search = _searchController.text.toLowerCase();
     final filtered = provider.permissions.where((p) {
       if (search.isEmpty) return true;
-      final target = p.roleId != null ? 'role ${p.roleId}' : 'user ${p.userId}';
+      final target = p.roleId != null
+          ? 'role ${p.roleId}'
+          : '${p.userId ?? ''} ${_formatPermissionTarget(p)}';
       return target.toLowerCase().contains(search) ||
           p.documentType.toLowerCase().contains(search) ||
           p.action.displayName.toLowerCase().contains(search);
@@ -113,10 +477,45 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
 
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: DocuTrackerStyles.listCardDecoration(context),
+      decoration: DocuTrackerStyles.listCardDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Row(
+            children: [
+              Icon(
+                Icons.description_outlined,
+                color: AppTheme.primaryNavy,
+                size: 24,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Document permissions',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Each row is one person (or role) and document scope; chips list every action and whether it is granted. Workflow routing is under Workflows.',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
           Wrap(
             spacing: 12,
             runSpacing: 12,
@@ -140,29 +539,26 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                   child: _buildFilterDropdown<String?>(
                     _selectedRoleId == null
                         ? 'All roles'
-                        : (_selectedRoleId == 'admin'
-                              ? 'Admin'
-                              : _selectedRoleId ?? 'All'),
+                        : (_userGroups[_selectedRoleId] ??
+                              _selectedRoleId ??
+                              'All'),
                     _selectedRoleId,
-                    [null, 'admin', 'hr_staff', 'dept_head', 'employee'],
+                    [null, ..._userGroups.keys],
                     (v) {
                       setState(() => _selectedRoleId = v);
                       _load();
                     },
-                    labels: const [
-                      'All roles',
-                      'Admin',
-                      'HR Staff',
-                      'Dept Head',
-                      'Employee',
-                    ],
+                    labels: ['All roles', ..._userGroups.values],
                   ),
                 ),
               if (_filterBy == 'user')
                 SizedBox(
-                  width: 180,
+                  width: 200,
                   child: TextField(
-                    decoration: DocuTrackerStyles.inputDecoration(context, 'User ID', Icons.person_outline_rounded),
+                    decoration: DocuTrackerStyles.inputDecoration(
+context,                       'User ID (optional)',
+                      Icons.person_outline_rounded,
+                    ),
                     onChanged: (v) {
                       setState(() => _selectedUserId = v.isEmpty ? null : v);
                       _load();
@@ -192,87 +588,102 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 20),
-          _buildWorkflowSection(provider),
-          const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            decoration: BoxDecoration(
-              color: AppTheme.lightGray.withOpacity(0.4),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: Text(
-                    'Role/User',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: AppTheme.textPrimary,
+          const SizedBox(height: 16),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              const minW = 520.0;
+              final useHScroll = constraints.maxWidth < minW;
+              Widget tableBlock() {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppTheme.lightGray.withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            flex: 2,
+                            child: Text(
+                              'Person / role',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            flex: 1,
+                            child: Text(
+                              'Document type',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            flex: 3,
+                            child: Text(
+                              'Permissions',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 40),
+                        ],
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 8),
+                    if (provider.loading)
+                      const Padding(
+                        padding: EdgeInsets.all(32),
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    else if (filtered.isEmpty)
+                      Container(
+                        constraints: const BoxConstraints(minHeight: 120),
+                        alignment: Alignment.center,
+                        child: Text(
+                          'No permissions yet',
+                          style: TextStyle(
+                            color: AppTheme.textSecondary.withValues(
+                              alpha: 0.8,
+                            ),
+                            fontSize: 14,
+                          ),
+                        ),
+                      )
+                    else
+                      ..._buildGroupedPermissionRows(filtered),
+                  ],
+                );
+              }
+
+              if (!useHScroll) {
+                return tableBlock();
+              }
+              return SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minWidth: minW),
+                  child: tableBlock(),
                 ),
-                Expanded(
-                  child: Text(
-                    'Document Type',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: Text(
-                    'Action',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: 92,
-                  child: Text(
-                    'Granted',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+              );
+            },
           ),
-          const SizedBox(height: 8),
-          if (provider.loading)
-            const Padding(
-              padding: EdgeInsets.all(32),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (filtered.isEmpty)
-            Container(
-              constraints: const BoxConstraints(minHeight: 120),
-              alignment: Alignment.center,
-              child: Text(
-                'No permissions yet',
-                style: TextStyle(
-                  color: AppTheme.textSecondary.withValues(alpha: 0.8),
-                  fontSize: 14,
-                ),
-              ),
-            )
-          else
-            ...filtered.map(
-              (p) => _PermissionRow(
-                permission: p,
-                onEdit: () => _openSetupForPermission(p),
-              ),
-            ),
         ],
       ),
     );
@@ -285,13 +696,13 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
       decoration: InputDecoration(
         hintText: 'Search',
         hintStyle: TextStyle(
-          color: AppTheme.textSecondary.withOpacity(0.8),
+          color: AppTheme.textSecondary.withValues(alpha: 0.8),
           fontSize: 14,
         ),
         prefixIcon: Icon(
           Icons.search_rounded,
           size: 20,
-          color: AppTheme.textSecondary.withOpacity(0.7),
+          color: AppTheme.textSecondary.withValues(alpha: 0.7),
         ),
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(
@@ -299,7 +710,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
           vertical: 12,
         ),
         filled: true,
-        fillColor: AppTheme.lightGray.withOpacity(0.5),
+        fillColor: AppTheme.lightGray.withValues(alpha: 0.5),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide.none,
@@ -318,7 +729,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
-        color: AppTheme.lightGray.withOpacity(0.5),
+        color: AppTheme.lightGray.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: Colors.transparent),
       ),
@@ -342,71 +753,89 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
     );
   }
 
-  Widget _buildWorkflowSection(DocuTrackerProvider provider) {
-    if (provider.routingConfigs.isEmpty) return const SizedBox.shrink();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(
-              Icons.account_tree_rounded,
-              color: AppTheme.primaryNavy,
-              size: 20,
-            ),
-            const SizedBox(width: 8),
-            Text(
-              'Workflows',
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        ...provider.routingConfigs.map(
-          (config) => _RoutingConfigCard(config: config),
-        ),
-      ],
-    );
-  }
-
   Widget _buildRightPanel(DocuTrackerProvider provider) {
+    final totalRules = provider.permissions.length;
+    final grantedCount = provider.permissions.where((p) => p.granted).length;
+    final deniedCount = totalRules - grantedCount;
+
     return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: DocuTrackerStyles.listCardDecoration(context),
+      padding: const EdgeInsets.all(20),
+      decoration: DocuTrackerStyles.listCardDecoration(),
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: 24),
-          CircleAvatar(
-            radius: 48,
-            backgroundColor: AppTheme.primaryNavy.withOpacity(0.12),
-            child: Icon(
-              Icons.security_rounded,
-              size: 48,
-              color: AppTheme.primaryNavy,
-            ),
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  Icons.shield_rounded,
+                  size: 20,
+                  color: AppTheme.primaryNavy,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'Access Control',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 16),
-          Text(
-            'User Permissions',
-            style: TextStyle(
-              color: AppTheme.textSecondary.withOpacity(0.9),
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-            ),
-            textAlign: TextAlign.center,
+          // Stats row
+          Row(
+            children: [
+              Expanded(
+                child: _StatChip(
+                  label: 'Total rules',
+                  value: '$totalRules',
+                  color: AppTheme.primaryNavy,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _StatChip(
+                  label: 'Granted',
+                  value: '$grantedCount',
+                  color: const Color(0xFF4CAF50),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _StatChip(
+                  label: 'Denied',
+                  value: '$deniedCount',
+                  color: Colors.red.shade400,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 20),
+          const Divider(height: 1),
+          const SizedBox(height: 20),
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: () => _showUserPermissionsDialog(context),
-              icon: const Icon(Icons.add_rounded, size: 20),
-              label: const Text('Edit Permissions'),
+              onPressed: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const DocuTrackerPermissionEditorScreen(),
+                  ),
+                );
+                if (mounted) _load();
+              },
+              icon: const Icon(Icons.manage_accounts_rounded, size: 20),
+              label: const Text('Manage Permissions'),
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFF4CAF50),
                 foregroundColor: Colors.white,
@@ -418,7 +847,38 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
               ),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        const DocuTrackerStepAssigneesEditorScreen(),
+                  ),
+                );
+                if (mounted) _load();
+              },
+              icon: Icon(
+                Icons.group_rounded,
+                size: 20,
+                color: AppTheme.primaryNavy,
+              ),
+              label: const Text('Step Assignees'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+                side: BorderSide(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.5),
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
@@ -427,13 +887,13 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                 Icons.refresh_rounded,
                 size: 20,
                 color: provider.loading
-                    ? AppTheme.textSecondary.withOpacity(0.5)
-                    : AppTheme.textPrimary,
+                    ? AppTheme.textSecondary.withValues(alpha: 0.5)
+                    : AppTheme.textSecondary,
               ),
               label: const Text('Refresh'),
               style: OutlinedButton.styleFrom(
-                foregroundColor: AppTheme.textPrimary,
-                side: BorderSide(color: AppTheme.primaryNavy.withOpacity(0.6)),
+                foregroundColor: AppTheme.textSecondary,
+                side: BorderSide(color: Colors.black.withValues(alpha: 0.12)),
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
@@ -446,29 +906,20 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
     );
   }
 
-  Future<void> _showUserPermissionsDialog(BuildContext dialogContext) async {
-    final saved = await Navigator.of(dialogContext).push<bool>(
-      MaterialPageRoute<bool>(
-        builder: (_) => DocuTrackerSetupPermissionsScreen(
-          initialUserId: _selectedUserId,
-          initialDocumentType: _selectedDocumentType ?? '*',
-        ),
-      ),
-    );
-    if (saved == true && mounted) _load();
-  }
-
-  Future<void> _openSetupForPermission(DocumentPermission permission) async {
-    final saved = await Navigator.of(context).push<bool>(
-      MaterialPageRoute<bool>(
-        builder: (_) => DocuTrackerSetupPermissionsScreen(
-          initialUserId: permission.userId ?? _selectedUserId,
+  Future<void> _openPermissionEditorForRow(
+    DocumentPermission permission,
+  ) async {
+    final uid = permission.userId ?? _selectedUserId;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => DocuTrackerPermissionEditorScreen(
+          initialUserId: uid,
           initialDocumentType: permission.documentType,
+          initialTabIsUserOverride: true,
         ),
       ),
     );
-
-    if (saved == true && mounted) _load();
+    if (mounted) _load();
   }
 
   // ignore: unused_element
@@ -532,7 +983,10 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                                 const SizedBox(height: 8),
                                 DropdownButtonFormField<DocumentAction>(
                                   value: action,
-                                  decoration: DocuTrackerStyles.dropdownDecoration(context, 'Select action'),
+                                  decoration:
+                                      DocuTrackerStyles.dropdownDecoration(
+context,                                         'Select action',
+                                      ),
                                   items: DocumentAction.values
                                       .map(
                                         (a) => DropdownMenuItem(
@@ -557,7 +1011,10 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                                 const SizedBox(height: 8),
                                 DropdownButtonFormField<String>(
                                   value: documentType,
-                                  decoration: DocuTrackerStyles.dropdownDecoration(context, 'Select type'),
+                                  decoration:
+                                      DocuTrackerStyles.dropdownDecoration(
+context,                                         'Select type',
+                                      ),
                                   items: [
                                     const DropdownMenuItem(
                                       value: '*',
@@ -584,7 +1041,9 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                                     color: AppTheme.offWhite,
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(
-                                      color: Colors.black.withOpacity(0.08),
+                                      color: Colors.black.withValues(
+                                        alpha: 0.08,
+                                      ),
                                     ),
                                   ),
                                   child: Row(
@@ -604,7 +1063,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                                         onChanged: (v) =>
                                             setState(() => granted = v),
                                         activeTrackColor: AppTheme.primaryNavy
-                                            .withOpacity(0.6),
+                                            .withValues(alpha: 0.6),
                                       ),
                                     ],
                                   ),
@@ -620,13 +1079,23 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                                 ),
                                 const SizedBox(height: 8),
                                 TextField(
-                                  decoration: DocuTrackerStyles.inputDecoration(context, 'Role ID (e.g. admin, hr_staff)', Icons.badge_outlined),
-                                  onChanged: (v) => roleId = v.trim().isEmpty ? null : v.trim(),
+                                  decoration: DocuTrackerStyles.inputDecoration(
+context,                                     'Role ID (e.g. admin, hr_staff)',
+                                    Icons.badge_outlined,
+                                  ),
+                                  onChanged: (v) => roleId = v.trim().isEmpty
+                                      ? null
+                                      : v.trim(),
                                 ),
                                 const SizedBox(height: 16),
                                 TextField(
-                                  decoration: DocuTrackerStyles.inputDecoration(context, 'User ID (optional)', Icons.person_outline_rounded),
-                                  onChanged: (v) => userId = v.trim().isEmpty ? null : v.trim(),
+                                  decoration: DocuTrackerStyles.inputDecoration(
+context,                                     'User ID (optional)',
+                                    Icons.person_outline_rounded,
+                                  ),
+                                  onChanged: (v) => userId = v.trim().isEmpty
+                                      ? null
+                                      : v.trim(),
                                 ),
                               ],
                             ),
@@ -640,7 +1109,9 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                     decoration: BoxDecoration(
                       color: Colors.grey.shade50,
                       border: Border(
-                        top: BorderSide(color: Colors.black.withOpacity(0.06)),
+                        top: BorderSide(
+                          color: Colors.black.withValues(alpha: 0.06),
+                        ),
                       ),
                     ),
                     child: Row(
@@ -691,13 +1162,18 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
   }
 
   static const _userGroups = <String, String>{
-    'admin': 'Administrator',
-    'hr_staff': 'HR Staff',
-    'dept_head': 'Dept Head',
-    'employee': 'Employee',
+    DocuTrackerRoles.admin: 'Administrator',
+    DocuTrackerRoles.hr: 'HR',
+    DocuTrackerRoles.supervisor: 'Supervisor',
+    DocuTrackerRoles.employee: 'Employee',
   };
 
   static const _restrictionItems = <_RestrictionItem>[
+    _RestrictionItem(
+      action: DocumentAction.createDraft,
+      title: 'Create drafts',
+      icon: Icons.add_circle_outline_rounded,
+    ),
     _RestrictionItem(
       action: DocumentAction.view,
       title: 'Auditing',
@@ -770,17 +1246,17 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
   Future<void> _load() async {
     setState(() => _loading = true);
 
-    final perms = await _repo.listPermissions(
-      roleId: _selectedRoleId,
-      documentType: '*',
-    );
+    final perms = <DocumentPermission>[];
+    for (final r in DocuTrackerRoles.equivalentsForRead(_selectedRoleId)) {
+      perms.addAll(await _repo.listPermissions(roleId: r, documentType: '*'));
+    }
 
     _existingByActionName = {for (final p in perms) p.action.name: p};
 
     _grantedByActionName = {
       for (final item in _DocuTrackerAdminScreenState._restrictionItems)
         item.action.name:
-            _existingByActionName[item.action.name]?.granted ?? true,
+            _existingByActionName[item.action.name]?.granted ?? false,
     };
 
     if (!mounted) return;
@@ -792,19 +1268,19 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
 
     for (final item in _DocuTrackerAdminScreenState._restrictionItems) {
       final actionName = item.action.name;
-      final granted = _grantedByActionName[actionName] ?? true;
+      final granted = _grantedByActionName[actionName] ?? false;
       final existing = _existingByActionName[actionName];
 
       if (existing == null) {
-        // Keep "implicit allow" behavior: only insert explicit denies.
-        if (!granted) {
+        // Strict default-deny: insert explicit allows (and explicit denies if you want them visible).
+        if (granted) {
           await _repo.savePermission(
             DocumentPermission(
               roleId: _selectedRoleId,
               userId: null,
               documentType: '*',
               action: item.action,
-              granted: false,
+              granted: true,
             ),
           );
         }
@@ -858,7 +1334,7 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                       Text(
                         'User Group',
                         style: TextStyle(
-                          color: AppTheme.textSecondary.withOpacity(0.9),
+                          color: AppTheme.textSecondary.withValues(alpha: 0.9),
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
                         ),
@@ -866,7 +1342,9 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                       const SizedBox(height: 8),
                       DropdownButtonFormField<String>(
                         value: _selectedRoleId,
-                        decoration: DocuTrackerStyles.dropdownDecoration(context, 'Select user group'),
+                        decoration: DocuTrackerStyles.dropdownDecoration(
+context,                           'Select user group',
+                        ),
                         items: _DocuTrackerAdminScreenState._userGroups.entries
                             .map(
                               (e) => DropdownMenuItem(
@@ -888,7 +1366,7 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                       Text(
                         roleLabel,
                         style: TextStyle(
-                          color: AppTheme.textSecondary.withOpacity(0.8),
+                          color: AppTheme.textSecondary.withValues(alpha: 0.8),
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
                         ),
@@ -908,10 +1386,10 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                               vertical: 12,
                             ),
                             decoration: BoxDecoration(
-                              color: AppTheme.lightGray.withOpacity(0.25),
+                              color: AppTheme.lightGray.withValues(alpha: 0.25),
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
-                                color: Colors.black.withOpacity(0.06),
+                                color: Colors.black.withValues(alpha: 0.06),
                               ),
                             ),
                             child: Row(
@@ -920,8 +1398,8 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                                   width: 34,
                                   height: 34,
                                   decoration: BoxDecoration(
-                                    color: AppTheme.primaryNavy.withOpacity(
-                                      0.12,
+                                    color: AppTheme.primaryNavy.withValues(
+                                      alpha: 0.12,
                                     ),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
@@ -953,7 +1431,7 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                                     });
                                   },
                                   activeTrackColor: AppTheme.primaryNavy
-                                      .withOpacity(0.6),
+                                      .withValues(alpha: 0.6),
                                 ),
                               ],
                             ),
@@ -969,7 +1447,7 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
               decoration: BoxDecoration(
                 color: Colors.grey.shade50,
                 border: Border(
-                  top: BorderSide(color: Colors.black.withOpacity(0.06)),
+                  top: BorderSide(color: Colors.black.withValues(alpha: 0.06)),
                 ),
               ),
               child: Row(
@@ -1008,59 +1486,160 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
   }
 }
 
-class _PermissionRow extends StatelessWidget {
-  const _PermissionRow({required this.permission, required this.onEdit});
+/// One row per person/role + document type; actions shown as compact chips (✓ / ✗).
+class _PermissionGroupRow extends StatelessWidget {
+  const _PermissionGroupRow({
+    required this.permissions,
+    required this.targetLabel,
+    required this.onEdit,
+    this.isEven = false,
+  });
 
-  final DocumentPermission permission;
+  final List<DocumentPermission> permissions;
+  final String targetLabel;
   final VoidCallback onEdit;
+  final bool isEven;
+
+  Widget _actionChip(DocumentPermission p) {
+    final ac = _permissionActionColor(p.action);
+    return Tooltip(
+      message: '${p.action.displayName}: ${p.granted ? 'Granted' : 'Denied'}',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: ac.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: ac.withValues(alpha: 0.35)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              p.action.displayName,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: ac,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              p.granted ? Icons.check_rounded : Icons.close_rounded,
+              size: 14,
+              color: p.granted ? Colors.green.shade700 : Colors.red.shade700,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final target = permission.roleId != null
-        ? 'Role: ${permission.roleId}'
-        : 'User: ${permission.userId}';
+    final first = permissions.first;
+    final isAllTypes = first.documentType == '*';
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: isEven
+            ? AppTheme.lightGray.withValues(alpha: 0.25)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+      ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
             flex: 2,
-            child: Text(
-              target,
-              style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
-              overflow: TextOverflow.ellipsis,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CircleAvatar(
+                  radius: 14,
+                  backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                  child: Text(
+                    targetLabel.isNotEmpty ? targetLabel[0].toUpperCase() : '?',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.primaryNavy,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    targetLabel,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: AppTheme.textPrimary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
             ),
           ),
           Expanded(
-            child: Text(
-              permission.documentType,
-              style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
-              overflow: TextOverflow.ellipsis,
-            ),
+            flex: 1,
+            child: isAllTypes
+                ? Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.blueGrey.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: Colors.blueGrey.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Text(
+                      'All types',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.blueGrey.shade700,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  )
+                : Text(
+                    first.documentType,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.textSecondary,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
           ),
           Expanded(
-            child: Text(
-              permission.action.displayName,
-              style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
-              overflow: TextOverflow.ellipsis,
+            flex: 3,
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              alignment: WrapAlignment.start,
+              children: [for (final p in permissions) _actionChip(p)],
             ),
           ),
           SizedBox(
-            width: 92,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Icon(
-                  permission.granted ? Icons.check_circle : Icons.cancel,
-                  color: permission.granted ? Colors.green : Colors.red,
-                  size: 20,
-                ),
-                IconButton(
-                  tooltip: 'Edit this grant set',
-                  icon: const Icon(Icons.edit_rounded, size: 20),
-                  onPressed: onEdit,
-                ),
-              ],
+            width: 40,
+            child: IconButton(
+              tooltip: 'Edit permissions for this person and document type',
+              icon: Icon(
+                Icons.edit_rounded,
+                size: 17,
+                color: AppTheme.textSecondary,
+              ),
+              onPressed: onEdit,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
             ),
           ),
         ],
@@ -1070,36 +1649,162 @@ class _PermissionRow extends StatelessWidget {
 }
 
 class _RoutingConfigCard extends StatelessWidget {
-  const _RoutingConfigCard({required this.config});
+  const _RoutingConfigCard({
+    required this.config,
+    required this.employeeDirectory,
+    required this.departmentNameById,
+  });
 
   final DocumentRoutingConfig config;
+  final EmployeeDirectoryLookup employeeDirectory;
+  final Map<String, String> departmentNameById;
+
+  String _stepChipLabel(WorkflowStep s) {
+    final title = (s.label ?? '').trim().isNotEmpty ? s.label!.trim() : 'Step';
+    final t = s.assigneeType.trim().toLowerCase();
+    switch (t) {
+      case 'user':
+        final ids = s.userIds?.where((e) => e.trim().isNotEmpty).toList() ?? [];
+        if (ids.isNotEmpty) {
+          final line = employeeDirectory.formatUserLine(ids.first);
+          return '${s.stepOrder}. $title · $line';
+        }
+        final did = s.departmentId?.trim();
+        final dn = (did != null && did.isNotEmpty)
+            ? (departmentNameById[did] ?? did)
+            : null;
+        return '${s.stepOrder}. $title · ${dn ?? 'Choose department & people'}';
+      case 'department':
+        final did = s.departmentId?.trim();
+        final dn = (did != null && did.isNotEmpty)
+            ? (departmentNameById[did] ?? did)
+            : '—';
+        return '${s.stepOrder}. $title · Dept pool: $dn';
+      case 'office':
+        return '${s.stepOrder}. $title · Office routing';
+      case 'role':
+        final r = s.roleId?.trim();
+        return '${s.stepOrder}. $title · Role: ${r?.isNotEmpty == true ? r : '—'}';
+      default:
+        return '${s.stepOrder}. $title';
+    }
+  }
+
+  static Color _stepColor(int order) {
+    const colors = [
+      Color(0xFF3B82F6),
+      Color(0xFF8B5CF6),
+      Color(0xFF10B981),
+      Color(0xFFF59E0B),
+      Color(0xFFEF4444),
+      Color(0xFF06B6D4),
+    ];
+    return colors[(order - 1) % colors.length];
+  }
 
   @override
   Widget build(BuildContext context) {
+    final stepCount = config.steps.length;
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppTheme.lightGray.withOpacity(0.3),
+        color: AppTheme.lightGray.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Text(
-                config.documentType.displayName,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 14,
+              Expanded(
+                child: Row(
+                  children: [
+                    Text(
+                      config.documentType.displayName,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        'v${config.version}',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: AppTheme.primaryNavy,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        '${config.reviewDeadlineHours}h deadline',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.orange.shade700,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.blueGrey.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        '$stepCount step${stepCount == 1 ? '' : 's'}',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.blueGrey.shade700,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(width: 8),
-              Text(
-                '• ${config.reviewDeadlineHours}h deadline',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+              IconButton(
+                tooltip: 'Edit workflow',
+                icon: const Icon(Icons.edit_rounded, size: 20),
+                onPressed: () async {
+                  final saved = await Navigator.of(context).push<bool>(
+                    MaterialPageRoute<bool>(
+                      builder: (_) => DocuTrackerWorkflowEditorScreen(
+                        initialConfig: config,
+                      ),
+                    ),
+                  );
+                  if (saved == true && context.mounted) {
+                    await context
+                        .read<DocuTrackerProvider>()
+                        .loadRoutingConfigs();
+                  }
+                },
               ),
             ],
           ),
@@ -1107,28 +1812,99 @@ class _RoutingConfigCard extends StatelessWidget {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: config.steps
-                .map(
-                  (s) => Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppTheme.offWhite,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.black.withOpacity(0.06)),
-                    ),
-                    child: Text(
-                      '${s.stepOrder}. ${s.label ?? s.assigneeType}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: AppTheme.textPrimary,
+            children: config.steps.map((s) {
+              final color = _stepColor(s.stepOrder);
+              return Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.07),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: color.withValues(alpha: 0.2)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 18,
+                      height: 18,
+                      decoration: BoxDecoration(
+                        color: color,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(
+                        child: Text(
+                          '${s.stepOrder}',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                )
-                .toList(),
+                    const SizedBox(width: 6),
+                    Text(
+                      _stepChipLabel(s).replaceFirst('${s.stepOrder}. ', ''),
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.25,
+                        color: color.withValues(alpha: 0.9),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatChip extends StatelessWidget {
+  const _StatChip({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        children: [
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              color: color.withValues(alpha: 0.8),
+              fontWeight: FontWeight.w600,
+            ),
+            textAlign: TextAlign.center,
           ),
         ],
       ),

@@ -35,10 +35,18 @@ class DocumentPermission {
 
   factory DocumentPermission.fromJson(Map<String, dynamic> json) {
     final actionStr = json['action']?.toString() ?? 'view';
-    final normalized = actionStr.toLowerCase().replaceAll(' ', '');
+    final normalized = actionStr
+        .toLowerCase()
+        .replaceAll(' ', '')
+        .replaceAll('-', '_');
     DocumentAction action = DocumentAction.view;
     for (final e in DocumentAction.values) {
-      if (e.name == normalized || (e == DocumentAction.returnDoc && normalized == 'return')) {
+      final enumKey = e.name.toLowerCase();
+      final wireKey = e.value.toLowerCase();
+      if (enumKey == normalized ||
+          wireKey == normalized ||
+          (e == DocumentAction.returnDoc && normalized == 'return') ||
+          (e == DocumentAction.createDraft && normalized == 'create')) {
         action = e;
         break;
       }

@@ -5,7 +5,6 @@ void main() {
   test('DocumentStatus serializes to snake_case', () {
     expect(DocumentStatus.inReview.value, 'in_review');
     expect(DocumentStatus.approved.value, 'approved');
-    expect(DocumentStatus.forwarded.value, 'forwarded');
   });
 
   test('documentStatusFromString handles snake_case and camelCase', () {

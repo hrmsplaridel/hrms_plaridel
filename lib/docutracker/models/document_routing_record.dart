@@ -8,6 +8,8 @@ class DocumentRoutingRecord {
     required this.documentId,
     required this.stepOrder,
     required this.assigneeId,
+    this.assigneeIds = const [],
+    this.assigneeNames = const [],
     this.assigneeName,
     this.sentTime,
     this.deadlineTime,
@@ -22,6 +24,8 @@ class DocumentRoutingRecord {
   final String documentId;
   final int stepOrder;
   final String assigneeId;
+  final List<String> assigneeIds;
+  final List<String> assigneeNames;
 
   /// Joined from profiles
   final String? assigneeName;
@@ -45,11 +49,21 @@ class DocumentRoutingRecord {
   static const String tableName = 'docutracker_routing_records';
 
   factory DocumentRoutingRecord.fromJson(Map<String, dynamic> json) {
+    final assigneeIdsRaw = json['assignee_ids'];
+    final assigneeIds = assigneeIdsRaw is List
+        ? assigneeIdsRaw.map((e) => e?.toString() ?? '').where((e) => e.isNotEmpty).toList()
+        : const <String>[];
+    final assigneeNamesRaw = json['assignee_names'];
+    final assigneeNames = assigneeNamesRaw is List
+        ? assigneeNamesRaw.map((e) => e?.toString() ?? '').where((e) => e.isNotEmpty).toList()
+        : const <String>[];
     return DocumentRoutingRecord(
       id: json['id']?.toString(),
       documentId: json['document_id'] as String? ?? '',
       stepOrder: (json['step_order'] as num?)?.toInt() ?? 1,
       assigneeId: json['assignee_id'] as String? ?? '',
+      assigneeIds: assigneeIds,
+      assigneeNames: assigneeNames,
       assigneeName: json['assignee_name']?.toString(),
       sentTime: json['sent_time'] != null
           ? DateTime.tryParse(json['sent_time'] as String)
@@ -76,6 +90,8 @@ class DocumentRoutingRecord {
         'document_id': documentId,
         'step_order': stepOrder,
         'assignee_id': assigneeId,
+        if (assigneeIds.isNotEmpty) 'assignee_ids': assigneeIds,
+        if (assigneeNames.isNotEmpty) 'assignee_names': assigneeNames,
         if (sentTime != null) 'sent_time': sentTime!.toIso8601String(),
         if (deadlineTime != null) 'deadline_time': deadlineTime!.toIso8601String(),
         if (reviewedTime != null) 'reviewed_time': reviewedTime!.toIso8601String(),

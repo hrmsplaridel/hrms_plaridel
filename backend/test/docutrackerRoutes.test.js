@@ -42,7 +42,7 @@ function getRouteHandler(router, method, path) {
   return layer.route.stack[layer.route.stack.length - 1].handle;
 }
 
-test('GET /permissions/effective returns explanation payload', async () => {
+test('GET /permission-explain returns explanation payload', async () => {
   const workflowService = {
     DOC_ACTIONS: new Set(['view', 'approve', 'submit']),
     hasPermission: async () => null,
@@ -82,7 +82,7 @@ test('GET /permissions/effective returns explanation payload', async () => {
   const routePath = require.resolve('../src/routes/docutracker');
   delete require.cache[routePath];
   const router = require('../src/routes/docutracker');
-  const handler = getRouteHandler(router, 'get', '/permissions/effective');
+  const handler = getRouteHandler(router, 'get', '/permission-explain');
 
   const req = {
     query: { document_type: 'memo', action: 'view' },
@@ -103,7 +103,7 @@ test('GET /permissions/effective returns explanation payload', async () => {
   delete require.cache[routePath];
 });
 
-test('POST /documents/:id/approve forwards idempotency header', async () => {
+test('POST /documents/:id/transition forwards idempotency key in body', async () => {
   let capturedPayload = null;
   const workflowService = {
     DOC_ACTIONS: new Set(['view', 'approve', 'submit']),
@@ -138,12 +138,12 @@ test('POST /documents/:id/approve forwards idempotency header', async () => {
   const routePath = require.resolve('../src/routes/docutracker');
   delete require.cache[routePath];
   const router = require('../src/routes/docutracker');
-  const handler = getRouteHandler(router, 'post', '/documents/:id/approve');
+  const handler = getRouteHandler(router, 'post', '/documents/:id/transition');
 
   const req = {
     params: { id: 'doc-99' },
-    body: { remarks: 'ok' },
-    headers: { 'idempotency-key': 'idem-99' },
+    body: { action: 'approve', remarks: 'ok', idempotency_key: 'idem-99' },
+    headers: {},
     user: { id: 'user-2', role: 'admin' },
   };
   const res = createMockResponse();
@@ -153,6 +153,85 @@ test('POST /documents/:id/approve forwards idempotency header', async () => {
   assert.equal(res.payload?.ok, true);
   assert.equal(capturedPayload?.idempotency_key, 'idem-99');
   assert.equal(capturedPayload?.remarks, 'ok');
+
+  restoreWorkflow();
+  restoreDb();
+  restoreAuth();
+  restoreRbac();
+  delete require.cache[routePath];
+});
+
+test('POST /permissions normalizes create to create_draft', async () => {
+  const queries = [];
+  const restoreWorkflow = withMockedModule('../src/services/docutrackerWorkflowService', {
+    DOC_ACTIONS: new Set(['view', 'approve', 'submit']),
+    hasPermission: async () => null,
+    canUserPerformTypeAction: async () => true,
+    canUserPerformDocumentAction: async () => true,
+    listDocuments: async () => [],
+    getDocumentBundle: async () => null,
+    createDocument: async () => ({}),
+    transitionDocument: async () => ({}),
+    updateDocumentMetadata: async () => ({}),
+    addDocumentRemark: async () => true,
+    getEffectivePermissionExplanation: async () => ({}),
+  });
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: {
+      query: async (sql, params = []) => {
+        queries.push({ sql, params });
+        if (sql.includes('SELECT id FROM docutracker_permissions')) {
+          return { rowCount: 0, rows: [] };
+        }
+        if (sql.includes('INSERT INTO docutracker_permissions')) {
+          return {
+            rowCount: 1,
+            rows: [
+              {
+                id: 'perm-1',
+                user_id: 'user-1',
+                role_id: null,
+                document_type: 'memo',
+                action: 'create_draft',
+                granted: true,
+              },
+            ],
+          };
+        }
+        return { rowCount: 0, rows: [] };
+      },
+    },
+  });
+  const restoreAuth = withMockedModule('../src/middleware/auth', {
+    authMiddleware: (_req, _res, next) => next?.(),
+  });
+  const restoreRbac = withMockedModule('../src/middleware/rbac', {
+    requireAdmin: (_req, _res, next) => next?.(),
+  });
+
+  const routePath = require.resolve('../src/routes/docutracker');
+  delete require.cache[routePath];
+  const router = require('../src/routes/docutracker');
+  const handler = getRouteHandler(router, 'post', '/permissions');
+
+  const req = {
+    body: {
+      user_id: 'user-1',
+      document_type: 'memo',
+      action: 'create',
+      granted: true,
+    },
+    headers: {},
+    user: { id: 'admin-1', role: 'admin' },
+  };
+  const res = createMockResponse();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(res.payload?.action, 'create_draft');
+  const insertCall = queries.find((q) => q.sql.includes('INSERT INTO docutracker_permissions'));
+  assert.ok(insertCall);
+  assert.equal(insertCall.params[3], 'create_draft');
 
   restoreWorkflow();
   restoreDb();

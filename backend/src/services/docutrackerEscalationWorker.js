@@ -1,22 +1,26 @@
 const { pool } = require('../config/db');
+const {
+  ESCALATION_ELIGIBLE_WORKFLOW_STATUSES,
+} = require('./docutrackerStatusSemantics');
 
 let timer = null;
 let running = false;
 const ESCALATION_LOCK_KEY = 907531;
 
-function parseSteps(steps) {
-  if (!Array.isArray(steps)) return [];
-  return steps
-    .map((step) => ({
-      step_order: Number(step.step_order ?? step.stepOrder ?? 0),
-      user_ids: Array.isArray(step.user_ids)
-        ? step.user_ids
-        : Array.isArray(step.userIds)
-          ? step.userIds
-          : [],
-    }))
-    .filter((step) => step.step_order > 0)
-    .sort((a, b) => a.step_order - b.step_order);
+function normalizeRole(role) {
+  const r = String(role ?? '').trim().toLowerCase();
+  if (!r) return '';
+  if (r === 'hr_staff') return 'hr';
+  if (r === 'dept_head') return 'supervisor';
+  return r;
+}
+
+function roleEquivalentsForRead(role) {
+  const n = normalizeRole(role);
+  if (!n) return [];
+  if (n === 'hr') return ['hr', 'hr_staff'];
+  if (n === 'supervisor') return ['supervisor', 'dept_head'];
+  return [n];
 }
 
 async function isActiveUser(client, userId) {
@@ -118,6 +122,40 @@ async function insertHistoryIfMissing(client, payload) {
   return true;
 }
 
+async function upsertRoutingRecord(client, payload) {
+  const {
+    document_id,
+    step_order,
+    assignee_id,
+    status,
+    deadline_time,
+    remarks,
+  } = payload || {};
+  if (!document_id || !step_order) return;
+  if (!assignee_id) return;
+  await client.query(
+    `INSERT INTO docutracker_routing_records
+       (document_id, step_order, assignee_id, sent_time, deadline_time, reviewed_time, status, remarks)
+     VALUES ($1, $2, $3, now(), $4, NULL, $5, $6)
+     ON CONFLICT (document_id, step_order)
+     DO UPDATE SET assignee_id = EXCLUDED.assignee_id,
+                   sent_time = EXCLUDED.sent_time,
+                   deadline_time = EXCLUDED.deadline_time,
+                   reviewed_time = NULL,
+                   status = EXCLUDED.status,
+                   remarks = EXCLUDED.remarks,
+                   updated_at = now()`,
+    [
+      document_id,
+      step_order,
+      assignee_id,
+      deadline_time ?? null,
+      status ?? 'escalated',
+      remarks ?? null,
+    ]
+  );
+}
+
 async function notifyAdminsForIntervention(client, documentId, title, body) {
   const admins = await client.query(
     `SELECT id
@@ -136,21 +174,41 @@ async function notifyAdminsForIntervention(client, documentId, title, body) {
   }
 }
 
-async function resolveEscalationRecipient(client, doc, configSteps) {
-  const currentStep = Number(doc.current_step || 1);
-  const nextStep = configSteps.find((step) => step.step_order === currentStep + 1);
-  if (!nextStep) {
-    return { assigneeId: null, nextStepOrder: null, reason: 'NO_NEXT_STEP' };
+async function resolveEscalationRecipient(client, doc) {
+  const targetRole = normalizeRole(doc.escalation_target_role);
+  const roleCandidates = roleEquivalentsForRead(targetRole);
+  const deptId = doc.document_department_id || null;
+
+  if (!targetRole || roleCandidates.length === 0) {
+    return { assigneeId: null, reason: 'NO_ESCALATION_TARGET_ROLE' };
   }
-  const explicit = nextStep.user_ids.find(Boolean) || null;
-  if (!explicit) {
-    return { assigneeId: null, nextStepOrder: nextStep.step_order, reason: 'NO_ASSIGNEE_CONFIGURED' };
+
+  // Choose the first active user in the target role for the document's department.
+  // This keeps escalation within the same workflow step and enforces department-scoped configs.
+  const r = await client.query(
+    `SELECT u.id
+     FROM users u
+     WHERE u.role = ANY($1::text[])
+       AND (u.is_active IS NULL OR u.is_active = true)
+       AND EXISTS (
+         SELECT 1
+         FROM assignments a
+         WHERE a.employee_id = u.id
+           AND (a.is_active IS NULL OR a.is_active = true)
+           AND a.effective_from <= CURRENT_DATE
+           AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
+           AND ($2::uuid IS NULL OR a.department_id = $2::uuid)
+       )
+     ORDER BY u.id
+     LIMIT 1`,
+    [roleCandidates, deptId]
+  );
+
+  if (!r.rowCount) {
+    return { assigneeId: null, reason: 'NO_ACTIVE_TARGET_ROLE_USERS' };
   }
-  const valid = await isActiveUser(client, explicit);
-  if (!valid) {
-    return { assigneeId: null, nextStepOrder: nextStep.step_order, reason: 'INVALID_ASSIGNEE' };
-  }
-  return { assigneeId: explicit, nextStepOrder: nextStep.step_order, reason: null };
+  const candidate = r.rows[0].id;
+  return { assigneeId: candidate, reason: null };
 }
 
 async function processEscalationsOnce() {
@@ -170,25 +228,38 @@ async function processEscalationsOnce() {
     await client.query('BEGIN');
 
     const docsRes = await client.query(
-      `SELECT d.*, c.escalation_delay_minutes, c.max_escalation_level, c.notify_original_sender, rc.steps AS routing_steps
+      `SELECT
+         d.*,
+         ad.department_id AS document_department_id,
+         c.escalation_target_role,
+         c.escalation_delay_minutes,
+         c.max_escalation_level,
+         c.notify_original_sender
        FROM docutracker_documents d
+       -- infer current department from the current holder (fallback: creator)
        LEFT JOIN LATERAL (
-         SELECT escalation_delay_minutes, max_escalation_level, notify_original_sender
+         SELECT a.department_id
+         FROM assignments a
+         WHERE a.employee_id = COALESCE(d.current_holder_id, d.created_by)
+           AND (a.is_active IS NULL OR a.is_active = true)
+           AND a.effective_from <= CURRENT_DATE
+           AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
+         ORDER BY a.effective_from DESC
+         LIMIT 1
+       ) ad ON true
+       LEFT JOIN LATERAL (
+         SELECT escalation_target_role, escalation_delay_minutes, max_escalation_level, notify_original_sender
          FROM docutracker_escalation_configs c
          WHERE c.document_type = d.document_type
-         ORDER BY c.created_at DESC
+           AND (c.department_id = ad.department_id OR c.department_id IS NULL)
+         ORDER BY (c.department_id IS NULL) ASC, c.created_at DESC
          LIMIT 1
        ) c ON true
-       LEFT JOIN LATERAL (
-         SELECT steps
-         FROM docutracker_routing_configs rc
-         WHERE rc.document_type = d.document_type
-         LIMIT 1
-       ) rc ON true
        WHERE d.deadline_time IS NOT NULL
          AND d.deadline_time < now()
-         AND d.status IN ('pending', 'in_review', 'forwarded', 'escalated')
-       FOR UPDATE OF d SKIP LOCKED`
+         AND d.status = ANY($1::text[])
+       FOR UPDATE OF d SKIP LOCKED`,
+      [ESCALATION_ELIGIBLE_WORKFLOW_STATUSES]
     );
 
     for (const doc of docsRes.rows) {
@@ -197,8 +268,6 @@ async function processEscalationsOnce() {
       const nextLevel = Number(doc.escalation_level || 0) + 1;
       const now = new Date();
       const nextDeadline = new Date(now.getTime() + delayMinutes * 60 * 1000);
-      const configSteps = parseSteps(doc.routing_steps || []);
-
       if (nextLevel > maxLevel) {
         await client.query(
           `UPDATE docutracker_documents
@@ -222,15 +291,37 @@ async function processEscalationsOnce() {
           escalation_level: doc.escalation_level,
         });
 
+        const overdueRecipient = doc.current_holder_id ?? doc.created_by;
+        if (overdueRecipient) {
+          await upsertRoutingRecord(client, {
+            document_id: doc.id,
+            step_order: doc.current_step,
+            assignee_id: overdueRecipient,
+            status: 'overdue',
+            deadline_time: doc.deadline_time ?? null,
+            remarks: 'Overdue (max escalation level reached)',
+          });
+        }
         await insertNotificationIfNotRecent(client, {
           document_id: doc.id,
-          user_id: doc.current_holder_id,
+          user_id: overdueRecipient,
           type: 'overdue',
           escalation_level: doc.escalation_level,
           event_key: `overdue:doc:${doc.id}:level:${doc.escalation_level ?? 0}`,
           title: 'Document overdue',
           body: 'This document reached max escalation level and requires admin intervention.',
         });
+        if (doc.notify_original_sender && doc.created_by && doc.created_by !== overdueRecipient) {
+          await insertNotificationIfNotRecent(client, {
+            document_id: doc.id,
+            user_id: doc.created_by,
+            type: 'overdue',
+            escalation_level: doc.escalation_level,
+            event_key: `overdue:doc:${doc.id}:level:${doc.escalation_level ?? 0}:creator:${doc.created_by}`,
+            title: 'Your document is overdue',
+            body: 'A document you created reached max escalation level and requires admin intervention.',
+          });
+        }
         await notifyAdminsForIntervention(
           client,
           doc.id,
@@ -238,62 +329,15 @@ async function processEscalationsOnce() {
           `Document "${doc.title}" reached max escalation level and needs manual action.`
         );
       } else {
-        const escalationRecipient = await resolveEscalationRecipient(client, doc, configSteps);
+        const escalationRecipient = await resolveEscalationRecipient(client, doc);
         if (!escalationRecipient.assigneeId) {
-          const currentHolderStillValid = await isActiveUser(client, doc.current_holder_id);
-          if (currentHolderStillValid) {
-            await client.query(
-              `UPDATE docutracker_documents
-               SET status = 'escalated',
-                   escalation_level = $2,
-                   current_step = $3,
-                   current_holder_id = $4,
-                   needs_admin_intervention = false,
-                   deadline_time = $5,
-                   sent_time = now(),
-                   updated_at = now()
-               WHERE id = $1`,
-              [doc.id, nextLevel, doc.current_step, doc.current_holder_id, nextDeadline]
-            );
-            await insertHistoryIfMissing(client, {
-              document_id: doc.id,
-              action: 'escalated',
-              from_step: doc.current_step,
-              to_step: doc.current_step,
-              from_status: doc.status,
-              to_status: 'escalated',
-              remarks: `Escalated on current step (${escalationRecipient.reason || 'SAME_STEP_FALLBACK'})`,
-              is_overdue_log: true,
-              is_escalation_log: true,
-              escalation_level: nextLevel,
-            });
-            await insertNotificationIfNotRecent(client, {
-              document_id: doc.id,
-              user_id: doc.current_holder_id,
-              type: 'escalated',
-              escalation_level: nextLevel,
-              event_key: `escalated:doc:${doc.id}:level:${nextLevel}:holder:${doc.current_holder_id}`,
-              title: 'Document escalated',
-              body: 'This document remains assigned to you and has been escalated due to overdue review.',
-            });
-            if (doc.notify_original_sender && doc.created_by && doc.created_by !== doc.current_holder_id) {
-              await insertNotificationIfNotRecent(client, {
-                document_id: doc.id,
-                user_id: doc.created_by,
-                type: 'escalated',
-                escalation_level: nextLevel,
-                event_key: `escalated:doc:${doc.id}:level:${nextLevel}:creator:${doc.created_by}`,
-                title: 'Your document was escalated',
-                body: 'A document you created has been escalated and remains in the current workflow step.',
-              });
-            }
-            continue;
-          }
-
+          // Strict fallback: no escalation recipient means admin intervention required.
+          const overdueRecipient = doc.current_holder_id ?? doc.created_by;
           await client.query(
             `UPDATE docutracker_documents
              SET status = 'overdue',
                  needs_admin_intervention = true,
+                 deadline_time = null,
                  updated_at = now()
              WHERE id = $1`,
             [doc.id]
@@ -305,11 +349,41 @@ async function processEscalationsOnce() {
             to_step: doc.current_step,
             from_status: doc.status,
             to_status: 'overdue',
-            remarks: `Escalation fallback triggered: ${escalationRecipient.reason}`,
+            remarks: `Escalation fallback triggered: ${escalationRecipient.reason || 'NO_RECIPIENT'}`,
             is_overdue_log: true,
             is_escalation_log: true,
             escalation_level: doc.escalation_level,
           });
+          if (overdueRecipient) {
+            await upsertRoutingRecord(client, {
+              document_id: doc.id,
+              step_order: doc.current_step,
+              assignee_id: overdueRecipient,
+              status: 'overdue',
+              deadline_time: null,
+              remarks: 'Overdue (no escalation recipient)',
+            });
+            await insertNotificationIfNotRecent(client, {
+              document_id: doc.id,
+              user_id: overdueRecipient,
+              type: 'overdue',
+              escalation_level: doc.escalation_level,
+              event_key: `overdue:doc:${doc.id}:level:${doc.escalation_level ?? 0}:no-target`,
+              title: 'Document overdue',
+              body: 'This document could not be auto-routed to an escalation recipient and requires admin intervention.',
+            });
+          }
+          if (doc.notify_original_sender && doc.created_by && doc.created_by !== overdueRecipient) {
+            await insertNotificationIfNotRecent(client, {
+              document_id: doc.id,
+              user_id: doc.created_by,
+              type: 'overdue',
+              escalation_level: doc.escalation_level,
+              event_key: `overdue:doc:${doc.id}:level:${doc.escalation_level ?? 0}:creator`,
+              title: 'Your document is overdue',
+              body: 'Your document could not be auto-routed and needs admin intervention.',
+            });
+          }
           await notifyAdminsForIntervention(
             client,
             doc.id,
@@ -333,20 +407,29 @@ async function processEscalationsOnce() {
           [
             doc.id,
             nextLevel,
-            escalationRecipient.nextStepOrder || doc.current_step,
+            doc.current_step,
             escalationRecipient.assigneeId,
             nextDeadline,
           ]
         );
 
+        await upsertRoutingRecord(client, {
+          document_id: doc.id,
+          step_order: doc.current_step,
+          assignee_id: escalationRecipient.assigneeId,
+          status: 'escalated',
+          deadline_time: nextDeadline,
+          remarks: `Escalated to ${normalizeRole(doc.escalation_target_role) || 'target role'}`,
+        });
+
         await insertHistoryIfMissing(client, {
           document_id: doc.id,
           action: 'escalated',
           from_step: doc.current_step,
-          to_step: escalationRecipient.nextStepOrder || doc.current_step,
+          to_step: doc.current_step,
           from_status: doc.status,
           to_status: 'escalated',
-          remarks: 'Automatically escalated because deadline was exceeded',
+          remarks: `Automatically escalated to target role (${normalizeRole(doc.escalation_target_role)})`,
           is_overdue_log: true,
           is_escalation_log: true,
           escalation_level: nextLevel,
