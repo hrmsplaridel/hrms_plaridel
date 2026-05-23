@@ -669,6 +669,11 @@ class _DocumentDataTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final compactRows = screenWidth < 1200;
+    final dataRowMinHeight = compactRows ? 52.0 : 56.0;
+    final dataRowMaxHeight = compactRows ? 72.0 : 80.0;
+
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: ConstrainedBox(
@@ -676,7 +681,10 @@ class _DocumentDataTable extends StatelessWidget {
         child: DataTable(
           columnSpacing: 18,
           headingRowHeight: 44,
-          dataRowMinHeight: 56,
+          dataRowMinHeight: dataRowMinHeight,
+          // Keep row constraints normalized across screen sizes to prevent
+          // BoxConstraints assertion failures.
+          dataRowMaxHeight: dataRowMaxHeight,
           columns: const [
             DataColumn(label: Text('Document')),
             DataColumn(label: Text('Type')),
