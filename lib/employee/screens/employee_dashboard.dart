@@ -27,6 +27,7 @@ import '../../shared/widgets/dashboard_content_navigator.dart';
 import '../../shared/widgets/dashboard_header_actions.dart';
 import '../../shared/widgets/collapsible_dashboard_sidebar.dart';
 import '../../shared/widgets/portal_sidebar_brand.dart';
+import '../../../widgets/user_avatar.dart';
 
 /// Main scroll padding: comfortable insets on phones (narrower gutters still breathe).
 EdgeInsets _employeeMainScrollPadding(BuildContext context) {
@@ -111,17 +112,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
     super.dispose();
   }
 
-<<<<<<< HEAD
-  static const _navItems = [
-    'Dashboard',
-    'My Attendance',
-    'My Leave',
-    'Locator Slip',
-    'Training Reports',
-    'DocuTracker',
-    'Announcements',
-  ];
-
   void _prefetchDocuTrackerNotificationsIfNeeded(int index) {
     if (index != 5) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -130,8 +120,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
     });
   }
 
-=======
->>>>>>> origin/main
   Future<void> _handleOpenNotifications() async {
     final result = await openNotificationsPanel(context);
     if (!mounted) return;
@@ -254,38 +242,17 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                   selectedIndex: _selectedNavIndex,
                   showBrand: true,
                   onTap: (i) {
-<<<<<<< HEAD
-                    setState(() => _selectedNavIndex = i);
-                    _prefetchDocuTrackerNotificationsIfNeeded(i);
-=======
                     _onNavSelected(i);
->>>>>>> origin/main
+                    _prefetchDocuTrackerNotificationsIfNeeded(i);
                     if (context.mounted) Navigator.of(context).pop();
                   },
                 ),
               ),
             ),
       body: SafeArea(
-<<<<<<< HEAD
-        child: Row(
-          children: [
-            if (isWide)
-              _EmployeeSidebar(
-                displayName: displayName,
-                avatarPath: avatarPath,
-                selectedIndex: _selectedNavIndex,
-                onTap: (i) {
-                  setState(() => _selectedNavIndex = i);
-                  _prefetchDocuTrackerNotificationsIfNeeded(i);
-                },
-              ),
-            Expanded(
-              child: Column(
-=======
         child: isWide
             ? Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
->>>>>>> origin/main
                 children: [
                   _EmployeeSidebar(
                     railMode: true,
@@ -293,21 +260,11 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                     showBrand: false,
                     displayName: displayName,
                     avatarPath: avatarPath,
-<<<<<<< HEAD
-                    showMenuButton: !isWide,
-                    showDocuTrackerBell: _selectedNavIndex == 5,
-                    onOpenNotifications: _handleOpenNotifications,
-                    onProfileTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const ProfileAndSettingsPage(),
-                        ),
-                      );
-                    },
-=======
                     selectedIndex: _selectedNavIndex,
-                    onTap: _onNavSelected,
->>>>>>> origin/main
+                    onTap: (i) {
+                      _onNavSelected(i);
+                      _prefetchDocuTrackerNotificationsIfNeeded(i);
+                    },
                   ),
                   Expanded(
                     child: Column(
@@ -748,21 +705,92 @@ class _EmployeeSidebar extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                         color: AppTheme.primaryNavy,
                       ),
-<<<<<<< HEAD
-                      child: Text(
-                        'Terms',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.white.withOpacity(0.7),
-                        ),
-                      ),
                     ),
-                  ],
-                ),
-              ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        if (compact) const SizedBox(height: 12),
+      ],
+    );
+  }
+
+  Widget _buildRail({
+    required BuildContext context,
+    required bool compact,
+    required Color hairline,
+    required Color canvas,
+  }) {
+    return DashboardSidebarRailFrame(
+      compact: compact,
+      hairline: hairline,
+      canvas: canvas,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SidebarRailHeader(collapsed: compact),
+          Expanded(
+            child: ColoredBox(
+              color: compact ? Colors.transparent : canvas,
+              child: Column(
+                children: [
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: _buildNavList(compact: compact),
+                    ),
+                  ),
+                  _buildFooter(context, compact: compact),
+                ],
+              ),
             ),
           ),
-          const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hairline = AppTheme.dashHairlineOf(context);
+    final canvas = AppTheme.dashCanvasOf(context);
+    final panel = AppTheme.dashPanelOf(context);
+
+    if (railMode) {
+      return AnimatedSidebarWidth(
+        collapsed: collapsed,
+        builder: (context, compact) => _buildRail(
+          context: context,
+          compact: compact,
+          hairline: hairline,
+          canvas: canvas,
+        ),
+      );
+    }
+
+    return Container(
+      width: kDashboardSidebarWidth,
+      decoration: BoxDecoration(
+        color: panel,
+        border: Border(right: BorderSide(color: hairline)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 14,
+            offset: const Offset(1, 0),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          if (showBrand) const PortalSidebarBrand(),
+          Expanded(
+            child: SingleChildScrollView(
+              child: _buildNavList(compact: false),
+            ),
+          ),
+          _buildFooter(context, compact: false),
         ],
       ),
     );
@@ -1066,8 +1094,6 @@ class _EmployeeUserMenu extends StatelessWidget {
                           ),
                         ],
                       ],
-=======
->>>>>>> origin/main
                     ),
                   ),
                 ],
@@ -1075,88 +1101,7 @@ class _EmployeeUserMenu extends StatelessWidget {
             ],
           ),
         ),
-        if (compact)
-          const SizedBox(height: 12),
       ],
-    );
-  }
-
-  Widget _buildRail({
-    required BuildContext context,
-    required bool compact,
-    required Color hairline,
-    required Color canvas,
-  }) {
-    return DashboardSidebarRailFrame(
-      compact: compact,
-      hairline: hairline,
-      canvas: canvas,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SidebarRailHeader(collapsed: compact),
-          Expanded(
-            child: ColoredBox(
-              color: compact ? Colors.transparent : canvas,
-              child: Column(
-                children: [
-                  Expanded(
-                    child: SingleChildScrollView(
-                      child: _buildNavList(compact: compact),
-                    ),
-                  ),
-                  _buildFooter(context, compact: compact),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final hairline = AppTheme.dashHairlineOf(context);
-    final canvas = AppTheme.dashCanvasOf(context);
-    final panel = AppTheme.dashPanelOf(context);
-
-    if (railMode) {
-      return AnimatedSidebarWidth(
-        collapsed: collapsed,
-        builder: (context, compact) => _buildRail(
-          compact: compact,
-          hairline: hairline,
-          canvas: canvas,
-          context: context,
-        ),
-      );
-    }
-
-    return Container(
-      width: kDashboardSidebarWidth,
-      decoration: BoxDecoration(
-        color: panel,
-        border: Border(right: BorderSide(color: hairline)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 14,
-            offset: const Offset(1, 0),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          if (showBrand) const PortalSidebarBrand(),
-          Expanded(
-            child: SingleChildScrollView(
-              child: _buildNavList(compact: false),
-            ),
-          ),
-          _buildFooter(context, compact: false),
-        ],
-      ),
     );
   }
 }

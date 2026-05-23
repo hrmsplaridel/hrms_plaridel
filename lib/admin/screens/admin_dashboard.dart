@@ -172,6 +172,12 @@ class _AdminDashboardState extends State<AdminDashboard>
     }
     setState(() => _selectedMenu = menu);
     DashboardContentNavigator.showHome(_contentNavKey);
+    if (menu == AdminMenu.docutracker) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        context.read<DocuTrackerProvider>().loadNotifications(forceRefresh: true);
+      });
+    }
   }
 
   void _openMyProfile() {
@@ -186,12 +192,6 @@ class _AdminDashboardState extends State<AdminDashboard>
       if (!mounted) return;
       DashboardContentNavigator.openSettings(_contentNavKey);
     });
-    if (menu == AdminMenu.docutracker) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        context.read<DocuTrackerProvider>().loadNotifications(forceRefresh: true);
-      });
-    }
   }
 
   /// Same flow as [LeaveMain] — admin My Portal must pass a handler or File Leave stays disabled.
@@ -321,20 +321,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                     avatarPath: avatarPath,
                     email: email,
                     displayName: displayName,
-<<<<<<< HEAD
-                    avatarPath: avatarPath,
-                    showMenuButton: !isWide,
-                    showDocuTrackerBell: _selectedMenu == AdminMenu.docutracker,
-                    searchEnabled: _selectedMenu == AdminMenu.dashboard,
-                    searchController: _dashboardSearchController,
-                    searchQuery: _dashboardSearchQuery,
-                    onSearchChanged: (value) {
-                      setState(() => _dashboardSearchQuery = value);
-                    },
-                    onOpenNotifications: _handleOpenNotifications,
-=======
                     onTap: _onMenuSelected,
->>>>>>> origin/main
                   ),
                   Expanded(
                     child: Column(
@@ -686,135 +673,6 @@ class _Sidebar extends StatelessWidget {
       );
     }
 
-<<<<<<< HEAD
-class _NavTile extends StatefulWidget {
-  const _NavTile({
-    required this.icon,
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-  final IconData icon;
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  State<_NavTile> createState() => _NavTileState();
-}
-
-class _NavTileState extends State<_NavTile> {
-  bool _hover = false;
-
-  static const _activeFill = Color(0xFFFFF0E6);
-
-  @override
-  Widget build(BuildContext context) {
-    final iconColor = widget.selected
-        ? AppTheme.primaryNavy
-        : (_hover ? AppTheme.primaryNavy.withValues(alpha: 0.88) : AppTheme.textSecondary);
-    final labelColor = widget.selected
-        ? AppTheme.primaryNavy
-        : (_hover ? AppTheme.textPrimary : AppTheme.textSecondary);
-
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: widget.onTap,
-            borderRadius: BorderRadius.circular(14),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              curve: Curves.easeOutCubic,
-              decoration: BoxDecoration(
-                color: widget.selected
-                    ? _activeFill
-                    : (_hover ? AppTheme.primaryNavy.withValues(alpha: 0.05) : Colors.transparent),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              // IntrinsicHeight: sidebar nav lives in a scroll view (unbounded height).
-              // Row + CrossAxisAlignment.stretch needs a finite max height on the cross axis.
-              child: IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (widget.selected)
-                      Container(
-                        width: 4,
-                        decoration: BoxDecoration(
-                          color: AppTheme.primaryNavy,
-                          borderRadius: const BorderRadius.horizontal(left: Radius.circular(14)),
-                        ),
-                      ),
-                    Expanded(
-                      child: Padding(
-                        padding: EdgeInsets.fromLTRB(widget.selected ? 12 : 16, 13, 16, 13),
-                        child: Row(
-                          children: [
-                            Icon(widget.icon, size: 22, color: iconColor),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Text(
-                                widget.label,
-                                style: TextStyle(
-                                  color: labelColor,
-                                  fontWeight: widget.selected ? FontWeight.w700 : FontWeight.w500,
-                                  fontSize: 15,
-                                  letterSpacing: -0.1,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _TopBar extends StatelessWidget {
-  const _TopBar({
-    required this.email,
-    required this.displayName,
-    this.avatarPath,
-    this.showMenuButton = false,
-    this.showDocuTrackerBell = false,
-    this.searchEnabled = false,
-    required this.searchController,
-    required this.searchQuery,
-    required this.onSearchChanged,
-    required this.onOpenNotifications,
-  });
-
-  final String email;
-  final String displayName;
-  final String? avatarPath;
-  final bool showMenuButton;
-  final bool showDocuTrackerBell;
-
-  /// Dashboard tab only — search filters overview sections.
-  final bool searchEnabled;
-  final TextEditingController searchController;
-  final String searchQuery;
-  final ValueChanged<String> onSearchChanged;
-  final Future<void> Function() onOpenNotifications;
-
-  @override
-  Widget build(BuildContext context) {
-    final isCompact = MediaQuery.of(context).size.width < 600;
-=======
->>>>>>> origin/main
     return Container(
       width: kDashboardSidebarWidth,
       decoration: BoxDecoration(
@@ -832,150 +690,9 @@ class _TopBar extends StatelessWidget {
         children: [
           if (showBrand) const PortalSidebarBrand(),
           Expanded(
-<<<<<<< HEAD
-            child: !searchEnabled
-                ? const SizedBox.shrink()
-                : Container(
-                    height: 48,
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    decoration: BoxDecoration(
-                      color: AppTheme.offWhite,
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: Colors.black.withOpacity(0.06)),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.03),
-                          blurRadius: 8,
-                          offset: const Offset(0, 1),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.search_rounded,
-                          size: 22,
-                          color: AppTheme.textSecondary.withOpacity(0.8),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: TextField(
-                            controller: searchController,
-                            onChanged: onSearchChanged,
-                            textInputAction: TextInputAction.search,
-                            style: TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: isCompact ? 13 : 14,
-                            ),
-                            decoration: InputDecoration(
-                              isDense: true,
-                              border: InputBorder.none,
-                              hintText: 'Search dashboard...',
-                              hintStyle: TextStyle(
-                                color: AppTheme.textSecondary.withOpacity(0.85),
-                                fontSize: isCompact ? 13 : 14,
-                              ),
-                              contentPadding: EdgeInsets.zero,
-                            ),
-                          ),
-                        ),
-                        if (searchQuery.isNotEmpty)
-                          IconButton(
-                            icon: Icon(
-                              Icons.close_rounded,
-                              size: 20,
-                              color: AppTheme.textSecondary.withOpacity(0.8),
-                            ),
-                            tooltip: 'Clear',
-                            onPressed: () {
-                              searchController.clear();
-                              onSearchChanged('');
-                            },
-                            style: IconButton.styleFrom(
-                              padding: EdgeInsets.zero,
-                              minimumSize: const Size(32, 32),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-          ),
-          if (!searchEnabled) const Spacer(),
-          if (showDocuTrackerBell) ...[
-            DocuTrackerBellIconButton(
-              isAdmin: true,
-              adminChrome: true,
-              compact: isCompact,
-            ),
-            SizedBox(width: isCompact ? 6 : 10),
-          ],
-          Consumer<NotificationProvider>(
-            builder: (context, np, _) {
-              final c = np.unreadCount;
-              return Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  IconButton(
-                    icon: Icon(
-                      Icons.notifications_outlined,
-                      color: AppTheme.textPrimary,
-                      size: isCompact ? 24 : 26,
-                    ),
-                    tooltip: 'HR notifications',
-                    onPressed: () {
-                      onOpenNotifications();
-                    },
-                    style: IconButton.styleFrom(
-                      backgroundColor: AppTheme.offWhite,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                  if (c > 0)
-                    Positioned(
-                      right: -2,
-                      top: -2,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 5,
-                          vertical: 1,
-                        ),
-                        constraints: const BoxConstraints(
-                          minWidth: 18,
-                          minHeight: 18,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFE53935),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.white, width: 1),
-                        ),
-                        child: Text(
-                          c > 99 ? '99+' : '$c',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              );
-            },
-          ),
-          SizedBox(width: isCompact ? 6 : 12),
-          _AdminDropdown(
-            email: email,
-            displayName: displayName,
-            avatarPath: avatarPath,
-            compact: isCompact,
-=======
             child: SingleChildScrollView(
               child: _buildNavList(context, compact: false),
             ),
->>>>>>> origin/main
           ),
           _buildFooter(context, compact: false, year: year),
         ],

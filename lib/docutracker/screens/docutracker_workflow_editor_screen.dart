@@ -1113,7 +1113,7 @@ class _DefaultDeadlineCard extends StatelessWidget {
               controller: controller,
               keyboardType: TextInputType.number,
               decoration: DocuTrackerStyles.inputDecoration(
-                'Used when a step has no per-step deadline',
+context,                 'Used when a step has no per-step deadline',
                 Icons.schedule_rounded,
               ),
               onChanged: (_) => onChanged(),

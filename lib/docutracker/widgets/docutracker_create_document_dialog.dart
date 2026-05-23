@@ -57,7 +57,7 @@ Future<void> showDocuTrackerCreateDocumentDialog(
                             children: [
                               TextField(
                                 decoration: DocuTrackerStyles.inputDecoration(
-                                  'Enter title',
+context,                                   'Enter title',
                                   Icons.title_rounded,
                                 ),
                                 onChanged: (v) => title = v,
@@ -67,7 +67,7 @@ Future<void> showDocuTrackerCreateDocumentDialog(
                                 value: type,
                                 decoration:
                                     DocuTrackerStyles.dropdownDecoration(
-                                  'Document Type',
+context,                                   'Document Type',
                                 ),
                                 items: DocumentType.values
                                     .map(
@@ -83,7 +83,7 @@ Future<void> showDocuTrackerCreateDocumentDialog(
                               const SizedBox(height: 20),
                               TextField(
                                 decoration: DocuTrackerStyles.inputDecoration(
-                                  'Description (optional)',
+context,                                   'Description (optional)',
                                   Icons.notes_rounded,
                                 ),
                                 maxLines: 6,

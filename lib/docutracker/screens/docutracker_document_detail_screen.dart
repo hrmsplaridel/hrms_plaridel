@@ -551,7 +551,6 @@ class _DocuTrackerDocumentDetailScreenState
     );
   }
 
-<<<<<<< HEAD
   DocumentRoutingConfig? _routingConfigFor(
     DocuTrackerProvider provider,
     DocuTrackerDocument doc,
@@ -585,12 +584,6 @@ class _DocuTrackerDocumentDetailScreenState
       icon: Icons.article_outlined,
       title: 'Document information',
       subtitle: 'Reference details and timeline for this routing.',
-=======
-  Widget _buildInfoCard(DocuTrackerDocument doc) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: DocuTrackerStyles.listCardDecoration(context),
->>>>>>> origin/main
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -659,7 +652,6 @@ class _DocuTrackerDocumentDetailScreenState
     DocuTrackerProvider provider,
     String currentUserId,
   ) {
-<<<<<<< HEAD
     final cfg = _routingConfigFor(provider, doc);
     final steps =
         (cfg?.steps ?? const <WorkflowStep>[]).where((s) => s.enabled).toList()
@@ -694,206 +686,6 @@ class _DocuTrackerDocumentDetailScreenState
       title: 'Workflow & routing',
       subtitle:
           'Current status, step in the defined route, and who is assigned to act.',
-=======
-    return Wrap(
-      spacing: 12,
-      runSpacing: 8,
-      children: [
-        if (_canApprove)
-          FilledButton.icon(
-          onPressed: provider.loading
-              ? null
-              : () async {
-                  final ok = await provider.approveDocument(doc,
-                      actionBy: userId, remarks: _remarkController.text);
-                  if (context.mounted && ok) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Document approved.')),
-                    );
-                    Navigator.of(context).pop();
-                  }
-                },
-          icon: const Icon(Icons.check_circle_rounded, size: 18),
-          label: const Text('Approve'),
-          style: DocuTrackerStyles.approveButtonStyle(),
-          ),
-        if (_canReject)
-          OutlinedButton.icon(
-          onPressed: provider.loading
-              ? null
-              : () async {
-                  _remarkController.clear();
-                  showDialog<void>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text('Reject - Remarks'),
-                      content: TextField(
-                        controller: _remarkController,
-                        decoration: DocuTrackerStyles.inputDecoration(context, 
-                          'Reason for rejection (required)',
-                          Icons.cancel_rounded,
-                        ),
-                        maxLines: 3,
-                      ),
-                      actions: [
-                        OutlinedButton(
-                          onPressed: () => Navigator.of(ctx).pop(),
-                          style: DocuTrackerStyles.outlinedButtonStyle(),
-                          child: const Text('Cancel'),
-                        ),
-                        FilledButton(
-                          onPressed: () async {
-                            final remarks = _remarkController.text.trim();
-                            if (remarks.isEmpty) return;
-                            Navigator.of(ctx).pop();
-                            final ok = await provider.rejectDocument(doc,
-                                remarks: remarks, actionBy: userId);
-                            if (context.mounted && ok) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Document rejected.')),
-                              );
-                              Navigator.of(context).pop();
-                            }
-                          },
-                          style: DocuTrackerStyles.destructiveButtonStyle(),
-                          child: const Text('Reject'),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-          icon: const Icon(Icons.cancel_rounded, size: 18),
-          label: const Text('Reject'),
-          style: DocuTrackerStyles.outlinedRedStyle(),
-          ),
-        if (_canReturn)
-          OutlinedButton.icon(
-          onPressed: provider.loading
-              ? null
-              : () async {
-                  _remarkController.clear();
-                  showDialog<void>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text('Return - Remarks'),
-                      content: TextField(
-                        controller: _remarkController,
-                        decoration: DocuTrackerStyles.inputDecoration(context, 
-                          'Reason for return (optional)',
-                          Icons.reply_rounded,
-                        ),
-                        maxLines: 3,
-                      ),
-                      actions: [
-                        OutlinedButton(
-                          onPressed: () => Navigator.of(ctx).pop(),
-                          style: DocuTrackerStyles.outlinedButtonStyle(),
-                          child: const Text('Cancel'),
-                        ),
-                        FilledButton(
-                          onPressed: () async {
-                            final ok = await provider.returnDocument(doc,
-                                remarks: _remarkController.text.trim().isEmpty
-                                    ? null
-                                    : _remarkController.text.trim(),
-                                actionBy: userId);
-                            if (context.mounted && ok) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Document returned.')),
-                              );
-                              Navigator.of(ctx).pop();
-                            }
-                          },
-                          style: DocuTrackerStyles.primaryButtonStyle(),
-                          child: const Text('Return'),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-          icon: const Icon(Icons.reply_rounded, size: 18),
-          label: const Text('Return'),
-          style: DocuTrackerStyles.outlinedButtonStyle(),
-          ),
-        if (_canForward)
-          OutlinedButton.icon(
-          onPressed: provider.loading
-              ? null
-              : () async {
-                  final ok = await provider.forwardDocument(doc,
-                      actionBy: userId,
-                      remarks: _remarkController.text.trim().isEmpty
-                          ? null
-                          : _remarkController.text.trim());
-                  if (context.mounted && ok) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Document forwarded.')),
-                    );
-                    Navigator.of(context).pop();
-                  }
-                },
-          icon: const Icon(Icons.forward_rounded, size: 18),
-          label: const Text('Forward'),
-          style: DocuTrackerStyles.outlinedButtonStyle(),
-          ),
-        if (_canEdit)
-          OutlinedButton.icon(
-          onPressed: provider.loading
-              ? null
-              : () {
-                  _remarkController.clear();
-                  showDialog<void>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text('Add Remark'),
-                      content: TextField(
-                        controller: _remarkController,
-                        decoration: DocuTrackerStyles.inputDecoration(context, 
-                          'Enter your remark or comment',
-                          Icons.comment_rounded,
-                        ),
-                        maxLines: 3,
-                      ),
-                      actions: [
-                        OutlinedButton(
-                          onPressed: () => Navigator.of(ctx).pop(),
-                          style: DocuTrackerStyles.outlinedButtonStyle(),
-                          child: const Text('Cancel'),
-                        ),
-                        FilledButton(
-                          onPressed: () async {
-                            final remarks = _remarkController.text.trim();
-                            if (remarks.isEmpty) return;
-                            Navigator.of(ctx).pop();
-                            final ok = await provider.addRemark(doc,
-                                actorId: userId, remarks: remarks);
-                            if (context.mounted && ok) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Remark added.')),
-                              );
-                              provider.loadDocumentHistory(doc.id!);
-                            }
-                          },
-                          style: DocuTrackerStyles.primaryButtonStyle(),
-                          child: const Text('Add'),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-          icon: const Icon(Icons.comment_rounded, size: 18),
-          label: const Text('Add Remark'),
-          style: DocuTrackerStyles.outlinedButtonStyle(),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildAuditTrail(DocuTrackerProvider provider) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: DocuTrackerStyles.listCardDecoration(context),
->>>>>>> origin/main
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1046,7 +838,7 @@ class _DocuTrackerDocumentDetailScreenState
                           content: TextField(
                             controller: returnCtrl,
                             decoration: DocuTrackerStyles.inputDecoration(
-                              'Reason for return (optional)',
+context,                               'Reason for return (optional)',
                               Icons.reply_rounded,
                             ),
                             maxLines: 3,
@@ -1108,7 +900,7 @@ class _DocuTrackerDocumentDetailScreenState
                             controller: remarkCtrl,
                             autofocus: true,
                             decoration: DocuTrackerStyles.inputDecoration(
-                              'Reason for rejection (required)',
+context,                               'Reason for rejection (required)',
                               Icons.cancel_rounded,
                             ),
                             maxLines: 3,
@@ -1171,7 +963,7 @@ class _DocuTrackerDocumentDetailScreenState
                             controller: remarkCtrl,
                             autofocus: true,
                             decoration: DocuTrackerStyles.inputDecoration(
-                              'Enter remark (logged to history)',
+context,                               'Enter remark (logged to history)',
                               Icons.comment_rounded,
                             ),
                             maxLines: 4,
@@ -1262,7 +1054,7 @@ class _DocuTrackerDocumentDetailScreenState
                 controller: _remarkController,
                 maxLines: 2,
                 decoration: DocuTrackerStyles.inputDecoration(
-                  'Optional note for next recipient...',
+context,                   'Optional note for next recipient...',
                   Icons.notes_rounded,
                 ),
               ),

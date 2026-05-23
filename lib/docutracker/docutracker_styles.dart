@@ -22,20 +22,6 @@ class DocuTrackerStyles {
       prefixIcon: icon != null
           ? Icon(icon, color: AppTheme.primaryNavy, size: 22)
           : null,
-<<<<<<< HEAD
-      filled: true,
-      fillColor: AppTheme.offWhite,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.08)),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AppTheme.primaryNavy, width: 1.5),
-      ),
-=======
->>>>>>> origin/main
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       radius: 12,
     );
@@ -45,20 +31,6 @@ class DocuTrackerStyles {
     return AppTheme.dashInputDecoration(
       context,
       hintText: hint,
-<<<<<<< HEAD
-      filled: true,
-      fillColor: AppTheme.offWhite,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.08)),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AppTheme.primaryNavy, width: 1.5),
-      ),
-=======
->>>>>>> origin/main
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       radius: 12,
     );
@@ -177,7 +149,6 @@ class DocuTrackerStyles {
         child: child,
       );
 
-<<<<<<< HEAD
   static BoxDecoration cardDecoration() => DocuTrackerTokens.cardDecoration();
 
   static BoxDecoration listCardDecoration() => DocuTrackerTokens.cardDecoration();
@@ -212,11 +183,4 @@ class DocuTrackerStyles {
       ),
     );
   }
-=======
-  static BoxDecoration cardDecoration(BuildContext context) =>
-      AppTheme.dashSurfaceCard(context, radius: 20);
-
-  static BoxDecoration listCardDecoration(BuildContext context) =>
-      AppTheme.dashSurfaceCard(context, radius: 16);
->>>>>>> origin/main
 }

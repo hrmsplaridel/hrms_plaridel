@@ -1221,7 +1221,7 @@ class _DocuTrackerPermissionEditorScreenState
                               ? _userId
                               : null,
                           decoration: DocuTrackerStyles.dropdownDecoration(
-                            'Employee',
+context,                             'Employee',
                           ),
                           items: () {
                             final rows = _filteredEmployees();
