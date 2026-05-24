@@ -1809,11 +1809,13 @@ class _LoginToHrmsButtonState extends State<_LoginToHrmsButton>
             children: [
               child!,
               Positioned.fill(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(_kButtonRadius),
-                  child: CustomPaint(
-                    painter: _LoginButtonShinePainter(
-                      progress: _shineCtrl!.value,
+                child: IgnorePointer(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(_kButtonRadius),
+                    child: CustomPaint(
+                      painter: _LoginButtonShinePainter(
+                        progress: _shineCtrl!.value,
+                      ),
                     ),
                   ),
                 ),
