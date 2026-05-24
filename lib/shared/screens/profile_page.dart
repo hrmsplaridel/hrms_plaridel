@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -499,11 +500,31 @@ class _ProfileContentState extends State<ProfileContent> {
       allowMultiple: false,
       withData: true,
     );
-    if (result == null ||
-        result.files.isEmpty ||
-        result.files.single.bytes == null)
+    if (result == null || result.files.isEmpty) return;
+
+    final picked = result.files.single;
+    List<int>? bytes = picked.bytes;
+    if (bytes == null || bytes.isEmpty) {
+      final path = picked.path;
+      if (path != null && path.isNotEmpty) {
+        try {
+          bytes = await picked.xFile.readAsBytes();
+        } catch (_) {}
+      }
+    }
+    if (bytes == null || bytes.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not read the selected image. Try another file (JPG or PNG).',
+          ),
+        ),
+      );
       return;
-    final bytes = result.files.single.bytes!;
+    }
+
+    final uploadName = _avatarUploadFileName(picked.name);
     setState(() {
       _imageLoading = true;
       _message = null;
@@ -512,7 +533,7 @@ class _ProfileContentState extends State<ProfileContent> {
       await ApiClient.instance.uploadBytes(
         '/api/upload/avatar',
         bytes: bytes,
-        fileName: 'avatar.jpg',
+        fileName: uploadName,
       );
       if (mounted) {
         await context.read<AuthProvider>().refreshUser();
@@ -527,12 +548,30 @@ class _ProfileContentState extends State<ProfileContent> {
         ).showSnackBar(const SnackBar(content: Text('Profile photo updated.')));
       }
     } catch (e) {
-      if (mounted)
-        setState(() {
-          _imageLoading = false;
-          _message = 'Image upload failed: $e';
-        });
+      if (!mounted) return;
+      final msg = e is DioException
+          ? (e.response?.data is Map
+              ? (e.response!.data as Map)['error']?.toString()
+              : null) ??
+              e.message
+          : e.toString();
+      setState(() {
+        _imageLoading = false;
+        _message = 'Image upload failed: ${msg ?? e}';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Image upload failed: ${msg ?? e}')),
+      );
     }
+  }
+
+  String _avatarUploadFileName(String? originalName) {
+    final name = (originalName ?? '').trim().toLowerCase();
+    if (name.endsWith('.png')) return 'avatar.png';
+    if (name.endsWith('.gif')) return 'avatar.gif';
+    if (name.endsWith('.webp')) return 'avatar.webp';
+    if (name.endsWith('.jpeg')) return 'avatar.jpeg';
+    return 'avatar.jpg';
   }
 
   Future<void> _saveProfile() async {

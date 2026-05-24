@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:ui' show lerpDouble;
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../landingpage/constants/app_theme.dart';
@@ -19,22 +21,54 @@ import '../../../locator/screens/employee_locator_slip_screen.dart';
 import '../../../leave/models/leave_type.dart';
 import '../../../ld/training_daily_report_employee_screen.dart';
 import '../widgets/attendance_overview/attendance_overview.dart';
+import '../widgets/employee_dash_ui.dart';
 import '../widgets/employee_dashboard_skeletons.dart';
 import '../../shared/screens/profile_page.dart' show DashboardProfilePanel;
 import '../../shared/widgets/dashboard_content_navigator.dart';
 import '../../shared/widgets/dashboard_header_actions.dart';
+import '../../shared/utils/time_greeting.dart';
 import '../../shared/widgets/collapsible_dashboard_sidebar.dart';
+import '../../shared/widgets/dashboard_mobile_bottom_nav.dart';
 import '../../shared/widgets/portal_sidebar_brand.dart';
 
 /// Main scroll padding: comfortable insets on phones (narrower gutters still breathe).
-EdgeInsets _employeeMainScrollPadding(BuildContext context) {
+EdgeInsets _employeeMainScrollPadding(BuildContext context, {bool mobileNav = false}) {
   final mq = MediaQuery.of(context);
   final w = mq.size.width;
   final horizontal = w > 900 ? 24.0 : (w > 600 ? 20.0 : 18.0);
   final top = w < 600 ? 4.0 : 8.0;
-  final bottom = 28.0 + (w < 600 ? mq.padding.bottom * 0.5 : 0.0);
+  var bottom = 28.0 + (w < 600 ? mq.padding.bottom * 0.5 : 0.0);
+  if (mobileNav) {
+    bottom += DashboardMobileBottomNav.scrollPaddingExtra(context);
+  }
   return EdgeInsets.fromLTRB(horizontal, top, horizontal, bottom);
 }
+
+/// Sidebar destinations mirrored on the mobile bottom bar (profile stays in account menu).
+const _employeeMobileNavItems = [
+  DashboardMobileNavItem(icon: Icons.home_outlined, label: 'Dashboard'),
+  DashboardMobileNavItem(
+    icon: Icons.event_available_outlined,
+    label: 'My Attendance',
+    shortLabel: 'Attendance',
+  ),
+  DashboardMobileNavItem(
+    icon: Icons.event_busy_outlined,
+    label: 'My Leave',
+    shortLabel: 'Leave',
+  ),
+  DashboardMobileNavItem(
+    icon: Icons.pin_drop_outlined,
+    label: 'Locator Slip',
+    shortLabel: 'Locator',
+  ),
+  DashboardMobileNavItem(
+    icon: Icons.assignment_outlined,
+    label: 'Training Reports',
+    shortLabel: 'Training',
+  ),
+  DashboardMobileNavItem(icon: Icons.description_outlined, label: 'DocuTracker'),
+];
 
 double _employeeCardPadding(BuildContext context) {
   return MediaQuery.sizeOf(context).width < 600 ? 16.0 : 20.0;
@@ -45,7 +79,7 @@ double _employeeSectionCardPadding(BuildContext context) {
 }
 
 /// Employee dashboard reference: dark blue sidebar (HR branding), nav items,
-/// welcome + Clock In, Attendance, Leave Balance, Payslip cards, Announcements,
+/// welcome + Clock In, Attendance, Leave Balance, Payslip cards,
 /// Upcoming Leave, Attendance Overview.
 class EmployeeDashboard extends StatefulWidget {
   const EmployeeDashboard({super.key});
@@ -69,11 +103,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
     'Locator Slip',
     'Training Reports',
     'DocuTracker',
-    'Announcements',
   ];
 
   /// Shown only via account menu (not listed in sidebar).
-  static const int _profileNavIndex = 7;
+  static const int _profileNavIndex = 6;
   static const _settingsPanelKey = PageStorageKey<String>('employee_settings');
   late final Widget _settingsPanel = const DashboardProfilePanel(
     key: _settingsPanelKey,
@@ -145,6 +178,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
         break;
       case NotificationTapKind.adminDtrLocatorManagement:
       case NotificationTapKind.adminDtrLeaveManagement:
+      case NotificationTapKind.adminRecruitment:
+      case NotificationTapKind.adminTrainingReports:
       case NotificationTapKind.none:
         break;
     }
@@ -221,21 +256,15 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
 
     return Scaffold(
       backgroundColor: AppTheme.dashCanvasOf(context),
-      drawer: isWide
+      bottomNavigationBar: isWide
           ? null
-          : Drawer(
-              child: SafeArea(
-                child: _EmployeeSidebar(
-                  displayName: displayName,
-                  avatarPath: avatarPath,
-                  selectedIndex: _selectedNavIndex,
-                  showBrand: true,
-                  onTap: (i) {
-                    _onNavSelected(i);
-                    if (context.mounted) Navigator.of(context).pop();
-                  },
-                ),
-              ),
+          : DashboardMobileBottomNav(
+              items: _employeeMobileNavItems,
+              selectedIndex:
+                  _selectedNavIndex < _employeeMobileNavItems.length
+                      ? _selectedNavIndex
+                      : -1,
+              onSelected: _onNavSelected,
             ),
       body: SafeArea(
         child: isWide
@@ -257,6 +286,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                         DashboardAppHeaderBar(
                           showBrand: false,
                           showSidebarToggle: true,
+                          sidebarCollapsed: _sidebarCollapsed,
                           onSidebarToggle: () => setState(
                             () => _sidebarCollapsed = !_sidebarCollapsed,
                           ),
@@ -298,8 +328,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
             : Column(
                 children: [
                   DashboardAppHeaderBar(
-                    showMenuButton: true,
-                    onMenuPressed: () => Scaffold.of(context).openDrawer(),
                     compactActions: width < 600,
                     onViewAllNotifications: _handleOpenNotifications,
                     onNotificationTap: _applyNotificationTapResult,
@@ -318,12 +346,18 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                         homeBuilder: () =>
                             _employeeMainChild(displayName: displayName),
                         settingsPanel: _settingsPanel,
-                        homeScrollPadding: _employeeMainScrollPadding(context),
-                        settingsScrollPadding: const EdgeInsets.fromLTRB(
+                        homeScrollPadding: _employeeMainScrollPadding(
+                          context,
+                          mobileNav: true,
+                        ),
+                        settingsScrollPadding: EdgeInsets.fromLTRB(
                           12,
                           8,
                           12,
-                          28,
+                          28 +
+                              DashboardMobileBottomNav.scrollPaddingExtra(
+                                context,
+                              ),
                         ),
                       ),
                     ),
@@ -392,7 +426,7 @@ class EmployeeAttendanceOverviewSection extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Welcome back, $displayName!',
+                personalizedTimeGreeting(displayName),
                 style: TextStyle(
                   color: AppTheme.dashTextPrimaryOf(context),
                   fontSize: welcomeSize,
@@ -596,24 +630,21 @@ class _EmployeeSidebar extends StatelessWidget {
           collapsed: compact,
           onTap: () => onTap(5),
         ),
-        DashboardSidebarNavTile(
-          icon: Icons.campaign_outlined,
-          label: 'Announcements',
-          selected: selectedIndex == 6,
-          collapsed: compact,
-          onTap: () => onTap(6),
-        ),
         const SizedBox(height: 12),
       ],
     );
   }
 
   Widget _buildFooter(BuildContext context, {required bool compact}) {
+    final t = SidebarCollapseScope.maybeOf(context) ?? (compact ? 1.0 : 0.0);
+    final fadeExpanded = (1 - t).clamp(0.0, 1.0);
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (!compact)
-          Padding(
+        Opacity(
+          opacity: fadeExpanded,
+          child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Container(
               height: 2,
@@ -623,113 +654,117 @@ class _EmployeeSidebar extends StatelessWidget {
               ),
             ),
           ),
+        ),
         Padding(
           padding: EdgeInsets.fromLTRB(
-            compact ? 8 : 12,
+            lerpDouble(12, 8, t)!,
             4,
-            compact ? 8 : 12,
-            compact ? 8 : 10,
+            lerpDouble(12, 8, t)!,
+            lerpDouble(10, 8, t)!,
           ),
           child: DashboardSidebarProfileCard(
             displayName: displayName,
             subtitle: 'Employee',
             avatarPath: avatarPath,
-            collapsed: compact,
           ),
         ),
-        if (!compact)
-          Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: Column(
-            children: [
-              Text(
-                '© ${DateTime.now().year} HRMS',
-                style: TextStyle(
-                  color: AppTheme.dashTextSecondaryOf(
-                    context,
-                  ).withValues(alpha: 0.85),
-                  fontSize: 11,
+        Opacity(
+          opacity: fadeExpanded,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              children: [
+                Text(
+                  '© ${DateTime.now().year} HRMS',
+                  style: TextStyle(
+                    color: AppTheme.dashTextSecondaryOf(
+                      context,
+                    ).withValues(alpha: 0.85),
+                    fontSize: 11,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 4),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  TextButton(
-                    onPressed: () {},
-                    style: TextButton.styleFrom(
-                      minimumSize: Size.zero,
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                    ),
-                    child: Text(
-                      'Privacy Policy',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.primaryNavy,
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    TextButton(
+                      onPressed: () {},
+                      style: TextButton.styleFrom(
+                        minimumSize: Size.zero,
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                      ),
+                      child: Text(
+                        'Privacy Policy',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.primaryNavy,
+                        ),
                       ),
                     ),
-                  ),
-                  Text(
-                    ' | ',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.textSecondary.withValues(alpha: 0.6),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () {},
-                    style: TextButton.styleFrom(
-                      minimumSize: Size.zero,
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                    ),
-                    child: Text(
-                      'Terms',
+                    Text(
+                      ' | ',
                       style: TextStyle(
                         fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.primaryNavy,
+                        color: AppTheme.textSecondary.withValues(alpha: 0.6),
                       ),
                     ),
-                  ),
-                ],
-              ),
-            ],
+                    TextButton(
+                      onPressed: () {},
+                      style: TextButton.styleFrom(
+                        minimumSize: Size.zero,
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                      ),
+                      child: Text(
+                        'Terms',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.primaryNavy,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
-        if (compact)
-          const SizedBox(height: 12),
+        SizedBox(height: lerpDouble(16, 12, t)!),
       ],
     );
   }
 
   Widget _buildRail({
     required BuildContext context,
-    required bool compact,
     required Color hairline,
     required Color canvas,
   }) {
     return DashboardSidebarRailFrame(
-      compact: compact,
       hairline: hairline,
       canvas: canvas,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SidebarRailHeader(collapsed: compact),
+          const SidebarRailHeader(),
           Expanded(
-            child: ColoredBox(
-              color: compact ? Colors.transparent : canvas,
-              child: Column(
-                children: [
-                  Expanded(
-                    child: SingleChildScrollView(
-                      child: _buildNavList(compact: compact),
-                    ),
+            child: Builder(
+              builder: (context) {
+                final t = SidebarCollapseScope.of(context);
+                return ColoredBox(
+                  color: Color.lerp(canvas, Colors.transparent, t)!,
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: SingleChildScrollView(
+                          child: _buildNavList(compact: false),
+                        ),
+                      ),
+                      _buildFooter(context, compact: false),
+                    ],
                   ),
-                  _buildFooter(context, compact: compact),
-                ],
-              ),
+                );
+              },
             ),
           ),
         ],
@@ -746,11 +781,10 @@ class _EmployeeSidebar extends StatelessWidget {
     if (railMode) {
       return AnimatedSidebarWidth(
         collapsed: collapsed,
-        builder: (context, compact) => _buildRail(
-          compact: compact,
+        child: _buildRail(
+          context: context,
           hairline: hairline,
           canvas: canvas,
-          context: context,
         ),
       );
     }
@@ -772,9 +806,7 @@ class _EmployeeSidebar extends StatelessWidget {
         children: [
           if (showBrand) const PortalSidebarBrand(),
           Expanded(
-            child: SingleChildScrollView(
-              child: _buildNavList(compact: false),
-            ),
+            child: SingleChildScrollView(child: _buildNavList(compact: false)),
           ),
           _buildFooter(context, compact: false),
         ],
@@ -783,7 +815,7 @@ class _EmployeeSidebar extends StatelessWidget {
   }
 }
 
-/// Main content: welcome, 4 cards (Clock In, Attendance, Leave Balance, My Payslip), Announcements, Upcoming Leave, Attendance Overview.
+/// Main content: welcome, 4 cards (Clock In, Attendance, Leave Balance, My Payslip), Upcoming Leave, Attendance Overview.
 class _EmployeeDashboardContent extends StatefulWidget {
   const _EmployeeDashboardContent({
     required this.displayName,
@@ -847,35 +879,14 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
   Widget build(BuildContext context) {
     final w = MediaQuery.sizeOf(context).width;
     final isNarrow = w < 600;
-    final isTiny = w < 360;
-    final welcomeSize = isTiny ? 17.0 : (isNarrow ? 19.0 : 24.0);
-    final subtitleSize = isNarrow ? 13.5 : 14.5;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Welcome back, ${widget.displayName}!',
-          style: TextStyle(
-            color: AppTheme.dashTextPrimaryOf(context),
-            fontSize: welcomeSize,
-            fontWeight: FontWeight.w700,
-            height: 1.25,
-            letterSpacing: -0.35,
-          ),
-          maxLines: 3,
-          overflow: TextOverflow.ellipsis,
+        EmployeeWelcomeBanner(
+          displayName: widget.displayName,
+          isNarrow: isNarrow,
         ),
-        const SizedBox(height: 8),
-        Text(
-          "Here's your latest information and updates.",
-          style: TextStyle(
-            color: AppTheme.dashTextSecondaryOf(context),
-            fontSize: subtitleSize,
-            height: 1.45,
-          ),
-        ),
-        SizedBox(height: isNarrow ? 20 : 26),
+        SizedBox(height: isNarrow ? 22 : 28),
         EmployeeAttendanceOverviewCard(
           onViewMore: widget.onViewAttendance,
           summaryCards: _EmployeeSummaryCards(
@@ -884,27 +895,21 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
           ),
           upcomingLeave: const _EmployeeUpcomingLeaveCard(embedded: true),
         ),
-        SizedBox(height: isNarrow ? 20 : 24),
-        Text(
-          'DocuTracker',
-          style: AppTheme.dashSectionTitle(context).copyWith(
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-            color: AppTheme.dashTextPrimaryOf(context),
-            letterSpacing: -0.2,
-          ),
+        SizedBox(height: isNarrow ? 22 : 28),
+        EmployeeSectionHeader(
+          title: 'DocuTracker',
+          icon: Icons.folder_copy_outlined,
+          subtitle: 'Your documents and routing status',
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 14),
         Container(
           padding: EdgeInsets.all(_employeeSectionCardPadding(context)),
-          decoration: AppTheme.dashSurfaceCard(context),
+          decoration: EmployeeDashUi.elevatedPanel(context),
           child: const DocuTrackerDashboardScreen(
             isAdmin: false,
             showTitle: false,
           ),
         ),
-        const SizedBox(height: 24),
-        _EmployeeAnnouncementsCard(),
         const SizedBox(height: 32),
       ],
     );
@@ -1056,17 +1061,17 @@ class _ClockInCard extends StatelessWidget {
 
         return Container(
           padding: EdgeInsets.all(_employeeCardPadding(context)),
-          decoration: AppTheme.dashSurfaceCard(context),
+          decoration: EmployeeDashUi.summaryCard(
+            context: context,
+            tint: const Color(0xFFFFF7ED),
+            accent: AppTheme.primaryNavy,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                label,
-                style: TextStyle(
-                  color: AppTheme.dashTextSecondaryOf(context),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                ),
+                label.toUpperCase(),
+                style: EmployeeDashUi.metricLabel(context),
               ),
               if (isHoliday)
                 Padding(
@@ -1198,8 +1203,9 @@ class _ClockInCard extends StatelessWidget {
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(12),
                     ),
+                    elevation: 0,
                   ),
                   child: dtr.loading
                       ? const SizedBox(
@@ -1245,7 +1251,11 @@ class _AttendanceCard extends StatelessWidget {
 
         return Container(
           padding: EdgeInsets.all(_employeeCardPadding(context)),
-          decoration: AppTheme.dashSurfaceCard(context),
+          decoration: EmployeeDashUi.summaryCard(
+            context: context,
+            tint: const Color(0xFFE8F5E9),
+            accent: AttendanceOverviewColors.present,
+          ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1255,12 +1265,8 @@ class _AttendanceCard extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      'Attendance',
-                      style: TextStyle(
-                        color: AppTheme.dashTextSecondaryOf(context),
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                      ),
+                      'ATTENDANCE',
+                      style: EmployeeDashUi.metricLabel(context),
                     ),
                     const SizedBox(height: 12),
                     Text(
@@ -1322,7 +1328,7 @@ class _AttendanceCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              const _SummaryCardIconAccent(
+              const EmployeeSummaryIconAccent(
                 icon: Icons.event_available_rounded,
                 color: AttendanceOverviewColors.present,
               ),
@@ -1362,7 +1368,11 @@ class _LeaveBalanceCard extends StatelessWidget {
         }
         return Container(
           padding: EdgeInsets.all(_employeeCardPadding(context)),
-          decoration: AppTheme.dashSurfaceCard(context),
+          decoration: EmployeeDashUi.summaryCard(
+            context: context,
+            tint: const Color(0xFFF3E5F5),
+            accent: AttendanceOverviewColors.onLeave,
+          ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1372,12 +1382,8 @@ class _LeaveBalanceCard extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      'Leave Balance',
-                      style: TextStyle(
-                        color: AppTheme.dashTextSecondaryOf(context),
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                      ),
+                      'LEAVE BALANCE',
+                      style: EmployeeDashUi.metricLabel(context),
                     ),
                     const SizedBox(height: 12),
                     Text(
@@ -1425,7 +1431,7 @@ class _LeaveBalanceCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              const _SummaryCardIconAccent(
+              const EmployeeSummaryIconAccent(
                 icon: Icons.event_note_rounded,
                 color: AttendanceOverviewColors.onLeave,
               ),
@@ -1433,28 +1439,6 @@ class _LeaveBalanceCard extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-/// Right-side visual anchor so summary cards use horizontal space evenly with the clock card.
-class _SummaryCardIconAccent extends StatelessWidget {
-  const _SummaryCardIconAccent({required this.icon, required this.color});
-
-  final IconData icon;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 48,
-      height: 48,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Icon(icon, color: color, size: 26),
     );
   }
 }
@@ -1588,103 +1572,6 @@ class _PayslipCard extends StatelessWidget {
   }
 }
 
-class _EmployeeAnnouncementsCard extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    final pad = _employeeSectionCardPadding(context);
-    final innerPad = MediaQuery.sizeOf(context).width < 600 ? 12.0 : 16.0;
-
-    Widget titleRow() {
-      return Row(
-        children: [
-          Icon(Icons.campaign_outlined, color: AppTheme.primaryNavy, size: 22),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Announcements',
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontWeight: FontWeight.w700,
-                fontSize: 15,
-                letterSpacing: -0.2,
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      );
-    }
-
-    return LayoutBuilder(
-      builder: (context, c) {
-        final stackHeader = c.maxWidth < 400;
-        return Container(
-          padding: EdgeInsets.all(pad),
-          decoration: AppTheme.dashSurfaceCard(context),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (stackHeader) ...[
-                titleRow(),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: () {},
-                    style: TextButton.styleFrom(
-                      foregroundColor: AppTheme.primaryNavy,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                    ),
-                    child: const Text('View All >'),
-                  ),
-                ),
-              ] else
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(child: titleRow()),
-                    const SizedBox(width: 8),
-                    TextButton(
-                      onPressed: () {},
-                      style: TextButton.styleFrom(
-                        foregroundColor: AppTheme.primaryNavy,
-                      ),
-                      child: const Text('View All >'),
-                    ),
-                  ],
-                ),
-              SizedBox(height: stackHeader ? 12 : 16),
-              Container(
-                padding: EdgeInsets.all(innerPad),
-                decoration: BoxDecoration(
-                  color: AppTheme.offWhite,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppTheme.dashHairline),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'No announcements yet.',
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 14,
-                        height: 1.4,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
 class _EmployeeUpcomingLeaveCard extends StatelessWidget {
   const _EmployeeUpcomingLeaveCard({this.embedded = false});
 
@@ -1697,23 +1584,10 @@ class _EmployeeUpcomingLeaveCard extends StatelessWidget {
     final innerPad = MediaQuery.sizeOf(context).width < 600 ? 12.0 : 16.0;
 
     Widget titleRow() {
-      return Row(
-        children: [
-          Icon(Icons.event_outlined, color: AppTheme.primaryNavy, size: 22),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Upcoming Leave',
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontWeight: FontWeight.w700,
-                fontSize: 15,
-                letterSpacing: -0.2,
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
+      return EmployeeSectionHeader(
+        title: 'Upcoming Leave',
+        icon: Icons.event_outlined,
+        subtitle: embedded ? 'Scheduled time off' : null,
       );
     }
 
@@ -1729,14 +1603,8 @@ class _EmployeeUpcomingLeaveCard extends StatelessWidget {
                 alignment: Alignment.centerRight,
                 child: TextButton(
                   onPressed: () {},
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppTheme.primaryNavy,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                  ),
-                  child: const Text('View More >'),
+                  style: EmployeeDashUi.ghostAction(context),
+                  child: const Text('View More'),
                 ),
               ),
             ] else
@@ -1747,10 +1615,8 @@ class _EmployeeUpcomingLeaveCard extends StatelessWidget {
                   const SizedBox(width: 8),
                   TextButton(
                     onPressed: () {},
-                    style: TextButton.styleFrom(
-                      foregroundColor: AppTheme.primaryNavy,
-                    ),
-                    child: const Text('View More >'),
+                    style: EmployeeDashUi.ghostAction(context),
+                    child: const Text('View More'),
                   ),
                 ],
               ),
@@ -1758,9 +1624,9 @@ class _EmployeeUpcomingLeaveCard extends StatelessWidget {
             Container(
               padding: EdgeInsets.all(innerPad),
               decoration: BoxDecoration(
-                color: AppTheme.offWhite,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.dashHairline),
+                color: AppTheme.dashMutedSurfaceOf(context),
+                borderRadius: BorderRadius.circular(EmployeeDashUi.radiusMd),
+                border: Border.all(color: AppTheme.dashHairlineOf(context)),
               ),
               child: Row(
                 children: [
@@ -1768,15 +1634,27 @@ class _EmployeeUpcomingLeaveCard extends StatelessWidget {
                     child: Text(
                       'No upcoming leave.',
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 14,
+                        height: 1.4,
                       ),
                     ),
                   ),
-                  Icon(
-                    Icons.event_rounded,
-                    color: AppTheme.textSecondary.withOpacity(0.5),
-                    size: 40,
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: AttendanceOverviewColors.onLeave.withValues(
+                        alpha: 0.1,
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.event_rounded,
+                      color: AttendanceOverviewColors.onLeave.withValues(
+                        alpha: 0.55,
+                      ),
+                      size: 28,
+                    ),
                   ),
                 ],
               ),
@@ -1790,7 +1668,7 @@ class _EmployeeUpcomingLeaveCard extends StatelessWidget {
 
         return Container(
           padding: EdgeInsets.all(pad),
-          decoration: AppTheme.dashSurfaceCard(context),
+          decoration: EmployeeDashUi.elevatedPanel(context),
           child: content,
         );
       },

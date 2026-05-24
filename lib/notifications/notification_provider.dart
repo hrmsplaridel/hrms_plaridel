@@ -32,8 +32,10 @@ class NotificationProvider extends ChangeNotifier {
     try {
       items = await _repo.fetchNotifications();
       unreadCount = await _repo.fetchUnreadCount();
-    } catch (e) {
-      loadError = e.toString();
+    } on NotificationLoadException catch (e) {
+      loadError = e.message;
+    } catch (_) {
+      loadError = 'Could not load notifications. Try again.';
     } finally {
       loading = false;
       notifyListeners();

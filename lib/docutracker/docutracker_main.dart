@@ -72,11 +72,11 @@ class _DocuTrackerMainState extends State<DocuTrackerMain> {
         final isSelected = _currentSection == section;
         final bg = isSelected
             ? (dark
-                ? AppTheme.primaryNavy.withValues(alpha: 0.38)
-                : AppTheme.primaryNavy.withValues(alpha: 0.12))
+                  ? AppTheme.primaryNavy.withValues(alpha: 0.38)
+                  : AppTheme.primaryNavy.withValues(alpha: 0.12))
             : (dark
-                ? AppTheme.dashMutedSurfaceOf(context)
-                : AppTheme.lightGray.withValues(alpha: 0.6));
+                  ? AppTheme.dashMutedSurfaceOf(context)
+                  : AppTheme.lightGray.withValues(alpha: 0.6));
         final fg = isSelected
             ? (dark ? Colors.white : AppTheme.primaryNavy)
             : AppTheme.dashTextPrimaryOf(context);
@@ -95,11 +95,7 @@ class _DocuTrackerMainState extends State<DocuTrackerMain> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    _iconForSection(section),
-                    size: 20,
-                    color: iconColor,
-                  ),
+                  Icon(_iconForSection(section), size: 20, color: iconColor),
                   const SizedBox(width: 8),
                   Text(
                     section.title,

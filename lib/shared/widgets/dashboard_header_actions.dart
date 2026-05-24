@@ -1,17 +1,15 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../api/app_user.dart';
 import '../../landingpage/constants/app_theme.dart';
-import '../../landingpage/screens/landing_page.dart';
-import '../../login/screens/login_page.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/theme_mode_provider.dart';
 import '../../notifications/notification_tap_result.dart';
 import '../../widgets/user_avatar.dart';
 import 'collapsible_dashboard_sidebar.dart';
 import 'dashboard_notifications_dropdown.dart';
+import 'sign_out_flow.dart';
 
 /// Label for profile header / account menu (employee number only, never auth UUID).
 String? dashboardAccountIdLabel(AppUser? user) {
@@ -272,17 +270,15 @@ class _DashboardSidebarProfileCardState
   @override
   Widget build(BuildContext context) {
     const avatarRadius = 20.0;
-    final collapsed = widget.collapsed;
 
-    if (collapsed) {
-      return CollapsedSidebarProfileOrb(
+    return sidebarCollapseCrossfade(
+      alignment: Alignment.center,
+      collapsed: CollapsedSidebarProfileOrb(
         displayName: widget.displayName,
         subtitle: widget.subtitle,
         avatarPath: widget.avatarPath,
-      );
-    }
-
-    return AnimatedBuilder(
+      ),
+      expanded: AnimatedBuilder(
       animation: _pulse,
       builder: (context, _) {
         final pulseT = _pulse.value;
@@ -373,6 +369,7 @@ class _DashboardSidebarProfileCardState
           ),
         );
       },
+      ),
     );
   }
 }
@@ -505,13 +502,7 @@ class DashboardAccountMenuButton extends StatelessWidget {
           return;
         }
         if (value == 'signout') {
-          await context.read<AuthProvider>().signOut();
-          if (!context.mounted) return;
-          final dest = kIsWeb ? const LandingPage() : const LoginPage();
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (_) => dest),
-            (route) => false,
-          );
+          await performDashboardSignOut(context);
         }
       },
     );

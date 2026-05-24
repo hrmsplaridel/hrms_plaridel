@@ -113,7 +113,8 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       GlobalKey<StructuredAddressFormState>();
   final _salaryGradeController = TextEditingController();
 
-  String? _privilege;
+  /// Defaults to Employee so new hires are not accidentally saved as admin.
+  String? _privilege = 'Employee';
   String? _suffix;
   String? _sex;
   DateTime? _dateOfBirth;
@@ -301,7 +302,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     _salaryGradeController.clear();
     setState(() {
       _addressFormKey = GlobalKey<StructuredAddressFormState>();
-      _privilege = null;
+      _privilege = 'Employee';
       _suffix = null;
       _sex = null;
       _dateOfBirth = null;
@@ -407,7 +408,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         widget.onAccountCreated!();
       } else {
         _showSnackBar(
-          'Account created successfully. They can sign in with their email and password.',
+          'Account created as $privilege. They can sign in with their email and password.',
         );
       }
     } on DioException catch (e) {
@@ -685,14 +686,42 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         DropdownButtonFormField<String>(
           initialValue: _privilege,
           isExpanded: true,
-          decoration: _fieldDecoration('Role', hint: 'Admin or Employee'),
-          items: [
-            'Admin',
-            'Employee',
-          ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+          decoration: _fieldDecoration('Role', hint: 'Employee (recommended)'),
+          items: const [
+            DropdownMenuItem(value: 'Employee', child: Text('Employee')),
+            DropdownMenuItem(value: 'Admin', child: Text('Administrator')),
+          ],
           onChanged: (v) => setState(() => _privilege = v),
           validator: (v) => v == null ? 'Required' : null,
         ),
+        if (_privilege == 'Admin') ...[
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF3E0),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFEF6C00).withValues(alpha: 0.4)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFFEF6C00)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Administrator can access the full admin dashboard, DTR management, and all HR modules. Use Employee for hired staff.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.35,
+                      color: _chromeMutedColor(context),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
         SizedBox(height: narrow ? 14 : 16),
         Container(
           padding: const EdgeInsets.all(12),

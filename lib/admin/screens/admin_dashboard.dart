@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 import '../../api/user_facing_api_error.dart';
 import 'package:provider/provider.dart';
@@ -13,11 +14,13 @@ import '../../../utils/form_pdf.dart';
 import '../../../widgets/read_only_saved_entry_dialog.dart';
 import '../../../widgets/rsp_form_header_footer.dart';
 import '../../../widgets/rsp_ld_saved_records_browser.dart';
+import '../../../widgets/rsp_ld_record_actions.dart';
 import '../../../widgets/training_daily_report_read_only_view.dart';
 import '../../../widgets/training_report_attachment_preview.dart';
 import '../../shared/screens/profile_page.dart' show DashboardProfilePanel;
 import '../../shared/widgets/dashboard_content_navigator.dart';
 import '../../shared/widgets/dashboard_header_actions.dart';
+import '../../shared/utils/time_greeting.dart';
 import '../../shared/widgets/collapsible_dashboard_sidebar.dart';
 import '../../shared/widgets/portal_sidebar_brand.dart';
 import '../../../dtr/dtr_main.dart';
@@ -51,12 +54,321 @@ import '../../../notifications/open_notifications_panel.dart';
 
 /// Dashboard accent colors for summary cards and accents (orange theme).
 class _DashboardColors {
-  static const Color cardBlue = Color(0xFFFFF3E0);
-  static const Color cardGreen = Color(0xFFFFECB3);
-  static const Color cardAmber = Color(0xFFFFE0B2);
-  static const Color accentBlue = Color(0xFFE85D04);
-  static const Color accentGreen = Color(0xFFBF360C);
-  static const Color accentAmber = Color(0xFFFF9800);
+  static const Color cardApplicants = Color(0xFFFFF7ED);
+  static const Color cardPending = Color(0xFFFFF1F0);
+  static const Color cardVacancies = Color(0xFFFFFBEB);
+  static const Color cardHiring = Color(0xFFF0F4FF);
+  static const Color accentOrange = Color(0xFFE85D04);
+  static const Color accentCoral = Color(0xFFDC4A2D);
+  static const Color accentAmber = Color(0xFFD97706);
+  static const Color accentNavy = Color(0xFF1A237E);
+
+  // Legacy aliases used by summary data loaders.
+  static const Color cardBlue = cardApplicants;
+  static const Color cardGreen = cardPending;
+  static const Color cardAmber = cardVacancies;
+  static const Color accentBlue = accentOrange;
+  static const Color accentGreen = accentCoral;
+}
+
+/// Shared visual primitives for the admin dashboard home view.
+class _AdminDashUi {
+  _AdminDashUi._();
+
+  static const double radiusLg = 20;
+  static const double radiusMd = 16;
+
+  static BoxDecoration welcomeBanner(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
+    return BoxDecoration(
+      borderRadius: BorderRadius.circular(radiusLg),
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: dark
+            ? [const Color(0xFF252D3D), const Color(0xFF1E2430)]
+            : [const Color(0xFFFFF8F3), Colors.white, const Color(0xFFF8FAFF)],
+      ),
+      border: Border.all(
+        color: dark
+            ? AppTheme.dashHairlineOf(context)
+            : _DashboardColors.accentOrange.withValues(alpha: 0.14),
+      ),
+      boxShadow: [
+        BoxShadow(
+          color: _DashboardColors.accentOrange.withValues(
+            alpha: dark ? 0.12 : 0.08,
+          ),
+          blurRadius: 28,
+          offset: const Offset(0, 10),
+        ),
+        BoxShadow(
+          color: Colors.black.withValues(alpha: dark ? 0.25 : 0.04),
+          blurRadius: 16,
+          offset: const Offset(0, 4),
+        ),
+      ],
+    );
+  }
+
+  static BoxDecoration elevatedPanel(BuildContext context) {
+    final base = AppTheme.dashSurfaceCard(context, radius: radiusLg);
+    final dark = AppTheme.dashIsDark(context);
+    return base.copyWith(
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: dark ? 0.28 : 0.05),
+          blurRadius: 20,
+          offset: const Offset(0, 6),
+        ),
+        BoxShadow(
+          color: _DashboardColors.accentOrange.withValues(
+            alpha: dark ? 0.06 : 0.03,
+          ),
+          blurRadius: 24,
+          offset: const Offset(0, 8),
+        ),
+      ],
+    );
+  }
+
+  static BoxDecoration summaryCard({
+    required BuildContext context,
+    required Color tint,
+    required Color accent,
+  }) {
+    final dark = AppTheme.dashIsDark(context);
+    return BoxDecoration(
+      borderRadius: BorderRadius.circular(radiusMd),
+      color: dark ? const Color(0xFF1E2430) : tint,
+      border: Border.all(color: accent.withValues(alpha: dark ? 0.35 : 0.18)),
+      boxShadow: [
+        BoxShadow(
+          color: accent.withValues(alpha: dark ? 0.15 : 0.1),
+          blurRadius: 18,
+          offset: const Offset(0, 6),
+        ),
+        BoxShadow(
+          color: Colors.black.withValues(alpha: dark ? 0.2 : 0.035),
+          blurRadius: 10,
+          offset: const Offset(0, 3),
+        ),
+      ],
+    );
+  }
+
+  static ButtonStyle ghostAction(BuildContext context) {
+    return TextButton.styleFrom(
+      foregroundColor: AppTheme.primaryNavy,
+      backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.06),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+    );
+  }
+}
+
+class _AdminSectionHeader extends StatelessWidget {
+  const _AdminSectionHeader({
+    required this.title,
+    this.icon,
+    this.subtitle,
+    this.trailing,
+  });
+
+  final String title;
+  final IconData? icon;
+  final String? subtitle;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (icon != null) ...[
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  AppTheme.primaryNavy.withValues(alpha: 0.14),
+                  AppTheme.letterheadNavy.withValues(alpha: 0.08),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+              ),
+            ),
+            child: Icon(icon, color: AppTheme.primaryNavy, size: 22),
+          ),
+          const SizedBox(width: 14),
+        ],
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  color: primary,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 17,
+                  letterSpacing: -0.35,
+                  height: 1.2,
+                ),
+              ),
+              if (subtitle != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  subtitle!,
+                  style: TextStyle(
+                    color: secondary,
+                    fontSize: 13,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        if (trailing != null) trailing!,
+      ],
+    );
+  }
+}
+
+class _AdminWelcomeBanner extends StatelessWidget {
+  const _AdminWelcomeBanner({required this.isNarrow});
+
+  final bool isNarrow;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final displayName = context.select<AuthProvider, String>(
+      (a) => a.displayName.isNotEmpty ? a.displayName : 'Admin',
+    );
+    final greeting = personalizedTimeGreeting(displayName);
+
+    final copy = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: AppTheme.primaryNavy.withValues(alpha: 0.15),
+            ),
+          ),
+          child: const Text(
+            'Admin Portal',
+            style: TextStyle(
+              color: AppTheme.primaryNavy,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.4,
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          greeting,
+          style: TextStyle(
+            color: primary,
+            fontSize: isNarrow ? 22 : 28,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.6,
+            height: 1.15,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          "Here's the latest overview of the HR activities.",
+          style: TextStyle(
+            color: secondary,
+            fontSize: isNarrow ? 14 : 15,
+            height: 1.45,
+          ),
+        ),
+      ],
+    );
+
+    return Container(
+      padding: EdgeInsets.all(isNarrow ? 20 : 26),
+      decoration: _AdminDashUi.welcomeBanner(context),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned(
+            right: isNarrow ? -28 : -16,
+            top: isNarrow ? -36 : -24,
+            child: Container(
+              width: isNarrow ? 120 : 160,
+              height: isNarrow ? 120 : 160,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    AppTheme.primaryNavy.withValues(alpha: 0.12),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: isNarrow ? -20 : -8,
+            bottom: isNarrow ? -24 : -16,
+            child: Container(
+              width: isNarrow ? 80 : 100,
+              height: isNarrow ? 80 : 100,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    AppTheme.letterheadNavy.withValues(alpha: 0.08),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (isNarrow)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Align(
+                  alignment: Alignment.centerRight,
+                  child: RealTimeClock(),
+                ),
+                const SizedBox(height: 16),
+                copy,
+              ],
+            )
+          else
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: copy),
+                const SizedBox(width: 20),
+                const RealTimeClock(),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 enum AdminMenu {
@@ -151,6 +463,14 @@ class _AdminDashboardState extends State<AdminDashboard>
             _dtrContentKey.currentState?.openLocatorManagement();
           });
         });
+        break;
+      case NotificationTapKind.adminRecruitment:
+        setState(() => _selectedMenu = AdminMenu.rsp);
+        DashboardContentNavigator.showHome(_contentNavKey);
+        break;
+      case NotificationTapKind.adminTrainingReports:
+        setState(() => _selectedMenu = AdminMenu.ld);
+        DashboardContentNavigator.showHome(_contentNavKey);
         break;
       case NotificationTapKind.none:
       case NotificationTapKind.employeeLeaveApprovals:
@@ -320,6 +640,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                         DashboardAppHeaderBar(
                           showBrand: false,
                           showSidebarToggle: true,
+                          sidebarCollapsed: _sidebarCollapsed,
                           onSidebarToggle: () => setState(
                             () => _sidebarCollapsed = !_sidebarCollapsed,
                           ),
@@ -499,11 +820,15 @@ class _Sidebar extends StatelessWidget {
     required bool compact,
     required int year,
   }) {
+    final t = SidebarCollapseScope.maybeOf(context) ?? (compact ? 1.0 : 0.0);
+    final fadeExpanded = (1 - t).clamp(0.0, 1.0);
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (!compact)
-          Padding(
+        Opacity(
+          opacity: fadeExpanded,
+          child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Container(
               height: 2,
@@ -513,22 +838,23 @@ class _Sidebar extends StatelessWidget {
               ),
             ),
           ),
+        ),
         Padding(
           padding: EdgeInsets.fromLTRB(
-            compact ? 8 : 12,
+            lerpDouble(12, 8, t)!,
             4,
-            compact ? 8 : 12,
-            compact ? 8 : 10,
+            lerpDouble(12, 8, t)!,
+            lerpDouble(10, 8, t)!,
           ),
           child: DashboardSidebarProfileCard(
             displayName: displayName,
             subtitle: email.isNotEmpty ? email : 'System Administrator',
             avatarPath: avatarPath,
-            collapsed: compact,
           ),
         ),
-        if (!compact)
-          Padding(
+        Opacity(
+          opacity: fadeExpanded,
+          child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
             child: Wrap(
               alignment: WrapAlignment.center,
@@ -604,39 +930,43 @@ class _Sidebar extends StatelessWidget {
               ],
             ),
           ),
-        if (compact) const SizedBox(height: 12),
+        ),
+        SizedBox(height: lerpDouble(18, 12, t)!),
       ],
     );
   }
 
   Widget _buildRail({
     required BuildContext context,
-    required bool compact,
     required Color hairline,
     required Color canvas,
     required int year,
   }) {
     return DashboardSidebarRailFrame(
-      compact: compact,
       hairline: hairline,
       canvas: canvas,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SidebarRailHeader(collapsed: compact),
+          const SidebarRailHeader(),
           Expanded(
-            child: ColoredBox(
-              color: compact ? Colors.transparent : canvas,
-              child: Column(
-                children: [
-                  Expanded(
-                    child: SingleChildScrollView(
-                      child: _buildNavList(context, compact: compact),
-                    ),
+            child: Builder(
+              builder: (context) {
+                final t = SidebarCollapseScope.of(context);
+                return ColoredBox(
+                  color: Color.lerp(canvas, Colors.transparent, t)!,
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: SingleChildScrollView(
+                          child: _buildNavList(context, compact: false),
+                        ),
+                      ),
+                      _buildFooter(context, compact: false, year: year),
+                    ],
                   ),
-                  _buildFooter(context, compact: compact, year: year),
-                ],
-              ),
+                );
+              },
             ),
           ),
         ],
@@ -654,9 +984,8 @@ class _Sidebar extends StatelessWidget {
     if (railMode) {
       return AnimatedSidebarWidth(
         collapsed: collapsed,
-        builder: (context, compact) => _buildRail(
+        child: _buildRail(
           context: context,
-          compact: compact,
           hairline: hairline,
           canvas: canvas,
           year: year,
@@ -799,9 +1128,11 @@ class _DashboardContent extends StatelessWidget {
               width: double.infinity,
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: const Color(0xFFFFF3E0),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.orange.withOpacity(0.35)),
+                color: const Color(0xFFFFF8F3),
+                borderRadius: BorderRadius.circular(_AdminDashUi.radiusMd),
+                border: Border.all(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.2),
+                ),
               ),
               child: Row(
                 children: [
@@ -825,135 +1156,21 @@ class _DashboardContent extends StatelessWidget {
               ),
             ),
           ),
-        if (showWelcome)
-          Container(
-            padding: EdgeInsets.all(isNarrow ? 20 : 24),
-            decoration: AppTheme.dashSurfaceCard(context),
-            child: isNarrow
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Align(
-                        alignment: Alignment.centerRight,
-                        child: RealTimeClock(),
-                      ),
-                      const SizedBox(height: 14),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: AppTheme.primaryNavy.withValues(
-                                alpha: 0.08,
-                              ),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Icon(
-                              Icons.waving_hand_outlined,
-                              color: AppTheme.primaryNavy,
-                              size: 22,
-                            ),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Welcome back, Admin!',
-                                  style: TextStyle(
-                                    color: AppTheme.dashTextPrimaryOf(context),
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: -0.35,
-                                    height: 1.2,
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  "Here's the latest overview of the HR activities.",
-                                  style: TextStyle(
-                                    color: AppTheme.dashTextSecondaryOf(
-                                      context,
-                                    ),
-                                    fontSize: 14,
-                                    height: 1.45,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  )
-                : Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primaryNavy.withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          Icons.waving_hand_outlined,
-                          color: AppTheme.primaryNavy,
-                          size: 26,
-                        ),
-                      ),
-                      const SizedBox(width: 18),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              'Welcome back, Admin!',
-                              style: TextStyle(
-                                color: AppTheme.dashTextPrimaryOf(context),
-                                fontSize: 26,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: -0.45,
-                                height: 1.2,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              "Here's the latest overview of the HR activities.",
-                              style: TextStyle(
-                                color: AppTheme.dashTextSecondaryOf(context),
-                                fontSize: 15,
-                                height: 1.45,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const RealTimeClock(),
-                    ],
-                  ),
-          ),
+        if (showWelcome) _AdminWelcomeBanner(isNarrow: isNarrow),
         if (showWelcome && showSummary) const SizedBox(height: 28),
         if (showSummary) const _SummaryCards(),
         if ((showWelcome || showSummary) && showDocu)
           const SizedBox(height: 28),
         if (showDocu) ...[
-          Text(
-            'DocuTracker',
-            style: AppTheme.dashSectionTitle(context).copyWith(
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-              color: AppTheme.dashTextPrimaryOf(context),
-              letterSpacing: -0.2,
-            ),
+          _AdminSectionHeader(
+            title: 'DocuTracker',
+            icon: Icons.folder_copy_outlined,
+            subtitle: 'Document tracking and routing overview',
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 14),
           Container(
-            padding: const EdgeInsets.all(20),
-            decoration: AppTheme.dashSurfaceCard(context),
+            padding: const EdgeInsets.all(22),
+            decoration: _AdminDashUi.elevatedPanel(context),
             child: const DocuTrackerDashboardScreen(
               isAdmin: true,
               showTitle: false,
@@ -963,19 +1180,15 @@ class _DashboardContent extends StatelessWidget {
         if ((showWelcome || showSummary || showDocu) && showDtr)
           const SizedBox(height: 28),
         if (showDtr) ...[
-          Text(
-            'Daily Time Record',
-            style: AppTheme.dashSectionTitle(context).copyWith(
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-              color: AppTheme.dashTextPrimaryOf(context),
-              letterSpacing: -0.2,
-            ),
+          _AdminSectionHeader(
+            title: 'Daily Time Record',
+            icon: Icons.schedule_rounded,
+            subtitle: 'Attendance, shifts, and workforce time records',
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 14),
           Container(
-            padding: const EdgeInsets.all(20),
-            decoration: AppTheme.dashSurfaceCard(context),
+            padding: const EdgeInsets.all(22),
+            decoration: _AdminDashUi.elevatedPanel(context),
             child: const DtrDashboard(),
           ),
         ],
@@ -1070,8 +1283,8 @@ class _SummaryCardsState extends State<_SummaryCards> {
               title: 'Hiring Status',
               value: hiringActive ? 'Active' : 'Inactive',
               subtitle: 'Landing page',
-              color: Colors.white,
-              iconColor: AppTheme.primaryNavy,
+              color: _DashboardColors.cardHiring,
+              iconColor: _DashboardColors.accentNavy,
               icon: Icons.campaign_rounded,
             ),
           ];
@@ -1155,8 +1368,8 @@ class _SummaryCardsState extends State<_SummaryCards> {
             title: 'Hiring Status',
             value: 'â€¦',
             subtitle: 'â€¦',
-            color: Colors.white,
-            iconColor: AppTheme.primaryNavy,
+            color: _DashboardColors.cardHiring,
+            iconColor: _DashboardColors.accentNavy,
             icon: Icons.campaign_rounded,
           ),
         ];
@@ -1167,7 +1380,7 @@ class _SummaryCardsState extends State<_SummaryCards> {
         children: [
           for (int i = 0; i < cards.length; i++) ...[
             Expanded(child: _SummaryCard(data: cards[i])),
-            if (i < cards.length - 1) const SizedBox(width: 16),
+            if (i < cards.length - 1) const SizedBox(width: 18),
           ],
         ],
       );
@@ -1176,7 +1389,7 @@ class _SummaryCardsState extends State<_SummaryCards> {
         children: [
           for (int i = 0; i < cards.length; i++) ...[
             _SummaryCard(data: cards[i]),
-            if (i < cards.length - 1) const SizedBox(height: 12),
+            if (i < cards.length - 1) const SizedBox(height: 14),
           ],
         ],
       );
@@ -1186,11 +1399,11 @@ class _SummaryCardsState extends State<_SummaryCards> {
           Row(
             children: [
               Expanded(child: _SummaryCard(data: cards[0])),
-              const SizedBox(width: 16),
+              const SizedBox(width: 18),
               Expanded(child: _SummaryCard(data: cards[1])),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
           Row(
             children: [
               Expanded(child: _SummaryCard(data: cards[2])),
@@ -1229,53 +1442,81 @@ class _SummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: AppTheme.dashSurfaceCard(context),
-        child: Column(
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+
+    return Container(
+      decoration: _AdminDashUi.summaryCard(
+        context: context,
+        tint: data.color,
+        accent: data.iconColor,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+        child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    data.title.toUpperCase(),
+                    style: TextStyle(
+                      color: secondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    data.value,
+                    style: TextStyle(
+                      color: primary,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.6,
+                      height: 1.1,
+                    ),
+                  ),
+                  if (data.subtitle.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      data.subtitle,
+                      style: TextStyle(
+                        color: secondary,
+                        fontSize: 12,
+                        height: 1.35,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
             Container(
-              padding: const EdgeInsets.all(10),
+              width: 48,
+              height: 48,
+              alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: data.iconColor.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(data.icon, size: 22, color: data.iconColor),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              data.title,
-              style: TextStyle(
-                color: AppTheme.dashTextSecondaryOf(context),
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              data.value,
-              style: TextStyle(
-                color: AppTheme.dashTextPrimaryOf(context),
-                fontSize: 26,
-                fontWeight: FontWeight.w700,
-                letterSpacing: -0.45,
-                height: 1.2,
-              ),
-            ),
-            if (data.subtitle.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text(
-                data.subtitle,
-                style: TextStyle(
-                  color: AppTheme.dashTextSecondaryOf(context),
-                  fontSize: 12,
-                  height: 1.3,
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    data.iconColor.withValues(alpha: 0.18),
+                    data.iconColor.withValues(alpha: 0.06),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: data.iconColor.withValues(alpha: 0.2),
                 ),
               ),
-            ],
+              child: Icon(data.icon, size: 24, color: data.iconColor),
+            ),
           ],
         ),
       ),
@@ -1287,60 +1528,28 @@ class _AnnouncementsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(22),
-      decoration: AppTheme.dashSurfaceCard(context),
+      padding: const EdgeInsets.all(24),
+      decoration: _AdminDashUi.elevatedPanel(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryNavy.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(
-                      Icons.campaign_outlined,
-                      color: AppTheme.primaryNavy,
-                      size: 22,
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Text(
-                    'Announcements',
-                    style: TextStyle(
-                      color: AppTheme.dashTextPrimaryOf(context),
-                      fontWeight: FontWeight.w700,
-                      fontSize: 15,
-                      letterSpacing: -0.2,
-                    ),
-                  ),
-                ],
-              ),
-              TextButton.icon(
-                onPressed: () {},
-                icon: const Icon(Icons.arrow_forward_rounded, size: 18),
-                label: const Text('View All'),
-                style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.primaryNavy,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                ),
-              ),
-            ],
+          _AdminSectionHeader(
+            title: 'Announcements',
+            icon: Icons.campaign_outlined,
+            subtitle: 'Landing page hiring visibility',
+            trailing: TextButton.icon(
+              onPressed: () {},
+              icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+              label: const Text('View All'),
+              style: _AdminDashUi.ghostAction(context),
+            ),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 20),
           Container(
-            padding: const EdgeInsets.all(18),
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
               color: AppTheme.dashMutedSurfaceOf(context),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(_AdminDashUi.radiusMd),
               border: Border.all(color: AppTheme.dashHairlineOf(context)),
             ),
             child: Column(
@@ -1379,114 +1588,63 @@ class _RecruitmentOverviewCard extends StatelessWidget {
     final isCompact = width < 480;
 
     return Container(
-      padding: const EdgeInsets.all(22),
-      decoration: AppTheme.dashSurfaceCard(context),
+      padding: const EdgeInsets.all(24),
+      decoration: _AdminDashUi.elevatedPanel(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (isCompact)
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: _DashboardColors.accentBlue.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Icon(
-                        Icons.pie_chart_rounded,
-                        color: _DashboardColors.accentBlue,
-                        size: 24,
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Flexible(
-                      child: Text(
-                        'Recruitment Overview',
-                        style: TextStyle(
-                          color: AppTheme.dashTextPrimaryOf(context),
-                          fontWeight: FontWeight.w700,
-                          fontSize: 18,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
+          _AdminSectionHeader(
+            title: 'Recruitment Overview',
+            icon: Icons.pie_chart_rounded,
+            subtitle: 'Application pipeline and hiring metrics',
+            trailing: isCompact
+                ? null
+                : TextButton.icon(
                     onPressed: () {},
-                    icon: const Icon(Icons.insights_rounded, size: 18),
+                    icon: const Icon(Icons.insights_rounded, size: 16),
                     label: const Text('View Report'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: AppTheme.primaryNavy,
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                    ),
+                    style: _AdminDashUi.ghostAction(context),
                   ),
-                ),
-              ],
-            )
-          else
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: _DashboardColors.accentBlue.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Icon(
-                        Icons.pie_chart_rounded,
-                        color: _DashboardColors.accentBlue,
-                        size: 24,
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Text(
-                      'Recruitment Overview',
-                      style: TextStyle(
-                        color: AppTheme.dashTextPrimaryOf(context),
-                        fontWeight: FontWeight.w700,
-                        fontSize: 18,
-                      ),
-                    ),
-                  ],
-                ),
-                TextButton.icon(
-                  onPressed: () {},
-                  icon: const Icon(Icons.insights_rounded, size: 18),
-                  label: const Text('View Report'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppTheme.primaryNavy,
-                  ),
-                ),
-              ],
+          ),
+          if (isCompact) ...[
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () {},
+                icon: const Icon(Icons.insights_rounded, size: 16),
+                label: const Text('View Report'),
+                style: _AdminDashUi.ghostAction(context),
+              ),
             ),
-          const SizedBox(height: 24),
+          ],
+          const SizedBox(height: 22),
           Container(
             height: 200,
             decoration: BoxDecoration(
               color: AppTheme.dashMutedSurfaceOf(context),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(_AdminDashUi.radiusMd),
               border: Border.all(color: AppTheme.dashHairlineOf(context)),
             ),
             child: Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(
-                    Icons.analytics_outlined,
-                    size: 56,
-                    color: AppTheme.dashTextSecondaryOf(
-                      context,
-                    ).withValues(alpha: 0.5),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _DashboardColors.accentOrange.withValues(
+                        alpha: 0.1,
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.analytics_outlined,
+                      size: 40,
+                      color: _DashboardColors.accentOrange.withValues(
+                        alpha: 0.7,
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 16),
                   Text(
@@ -1494,22 +1652,27 @@ class _RecruitmentOverviewCard extends StatelessWidget {
                     style: TextStyle(
                       color: AppTheme.dashTextPrimaryOf(context),
                       fontSize: 15,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                   const SizedBox(height: 6),
-                  Text(
-                    'Data will appear when applicants complete the recruitment process.',
-                    style: TextStyle(
-                      color: AppTheme.dashTextSecondaryOf(context),
-                      fontSize: 13,
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: Text(
+                      'Data will appear when applicants complete the recruitment process.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: AppTheme.dashTextSecondaryOf(context),
+                        fontSize: 13,
+                        height: 1.4,
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 18),
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
@@ -1540,106 +1703,42 @@ class _PendingApplicationsCard extends StatelessWidget {
     final isCompact = width < 480;
 
     return Container(
-      padding: const EdgeInsets.all(22),
-      decoration: AppTheme.dashSurfaceCard(context),
+      padding: const EdgeInsets.all(24),
+      decoration: _AdminDashUi.elevatedPanel(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (isCompact)
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: _DashboardColors.accentGreen.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Icon(
-                        Icons.assignment_rounded,
-                        color: _DashboardColors.accentGreen,
-                        size: 24,
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Flexible(
-                      child: Text(
-                        'Pending Applications',
-                        style: TextStyle(
-                          color: AppTheme.dashTextPrimaryOf(context),
-                          fontWeight: FontWeight.w700,
-                          fontSize: 18,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
+          _AdminSectionHeader(
+            title: 'Pending Applications',
+            icon: Icons.assignment_rounded,
+            subtitle: 'Applicants awaiting document review',
+            trailing: isCompact
+                ? null
+                : TextButton.icon(
                     onPressed: () {},
-                    icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+                    icon: const Icon(Icons.arrow_forward_rounded, size: 16),
                     label: const Text('View All'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: AppTheme.primaryNavy,
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                    ),
+                    style: _AdminDashUi.ghostAction(context),
                   ),
-                ),
-              ],
-            )
-          else
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: _DashboardColors.accentGreen.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Icon(
-                        Icons.assignment_rounded,
-                        color: _DashboardColors.accentGreen,
-                        size: 24,
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Text(
-                      'Pending Applications',
-                      style: TextStyle(
-                        color: AppTheme.dashTextPrimaryOf(context),
-                        fontWeight: FontWeight.w700,
-                        fontSize: 18,
-                      ),
-                    ),
-                  ],
-                ),
-                TextButton.icon(
-                  onPressed: () {},
-                  icon: const Icon(Icons.arrow_forward_rounded, size: 18),
-                  label: const Text('View All'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppTheme.primaryNavy,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
-                  ),
-                ),
-              ],
+          ),
+          if (isCompact) ...[
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () {},
+                icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+                label: const Text('View All'),
+                style: _AdminDashUi.ghostAction(context),
+              ),
             ),
-          const SizedBox(height: 24),
+          ],
+          const SizedBox(height: 22),
           LayoutBuilder(
             builder: (context, constraints) {
               final needScroll = constraints.maxWidth < 500;
               final table = ClipRRect(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(_AdminDashUi.radiusMd),
                 child: Table(
                   columnWidths: const {
                     0: FlexColumnWidth(2),
@@ -1650,7 +1749,12 @@ class _PendingApplicationsCard extends StatelessWidget {
                   children: [
                     TableRow(
                       decoration: BoxDecoration(
-                        color: AppTheme.dashMutedSurfaceOf(context),
+                        gradient: LinearGradient(
+                          colors: [
+                            AppTheme.primaryNavy.withValues(alpha: 0.08),
+                            AppTheme.dashMutedSurfaceOf(context),
+                          ],
+                        ),
                       ),
                       children: [
                         _TableHeader('Applicant'),
@@ -1730,22 +1834,30 @@ class _PendingApplicationsCard extends StatelessWidget {
               return table;
             },
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 18),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
             decoration: BoxDecoration(
-              color: AppTheme.dashMutedSurfaceOf(context),
-              borderRadius: BorderRadius.circular(12),
+              color: AppTheme.primaryNavy.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(_AdminDashUi.radiusMd),
               border: Border.all(
-                color: AppTheme.primaryNavy.withValues(alpha: 0.25),
+                color: AppTheme.primaryNavy.withValues(alpha: 0.18),
               ),
             ),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                  Icons.info_outline_rounded,
-                  size: 20,
-                  color: AppTheme.primaryNavy,
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.info_outline_rounded,
+                    size: 18,
+                    color: AppTheme.primaryNavy,
+                  ),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -1754,7 +1866,7 @@ class _PendingApplicationsCard extends StatelessWidget {
                     style: TextStyle(
                       color: AppTheme.dashTextSecondaryOf(context),
                       fontSize: 14,
-                      height: 1.4,
+                      height: 1.45,
                     ),
                   ),
                 ),
@@ -1776,11 +1888,12 @@ class _TableHeader extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
       child: Text(
-        text,
+        text.toUpperCase(),
         style: TextStyle(
           fontWeight: FontWeight.w700,
-          fontSize: 13,
-          color: AppTheme.dashTextPrimaryOf(context),
+          fontSize: 11,
+          letterSpacing: 0.5,
+          color: AppTheme.dashTextSecondaryOf(context),
         ),
       ),
     );
@@ -2435,7 +2548,6 @@ class _LdSavedEntryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hairline = AppTheme.dashHairlineOf(context);
-    final muted = AppTheme.dashMutedSurfaceOf(context);
     final panel = AppTheme.dashPanelOf(context);
 
     return Container(
@@ -2548,8 +2660,8 @@ class _LdSavedEntryCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+                      spacing: kRspLdRecordActionGap,
+                      runSpacing: kRspLdRecordActionGap,
                       children: [
                         OutlinedButton.icon(
                           onPressed: onView,
@@ -2595,17 +2707,14 @@ class _LdSavedEntryCard extends StatelessWidget {
                     ),
                     const Spacer(),
                     Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+                      spacing: kRspLdRecordActionGap,
+                      runSpacing: kRspLdRecordActionGap,
                       children: [
                         IconButton(
                           onPressed: () => onPrint(),
                           icon: const Icon(Icons.print_rounded, size: 20),
                           tooltip: 'Print',
-                          style: IconButton.styleFrom(
-                            backgroundColor: muted,
-                            foregroundColor: AppTheme.primaryNavy,
-                          ),
+                          style: rspLdRecordIconButtonStyle(),
                         ),
                         IconButton(
                           onPressed: () => onDownloadPdf(),
@@ -2614,10 +2723,7 @@ class _LdSavedEntryCard extends StatelessWidget {
                             size: 20,
                           ),
                           tooltip: 'Download PDF',
-                          style: IconButton.styleFrom(
-                            backgroundColor: muted,
-                            foregroundColor: AppTheme.primaryNavy,
-                          ),
+                          style: rspLdRecordIconButtonStyle(),
                         ),
                         TextButton.icon(
                           onPressed: onDelete,
@@ -3416,11 +3522,18 @@ class _LdReportCard extends StatelessWidget {
                                 onPressed: () => showReadOnlySavedEntryDialog(
                                   context,
                                   title: 'Training daily report',
+                                  subtitle: r.title.trim().isNotEmpty
+                                      ? r.title
+                                      : r.submittedAt
+                                            .toLocal()
+                                            .toString()
+                                            .split('.')
+                                            .first,
                                   previewBuilder: () =>
                                       TrainingDailyReportReadOnlyView(
                                         report: r,
                                       ),
-                                  contentWidth: 560,
+                                  contentWidth: 640,
                                 ),
                                 icon: const Icon(
                                   Icons.article_outlined,
@@ -3983,7 +4096,8 @@ class _TrainingNeedAnalysisList extends StatelessWidget {
           meta: '${e.rows.length} row${e.rows.length == 1 ? '' : 's'}',
           onView: () => showReadOnlySavedEntryDialog(
             context,
-            title: 'Saved training need analysis',
+            title: 'Training need analysis',
+            subtitle: 'CY ${e.cyYear ?? '—'} · ${e.department ?? '—'}',
             previewBuilder: () => _TrainingNeedAnalysisFormEditor(
               readOnly: true,
               entry: e,
@@ -3993,6 +4107,7 @@ class _TrainingNeedAnalysisList extends StatelessWidget {
               onDownloadPdf: (_) async {},
             ),
             contentWidth: 1100,
+            onPrint: () => onPrint(e),
           ),
           onEdit: () => onEdit(e),
           onPrint: () => onPrint(e),
@@ -4715,7 +4830,8 @@ class _ActionBrainstormingList extends StatelessWidget {
           meta: '${e.rows.length} row${e.rows.length == 1 ? '' : 's'}',
           onView: () => showReadOnlySavedEntryDialog(
             context,
-            title: 'Saved action brainstorming worksheet',
+            title: 'Action brainstorming worksheet',
+            subtitle: '${e.department ?? '—'} · ${e.date ?? '—'}',
             previewBuilder: () => _ActionBrainstormingFormEditor(
               readOnly: true,
               entry: e,
@@ -4725,6 +4841,7 @@ class _ActionBrainstormingList extends StatelessWidget {
               onDownloadPdf: (_) async {},
             ),
             contentWidth: 1280,
+            onPrint: () => onPrint(e),
           ),
           onEdit: () => onEdit(e),
           onPrint: () => onPrint(e),

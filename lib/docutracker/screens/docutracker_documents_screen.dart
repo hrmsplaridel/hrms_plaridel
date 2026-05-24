@@ -253,7 +253,8 @@ class _DocuTrackerDocumentsScreenState
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
                                 TextField(
-                                  decoration: DocuTrackerStyles.inputDecoration(context, 
+                                  decoration: DocuTrackerStyles.inputDecoration(
+                                    context,
                                     'Enter title',
                                     Icons.title_rounded,
                                   ),
@@ -263,7 +264,8 @@ class _DocuTrackerDocumentsScreenState
                                 DropdownButtonFormField<DocumentType>(
                                   value: type,
                                   decoration:
-                                      DocuTrackerStyles.dropdownDecoration(context, 
+                                      DocuTrackerStyles.dropdownDecoration(
+                                        context,
                                         'Document Type',
                                       ),
                                   items: DocumentType.values
@@ -280,7 +282,8 @@ class _DocuTrackerDocumentsScreenState
                                 ),
                                 const SizedBox(height: 20),
                                 TextField(
-                                  decoration: DocuTrackerStyles.inputDecoration(context, 
+                                  decoration: DocuTrackerStyles.inputDecoration(
+                                    context,
                                     'Description (optional)',
                                     Icons.notes_rounded,
                                   ),

@@ -52,6 +52,7 @@ class RecruitmentApplication {
     this.finalInterviewPassed,
     this.hiredUserId,
     this.hrAccountSetupDone = false,
+    this.hireCredentialsEmailSentAt,
     this.createdAt,
     this.updatedAt,
   });
@@ -90,6 +91,12 @@ class RecruitmentApplication {
 
   /// HR-only monitoring flag: shown to applicants on Step 8 (no employee record required).
   final bool hrAccountSetupDone;
+
+  /// Set when admin successfully sends hire credentials email (POST send-hire-email).
+  final DateTime? hireCredentialsEmailSentAt;
+
+  bool get hireCredentialsEmailSent => hireCredentialsEmailSentAt != null;
+
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -167,6 +174,11 @@ class RecruitmentApplication {
       finalInterviewPassed: _parseTriStateBool(json['final_interview_passed']),
       hiredUserId: _parseUuidString(json['hired_user_id']),
       hrAccountSetupDone: json['hr_account_setup_done'] == true,
+      hireCredentialsEmailSentAt: json['hire_credentials_email_sent_at'] != null
+          ? DateTime.tryParse(
+              json['hire_credentials_email_sent_at'].toString(),
+            )
+          : null,
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at'] as String)
           : null,
@@ -441,7 +453,11 @@ class RecruitmentRepo {
   ) async {
     await ApiClient.instance.put<void>(
       '/api/rsp/applications/$applicationId/final-interview',
-      data: <String, dynamic>{'finalInterviewAt': at?.toIso8601String()},
+      data: <String, dynamic>{
+        'finalInterviewAt': at == null
+            ? null
+            : (at.isUtc ? at : at.toUtc()).toIso8601String(),
+      },
     );
   }
 

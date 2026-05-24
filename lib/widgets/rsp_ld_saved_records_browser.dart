@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../landingpage/constants/app_theme.dart';
 import 'read_only_saved_entry_dialog.dart';
+import 'rsp_ld_record_actions.dart';
 
 /// One row in the saved-records browser (view read-only summary + print).
 class SavedRecordListItem {
@@ -52,10 +53,10 @@ Future<void> showRspLdSavedRecordsBrowser(
     builder: (dialogContext) {
       final size = MediaQuery.sizeOf(dialogContext);
       final viewPad = MediaQuery.viewPaddingOf(dialogContext);
-      final maxW = math.min(560.0, size.width - 40);
+      final maxW = math.min(720.0, size.width - 32);
       final maxDialogH = math.max(
-        280.0,
-        math.min(560.0, size.height - viewPad.vertical - 52),
+        320.0,
+        math.min(640.0, size.height - viewPad.vertical - 48),
       );
 
       return Dialog(
@@ -63,15 +64,27 @@ Future<void> showRspLdSavedRecordsBrowser(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         elevation: 12,
         shadowColor: Colors.black.withValues(alpha: 0.2),
-        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: maxW, maxHeight: maxDialogH),
           child: Column(
             mainAxisSize: MainAxisSize.max,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              Container(
+                height: 3,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      AppTheme.primaryNavy,
+                      AppTheme.primaryNavyLight,
+                    ],
+                  ),
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                ),
+              ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(22, 20, 16, 12),
+                padding: const EdgeInsets.fromLTRB(22, 18, 16, 12),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -80,6 +93,9 @@ Future<void> showRspLdSavedRecordsBrowser(
                       decoration: BoxDecoration(
                         color: AppTheme.primaryNavy.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.18),
+                        ),
                       ),
                       child: Icon(
                         Icons.folder_open_rounded,
@@ -169,11 +185,16 @@ Future<void> showRspLdSavedRecordsBrowser(
                         ),
                       )
                     : ListView.separated(
-                        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                         itemCount: items.length,
                         separatorBuilder: (_, __) => const SizedBox(height: 10),
                         itemBuilder: (ctx, i) {
                           final it = items[i];
+                          final subtitleParts = it.subtitle
+                              ?.split('·')
+                              .map((s) => s.trim())
+                              .where((s) => s.isNotEmpty)
+                              .toList();
                           return Material(
                             color: _kSavedRecordsCardBg,
                             elevation: 0,
@@ -185,35 +206,52 @@ Future<void> showRspLdSavedRecordsBrowser(
                                 showReadOnlySavedEntryDialog(
                                   context,
                                   title: it.detailDialogTitle,
+                                  subtitle: it.subtitle,
                                   sections: it.previewSections,
                                   previewBuilder: it.previewBuilder,
                                   contentWidth: it.previewContentWidth ?? 520,
+                                  onPrint: it.onPrint,
                                 );
                               },
                               child: Container(
+                                width: double.infinity,
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 12,
+                                  horizontal: 16,
+                                  vertical: 14,
                                 ),
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(color: AppTheme.lightGray),
+                                  border: Border.all(
+                                    color: AppTheme.primaryNavy.withValues(
+                                      alpha: 0.1,
+                                    ),
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(
+                                        alpha: 0.04,
+                                      ),
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
                                 ),
                                 child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Container(
-                                      width: 44,
-                                      height: 44,
+                                      width: 48,
+                                      height: 48,
                                       decoration: BoxDecoration(
                                         color: AppTheme.primaryNavy.withValues(
                                           alpha: 0.1,
                                         ),
-                                        borderRadius: BorderRadius.circular(12),
+                                        borderRadius: BorderRadius.circular(14),
                                       ),
                                       child: Icon(
                                         Icons.description_outlined,
                                         color: AppTheme.primaryNavy,
-                                        size: 22,
+                                        size: 24,
                                       ),
                                     ),
                                     const SizedBox(width: 14),
@@ -227,59 +265,70 @@ Future<void> showRspLdSavedRecordsBrowser(
                                             maxLines: 2,
                                             overflow: TextOverflow.ellipsis,
                                             style: const TextStyle(
-                                              fontWeight: FontWeight.w700,
-                                              fontSize: 15,
+                                              fontWeight: FontWeight.w800,
+                                              fontSize: 16,
                                               color: AppTheme.textPrimary,
+                                              height: 1.2,
                                             ),
                                           ),
-                                          if (it.subtitle != null) ...[
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              it.subtitle!,
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                height: 1.3,
-                                                color: AppTheme.textSecondary,
-                                              ),
+                                          if (subtitleParts != null &&
+                                              subtitleParts.isNotEmpty) ...[
+                                            const SizedBox(height: 8),
+                                            Wrap(
+                                              spacing: 8,
+                                              runSpacing: 6,
+                                              children: subtitleParts
+                                                  .map(
+                                                    (part) => Container(
+                                                      padding:
+                                                          const EdgeInsets.symmetric(
+                                                        horizontal: 10,
+                                                        vertical: 4,
+                                                      ),
+                                                      decoration: BoxDecoration(
+                                                        color: AppTheme
+                                                            .primaryNavy
+                                                            .withValues(
+                                                          alpha: 0.07,
+                                                        ),
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                          20,
+                                                        ),
+                                                      ),
+                                                      child: Text(
+                                                        part,
+                                                        style: TextStyle(
+                                                          fontSize: 12,
+                                                          fontWeight:
+                                                              FontWeight.w600,
+                                                          color: AppTheme
+                                                              .textSecondary,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  )
+                                                  .toList(),
                                             ),
                                           ],
                                         ],
                                       ),
                                     ),
-                                    const SizedBox(width: 8),
-                                    IconButton(
-                                      tooltip: 'View',
-                                      style: IconButton.styleFrom(
-                                        backgroundColor: AppTheme.primaryNavy
-                                            .withValues(alpha: 0.1),
-                                        foregroundColor: AppTheme.primaryNavy,
-                                      ),
-                                      onPressed: () {
+                                    const SizedBox(width: 10),
+                                    RspLdViewPrintIconActions(
+                                      onView: () {
                                         showReadOnlySavedEntryDialog(
                                           context,
                                           title: it.detailDialogTitle,
+                                          subtitle: it.subtitle,
                                           sections: it.previewSections,
                                           previewBuilder: it.previewBuilder,
                                           contentWidth:
                                               it.previewContentWidth ?? 520,
+                                          onPrint: it.onPrint,
                                         );
                                       },
-                                      icon: const Icon(
-                                        Icons.visibility_rounded,
-                                        size: 22,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    IconButton(
-                                      tooltip: 'Print',
-                                      style: IconButton.styleFrom(
-                                        backgroundColor: AppTheme.primaryNavy
-                                            .withValues(alpha: 0.1),
-                                        foregroundColor: AppTheme.primaryNavy,
-                                      ),
-                                      onPressed: () async {
+                                      onPrint: () async {
                                         try {
                                           await it.onPrint();
                                         } catch (e) {
@@ -296,10 +345,6 @@ Future<void> showRspLdSavedRecordsBrowser(
                                           }
                                         }
                                       },
-                                      icon: const Icon(
-                                        Icons.print_rounded,
-                                        size: 22,
-                                      ),
                                     ),
                                   ],
                                 ),

@@ -7,6 +7,7 @@ import '../docutracker_styles.dart';
 import '../models/document.dart';
 import '../models/document_status.dart';
 import '../widgets/document_countdown_timer.dart';
+import '../widgets/docutracker_notifications_panel.dart';
 import '../widgets/docutracker_summary_card.dart';
 import 'docutracker_document_detail_screen.dart';
 
@@ -28,7 +29,8 @@ class DocuTrackerDashboardScreen extends StatefulWidget {
       _DocuTrackerDashboardScreenState();
 }
 
-class _DocuTrackerDashboardScreenState extends State<DocuTrackerDashboardScreen> {
+class _DocuTrackerDashboardScreenState
+    extends State<DocuTrackerDashboardScreen> {
   @override
   void initState() {
     super.initState();
@@ -44,6 +46,10 @@ class _DocuTrackerDashboardScreenState extends State<DocuTrackerDashboardScreen>
       userId: auth.user?.id ?? '',
       isAdmin: widget.isAdmin,
     );
+    final uid = auth.user?.id ?? '';
+    if (uid.isNotEmpty) {
+      await provider.loadNotifications(uid);
+    }
   }
 
   @override
@@ -74,7 +80,11 @@ class _DocuTrackerDashboardScreenState extends State<DocuTrackerDashboardScreen>
             ),
             const SizedBox(height: 24),
           ],
-          if (widget.isAdmin) _buildAdminDashboard(provider) else _buildEmployeeDashboard(provider, userId),
+          const DocuTrackerNotificationsPanel(),
+          if (widget.isAdmin)
+            _buildAdminDashboard(provider)
+          else
+            _buildEmployeeDashboard(provider, userId),
         ],
       ),
     );
@@ -93,7 +103,8 @@ class _DocuTrackerDashboardScreenState extends State<DocuTrackerDashboardScreen>
         .where((d) => d.createdBy == userId || d.currentHolderId == userId)
         .toList();
 
-    final hasAnyDocs = overdue.isNotEmpty ||
+    final hasAnyDocs =
+        overdue.isNotEmpty ||
         nearing.isNotEmpty ||
         incoming.isNotEmpty ||
         returned.isNotEmpty ||
@@ -112,10 +123,14 @@ class _DocuTrackerDashboardScreenState extends State<DocuTrackerDashboardScreen>
         const SizedBox(height: 24),
         if (hasAnyDocs) ...[
           if (overdue.isNotEmpty) _buildDocSection('Overdue', overdue, true),
-          if (nearing.isNotEmpty) _buildDocSection('Nearing Deadline', nearing, false),
-          if (incoming.isNotEmpty) _buildDocSection('Incoming / Pending', incoming, false),
-          if (returned.isNotEmpty) _buildDocSection('Returned', returned, false),
-          if (completed.isNotEmpty) _buildDocSection('Completed', completed, false),
+          if (nearing.isNotEmpty)
+            _buildDocSection('Nearing Deadline', nearing, false),
+          if (incoming.isNotEmpty)
+            _buildDocSection('Incoming / Pending', incoming, false),
+          if (returned.isNotEmpty)
+            _buildDocSection('Returned', returned, false),
+          if (completed.isNotEmpty)
+            _buildDocSection('Completed', completed, false),
         ] else
           _buildEmptyState(),
       ],
@@ -137,7 +152,8 @@ class _DocuTrackerDashboardScreenState extends State<DocuTrackerDashboardScreen>
         ),
         const SizedBox(height: 24),
         if (overdue.isNotEmpty) _buildDocSection('Overdue', overdue, true),
-        if (escalated.isNotEmpty) _buildDocSection('Escalated', escalated, true),
+        if (escalated.isNotEmpty)
+          _buildDocSection('Escalated', escalated, true),
         _buildDocSection('All Documents', all, false, true),
       ],
     );
@@ -424,17 +440,17 @@ class _DocumentTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isOverdue = document.status == DocumentStatus.overdue ||
+    final isOverdue =
+        document.status == DocumentStatus.overdue ||
         (document.deadlineTime != null &&
             DateTime.now().isAfter(document.deadlineTime!));
     final isEscalated = document.status == DocumentStatus.escalated;
 
     return ListTile(
       leading: CircleAvatar(
-        backgroundColor: (highlightOverdue || isOverdue
-                ? Colors.red
-                : AppTheme.primaryNavy)
-            .withOpacity(0.12),
+        backgroundColor:
+            (highlightOverdue || isOverdue ? Colors.red : AppTheme.primaryNavy)
+                .withOpacity(0.12),
         child: Icon(
           Icons.description_rounded,
           color: highlightOverdue || isOverdue
@@ -485,16 +501,16 @@ class _DocumentTile extends StatelessWidget {
           if (showHolder && document.assigneeName != null)
             Text(
               'Holder: ${document.assigneeName}',
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 12,
-              ),
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
             ),
           const SizedBox(height: 4),
           DocumentCountdownTimer(document: document, compact: true),
         ],
       ),
-      trailing: Icon(Icons.chevron_right_rounded, color: AppTheme.textSecondary),
+      trailing: Icon(
+        Icons.chevron_right_rounded,
+        color: AppTheme.textSecondary,
+      ),
       onTap: onTap,
     );
   }

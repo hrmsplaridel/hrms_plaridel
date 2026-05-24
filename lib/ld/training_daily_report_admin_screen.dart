@@ -677,11 +677,14 @@ class _ReportCard extends StatelessWidget {
                                 onPressed: () => showReadOnlySavedEntryDialog(
                                   context,
                                   title: 'Training daily report',
+                                  subtitle: r.title.trim().isNotEmpty
+                                      ? r.title
+                                      : r.submittedAt.toLocal().toString().split('.').first,
                                   previewBuilder: () =>
                                       TrainingDailyReportReadOnlyView(
                                         report: r,
                                       ),
-                                  contentWidth: 560,
+                                  contentWidth: 640,
                                 ),
                                 icon: const Icon(Icons.article_outlined, size: 18),
                                 label: const Text('View form'),

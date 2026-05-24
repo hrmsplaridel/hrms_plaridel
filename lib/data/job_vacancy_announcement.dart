@@ -12,6 +12,7 @@ class JobVacancyItem {
     this.isClosed,
     this.maxApplicants,
     this.applicationCount,
+    this.totalApplicationCount,
   });
 
   final String? headline;
@@ -28,8 +29,11 @@ class JobVacancyItem {
   /// When set (≥ 1), only this many applications with matching [position_applied_for] are allowed.
   final int? maxApplicants;
 
-  /// Current application count for this vacancy key (from GET only; not sent on save).
+  /// Applicants still in the hiring pipeline (from GET only; not sent on save).
   final int? applicationCount;
+
+  /// All applications for this position, including hired / declined / failed (from GET only).
+  final int? totalApplicationCount;
 
   /// Headline if non-empty, else body — matches how [position_applied_for] is stored when applying.
   String? get positionKey {
@@ -142,6 +146,11 @@ class JobVacancyAnnouncement {
           applicationCount: json['application_count'] is int
               ? json['application_count'] as int
               : int.tryParse(json['application_count']?.toString() ?? ''),
+          totalApplicationCount: json['total_application_count'] is int
+              ? json['total_application_count'] as int
+              : int.tryParse(
+                  json['total_application_count']?.toString() ?? '',
+                ),
         ),
       ];
     }
@@ -233,6 +242,14 @@ class JobVacancyAnnouncementRepo {
     await ApiClient.instance.put(
       '/api/rsp/job-vacancies',
       data: announcement.toJson(),
+    );
+  }
+
+  /// Saves only whether the landing page shows hiring (has_vacancies). Vacancy entries are unchanged.
+  Future<void> updateHasVacancies(bool hasVacancies) async {
+    await ApiClient.instance.patch<Map<String, dynamic>>(
+      '/api/rsp/job-vacancies/accepting',
+      data: {'has_vacancies': hasVacancies},
     );
   }
 }

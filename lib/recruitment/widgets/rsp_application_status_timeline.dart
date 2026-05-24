@@ -305,7 +305,7 @@ class RspApplicationStatusTimeline extends StatelessWidget {
     if (application.finalInterviewPassed == false) {
       return 'HR has recorded your final interview result. Contact the HR office if you have questions.';
     }
-    final at = application.finalInterviewAt;
+    final at = application.finalInterviewAt?.toLocal();
     if (at != null) {
       final loc = MaterialLocalizations.of(context);
       final dateStr = loc.formatFullDate(at);

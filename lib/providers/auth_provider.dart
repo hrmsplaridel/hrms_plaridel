@@ -11,8 +11,12 @@ import '../api/token_storage.dart';
 /// profile/avatar updates so UI stays in sync.
 class AuthProvider extends ChangeNotifier {
   AppUser? _user;
+  bool _isSigningOut = false;
 
   AppUser? get user => _user;
+
+  /// True while [signOut] is in progress (shows loading overlay in UI).
+  bool get isSigningOut => _isSigningOut;
 
   /// Display name from full_name or email prefix.
   String get displayName {
@@ -141,18 +145,25 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> signOut() async {
-    final refresh = await TokenStorage.instance.getRefreshToken();
-    if (refresh != null && refresh.isNotEmpty) {
-      try {
-        await ApiClient.instance.post<void>(
-          '/auth/logout',
-          data: {'refreshToken': refresh},
-          options: Options(extra: {'skipAuthRefresh': true}),
-        );
-      } catch (_) {}
-    }
-    await TokenStorage.instance.clearAllTokens();
-    _user = null;
+    if (_isSigningOut) return;
+    _isSigningOut = true;
     notifyListeners();
+    try {
+      final refresh = await TokenStorage.instance.getRefreshToken();
+      if (refresh != null && refresh.isNotEmpty) {
+        try {
+          await ApiClient.instance.post<void>(
+            '/auth/logout',
+            data: {'refreshToken': refresh},
+            options: Options(extra: {'skipAuthRefresh': true}),
+          );
+        } catch (_) {}
+      }
+      await TokenStorage.instance.clearAllTokens();
+      _user = null;
+    } finally {
+      _isSigningOut = false;
+      notifyListeners();
+    }
   }
 }

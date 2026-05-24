@@ -348,6 +348,29 @@ router.post('/notifications', protect, async (req, res) => {
 });
 
 /**
+ * PATCH /api/docutracker/notifications/:id/read
+ */
+router.patch('/notifications/:id/read', protect, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `UPDATE docutracker_notifications
+       SET read = true
+       WHERE id = $1 AND user_id = $2
+       RETURNING *`,
+      [id, req.user.id]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Notification not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[docutracker PATCH /notifications/:id/read]', err);
+    res.status(500).json({ error: 'Failed to mark notification read' });
+  }
+});
+
+/**
  * GET /api/docutracker/escalation-configs
  */
 router.get('/escalation-configs', protect, async (req, res) => {

@@ -5,6 +5,7 @@ import '../../landingpage/constants/app_theme.dart';
 import '../../notifications/app_notification.dart';
 import '../../notifications/notification_provider.dart';
 import '../../notifications/notification_tap_result.dart';
+import '../../notifications/notifications_ui.dart';
 import '../../notifications/open_notifications_panel.dart';
 import '../../providers/auth_provider.dart';
 
@@ -151,15 +152,19 @@ class DashboardNotificationsDropdownPanel extends StatelessWidget {
             onMarkAllRead: np.unreadCount > 0 ? () => np.markAllRead() : null,
           ),
           SizedBox(
-            height: 240,
+            height: 320,
             child: _DropdownBody(
               loading: np.loading,
               loadError: np.loadError,
               items: np.items,
+              onRetry: () => np.loadNotifications(),
               onNotificationTap: onNotificationTap,
             ),
           ),
-          _DropdownFooter(onViewAll: onViewAll),
+          _DropdownFooter(
+            onViewAll: onViewAll,
+            onClearAll: np.unreadCount > 0 ? () => np.markAllRead() : null,
+          ),
         ],
       ),
     );
@@ -171,12 +176,14 @@ class _DropdownBody extends StatelessWidget {
     required this.loading,
     required this.loadError,
     required this.items,
+    this.onRetry,
     this.onNotificationTap,
   });
 
   final bool loading;
   final String? loadError;
   final List<AppNotification> items;
+  final VoidCallback? onRetry;
   final void Function(NotificationTapResult? result)? onNotificationTap;
 
   @override
@@ -194,13 +201,25 @@ class _DropdownBody extends StatelessWidget {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(20),
-          child: Text(
-            'Could not load notifications.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 13,
-              color: AppTheme.dashTextSecondaryOf(context),
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                loadError!,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: AppTheme.dashTextSecondaryOf(context),
+                ),
+              ),
+              if (onRetry != null) ...[
+                const SizedBox(height: 12),
+                TextButton(
+                  onPressed: onRetry,
+                  child: const Text('Retry'),
+                ),
+              ],
+            ],
           ),
         ),
       );
@@ -230,8 +249,9 @@ class _DropdownBody extends StatelessWidget {
       separatorBuilder: (_, __) => const SizedBox(height: 6),
       itemBuilder: (context, index) {
         final n = preview[index];
-        return _DropdownNotificationTile(
+        return NotificationListCard(
           notification: n,
+          compact: true,
           onTap: () async {
             final np = context.read<NotificationProvider>();
             if (n.isUnread) await np.markRead(n.id);
@@ -242,94 +262,6 @@ class _DropdownBody extends StatelessWidget {
           },
         );
       },
-    );
-  }
-}
-
-class _DropdownNotificationTile extends StatelessWidget {
-  const _DropdownNotificationTile({
-    required this.notification,
-    required this.onTap,
-  });
-
-  final AppNotification notification;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final n = notification;
-    final unread = n.isUnread;
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        child: Ink(
-          decoration: BoxDecoration(
-            color: unread
-                ? AppTheme.primaryNavy.withValues(alpha: 0.06)
-                : AppTheme.dashMutedSurfaceOf(context),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: unread
-                  ? AppTheme.primaryNavy.withValues(alpha: 0.2)
-                  : AppTheme.dashHairlineOf(context),
-            ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (unread)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6, right: 8),
-                    child: Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        color: AppTheme.primaryNavy,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        n.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: unread ? FontWeight.w700 : FontWeight.w600,
-                          color: AppTheme.dashTextPrimaryOf(context),
-                          height: 1.25,
-                        ),
-                      ),
-                      if (n.body != null && n.body!.trim().isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          n.body!.trim(),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 12,
-                            height: 1.3,
-                            color: AppTheme.dashTextSecondaryOf(context),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
@@ -393,9 +325,11 @@ class _DropdownHeader extends StatelessWidget {
 class _DropdownFooter extends StatelessWidget {
   const _DropdownFooter({
     required this.onViewAll,
+    this.onClearAll,
   });
 
   final VoidCallback onViewAll;
+  final VoidCallback? onClearAll;
 
   @override
   Widget build(BuildContext context) {
@@ -411,9 +345,9 @@ class _DropdownFooter extends StatelessWidget {
         children: [
           Expanded(
             child: OutlinedButton.icon(
-              onPressed: null,
-              icon: const Icon(Icons.cleaning_services_outlined, size: 18),
-              label: const Text('Clear All'),
+              onPressed: onClearAll,
+              icon: const Icon(Icons.done_all_outlined, size: 18),
+              label: const Text('Mark all read'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppTheme.primaryNavy,
                 side: const BorderSide(color: AppTheme.primaryNavy),

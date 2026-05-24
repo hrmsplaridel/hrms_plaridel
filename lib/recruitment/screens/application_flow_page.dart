@@ -12,12 +12,13 @@ import '../../landingpage/constants/app_theme.dart';
 import '../../login/screens/login_page.dart';
 import '../../widgets/rsp_form_header_footer.dart';
 import '../widgets/rsp_application_status_timeline.dart';
+import '../widgets/rsp_applicant_exam_ui.dart';
 
 /// Default BEI questions when DB has none (admin can edit and save from RSP).
 const _defaultBeiQuestions = [
   'Tell me about a time when you had to collaborate with a co-worker that you had a hard time getting along with?',
   'Describe for me a time when you were under a significant amount of pressure at work. How did you deal with it?',
-  'Tell me about a time when you were ask to work on a task that you had never done before.',
+  'Tell me about a time when you were asked to work on a task that you had never done before.',
   'Tell me about a time when you had to cultivate a relationship with a new client. What did you do?',
   'Describe a time when you disagreed with your boss. What did you do?',
   'Describe your greatest challenge.',
@@ -1073,37 +1074,47 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   Widget _buildExamTimerBanner() {
     final r = _examCountdownRemaining;
     if (r == null || r <= 0) return const SizedBox.shrink();
-    final urgent = r <= 60;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Material(
-        color: urgent
-            ? Colors.red.shade50
-            : AppTheme.primaryNavy.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(
-            children: [
-              Icon(
-                Icons.timer_outlined,
-                color: urgent ? Colors.red.shade800 : AppTheme.primaryNavy,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Time remaining: ${_formatMmSs(r)}',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                    color: urgent ? Colors.red.shade900 : AppTheme.textPrimary,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return RspApplicantExamTimerBanner(
+      timeLabel: _formatMmSs(r),
+      urgent: r <= 60,
+    );
+  }
+
+  int _beiAnsweredCount() {
+    var n = 0;
+    for (final c in _beiControllers) {
+      if (c.text.trim().isNotEmpty) n++;
+    }
+    return n;
+  }
+
+  int _mcqAnsweredCount(List<int> selected) {
+    var n = 0;
+    for (final v in selected) {
+      if (v >= 0) n++;
+    }
+    return n;
+  }
+
+  Widget _buildMcqQuestionList({
+    required List<Map<String, dynamic>> questions,
+    required List<int> selected,
+    required void Function(int questionIndex, int optionIndex) onSelect,
+    required bool useLetterPrefix,
+  }) {
+    return Column(
+      children: List.generate(questions.length, (i) {
+        final q = questions[i];
+        final options = q['options'] as List<dynamic>? ?? [];
+        return RspApplicantMcqQuestionCard(
+          index: i,
+          questionText: q['question_text']?.toString() ?? '',
+          options: options,
+          selectedIndex: i < selected.length ? selected[i] : -1,
+          useLetterPrefix: useLetterPrefix,
+          onSelect: (j) => onSelect(i, j),
+        );
+      }),
     );
   }
 
@@ -3027,26 +3038,22 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   }
 
   Widget _buildStep3BeiExam() {
+    const stepTitle = '8 Behavioral Event Interview (BEI)';
+    const stepSubtitle =
+        'For new applicants and promotions. Answer each question in the space provided.';
+
     if (_beiQuestionsLoaded == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _loadBeiQuestions());
       return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Step 3: 8 Behavioral Event Interview (BEI)',
-            style: TextStyle(
-              color: AppTheme.primaryNavy,
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-            ),
+          RspApplicantStepHeader(
+            stepNumber: 3,
+            title: stepTitle,
+            subtitle: stepSubtitle,
+            icon: Icons.psychology_rounded,
           ),
-          const SizedBox(height: 24),
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.all(32),
-              child: CircularProgressIndicator(),
-            ),
-          ),
+          const RspApplicantExamLoading(),
         ],
       );
     }
@@ -3055,448 +3062,243 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       return const SizedBox.shrink();
     }
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'Step 3: 8 Behavioral Event Interview (BEI)',
-          style: TextStyle(
-            color: AppTheme.primaryNavy,
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-          ),
+        RspApplicantStepHeader(
+          stepNumber: 3,
+          title: stepTitle,
+          subtitle: stepSubtitle,
+          icon: Icons.psychology_rounded,
         ),
-        const SizedBox(height: 6),
-        Text(
-          'For New Applicant/s and Promotion/s. Please answer each question in the space provided.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-        ),
-        const SizedBox(height: 24),
-        ...List.generate(questions.length, (i) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${i + 1}. ${questions[i]}',
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _beiControllers[i],
-                  onChanged: (_) => setState(() {}),
-                  maxLines: 5,
-                  minLines: 3,
-                  decoration: InputDecoration(
-                    hintText: 'Type your answer here...',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    filled: true,
-                    fillColor: AppTheme.white,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 14,
-                    ),
-                    alignLabelWithHint: true,
-                  ),
-                ),
-              ],
-            ),
-          );
-        }),
-        const SizedBox(height: 16),
-        Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Text(
-              '"Make you MOVE". Your Answer is an Extension of Yourself. Make one that\'s Truly you.',
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 13,
-                fontStyle: FontStyle.italic,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ),
+        RspApplicantExamProgress(
+          answeredCount: _beiAnsweredCount(),
+          totalCount: questions.length,
+          label: 'Questions answered',
         ),
         const SizedBox(height: 20),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton(
-            onPressed: _submitBeiExam,
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.primaryNavy,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: const Text('Submit BEI Answers'),
-          ),
+        ...List.generate(questions.length, (i) {
+          return RspApplicantBeiQuestionCard(
+            index: i,
+            question: questions[i],
+            controller: _beiControllers[i],
+            onChanged: () => setState(() {}),
+          );
+        }),
+        const RspApplicantBeiMotivationQuote(),
+        const SizedBox(height: 8),
+        RspApplicantSubmitButton(
+          label: 'Submit BEI answers',
+          onPressed: _submitBeiExam,
         ),
       ],
     );
   }
 
   Widget _buildStep4GeneralExam() {
+    const stepTitle = 'General Exam for LGU-Plaridel Applicants';
+    final timeNote = _mcqInstructionTimeNote('general');
+    final subtitle =
+        'Answer each question. You need 60% or higher to pass.$timeNote';
+
     if (_generalQuestionsLoaded == null) {
       return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Step 4: General Exam',
-            style: TextStyle(
-              color: AppTheme.primaryNavy,
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-            ),
+          RspApplicantStepHeader(
+            stepNumber: 4,
+            title: stepTitle,
+            subtitle: subtitle,
+            icon: Icons.quiz_rounded,
           ),
-          const SizedBox(height: 24),
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.all(32),
-              child: CircularProgressIndicator(),
-            ),
-          ),
+          const RspApplicantExamLoading(),
         ],
       );
     }
     final questions = _generalQuestionsLoaded!;
     if (questions.isEmpty) {
       return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Step 4: General Exam for LGU-Plaridel Applicants',
-            style: TextStyle(
-              color: AppTheme.primaryNavy,
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-            ),
+          RspApplicantStepHeader(
+            stepNumber: 4,
+            title: stepTitle,
+            subtitle: subtitle,
+            icon: Icons.quiz_rounded,
           ),
           const SizedBox(height: 16),
-          Text(
-            'No questions configured. Please try again later.',
-            style: TextStyle(color: AppTheme.textSecondary),
+          const RspApplicantExamEmpty(
+            message: 'No questions configured. Please try again later.',
           ),
         ],
       );
     }
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'Step 4: General Exam for LGU-Plaridel Applicants',
-          style: TextStyle(
-            color: AppTheme.primaryNavy,
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-          ),
+        RspApplicantStepHeader(
+          stepNumber: 4,
+          title: stepTitle,
+          subtitle: subtitle,
+          icon: Icons.quiz_rounded,
         ),
-        const SizedBox(height: 6),
-        Text(
-          'Answer each question. You need 60% or higher to pass.${_mcqInstructionTimeNote('general')}',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+        RspApplicantExamProgress(
+          answeredCount: _mcqAnsweredCount(_generalSelected),
+          totalCount: questions.length,
+          label: 'Questions answered',
         ),
         _buildExamTimerBanner(),
-        const SizedBox(height: 24),
-        ...List.generate(questions.length, (i) {
-          final q = questions[i];
-          final options = q['options'] as List<dynamic>? ?? [];
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${i + 1}. ${q['question_text']}',
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                ...List.generate(options.length, (j) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: RadioListTile<int>(
-                      value: j,
-                      groupValue: _generalSelected[i],
-                      onChanged: (v) =>
-                          setState(() => _generalSelected[i] = v ?? -1),
-                      title: Text(
-                        options[j].toString(),
-                        style: const TextStyle(fontSize: 14),
-                      ),
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                  );
-                }),
-              ],
-            ),
-          );
-        }),
-        const SizedBox(height: 20),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton(
-            onPressed: _submitGeneralExam,
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.primaryNavy,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: const Text('Submit General Exam'),
-          ),
+        const SizedBox(height: 16),
+        _buildMcqQuestionList(
+          questions: questions,
+          selected: _generalSelected,
+          onSelect: (i, j) => setState(() => _generalSelected[i] = j),
+          useLetterPrefix: false,
+        ),
+        const SizedBox(height: 8),
+        RspApplicantSubmitButton(
+          label: 'Submit General Exam',
+          onPressed: _submitGeneralExam,
         ),
       ],
     );
   }
 
   Widget _buildStep5MathExam() {
+    const stepTitle = 'Mathematics Exam';
+    final timeNote = _mcqInstructionTimeNote('math');
+    final subtitle =
+        'Choose the best answer (a–d). You need 60% or higher to pass.$timeNote';
+
     if (_mathQuestionsLoaded == null) {
       return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Step 5: Mathematics Exam',
-            style: TextStyle(
-              color: AppTheme.primaryNavy,
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-            ),
+          RspApplicantStepHeader(
+            stepNumber: 5,
+            title: stepTitle,
+            subtitle: subtitle,
+            icon: Icons.calculate_rounded,
           ),
-          const SizedBox(height: 24),
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.all(32),
-              child: CircularProgressIndicator(),
-            ),
-          ),
+          const RspApplicantExamLoading(),
         ],
       );
     }
     final questions = _mathQuestionsLoaded!;
     if (questions.isEmpty) {
       return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Step 5: Mathematics Exam',
-            style: TextStyle(
-              color: AppTheme.primaryNavy,
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-            ),
+          RspApplicantStepHeader(
+            stepNumber: 5,
+            title: stepTitle,
+            subtitle: subtitle,
+            icon: Icons.calculate_rounded,
           ),
           const SizedBox(height: 16),
-          Text(
-            'No questions configured. Please try again later.',
-            style: TextStyle(color: AppTheme.textSecondary),
+          const RspApplicantExamEmpty(
+            message: 'No questions configured. Please try again later.',
           ),
         ],
       );
     }
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'Step 5: Mathematics Exam',
-          style: TextStyle(
-            color: AppTheme.primaryNavy,
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-          ),
+        RspApplicantStepHeader(
+          stepNumber: 5,
+          title: stepTitle,
+          subtitle: subtitle,
+          icon: Icons.calculate_rounded,
         ),
-        const SizedBox(height: 6),
-        Text(
-          'Instruction: Encircle the letter of your choice. You need 60% or higher to pass.${_mcqInstructionTimeNote('math')}',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+        RspApplicantExamProgress(
+          answeredCount: _mcqAnsweredCount(_mathSelected),
+          totalCount: questions.length,
+          label: 'Questions answered',
         ),
         _buildExamTimerBanner(),
-        const SizedBox(height: 24),
-        ...List.generate(questions.length, (i) {
-          final q = questions[i];
-          final options = q['options'] as List<dynamic>? ?? [];
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${i + 1}. ${q['question_text']}',
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                ...List.generate(options.length, (j) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: RadioListTile<int>(
-                      value: j,
-                      groupValue: _mathSelected[i],
-                      onChanged: (v) =>
-                          setState(() => _mathSelected[i] = v ?? -1),
-                      title: Text(
-                        '${String.fromCharCode(97 + j)}. ${options[j]}',
-                        style: const TextStyle(fontSize: 14),
-                      ),
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                  );
-                }),
-              ],
-            ),
-          );
-        }),
-        const SizedBox(height: 20),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton(
-            onPressed: _submitMathExam,
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.primaryNavy,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: const Text('Submit Mathematics Exam'),
-          ),
+        const SizedBox(height: 16),
+        _buildMcqQuestionList(
+          questions: questions,
+          selected: _mathSelected,
+          onSelect: (i, j) => setState(() => _mathSelected[i] = j),
+          useLetterPrefix: true,
+        ),
+        const SizedBox(height: 8),
+        RspApplicantSubmitButton(
+          label: 'Submit Mathematics Exam',
+          onPressed: _submitMathExam,
         ),
       ],
     );
   }
 
   Widget _buildStep6GeneralInfoExam() {
+    const stepTitle = 'General Information Exam';
+    final timeNote = _mcqInstructionTimeNote('general_info');
+    final subtitle =
+        'Choose the best answer (a–d). You need 60% or higher to pass.$timeNote';
+
     if (_generalInfoQuestionsLoaded == null) {
       return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Step 6: General Information Exam',
-            style: TextStyle(
-              color: AppTheme.primaryNavy,
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-            ),
+          RspApplicantStepHeader(
+            stepNumber: 6,
+            title: stepTitle,
+            subtitle: subtitle,
+            icon: Icons.menu_book_rounded,
           ),
-          const SizedBox(height: 24),
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.all(32),
-              child: CircularProgressIndicator(),
-            ),
-          ),
+          const RspApplicantExamLoading(),
         ],
       );
     }
     final questions = _generalInfoQuestionsLoaded!;
     if (questions.isEmpty) {
       return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Step 6: General Information Exam',
-            style: TextStyle(
-              color: AppTheme.primaryNavy,
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-            ),
+          RspApplicantStepHeader(
+            stepNumber: 6,
+            title: stepTitle,
+            subtitle: subtitle,
+            icon: Icons.menu_book_rounded,
           ),
           const SizedBox(height: 16),
-          Text(
-            'No questions configured. Please try again later.',
-            style: TextStyle(color: AppTheme.textSecondary),
+          const RspApplicantExamEmpty(
+            message: 'No questions configured. Please try again later.',
           ),
         ],
       );
     }
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'Step 6: General Information Exam',
-          style: TextStyle(
-            color: AppTheme.primaryNavy,
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-          ),
+        RspApplicantStepHeader(
+          stepNumber: 6,
+          title: stepTitle,
+          subtitle: subtitle,
+          icon: Icons.menu_book_rounded,
         ),
-        const SizedBox(height: 6),
-        Text(
-          'Instruction: Encircle the letter of your choice. You need 60% or higher to pass.${_mcqInstructionTimeNote('general_info')}',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+        RspApplicantExamProgress(
+          answeredCount: _mcqAnsweredCount(_generalInfoSelected),
+          totalCount: questions.length,
+          label: 'Questions answered',
         ),
         _buildExamTimerBanner(),
-        const SizedBox(height: 24),
-        ...List.generate(questions.length, (i) {
-          final q = questions[i];
-          final options = q['options'] as List<dynamic>? ?? [];
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${i + 1}. ${q['question_text']}',
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                ...List.generate(options.length, (j) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: RadioListTile<int>(
-                      value: j,
-                      groupValue: _generalInfoSelected[i],
-                      onChanged: (v) =>
-                          setState(() => _generalInfoSelected[i] = v ?? -1),
-                      title: Text(
-                        '${String.fromCharCode(97 + j)}. ${options[j]}',
-                        style: const TextStyle(fontSize: 14),
-                      ),
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                  );
-                }),
-              ],
-            ),
-          );
-        }),
-        const SizedBox(height: 20),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton(
-            onPressed: _examSubmitting
-                ? null
-                : () async => await _submitGeneralInfoExam(),
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.primaryNavy,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: const Text('Submit General Information Exam'),
-          ),
+        const SizedBox(height: 16),
+        _buildMcqQuestionList(
+          questions: questions,
+          selected: _generalInfoSelected,
+          onSelect: (i, j) => setState(() => _generalInfoSelected[i] = j),
+          useLetterPrefix: true,
+        ),
+        const SizedBox(height: 8),
+        RspApplicantSubmitButton(
+          label: 'Submit General Information Exam',
+          onPressed: _examSubmitting
+              ? null
+              : () async => await _submitGeneralInfoExam(),
+          enabled: !_examSubmitting,
         ),
       ],
     );
@@ -3538,73 +3340,32 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   }
 
   Widget _buildStep7AwaitingBeiGrading() {
-    final navy = AppTheme.primaryNavy;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'Step 7: View Exam Result',
-          style: TextStyle(
-            color: navy,
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Your multiple-choice exams are submitted. HR must enter scores for every Behavioral Event Interview (BEI) answer before a final screening result is shown.',
-          style: TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: 14,
-            height: 1.45,
-          ),
+        const RspApplicantStepHeader(
+          stepNumber: 7,
+          title: 'View Exam Result',
+          subtitle:
+              'Your multiple-choice exams are submitted. HR must grade every BEI answer before your final screening result appears.',
+          icon: Icons.fact_check_rounded,
         ),
         const SizedBox(height: 20),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(22),
-          decoration: BoxDecoration(
-            color: navy.withValues(alpha: 0.07),
-            borderRadius: BorderRadius.circular(_step7CardRadius),
-            border: Border.all(color: navy.withValues(alpha: 0.25)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(Icons.hourglass_top_rounded, color: navy, size: 40),
-              const SizedBox(height: 14),
-              Text(
-                'Waiting for BEI grading',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'This page checks every 15 seconds. You can also tap Refresh status.',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: AppTheme.textSecondary,
-                  height: 1.45,
-                ),
-              ),
-              const SizedBox(height: 16),
-              OutlinedButton.icon(
-                onPressed: _refreshBeiGradingFromServer,
-                icon: const Icon(Icons.refresh_rounded, size: 20),
-                label: const Text('Refresh status'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: navy,
-                  side: BorderSide(color: navy, width: 2),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 12,
-                  ),
-                ),
-              ),
-            ],
+        RspApplicantStatusCard(
+          icon: Icons.hourglass_top_rounded,
+          title: 'Waiting for BEI grading',
+          body:
+              'This page checks every 15 seconds. You can also tap Refresh status.',
+          accentColor: AppTheme.primaryNavy,
+          child: OutlinedButton.icon(
+            onPressed: _refreshBeiGradingFromServer,
+            icon: const Icon(Icons.refresh_rounded, size: 20),
+            label: const Text('Refresh status'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppTheme.primaryNavy,
+              side: const BorderSide(color: AppTheme.primaryNavy, width: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+            ),
           ),
         ),
         const SizedBox(height: 12),
@@ -3626,116 +3387,21 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       return _buildStep7AwaitingBeiGrading();
     }
     final examOk = _examPassed;
-    final examAccent = examOk
-        ? const Color(0xFFE85D04)
-        : Colors.deepOrange.shade700;
-    final examBg = examOk
-        ? AppTheme.primaryNavy.withValues(alpha: 0.07)
-        : Colors.orange.shade50;
-    final examBorder = examOk
-        ? AppTheme.primaryNavy.withValues(alpha: 0.28)
-        : Colors.orange.shade200;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'Step 7: View Exam Result',
-          style: TextStyle(
-            color: AppTheme.primaryNavy,
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Review your screening score and any update on your final interview.',
-          style: TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: 14,
-            height: 1.45,
-          ),
+        const RspApplicantStepHeader(
+          stepNumber: 7,
+          title: 'View Exam Result',
+          subtitle:
+              'Review your screening score and any update on your final interview.',
+          icon: Icons.fact_check_rounded,
         ),
         const SizedBox(height: 20),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 20),
-          decoration: BoxDecoration(
-            color: examBg,
-            borderRadius: BorderRadius.circular(_step7CardRadius),
-            border: Border.all(color: examBorder),
-          ),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final narrow = constraints.maxWidth < 340;
-              final iconCircle = Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: examAccent.withValues(alpha: 0.12),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  examOk ? Icons.check_rounded : Icons.close_rounded,
-                  size: 36,
-                  color: examAccent,
-                ),
-              );
-              final textBlock = Column(
-                crossAxisAlignment: narrow
-                    ? CrossAxisAlignment.center
-                    : CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    examOk ? 'Passed' : 'Not passed',
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      color: AppTheme.textPrimary,
-                      height: 1.15,
-                    ),
-                    textAlign: narrow ? TextAlign.center : TextAlign.start,
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Score: ${_examScore.toStringAsFixed(0)}%',
-                    style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textSecondary,
-                    ),
-                    textAlign: narrow ? TextAlign.center : TextAlign.start,
-                  ),
-                  if (!examOk) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      'You need 60% or higher. You may try again by starting a new application.',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: AppTheme.textSecondary,
-                        height: 1.45,
-                      ),
-                      textAlign: narrow ? TextAlign.center : TextAlign.start,
-                    ),
-                  ],
-                ],
-              );
-              if (narrow) {
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [iconCircle, const SizedBox(height: 18), textBlock],
-                );
-              }
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  iconCircle,
-                  const SizedBox(width: 20),
-                  Expanded(child: textBlock),
-                ],
-              );
-            },
-          ),
+        RspApplicantExamResultHero(
+          passed: examOk,
+          scorePercent: _examScore,
         ),
         if (_examPassed && _finalInterviewPassed == true) ...[
           const SizedBox(height: 16),
@@ -3891,7 +3557,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
-                                '${MaterialLocalizations.of(context).formatFullDate(_finalInterviewAt!)} · ${TimeOfDay.fromDateTime(_finalInterviewAt!).format(context)}',
+                                '${MaterialLocalizations.of(context).formatFullDate(_finalInterviewAt!.toLocal())} · ${TimeOfDay.fromDateTime(_finalInterviewAt!.toLocal()).format(context)}',
                                 style: TextStyle(
                                   fontSize: 15,
                                   fontWeight: FontWeight.w700,
@@ -3960,6 +3626,76 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       _applicationStatus == 'registered' ||
       (_hiredUserId != null && _hiredUserId!.trim().isNotEmpty);
 
+  Future<void> _refreshHiringStatus() async {
+    await _syncInterviewFromEmail();
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Status updated from HR records.')),
+    );
+  }
+
+  Widget _buildStep8StatusFooter() {
+    final interview = _finalInterviewAt;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (interview != null) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.65),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.event_rounded,
+                  size: 20,
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.85),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Final interview: '
+                    '${MaterialLocalizations.of(context).formatFullDate(interview.toLocal())} · '
+                    '${TimeOfDay.fromDateTime(interview.toLocal()).format(context)}',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textPrimary,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+        OutlinedButton.icon(
+          onPressed: _refreshHiringStatus,
+          icon: const Icon(Icons.refresh_rounded, size: 20),
+          label: const Text('Refresh status'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppTheme.primaryNavy,
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            side: BorderSide(
+              color: AppTheme.primaryNavy.withValues(alpha: 0.35),
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildHiringStatusCard({
     required bool linked,
     required bool passedFinal,
@@ -3972,77 +3708,43 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     late final IconData icon;
 
     if (linked) {
-      title = 'Status: Hired — account ready';
+      title = 'Hired — your account is ready';
       body =
-          'Your application is linked to an employee account. Use “Go to login form” below with the email HR used when your account was created. If you cannot sign in yet, wait for HR’s email or contact the HR office.';
+          'Your application is linked to an employee account. Sign in below with the same email you used for this application. If login fails, check your inbox (including spam) or contact HR.';
       accent = const Color(0xFF2E7D32);
       icon = Icons.verified_rounded;
     } else if (failedFinal) {
-      title = 'Status: Final interview recorded';
+      title = 'Final interview recorded';
       body =
-          'HR has recorded your final interview result. This step is for applicants who continue in the hiring process; for questions, please contact the HR office.';
+          'HR has recorded your final interview result. For questions, contact the HR office.';
       accent = Colors.red.shade800;
       icon = Icons.info_outline_rounded;
     } else if (passedFinal && hrSetupDone) {
-      title = 'Status: HR confirmed — account setup complete';
+      title = 'Account setup complete';
       body =
-          'HR has marked your employee account setup as finished. Check your email, then try “Go to login form” with the email you used for this application. Tap Refresh status if this message looks outdated.';
+          'HR marked your employee account as ready. Check your email, then use Go to login form with this application email.';
       accent = const Color(0xFF1565C0);
       icon = Icons.task_alt_rounded;
     } else if (passedFinal) {
-      title = 'Status: Waiting for hiring / account setup';
+      title = 'Waiting for HR account setup';
       body =
-          'You passed the final interview. If you are selected and hired, HR will create your account and email you when you can sign in. Keep an eye on your inbox (and spam folder). You can refresh status above after HR updates your record.';
+          'You passed the final interview. HR will create your account and email you when you can sign in—applicants cannot self-register. Check your inbox and spam folder, then tap Refresh status for updates.';
       accent = const Color(0xFFE85D04);
       icon = Icons.hourglass_top_rounded;
     } else {
-      title = 'Status: Waiting for final interview results';
+      title = 'Waiting for interview result';
       body =
-          'HR has not recorded a final interview outcome yet (or you have not refreshed since your interview). After the in-person interview, this will update when HR enters the result—use “Refresh status” or “Continue application” on Step 2 with your email.';
+          'HR has not recorded a final interview outcome yet. After your in-person interview, tap Refresh status here or continue on Step 2 with your email.';
       accent = AppTheme.primaryNavy;
       icon = Icons.pending_outlined;
     }
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: accent.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: accent.withValues(alpha: 0.35)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: accent, size: 28),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 15,
-                    color: AppTheme.textPrimary,
-                    height: 1.25,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  body,
-                  style: TextStyle(
-                    fontSize: 13,
-                    height: 1.45,
-                    color: AppTheme.textSecondary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+    return RspApplicantStatusCard(
+      icon: icon,
+      title: title,
+      body: body,
+      accentColor: accent,
+      child: _buildStep8StatusFooter(),
     );
   }
 
@@ -4051,289 +3753,37 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final passedFinal = _finalInterviewPassed == true;
     final failedFinal = _finalInterviewPassed == false;
 
+    String headerSubtitle;
+    if (failedFinal) {
+      headerSubtitle = 'Your current hiring status from HR.';
+    } else if (linked) {
+      headerSubtitle = 'You can sign in with your employee account.';
+    } else if (passedFinal) {
+      headerSubtitle =
+          'You passed screening and the final interview. HR will set up your account.';
+    } else {
+      headerSubtitle =
+          'Track your final interview result and account setup in one place.';
+    }
+
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'Step 8: Final hiring & your account',
-          style: TextStyle(
-            color: AppTheme.primaryNavy,
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 8),
-        if (!failedFinal) ...[
-          Text(
-            'Congratulations on completing the screening process.',
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 14,
-              height: 1.45,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 6),
-        ],
-        Text(
-          failedFinal
-              ? 'Below is your current status. Contact the HR office if you need clarification.'
-              : 'Review your hiring status, guidelines, and sign-in options below.',
-          style: TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: 14,
-            height: 1.45,
-          ),
+        RspApplicantStepHeader(
+          stepNumber: 8,
+          title: 'Final hiring & your account',
+          subtitle: headerSubtitle,
+          icon: Icons.badge_rounded,
         ),
         const SizedBox(height: 20),
-        if (linked) ...[
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(22),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  const Color(0xFFE8F5E9),
-                  const Color(0xFFC8E6C9).withValues(alpha: 0.85),
-                ],
-              ),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: const Color(0xFF43A047).withValues(alpha: 0.5),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.emoji_events_rounded,
-                      color: Colors.green.shade900,
-                      size: 36,
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Text(
-                        'Congratulations — you are hired!',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                          color: Colors.green.shade900,
-                          height: 1.2,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  'Your application is linked to an employee account. Check your email for any message from HR. Then use the button below to open the login form and sign in with the email HR used when your account was created.',
-                  style: TextStyle(
-                    fontSize: 14,
-                    height: 1.5,
-                    color: Colors.green.shade900.withValues(alpha: 0.95),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-        ] else if (passedFinal) ...[
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: _hrAccountSetupDone
-                  ? const Color(0xFFE3F2FD)
-                  : const Color(0xFFE8F5E9),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: _hrAccountSetupDone
-                    ? const Color(0xFF1565C0).withValues(alpha: 0.4)
-                    : const Color(0xFF43A047).withValues(alpha: 0.45),
-              ),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  _hrAccountSetupDone
-                      ? Icons.mark_email_read_rounded
-                      : Icons.celebration_rounded,
-                  color: _hrAccountSetupDone
-                      ? const Color(0xFF1565C0)
-                      : Colors.green.shade800,
-                  size: 32,
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Text(
-                    _hrAccountSetupDone
-                        ? 'HR has marked your employee account setup as complete. Check your email, then use “Go to login form” when you are ready. Tap Refresh status if this box does not match the status card below.'
-                        : 'You passed the final interview. If you are selected and hired, HR will create your employee account and email you when you can sign in. Watch your inbox (and spam).',
-                    style: TextStyle(
-                      fontSize: 14,
-                      height: 1.45,
-                      color: _hrAccountSetupDone
-                          ? const Color(0xFF0D47A1)
-                          : Colors.green.shade900,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-        ] else if (failedFinal) ...[
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: Colors.red.shade50,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: Colors.red.shade200),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.info_outline_rounded,
-                  color: Colors.red.shade800,
-                  size: 28,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'HR has recorded your final interview result. For details or questions, please contact the HR office.',
-                    style: TextStyle(
-                      fontSize: 14,
-                      height: 1.45,
-                      color: AppTheme.textPrimary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-        ],
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: AppTheme.primaryNavy.withValues(alpha: 0.06),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.18),
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.info_outline_rounded,
-                    color: AppTheme.primaryNavy,
-                    size: 22,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Guidelines',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 14,
-                        color: AppTheme.textPrimary,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text(
-                '• If you are hired after the final interview, HR creates your employee account and will email you when you can sign in (applicants do not self-register).\n'
-                '• Use the status card below to see whether you are cleared to sign in, whether HR marked account setup complete, or still waiting.\n'
-                '• Tap “Refresh status” after HR updates your record.',
-                style: TextStyle(
-                  fontSize: 13,
-                  height: 1.5,
-                  color: AppTheme.textSecondary,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 18),
         _buildHiringStatusCard(
           linked: linked,
           passedFinal: passedFinal,
           failedFinal: failedFinal,
           hrSetupDone: _hrAccountSetupDone,
         ),
-        const SizedBox(height: 10),
-        Align(
-          alignment: Alignment.centerRight,
-          child: TextButton.icon(
-            onPressed: () async {
-              await _syncInterviewFromEmail();
-              if (mounted) setState(() {});
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Status refreshed from HR records.'),
-                  ),
-                );
-              }
-            },
-            icon: const Icon(Icons.refresh_rounded, size: 20),
-            label: const Text('Refresh status'),
-          ),
-        ),
-        if (_finalInterviewAt != null) ...[
-          const SizedBox(height: 8),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppTheme.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppTheme.lightGray),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Scheduled final interview',
-                  style: TextStyle(
-                    color: AppTheme.primaryNavy,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '${MaterialLocalizations.of(context).formatFullDate(_finalInterviewAt!)} · ${TimeOfDay.fromDateTime(_finalInterviewAt!).format(context)}',
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    height: 1.35,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
         const SizedBox(height: 24),
-        if (linked)
+        if (linked || (passedFinal && _hrAccountSetupDone))
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
@@ -4347,27 +3797,6 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               label: const Text('Go to login form'),
               style: FilledButton.styleFrom(
                 backgroundColor: AppTheme.primaryNavy,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-          )
-        else
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: () {
-                Navigator.of(context).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (context) => const LoginPage()),
-                );
-              },
-              icon: const Icon(Icons.login_rounded, size: 22),
-              label: const Text('Go to login form'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),

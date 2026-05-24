@@ -171,7 +171,8 @@ const server = app.listen(PORT, HOST, () => {
   console.log('  API  /api/departments  /api/positions  /api/shifts');
   console.log('  API  /api/assignments  /api/employees');
   console.log('  POST /api/upload/avatar  GET /api/files/avatar/:userId');
-  console.log('  PUT  /api/rsp/job-vacancies  - update landing page hirings');
+  console.log('  PUT   /api/rsp/job-vacancies  - update landing page vacancy entries');
+  console.log('  PATCH /api/rsp/job-vacancies/accepting - hiring on/off (auto-save)');
   console.log('  PUT  /api/rsp/exam-questions/:examType - admin save exam questions');
   console.log('  GET  /api/rsp/exam-time-limits - public exam countdown limits');
   console.log('  PUT  /api/rsp/exam-time-limits - admin set per-exam time limits (seconds)');

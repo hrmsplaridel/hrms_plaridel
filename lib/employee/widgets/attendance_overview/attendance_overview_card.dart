@@ -8,6 +8,7 @@ import '../../../landingpage/constants/app_theme.dart';
 import 'attendance_overview_data.dart';
 import 'attendance_overview_kpi_tile.dart';
 import 'monthly_category_bar_chart.dart';
+import '../employee_dash_ui.dart';
 import '../employee_dashboard_skeletons.dart';
 
 /// Production-style monthly attendance overview: optional top summary strip
@@ -165,7 +166,7 @@ class _EmployeeAttendanceOverviewCardState
 
     return Container(
       padding: EdgeInsets.all(pad),
-      decoration: AppTheme.dashSurfaceCard(context),
+      decoration: EmployeeDashUi.elevatedPanel(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -306,16 +307,8 @@ class _AttendanceOverviewHeader extends StatelessWidget {
     final viewMore = onViewMore != null
         ? TextButton(
             onPressed: onViewMore,
-            style: TextButton.styleFrom(
-              foregroundColor: Theme.of(context).colorScheme.primary,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            child: const Text(
-              'View more',
-              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-            ),
+            style: EmployeeDashUi.ghostAction(context),
+            child: const Text('View more'),
           )
         : null;
 
@@ -375,8 +368,17 @@ class _MonthNavPill extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: AppTheme.dashMutedSurfaceOf(context),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

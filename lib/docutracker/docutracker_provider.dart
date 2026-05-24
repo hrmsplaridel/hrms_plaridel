@@ -49,6 +49,9 @@ class DocuTrackerProvider extends ChangeNotifier {
   List<DocumentNotification> get notifications =>
       List.unmodifiable(_notifications);
 
+  int get unreadNotificationCount =>
+      _notifications.where((n) => !n.read).length;
+
   /// Step 10: Employee dashboard - incoming (assigned to me, pending/inReview).
   List<DocuTrackerDocument> incomingForUser(String userId) => _documents
       .where(
@@ -235,13 +238,32 @@ class DocuTrackerProvider extends ChangeNotifier {
     }
   }
 
-  /// Load notifications for user (Step 7).
+  /// Load notifications for user (Step 7 — DocuTracker module only, not global bell).
   Future<void> loadNotifications(String userId) async {
     try {
       _notifications = await _repo.listNotificationsForUser(userId);
       notifyListeners();
     } catch (_) {
       _notifications = [];
+      notifyListeners();
+    }
+  }
+
+  Future<void> markNotificationRead(String notificationId) async {
+    await _repo.markNotificationRead(notificationId);
+    final i = _notifications.indexWhere((n) => n.id == notificationId);
+    if (i >= 0) {
+      final n = _notifications[i];
+      _notifications[i] = DocumentNotification(
+        id: n.id,
+        documentId: n.documentId,
+        userId: n.userId,
+        type: n.type,
+        title: n.title,
+        body: n.body,
+        read: true,
+        createdAt: n.createdAt,
+      );
       notifyListeners();
     }
   }

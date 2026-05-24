@@ -31,8 +31,15 @@ class AttendanceOverviewKpiTile extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: _tintBackground(context, accentColor),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: _tintBorder(accentColor), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: accentColor.withValues(alpha: 0.08),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(10, 10, 10, 9),

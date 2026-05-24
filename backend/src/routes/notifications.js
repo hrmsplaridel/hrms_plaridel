@@ -26,7 +26,12 @@ router.get('/', protect, async (req, res) => {
     res.json(rows.map(mapRowToApi));
   } catch (err) {
     console.error('[notifications GET]', err);
-    res.status(500).json({ error: 'Failed to fetch notifications' });
+    const missingTable = err?.code === '42P01';
+    res.status(500).json({
+      error: missingTable
+        ? 'Notifications table missing. Run backend/scripts/migrate-user-notifications.sql'
+        : 'Failed to fetch notifications',
+    });
   }
 });
 

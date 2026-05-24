@@ -42,10 +42,7 @@ class DashboardContentNavigator extends StatelessWidget {
   static void showHome(GlobalKey<NavigatorState> key) {
     final nav = key.currentState;
     if (nav == null) return;
-    nav.pushNamedAndRemoveUntil(
-      DashboardContentRoutes.home,
-      (route) => false,
-    );
+    nav.pushNamedAndRemoveUntil(DashboardContentRoutes.home, (route) => false);
   }
 
   @override
@@ -56,14 +53,11 @@ class DashboardContentNavigator extends StatelessWidget {
       onGenerateRoute: (settings) {
         final isSettings = settings.name == DashboardContentRoutes.settings;
         final body = isSettings ? settingsPanel : homeBuilder();
-        final padding =
-            isSettings ? settingsScrollPadding : homeScrollPadding;
+        final padding = isSettings ? settingsScrollPadding : homeScrollPadding;
         return PageRouteBuilder<void>(
           settings: settings,
-          pageBuilder: (_, __, ___) => _DashboardScrollPage(
-            padding: padding,
-            child: body,
-          ),
+          pageBuilder: (_, __, ___) =>
+              _DashboardScrollPage(padding: padding, child: body),
           transitionDuration: isSettings
               ? const Duration(milliseconds: 180)
               : Duration.zero,
@@ -85,10 +79,7 @@ class DashboardContentNavigator extends StatelessWidget {
 }
 
 class _DashboardScrollPage extends StatelessWidget {
-  const _DashboardScrollPage({
-    required this.padding,
-    required this.child,
-  });
+  const _DashboardScrollPage({required this.padding, required this.child});
 
   final EdgeInsets padding;
   final Widget child;
@@ -97,10 +88,7 @@ class _DashboardScrollPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return ColoredBox(
       color: AppTheme.dashCanvasOf(context),
-      child: SingleChildScrollView(
-        padding: padding,
-        child: child,
-      ),
+      child: SingleChildScrollView(padding: padding, child: child),
     );
   }
 }

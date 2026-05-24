@@ -2,41 +2,94 @@ import 'package:flutter/material.dart';
 
 import '../../landingpage/constants/app_theme.dart';
 
-/// Soft wave pattern for the profile hero banner.
-class ProfileWavePainter extends CustomPainter {
+/// Geometric accent mesh for the profile hero (replaces flat waves).
+class ProfileHeroMeshPainter extends CustomPainter {
+  ProfileHeroMeshPainter({required this.dark});
+
+  final bool dark;
+
   @override
   void paint(Canvas canvas, Size size) {
-    final wave = Paint()
-      ..color = const Color(0xFF90CAF9).withValues(alpha: 0.22)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
+    final navy = dark ? const Color(0xFF2A3550) : AppTheme.primaryNavy;
+    final orange = const Color(0xFFE85D04);
 
-    final wave2 = Paint()
-      ..color = const Color(0xFF64B5F6).withValues(alpha: 0.14)
+    final orb = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          orange.withValues(alpha: dark ? 0.35 : 0.22),
+          Colors.transparent,
+        ],
+      ).createShader(Rect.fromCircle(
+        center: Offset(size.width * 0.88, size.height * 0.15),
+        radius: size.width * 0.42,
+      ));
+    canvas.drawRect(Offset.zero & size, orb);
+
+    final arc = Paint()
+      ..color = Colors.white.withValues(alpha: dark ? 0.06 : 0.12)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.2;
+    final path = Path();
+    path.moveTo(size.width * 0.55, 0);
+    path.quadraticBezierTo(
+      size.width * 0.2,
+      size.height * 0.45,
+      -20,
+      size.height * 0.9,
+    );
+    canvas.drawPath(path, arc);
 
-    for (var i = 0; i < 6; i++) {
-      final path = Path();
-      final y = size.height * (0.1 + i * 0.13);
-      path.moveTo(0, y);
-      for (var x = 0.0; x <= size.width; x += 28) {
-        path.quadraticBezierTo(
-          x + 14,
-          y + (i.isEven ? 10 : -10),
-          x + 28,
-          y,
-        );
+    final dots = Paint()
+      ..color = navy.withValues(alpha: 0.08);
+    for (var x = 16.0; x < size.width; x += 28) {
+      for (var y = 12.0; y < size.height * 0.55; y += 24) {
+        canvas.drawCircle(Offset(x, y), 1.2, dots);
       }
-      canvas.drawPath(path, i.isEven ? wave : wave2);
     }
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant ProfileHeroMeshPainter oldDelegate) =>
+      oldDelegate.dark != dark;
 }
 
-/// Top banner with avatar, name, role, email — full-width on dashboard.
+/// Role-based accent for profile hero chips.
+class ProfileRoleStyle {
+  const ProfileRoleStyle({
+    required this.label,
+    required this.color,
+    required this.icon,
+  });
+
+  final String label;
+  final Color color;
+  final IconData icon;
+
+  static ProfileRoleStyle fromLabel(String roleLabel) {
+    final r = roleLabel.toLowerCase();
+    if (r.contains('admin')) {
+      return ProfileRoleStyle(
+        label: roleLabel,
+        color: AppTheme.primaryNavy,
+        icon: Icons.admin_panel_settings_rounded,
+      );
+    }
+    if (r.contains('hr')) {
+      return ProfileRoleStyle(
+        label: roleLabel,
+        color: const Color(0xFF1565C0),
+        icon: Icons.groups_rounded,
+      );
+    }
+    return ProfileRoleStyle(
+      label: roleLabel,
+      color: const Color(0xFF2E7D32),
+      icon: Icons.badge_outlined,
+    );
+  }
+}
+
+/// Identity hero: overlapping avatar, single metadata row, navy band.
 class ProfileHeroHeader extends StatelessWidget {
   const ProfileHeroHeader({
     super.key,
@@ -59,237 +112,401 @@ class ProfileHeroHeader extends StatelessWidget {
   final VoidCallback? onChangePhoto;
   final bool isUploading;
 
+  static const double _avatarRadius = 54;
+  static const double _headerBandHeight = 118;
+  /// Avatar overlaps below the navy band; header stack must include this so taps register.
+  static const double _avatarOverlap = _avatarRadius;
+
   @override
   Widget build(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
-    final titleColor = AppTheme.dashTextPrimaryOf(context);
+    final roleStyle = ProfileRoleStyle.fromLabel(roleLabel);
+    final titleColor = dark ? const Color(0xFFF4F7FB) : Colors.white;
+    final bodyBg = dark ? const Color(0xFF1A1F2A) : const Color(0xFFFAFBFC);
     final muted = AppTheme.dashTextSecondaryOf(context);
+    final primaryText = AppTheme.dashTextPrimaryOf(context);
 
-    final bannerColors = dark
-        ? [const Color(0xFF1E2A3D), const Color(0xFF243447)]
-        : [
-            const Color(0xFFE3F2FD),
-            const Color(0xFFF0F7FC),
-            Colors.white,
-          ];
+    final bandGradient = dark
+        ? const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF1E2A3D), Color(0xFF243B55)],
+          )
+        : const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [AppTheme.primaryNavy, Color(0xFF2D4A7C)],
+          );
 
-    Widget avatarBlock() {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
+    Widget avatarFrame() {
+      final frame = Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.center,
         children: [
-          GestureDetector(
-            onTap: isUploading ? null : onChangePhoto,
-            child: Container(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy,
-                  width: 3,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.14),
-                    blurRadius: 18,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
+          Container(
+            width: _avatarRadius * 2 + 10,
+            height: _avatarRadius * 2 + 10,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFFE85D04), Color(0xFFFFB74D)],
               ),
-              child: avatar,
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.25),
+                  blurRadius: 24,
+                  offset: const Offset(0, 10),
+                ),
+              ],
             ),
           ),
-          if (onChangePhoto != null) ...[
-            const SizedBox(height: 8),
-            TextButton.icon(
-              onPressed: isUploading ? null : onChangePhoto,
-              icon: Icon(
-                Icons.camera_alt_outlined,
-                size: 16,
-                color: AppTheme.primaryNavy,
-              ),
-              label: Text(
-                'Change photo',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.primaryNavy,
-                ),
-              ),
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
+          Container(
+            width: _avatarRadius * 2 + 4,
+            height: _avatarRadius * 2 + 4,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 4),
             ),
-          ],
-        ],
-      );
-    }
-
-    Widget nameRow({bool alignStart = false}) {
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment:
-            alignStart ? MainAxisAlignment.start : MainAxisAlignment.center,
-        children: [
-          ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth: wideLayout ? 520 : 280,
-            ),
-            child: Text(
-              displayName,
-              textAlign: alignStart ? TextAlign.start : TextAlign.center,
-              style: TextStyle(
-                color: titleColor,
-                fontSize: wideLayout ? 24 : 20,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.35,
-                height: 1.15,
-              ),
-            ),
+            child: ClipOval(child: avatar),
           ),
-          const SizedBox(width: 8),
-          Icon(
-            Icons.verified_rounded,
-            size: wideLayout ? 24 : 20,
-            color: Colors.green.shade600,
-          ),
-        ],
-      );
-    }
-
-    Widget metaColumn({required CrossAxisAlignment align}) {
-      return Column(
-        crossAxisAlignment: align,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          nameRow(alignStart: align == CrossAxisAlignment.start),
-          if (idLabel != null) ...[
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: AppTheme.primaryNavy.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: AppTheme.primaryNavy.withValues(alpha: 0.28),
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.badge_outlined, size: 15, color: AppTheme.primaryNavy),
-                  const SizedBox(width: 6),
-                  Text(
-                    idLabel!,
-                    style: TextStyle(
-                      color: AppTheme.primaryNavy,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
+          if (onChangePhoto != null)
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: Material(
+                color: const Color(0xFFE85D04),
+                elevation: 4,
+                shadowColor: Colors.black26,
+                shape: const CircleBorder(),
+                child: InkWell(
+                  onTap: isUploading ? null : onChangePhoto,
+                  customBorder: const CircleBorder(),
+                  child: SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: Center(
+                      child: isUploading
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(
+                              Icons.camera_alt_rounded,
+                              size: 20,
+                              color: Colors.white,
+                            ),
                     ),
                   ),
-                ],
+                ),
               ),
             ),
-          ],
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-            decoration: BoxDecoration(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: AppTheme.primaryNavy.withValues(alpha: 0.25),
-              ),
-            ),
-            child: Text(
-              roleLabel,
-              style: TextStyle(
-                color: AppTheme.primaryNavy,
-                fontSize: 11.5,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.3,
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.mail_outline_rounded, size: 16, color: muted),
-              const SizedBox(width: 6),
-              Text(
-                email.isEmpty ? '—' : email,
-                style: TextStyle(color: muted, fontSize: 13),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ),
         ],
+      );
+      if (onChangePhoto == null || isUploading) return frame;
+      return GestureDetector(
+        onTap: onChangePhoto,
+        behavior: HitTestBehavior.opaque,
+        child: frame,
       );
     }
 
-    final verticalPad = wideLayout ? 32.0 : 28.0;
+    Widget headerBandStack({required List<Widget> children}) {
+      return SizedBox(
+        height: _headerBandHeight + _avatarOverlap,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: _headerBandHeight,
+              child: DecoratedBox(
+                decoration: BoxDecoration(gradient: bandGradient),
+                child: CustomPaint(
+                  painter: ProfileHeroMeshPainter(dark: dark),
+                ),
+              ),
+            ),
+            ...children,
+          ],
+        ),
+      );
+    }
+
+    Widget metaChip({
+      required IconData icon,
+      required String text,
+      required Color accent,
+      bool onDark = false,
+    }) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: onDark
+              ? Colors.white.withValues(alpha: 0.12)
+              : accent.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: onDark
+                ? Colors.white.withValues(alpha: 0.2)
+                : accent.withValues(alpha: 0.22),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 16,
+              color: onDark ? Colors.white.withValues(alpha: 0.9) : accent,
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                text,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: onDark ? Colors.white : primaryText,
+                  letterSpacing: 0.15,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final identityBody = Column(
+      crossAxisAlignment:
+          wideLayout ? CrossAxisAlignment.start : CrossAxisAlignment.center,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: wideLayout
+              ? MainAxisAlignment.start
+              : MainAxisAlignment.center,
+          children: [
+            Flexible(
+              child: Text(
+                displayName,
+                textAlign: wideLayout ? TextAlign.start : TextAlign.center,
+                style: TextStyle(
+                  color: primaryText,
+                  fontSize: wideLayout ? 26 : 22,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.5,
+                  height: 1.15,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: const Color(0xFF2E7D32).withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.verified_rounded,
+                size: wideLayout ? 22 : 20,
+                color: Colors.green.shade700,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          alignment:
+              wideLayout ? WrapAlignment.start : WrapAlignment.center,
+          children: [
+            if (idLabel != null)
+              metaChip(
+                icon: Icons.pin_rounded,
+                text: idLabel!,
+                accent: AppTheme.primaryNavy,
+              ),
+            metaChip(
+              icon: roleStyle.icon,
+              text: roleStyle.label,
+              accent: roleStyle.color,
+            ),
+            metaChip(
+              icon: Icons.alternate_email_rounded,
+              text: email.isEmpty ? 'No email' : email,
+              accent: muted,
+            ),
+          ],
+        ),
+      ],
+    );
+
+    if (wideLayout) {
+      return Container(
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: bodyBg,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          border: Border(bottom: BorderSide(color: AppTheme.dashHairlineOf(context))),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            headerBandStack(
+              children: [
+                Positioned(
+                  left: 28,
+                  top: 28,
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.account_circle_rounded,
+                        size: 18,
+                        color: titleColor.withValues(alpha: 0.85),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'My profile',
+                        style: TextStyle(
+                          color: titleColor.withValues(alpha: 0.9),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.8,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Positioned(
+                  left: 32,
+                  bottom: 0,
+                  child: avatarFrame(),
+                ),
+              ],
+            ),
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                32 + _avatarRadius * 2 + 28,
+                20,
+                32,
+                28,
+              ),
+              child: identityBody,
+            ),
+          ],
+        ),
+      );
+    }
 
     return Container(
       width: double.infinity,
-      padding: EdgeInsets.fromLTRB(24, verticalPad, 24, verticalPad + 4),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: bannerColors,
-        ),
+        color: bodyBg,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        border: Border(
-          bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
-        ),
+        border: Border(bottom: BorderSide(color: AppTheme.dashHairlineOf(context))),
       ),
-      child: Stack(
-        alignment: Alignment.center,
+      child: Column(
         children: [
-          Positioned.fill(
-            child: CustomPaint(painter: ProfileWavePainter()),
-          ),
-          Positioned(
-            left: wideLayout ? 20 : 12,
-            top: wideLayout ? 16 : 10,
-            child: Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: dark ? Colors.white.withValues(alpha: 0.08) : Colors.white,
-                borderRadius: BorderRadius.circular(10),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.06),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: Image.asset(
-                  'assets/images/Plaridel Logo.jpg',
-                  width: 32,
-                  height: 32,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Icon(
-                    Icons.account_balance_rounded,
-                    size: 28,
-                    color: AppTheme.primaryNavy,
+          headerBandStack(
+            children: [
+              Positioned(
+                top: 16,
+                left: 16,
+                child: Opacity(
+                  opacity: 0.9,
+                  child: Image.asset(
+                    'assets/images/TransparentLogo.png',
+                    width: 36,
+                    height: 36,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => Icon(
+                      Icons.account_balance_rounded,
+                      color: titleColor.withValues(alpha: 0.8),
+                      size: 32,
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              avatarBlock(),
-              const SizedBox(height: 18),
-              metaColumn(align: CrossAxisAlignment.center),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Center(child: avatarFrame()),
+              ),
             ],
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 28),
+            child: Column(
+              children: [
+                Text(
+                  displayName,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: primaryText,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.4,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.verified_rounded,
+                      size: 18,
+                      color: Colors.green.shade700,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Verified account',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: muted,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    if (idLabel != null)
+                      metaChip(
+                        icon: Icons.pin_rounded,
+                        text: idLabel!,
+                        accent: AppTheme.primaryNavy,
+                      ),
+                    metaChip(
+                      icon: roleStyle.icon,
+                      text: roleStyle.label,
+                      accent: roleStyle.color,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                metaChip(
+                  icon: Icons.mail_outline_rounded,
+                  text: email.isEmpty ? '—' : email,
+                  accent: AppTheme.primaryNavy,
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -381,23 +598,23 @@ class _Tab extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Text(
               label,
               style: TextStyle(
                 color: color,
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
                 fontSize: 14,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               height: 3,
-              width: selected ? 56 : 0,
+              width: selected ? 32 : 0,
               decoration: BoxDecoration(
                 color: AppTheme.primaryNavy,
                 borderRadius: BorderRadius.circular(2),
@@ -766,8 +983,7 @@ class ProfileSettingTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fg = iconColor ?? AppTheme.primaryNavy;
-    final bg = iconBackground ??
-        AppTheme.primaryNavy.withValues(alpha: 0.1);
+    final bg = iconBackground ?? AppTheme.primaryNavy.withValues(alpha: 0.1);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),

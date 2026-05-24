@@ -195,10 +195,11 @@ class DocuTrackerRepository {
 
   Future<List<DocumentNotification>> listNotificationsForUser(String userId) async {
     try {
-      final res = await ApiClient.instance.get<List<dynamic>>(
+      final res = await ApiClient.instance.get<dynamic>(
         '$_base/notifications',
       );
-      final list = res.data ?? [];
+      final raw = res.data;
+      final list = raw is List ? raw : <dynamic>[];
       return list
           .map(
             (e) => DocumentNotification.fromJson(
@@ -209,6 +210,14 @@ class DocuTrackerRepository {
     } catch (_) {
       return [];
     }
+  }
+
+  Future<void> markNotificationRead(String notificationId) async {
+    try {
+      await ApiClient.instance.patch<void>(
+        '$_base/notifications/$notificationId/read',
+      );
+    } catch (_) {}
   }
 
   Future<EscalationConfig?> getEscalationConfig(

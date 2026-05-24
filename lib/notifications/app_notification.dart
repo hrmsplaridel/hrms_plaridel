@@ -41,7 +41,7 @@ class AppNotification {
     }
 
     return AppNotification(
-      id: json['id'] as String,
+      id: json['id']?.toString() ?? '',
       category: (json['category'] ?? 'general').toString(),
       type: (json['type'] ?? '').toString(),
       title: (json['title'] ?? '').toString(),

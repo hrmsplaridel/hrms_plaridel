@@ -166,10 +166,23 @@ class JobVacanciesSection extends StatelessWidget {
                   final headlineText = _displayHeadline(v.headline);
                   final structured = _structuredVacancyBody(v);
                   final max = v.maxApplicants;
-                  final count = v.applicationCount ?? 0;
+                  final active = v.applicationCount ?? 0;
+                  final total = v.totalApplicationCount ?? active;
                   final slotLine = (max != null && max >= 1)
-                      ? '$count of $max active applicants'
+                      ? '$active of $max slots in use'
                       : null;
+                  String? slotDetailLine;
+                  if (max != null && max >= 1) {
+                    if (total > active) {
+                      final removed = total - active;
+                      slotDetailLine =
+                          '$total submitted · $removed no longer in pipeline '
+                          '(hired, declined, failed exam, or failed final interview)';
+                    } else if (total == 0) {
+                      slotDetailLine =
+                          'Counts applicants still being processed for this exact job title';
+                    }
+                  }
                   final quotaFull = v.isApplicationQuotaFull;
                   final closed = v.isClosed == true;
                   return _VacancyCard(
@@ -179,6 +192,7 @@ class JobVacanciesSection extends StatelessWidget {
                     hasVacancies: hasVacancies,
                     minTall: twoColumns,
                     slotSummaryLine: slotLine,
+                    slotDetailLine: slotDetailLine,
                     applicationQuotaFull: quotaFull || closed,
                     onApplyTap: hasVacancies && !quotaFull && !closed
                         ? () => onApplyForVacancyTap?.call(v)
@@ -386,6 +400,7 @@ class _VacancyCard extends StatelessWidget {
     required this.hasVacancies,
     this.minTall = false,
     this.slotSummaryLine,
+    this.slotDetailLine,
     this.applicationQuotaFull = false,
     this.onApplyTap,
   });
@@ -400,6 +415,7 @@ class _VacancyCard extends StatelessWidget {
   /// When true (wide two-column layout), cards share a minimum height so rows align cleanly.
   final bool minTall;
   final String? slotSummaryLine;
+  final String? slotDetailLine;
   final bool applicationQuotaFull;
   final VoidCallback? onApplyTap;
 
@@ -566,7 +582,19 @@ class _VacancyCard extends StatelessWidget {
               style: TextStyle(
                 color: AppTheme.textSecondary,
                 fontSize: 13,
-                fontWeight: FontWeight.w600,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+          if (slotDetailLine != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              slotDetailLine!,
+              style: TextStyle(
+                color: AppTheme.textSecondary.withValues(alpha: 0.88),
+                fontSize: 12,
+                height: 1.4,
+                fontStyle: FontStyle.italic,
               ),
             ),
           ],
