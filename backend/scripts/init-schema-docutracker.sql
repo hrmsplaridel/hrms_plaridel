@@ -71,6 +71,14 @@ CREATE TABLE IF NOT EXISTS docutracker_routing_records (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Multiple assignees per routing record (reviewers/signatories).
+CREATE TABLE IF NOT EXISTS docutracker_routing_record_assignees (
+  routing_record_id UUID NOT NULL REFERENCES docutracker_routing_records(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (routing_record_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS docutracker_notifications (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   document_id UUID NOT NULL REFERENCES docutracker_documents(id) ON DELETE CASCADE,
@@ -111,3 +119,5 @@ CREATE INDEX IF NOT EXISTS idx_docutracker_documents_current_holder ON docutrack
 CREATE INDEX IF NOT EXISTS idx_docutracker_documents_status ON docutracker_documents(status);
 CREATE INDEX IF NOT EXISTS idx_docutracker_history_document_id ON docutracker_document_history(document_id);
 CREATE INDEX IF NOT EXISTS idx_docutracker_notifications_user_id ON docutracker_notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_docutracker_routing_record_assignees_user
+  ON docutracker_routing_record_assignees(user_id);

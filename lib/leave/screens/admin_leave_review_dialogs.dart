@@ -4,7 +4,6 @@ import '../../landingpage/constants/app_theme.dart';
 import '../leave_repository.dart';
 import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
-import '../models/leave_type.dart';
 import 'admin_leave_screen_utils.dart';
 
 class AdminLeaveApproveDialog extends StatefulWidget {
@@ -12,10 +11,12 @@ class AdminLeaveApproveDialog extends StatefulWidget {
     super.key,
     required this.request,
     this.leaveBalance,
+    this.creditSummary,
   });
 
   final LeaveRequest request;
   final LeaveBalance? leaveBalance;
+  final String? creditSummary;
 
   @override
   State<AdminLeaveApproveDialog> createState() => _AdminLeaveApproveDialogState();
@@ -65,11 +66,12 @@ class _AdminLeaveApproveDialogState extends State<AdminLeaveApproveDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final balanceLabel = widget.leaveBalance != null
-        ? '${widget.leaveBalance!.leaveType.displayName}: '
-              '${widget.leaveBalance!.availableDays.toStringAsFixed(1)} available '
-              '(${widget.leaveBalance!.remainingDays.toStringAsFixed(1)} remaining excl. pending)'
-        : 'No balance record for this leave type';
+    final balanceLabel = widget.creditSummary ??
+        (widget.leaveBalance != null
+            ? '${widget.leaveBalance!.leaveTypeLabel}: '
+                  '${widget.leaveBalance!.availableDays.toStringAsFixed(1)} available '
+                  '(${widget.leaveBalance!.remainingDays.toStringAsFixed(1)} remaining excl. pending)'
+            : 'No balance record for this leave type');
 
     return AlertDialog(
       title: const Text('Approve Leave Request'),
@@ -87,7 +89,7 @@ class _AdminLeaveApproveDialogState extends State<AdminLeaveApproveDialog> {
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.dashTextPrimaryOf(context),
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -123,19 +125,19 @@ class _AdminLeaveApproveDialogState extends State<AdminLeaveApproveDialog> {
                     horizontal: 14,
                   ),
                   decoration: BoxDecoration(
-                    color: AppTheme.offWhite,
+                    color: AppTheme.dashMutedSurfaceOf(context),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+                    border: Border.all(color: AppTheme.dashHairlineOf(context)),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Current Leave Balance:',
+                        'Credit Handling:',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
-                          color: AppTheme.textSecondary,
+                          color: AppTheme.dashTextSecondaryOf(context),
                         ),
                       ),
                       const SizedBox(height: 6),
@@ -143,7 +145,7 @@ class _AdminLeaveApproveDialogState extends State<AdminLeaveApproveDialog> {
                         balanceLabel,
                         style: TextStyle(
                           fontSize: 14,
-                          color: AppTheme.textPrimary,
+                          color: AppTheme.dashTextPrimaryOf(context),
                         ),
                       ),
                     ],
@@ -236,7 +238,7 @@ class _AdminLeaveDecisionDialogState extends State<AdminLeaveDecisionDialog> {
                 Text(
                   widget.subtitle,
                   style: TextStyle(
-                    color: AppTheme.textSecondary,
+                    color: AppTheme.dashTextSecondaryOf(context),
                     fontSize: 13,
                     height: 1.4,
                   ),
@@ -317,7 +319,8 @@ class _AdminLeaveDialogField extends StatelessWidget {
       minLines: minLines,
       keyboardType: keyboardType,
       validator: validator,
-      decoration: adminLeaveInputDecoration(label),
+      style: AppTheme.dashFieldTextStyle(context),
+      decoration: adminLeaveInputDecoration(context, label),
     );
   }
 }

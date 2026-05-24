@@ -176,9 +176,11 @@ class DtrExport {
 
   static String _locatorSlotOrBlank(TimeRecord? r, String segment) {
     if (!_isOnFieldByLocator(r)) return '';
-    if (_hasLocatorSegment(r, segment)) return 'ON FIELD';
+    if (_hasLocatorSegment(r, segment)) return r!.locatorSlipPrintLabel;
     final segs = r?.locatorSlipSegments ?? const <String>[];
-    if (segs.isEmpty && segment.toUpperCase() == 'AM IN') return 'ON FIELD';
+    if (segs.isEmpty && segment.toUpperCase() == 'AM IN') {
+      return r?.locatorSlipPrintLabel ?? 'ON FIELD';
+    }
     return '';
   }
 
@@ -197,6 +199,9 @@ class DtrExport {
             ? leaveType.toUpperCase()
             : 'LEAVE';
       }
+      if (s == 'on_field' || r.locatorSlipId != null) {
+        return r.locatorSlipPrintLabel;
+      }
       if (s != null && s.isNotEmpty) return s.toUpperCase();
       return 'ABSENT';
     }
@@ -208,9 +213,15 @@ class DtrExport {
         att != 'On Time' &&
         att != 'Late' &&
         att != 'Undertime') {
-      return att.toUpperCase();
+      return _normalizeAttendanceRemark(att).toUpperCase();
     }
     return '';
+  }
+
+  static String _normalizeAttendanceRemark(String remark) {
+    final value = remark.trim();
+    if (value.toLowerCase().startsWith('work from home')) return 'WFH';
+    return value;
   }
 
   /// Returns (hours, minutes) of undertime. Absent = 8h 0m. Non-working day / Holiday / Leave = 0.

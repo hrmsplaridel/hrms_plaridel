@@ -94,7 +94,12 @@ class _RemarksChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (color, bg) = _colorsForRemark(remark, isHoliday: isHoliday);
+    final dark = AppTheme.dashIsDark(context);
+    final (color, bg) = _colorsForRemark(
+      remark,
+      isHoliday: isHoliday,
+      dark: dark,
+    );
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -114,38 +119,86 @@ class _RemarksChip extends StatelessWidget {
     );
   }
 
+  static (Color color, Color bg) _chipPair(
+    Color fg,
+    Color lightBg, {
+    required bool dark,
+  }) => dark
+      ? (fg.withValues(alpha: 0.92), fg.withValues(alpha: 0.24))
+      : (fg, lightBg);
+
   static (Color color, Color bg) _colorsForRemark(
     String r, {
     bool isHoliday = false,
+    required bool dark,
   }) {
-    if (isHoliday) return (Colors.purple.shade700, Colors.purple.shade50);
+    if (isHoliday) {
+      return _chipPair(
+        Colors.purple.shade700,
+        Colors.purple.shade50,
+        dark: dark,
+      );
+    }
     switch (r) {
       case 'On Time':
-        return (Colors.green.shade800, Colors.green.shade50);
+        return _chipPair(
+          Colors.green.shade800,
+          Colors.green.shade50,
+          dark: dark,
+        );
       case 'Late':
-        return (Colors.red.shade800, Colors.red.shade50);
+        return _chipPair(Colors.red.shade800, Colors.red.shade50, dark: dark);
       case 'Undertime':
-        return (Colors.orange.shade800, Colors.orange.shade50);
+        return _chipPair(
+          Colors.orange.shade800,
+          Colors.orange.shade50,
+          dark: dark,
+        );
       case 'Late + Undertime':
-        return (Colors.deepOrange.shade800, Colors.deepOrange.shade50);
+        return _chipPair(
+          Colors.deepOrange.shade800,
+          Colors.deepOrange.shade50,
+          dark: dark,
+        );
       case 'Absent':
-        return (Colors.orange.shade700, Colors.orange.shade50);
+        return _chipPair(
+          Colors.orange.shade700,
+          Colors.orange.shade50,
+          dark: dark,
+        );
       case 'Holiday':
-        return (Colors.purple.shade700, Colors.purple.shade50);
+        return _chipPair(
+          Colors.purple.shade700,
+          Colors.purple.shade50,
+          dark: dark,
+        );
       case 'Leave':
-        return (Colors.blue.shade700, Colors.blue.shade50);
+        return _chipPair(Colors.blue.shade700, Colors.blue.shade50, dark: dark);
+      case 'Locator / Official Business':
+      case 'On Field':
+      case 'Pass Slip':
+      case 'Work From Home':
+      case 'WFH':
+        return _chipPair(Colors.teal.shade700, Colors.teal.shade50, dark: dark);
       case 'Incomplete':
-        return (Colors.amber.shade800, Colors.amber.shade50);
+        return _chipPair(
+          Colors.amber.shade800,
+          Colors.amber.shade50,
+          dark: dark,
+        );
       case 'Invalid Log':
-        return (Colors.red.shade900, Colors.red.shade100);
+        return _chipPair(Colors.red.shade900, Colors.red.shade100, dark: dark);
       default:
         if (r.toLowerCase().contains('leave')) {
-          return (Colors.blue.shade700, Colors.blue.shade50);
+          return _chipPair(
+            Colors.blue.shade700,
+            Colors.blue.shade50,
+            dark: dark,
+          );
         }
-        return (
-          AppTheme.textPrimary,
-          AppTheme.lightGray.withValues(alpha: 0.5),
-        );
+        return dark
+            ? (const Color(0xFFB0B8C4), const Color(0xFF343B4A))
+            : (AppTheme.textPrimary, AppTheme.lightGray.withValues(alpha: 0.5));
     }
   }
 }
@@ -376,7 +429,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
     if (timeValue != null) return _formatTime(timeValue);
     final segs = record.locatorSlipSegments ?? const <String>[];
     if (segs.any((s) => s.toUpperCase() == segment)) {
-      return 'On Field';
+      return record.locatorSlipSlotLabel;
     }
     return '—';
   }
@@ -397,13 +450,16 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
   /// Backend sends shift-aware attendance_remark; this is a simple fallback.
   static String getAttendanceRemark(TimeRecord r) {
     if (r.attendanceRemark != null && r.attendanceRemark!.isNotEmpty) {
-      return r.attendanceRemark!;
+      return _normalizeAttendanceRemark(r.attendanceRemark!);
     }
     if (r.status == 'holiday' || r.holidayId != null) {
       return r.holidayName ?? 'Holiday';
     }
     if (r.status == 'on_leave' || r.leaveRequestId != null) {
       return r.leaveTypeName ?? 'Leave';
+    }
+    if (r.status == 'on_field' || r.locatorSlipId != null) {
+      return r.locatorSlipDisplayLabel;
     }
     final hasAnyLog =
         r.timeIn != null ||
@@ -425,6 +481,12 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
     if (late) return 'Late';
     if (under) return 'Undertime';
     return 'On Time';
+  }
+
+  static String _normalizeAttendanceRemark(String remark) {
+    final value = remark.trim();
+    if (value.toLowerCase().startsWith('work from home')) return 'WFH';
+    return value;
   }
 
   /// Display late minutes: "X min", "0 min", or "—" for holiday/leave.
@@ -452,13 +514,13 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
     return m == 0 ? '0 min' : '$m min';
   }
 
-  Widget _headerLabel(String text) {
+  Widget _headerLabel(BuildContext context, String text) {
     return Text(
       text,
       style: TextStyle(
         fontWeight: FontWeight.w700,
         fontSize: 13,
-        color: AppTheme.textPrimary,
+        color: AppTheme.dashTextPrimaryOf(context),
       ),
     );
   }
@@ -476,6 +538,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
     final dtr = context.watch<DtrProvider>();
     final auth = context.watch<AuthProvider>();
     final search = _searchController.text.toLowerCase();
@@ -496,7 +559,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
           Text(
             'Time Logs',
             style: TextStyle(
-              color: AppTheme.textPrimary,
+              color: AppTheme.dashTextPrimaryOf(context),
               fontSize: 24,
               fontWeight: FontWeight.w800,
             ),
@@ -504,7 +567,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
           const SizedBox(height: 8),
           Text(
             'Manage and correct daily time-in/out records. Add, edit, or delete entries.',
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+            style: TextStyle(
+              color: AppTheme.dashTextSecondaryOf(context),
+              fontSize: 14,
+            ),
           ),
           if (_selectedDay != null && _selectedDay! >= 1) ...[
             const SizedBox(height: 6),
@@ -523,7 +589,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                       ? "Showing today's time logs (realtime view)"
                       : 'Showing time logs for ${_formatDate(DateTime(_selectedYear, _selectedMonth, _selectedDay!))}',
                   style: TextStyle(
-                    color: AppTheme.primaryNavy,
+                    color: dark
+                        ? AppTheme.primaryNavyLight
+                        : AppTheme.primaryNavy,
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                   ),
@@ -537,16 +605,20 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               margin: const EdgeInsets.only(bottom: 16),
               decoration: BoxDecoration(
-                color: Colors.blue.shade50,
+                color: dark
+                    ? Colors.blue.shade900.withValues(alpha: 0.35)
+                    : Colors.blue.shade50,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blue.shade200),
+                border: Border.all(
+                  color: dark ? Colors.blue.shade700 : Colors.blue.shade200,
+                ),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Icon(
                     Icons.info_outline,
-                    color: Colors.blue.shade700,
+                    color: dark ? Colors.blue.shade300 : Colors.blue.shade700,
                     size: 18,
                   ),
                   const SizedBox(width: 8),
@@ -554,7 +626,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                     child: Text(
                       'Showing sample data. DTR data comes from the backend (dtr_daily_summary). Add records via Clock In or admin Time Logs to see live data.',
                       style: TextStyle(
-                        color: Colors.blue.shade900,
+                        color: dark
+                            ? Colors.blue.shade100
+                            : Colors.blue.shade900,
                         fontSize: 13,
                       ),
                     ),
@@ -563,7 +637,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                     icon: Icon(
                       Icons.close,
                       size: 18,
-                      color: Colors.blue.shade700,
+                      color: dark ? Colors.blue.shade300 : Colors.blue.shade700,
                     ),
                     onPressed: () => setState(() => _bannerDismissed = true),
                     padding: EdgeInsets.zero,
@@ -581,15 +655,19 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
               padding: const EdgeInsets.all(12),
               margin: const EdgeInsets.only(bottom: 16),
               decoration: BoxDecoration(
-                color: Colors.red.shade50,
+                color: dark
+                    ? Colors.red.shade900.withValues(alpha: 0.35)
+                    : Colors.red.shade50,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.red.shade200),
+                border: Border.all(
+                  color: dark ? Colors.red.shade700 : Colors.red.shade200,
+                ),
               ),
               child: Row(
                 children: [
                   Icon(
                     Icons.error_outline,
-                    color: Colors.red.shade700,
+                    color: dark ? Colors.red.shade300 : Colors.red.shade700,
                     size: 20,
                   ),
                   const SizedBox(width: 10),
@@ -597,7 +675,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                     child: Text(
                       dtr.error!,
                       style: TextStyle(
-                        color: Colors.red.shade900,
+                        color: dark ? Colors.red.shade100 : Colors.red.shade900,
                         fontSize: 14,
                       ),
                     ),
@@ -628,32 +706,34 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                         child: TextField(
                           controller: _searchController,
                           onChanged: (_) => setState(() {}),
-                          decoration: InputDecoration(
+                          style: AppTheme.dashFieldTextStyle(context),
+                          decoration: AppTheme.dashInputDecoration(
+                            context,
                             hintText: 'Search name...',
                             prefixIcon: const Icon(
                               Icons.search_rounded,
                               size: 20,
                             ),
-                            isDense: true,
                             contentPadding: const EdgeInsets.symmetric(
                               horizontal: 12,
                               vertical: 10,
                             ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            filled: true,
-                            fillColor: AppTheme.white,
+                            radius: 8,
                           ),
                         ),
                       ),
                       DropdownButton<int>(
                         value: _selectedMonth,
+                        dropdownColor: AppTheme.dashPanelOf(context),
+                        style: AppTheme.dashFieldTextStyle(context),
                         items: List.generate(12, (i) => i + 1)
                             .map(
                               (m) => DropdownMenuItem(
                                 value: m,
-                                child: Text(_months[m - 1]),
+                                child: Text(
+                                  _months[m - 1],
+                                  style: AppTheme.dashFieldTextStyle(context),
+                                ),
                               ),
                             )
                             .toList(),
@@ -673,6 +753,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                       ),
                       DropdownButton<int>(
                         value: _selectedYear,
+                        dropdownColor: AppTheme.dashPanelOf(context),
+                        style: AppTheme.dashFieldTextStyle(context),
                         items:
                             List.generate(
                                   11,
@@ -681,7 +763,12 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                                 .map(
                                   (y) => DropdownMenuItem(
                                     value: y,
-                                    child: Text('$y'),
+                                    child: Text(
+                                      '$y',
+                                      style: AppTheme.dashFieldTextStyle(
+                                        context,
+                                      ),
+                                    ),
                                   ),
                                 )
                                 .toList(),
@@ -701,11 +788,19 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                       ),
                       DropdownButton<int?>(
                         value: _selectedDay,
-                        hint: const Text('All days'),
+                        dropdownColor: AppTheme.dashPanelOf(context),
+                        style: AppTheme.dashFieldTextStyle(context),
+                        hint: Text(
+                          'All days',
+                          style: AppTheme.dashFieldHintStyle(context),
+                        ),
                         items: [
-                          const DropdownMenuItem<int?>(
+                          DropdownMenuItem<int?>(
                             value: null,
-                            child: Text('All days'),
+                            child: Text(
+                              'All days',
+                              style: AppTheme.dashFieldTextStyle(context),
+                            ),
                           ),
                           ...List.generate(
                             _maxSelectableCalendarDay,
@@ -713,7 +808,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                           ).map(
                             (d) => DropdownMenuItem<int?>(
                               value: d,
-                              child: Text('Day $d'),
+                              child: Text(
+                                'Day $d',
+                                style: AppTheme.dashFieldTextStyle(context),
+                              ),
                             ),
                           ),
                         ],
@@ -724,16 +822,27 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                       ),
                       DropdownButton<String?>(
                         value: _selectedDepartmentId,
-                        hint: const Text('All departments'),
+                        dropdownColor: AppTheme.dashPanelOf(context),
+                        style: AppTheme.dashFieldTextStyle(context),
+                        hint: Text(
+                          'All departments',
+                          style: AppTheme.dashFieldHintStyle(context),
+                        ),
                         items: [
-                          const DropdownMenuItem<String?>(
+                          DropdownMenuItem<String?>(
                             value: null,
-                            child: Text('All departments'),
+                            child: Text(
+                              'All departments',
+                              style: AppTheme.dashFieldTextStyle(context),
+                            ),
                           ),
                           ...dtr.departments.map(
                             (d) => DropdownMenuItem<String?>(
                               value: d.id,
-                              child: Text(d.name),
+                              child: Text(
+                                d.name,
+                                style: AppTheme.dashFieldTextStyle(context),
+                              ),
                             ),
                           ),
                         ],
@@ -751,16 +860,27 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                       ),
                       DropdownButton<String?>(
                         value: _selectedUserId,
-                        hint: const Text('All employees'),
+                        dropdownColor: AppTheme.dashPanelOf(context),
+                        style: AppTheme.dashFieldTextStyle(context),
+                        hint: Text(
+                          'All employees',
+                          style: AppTheme.dashFieldHintStyle(context),
+                        ),
                         items: [
-                          const DropdownMenuItem<String?>(
+                          DropdownMenuItem<String?>(
                             value: null,
-                            child: Text('All employees'),
+                            child: Text(
+                              'All employees',
+                              style: AppTheme.dashFieldTextStyle(context),
+                            ),
                           ),
                           ...dtr.employees.map(
                             (e) => DropdownMenuItem<String?>(
                               value: e.id,
-                              child: Text(e.fullName),
+                              child: Text(
+                                e.fullName,
+                                style: AppTheme.dashFieldTextStyle(context),
+                              ),
                             ),
                           ),
                         ],
@@ -786,8 +906,12 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                           _applyFilters();
                         },
                         style: OutlinedButton.styleFrom(
-                          backgroundColor: const Color(0xFFE8F5E9),
-                          foregroundColor: const Color(0xFF2E7D32),
+                          backgroundColor: dark
+                              ? Colors.green.shade900.withValues(alpha: 0.4)
+                              : const Color(0xFFE8F5E9),
+                          foregroundColor: dark
+                              ? Colors.green.shade300
+                              : const Color(0xFF2E7D32),
                         ),
                         child: const Text('RESET'),
                       ),
@@ -837,10 +961,14 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                color: dark
+                    ? AppTheme.primaryNavy.withValues(alpha: 0.22)
+                    : AppTheme.primaryNavy.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: AppTheme.primaryNavy.withValues(alpha: 0.2),
+                  color: AppTheme.primaryNavy.withValues(
+                    alpha: dark ? 0.45 : 0.2,
+                  ),
                 ),
               ),
               child: Row(
@@ -848,7 +976,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                   Icon(
                     Icons.info_outline_rounded,
                     size: 18,
-                    color: AppTheme.primaryNavy,
+                    color: dark
+                        ? AppTheme.primaryNavyLight
+                        : AppTheme.primaryNavy,
                   ),
                   const SizedBox(width: 8),
                   Expanded(
@@ -856,7 +986,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                       'Showing sample data for UI overview. Add real records or adjust filters to see live data.',
                       style: TextStyle(
                         fontSize: 12,
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                       ),
                     ),
                   ),
@@ -875,18 +1005,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
           if (!dtr.loading && displayRecords.isEmpty)
             Container(
               padding: const EdgeInsets.all(40),
-              decoration: BoxDecoration(
-                color: AppTheme.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.04),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
+              decoration: AppTheme.dashSurfaceCard(context, radius: 12),
               child: Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -894,13 +1013,15 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                     Icon(
                       Icons.schedule_rounded,
                       size: 56,
-                      color: AppTheme.textSecondary.withValues(alpha: 0.5),
+                      color: AppTheme.dashTextSecondaryOf(
+                        context,
+                      ).withValues(alpha: 0.5),
                     ),
                     const SizedBox(height: 16),
                     Text(
                       'No time records match your filters.',
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
                       ),
@@ -910,7 +1031,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                     Text(
                       'Use Add manual entry above, or try a different date range.',
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 14,
                       ),
                       textAlign: TextAlign.center,
@@ -934,20 +1055,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                     : viewportCap;
                 final constrainedHeight = contentHeight.clamp(100.0, maxHeight);
                 return Container(
-                  decoration: BoxDecoration(
-                    color: AppTheme.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: Colors.black.withValues(alpha: 0.08),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.04),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
+                  decoration: AppTheme.dashSurfaceCard(context, radius: 12),
                   child: SizedBox(
                     width: double.infinity,
                     height: constrainedHeight,
@@ -966,63 +1074,72 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                                 10,
                               ),
                               decoration: BoxDecoration(
-                                color: AppTheme.lightGray.withValues(
-                                  alpha: 0.5,
-                                ),
+                                color: AppTheme.dashMutedSurfaceOf(context),
                                 borderRadius: const BorderRadius.vertical(
                                   top: Radius.circular(12),
+                                ),
+                                border: Border(
+                                  bottom: BorderSide(
+                                    color: AppTheme.dashHairlineOf(context),
+                                  ),
                                 ),
                               ),
                               child: Row(
                                 children: [
                                   Expanded(
                                     flex: 3,
-                                    child: _headerLabel('Employee'),
+                                    child: _headerLabel(context, 'Employee'),
                                   ),
                                   Expanded(
                                     flex: 2,
-                                    child: _headerLabel('Date'),
-                                  ),
-                                  Expanded(
-                                    flex: 1,
-                                    child: Center(child: _headerLabel('AM In')),
+                                    child: _headerLabel(context, 'Date'),
                                   ),
                                   Expanded(
                                     flex: 1,
                                     child: Center(
-                                      child: _headerLabel('AM Out'),
+                                      child: _headerLabel(context, 'AM In'),
                                     ),
                                   ),
                                   Expanded(
                                     flex: 1,
-                                    child: Center(child: _headerLabel('PM In')),
-                                  ),
-                                  Expanded(
-                                    flex: 1,
                                     child: Center(
-                                      child: _headerLabel('PM Out'),
+                                      child: _headerLabel(context, 'AM Out'),
                                     ),
                                   ),
                                   Expanded(
                                     flex: 1,
-                                    child: Center(child: _headerLabel('Late')),
+                                    child: Center(
+                                      child: _headerLabel(context, 'PM In'),
+                                    ),
                                   ),
                                   Expanded(
                                     flex: 1,
                                     child: Center(
-                                      child: _headerLabel('Undertime'),
+                                      child: _headerLabel(context, 'PM Out'),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    flex: 1,
+                                    child: Center(
+                                      child: _headerLabel(context, 'Late'),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    flex: 1,
+                                    child: Center(
+                                      child: _headerLabel(context, 'Undertime'),
                                     ),
                                   ),
                                   Expanded(
                                     flex: 2,
                                     child: Center(
-                                      child: _headerLabel('Remarks'),
+                                      child: _headerLabel(context, 'Remarks'),
                                     ),
                                   ),
                                   Expanded(
                                     flex: 1,
                                     child: Center(
-                                      child: _headerLabel('Source'),
+                                      child: _headerLabel(context, 'Source'),
                                     ),
                                   ),
                                   if (!isHardcodedPreview)
@@ -1038,6 +1155,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                                 itemCount: displayRecords.length,
                                 itemBuilder: (context, index) =>
                                     _buildTimeLogRow(
+                                      context: context,
                                       index: index,
                                       record: displayRecords[index],
                                       dtr: dtr,
@@ -1059,11 +1177,17 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
   }
 
   Widget _buildTimeLogRow({
+    required BuildContext context,
     required int index,
     required TimeRecord record,
     required DtrProvider dtr,
     required bool isHardcodedPreview,
   }) {
+    final dark = AppTheme.dashIsDark(context);
+    final cellStyle = TextStyle(
+      fontSize: 13,
+      color: AppTheme.dashTextPrimaryOf(context),
+    );
     final timeIn = record.timeIn?.toLocal();
     final breakOut = record.breakOut?.toLocal();
     final breakIn = record.breakIn?.toLocal();
@@ -1076,8 +1200,15 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
       padding: const EdgeInsets.fromLTRB(16, 12, 24, 12),
       decoration: BoxDecoration(
         color: index % 2 == 0
-            ? AppTheme.white
-            : AppTheme.lightGray.withValues(alpha: 0.25),
+            ? AppTheme.dashPanelOf(context)
+            : AppTheme.dashMutedSurfaceOf(
+                context,
+              ).withValues(alpha: dark ? 0.65 : 1),
+        border: Border(
+          bottom: BorderSide(
+            color: AppTheme.dashHairlineOf(context).withValues(alpha: 0.6),
+          ),
+        ),
       ),
       child: Row(
         children: [
@@ -1085,7 +1216,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
             flex: 3,
             child: Text(
               record.employeeName ?? record.userId,
-              style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+              style: cellStyle,
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -1093,7 +1224,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
             flex: 2,
             child: Text(
               _formatDate(record.recordDate),
-              style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+              style: cellStyle,
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -1106,7 +1237,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                   timeValue: timeIn,
                   segment: 'AM IN',
                 ),
-                style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+                style: cellStyle,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -1120,7 +1251,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                   timeValue: breakOut,
                   segment: 'AM OUT',
                 ),
-                style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+                style: cellStyle,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -1134,7 +1265,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                   timeValue: breakIn,
                   segment: 'PM IN',
                 ),
-                style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+                style: cellStyle,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -1148,7 +1279,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                   timeValue: timeOut,
                   segment: 'PM OUT',
                 ),
-                style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+                style: cellStyle,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -1158,7 +1289,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
             child: Center(
               child: Text(
                 lateStr,
-                style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+                style: cellStyle,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -1168,7 +1299,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
             child: Center(
               child: Text(
                 underStr,
-                style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+                style: cellStyle,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -1197,7 +1328,11 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
               flex: 1,
               child: Center(
                 child: PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_vert, size: 22),
+                  icon: Icon(
+                    Icons.more_vert,
+                    size: 22,
+                    color: AppTheme.dashTextSecondaryOf(context),
+                  ),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
                   tooltip: 'Actions',
@@ -1208,18 +1343,23 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                       _confirmDelete(context, dtr, record);
                     }
                   },
-                  itemBuilder: (context) => [
-                    const PopupMenuItem<String>(
+                  itemBuilder: (ctx) => [
+                    PopupMenuItem<String>(
                       value: 'edit',
                       child: Row(
                         children: [
                           Icon(
                             Icons.edit_rounded,
                             size: 20,
-                            color: AppTheme.textPrimary,
+                            color: AppTheme.dashTextPrimaryOf(ctx),
                           ),
-                          SizedBox(width: 12),
-                          Text('Edit'),
+                          const SizedBox(width: 12),
+                          Text(
+                            'Edit',
+                            style: TextStyle(
+                              color: AppTheme.dashTextPrimaryOf(ctx),
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -1249,14 +1389,15 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
     );
   }
 
-  Widget _manualEntryPunchTile({
+  Widget _manualEntryPunchTile(
+    BuildContext context, {
     required String label,
     required TimeOfDay? value,
     required VoidCallback onTap,
     required IconData icon,
   }) {
     return Material(
-      color: AppTheme.sectionAlt,
+      color: AppTheme.sectionAltOf(context),
       borderRadius: BorderRadius.circular(10),
       child: InkWell(
         onTap: onTap,
@@ -1265,7 +1406,13 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(
             children: [
-              Icon(icon, size: 20, color: AppTheme.primaryNavy),
+              Icon(
+                icon,
+                size: 20,
+                color: AppTheme.dashIsDark(context)
+                    ? AppTheme.primaryNavyLight
+                    : AppTheme.primaryNavy,
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -1273,10 +1420,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                   children: [
                     Text(
                       label,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -1286,8 +1433,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
                         color: value != null
-                            ? AppTheme.textPrimary
-                            : AppTheme.textSecondary.withValues(alpha: 0.75),
+                            ? AppTheme.dashTextPrimaryOf(context)
+                            : AppTheme.dashTextSecondaryOf(
+                                context,
+                              ).withValues(alpha: 0.75),
                       ),
                     ),
                   ],
@@ -1296,7 +1445,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
               Icon(
                 Icons.schedule_rounded,
                 size: 20,
-                color: AppTheme.textSecondary.withValues(alpha: 0.65),
+                color: AppTheme.dashTextSecondaryOf(
+                  context,
+                ).withValues(alpha: 0.65),
               ),
             ],
           ),
@@ -1363,8 +1514,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                   employeeDropdownValue != null &&
                   empList.isNotEmpty;
               return Dialog(
+                backgroundColor: AppTheme.dashPanelOf(ctx),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
+                  side: BorderSide(color: AppTheme.dashHairlineOf(ctx)),
                 ),
                 insetPadding: const EdgeInsets.symmetric(
                   horizontal: 20,
@@ -1403,12 +1556,12 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text(
+                                  Text(
                                     'Add time entry',
                                     style: TextStyle(
                                       fontSize: 20,
                                       fontWeight: FontWeight.w700,
-                                      color: AppTheme.textPrimary,
+                                      color: AppTheme.dashTextPrimaryOf(ctx),
                                     ),
                                   ),
                                   const SizedBox(height: 6),
@@ -1417,9 +1570,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                                     style: TextStyle(
                                       fontSize: 13,
                                       height: 1.35,
-                                      color: AppTheme.textSecondary.withValues(
-                                        alpha: 0.95,
-                                      ),
+                                      color: AppTheme.dashTextSecondaryOf(
+                                        ctx,
+                                      ).withValues(alpha: 0.95),
                                     ),
                                   ),
                                 ],
@@ -1437,26 +1590,12 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                               DropdownButtonFormField<String?>(
                                 initialValue: addDeptId,
                                 isExpanded: true,
-                                decoration: InputDecoration(
+                                dropdownColor: AppTheme.dashPanelOf(ctx),
+                                style: AppTheme.dashFieldTextStyle(ctx),
+                                decoration: AppTheme.dashInputDecoration(
+                                  ctx,
                                   labelText: 'Department',
-                                  filled: true,
-                                  fillColor: AppTheme.offWhite,
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: BorderSide(
-                                      color: Colors.black.withValues(
-                                        alpha: 0.12,
-                                      ),
-                                    ),
-                                  ),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: BorderSide(
-                                      color: Colors.black.withValues(
-                                        alpha: 0.12,
-                                      ),
-                                    ),
-                                  ),
+                                  radius: 12,
                                   contentPadding: const EdgeInsets.symmetric(
                                     horizontal: 16,
                                     vertical: 14,
@@ -1515,26 +1654,12 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                               DropdownButtonFormField<String>(
                                 initialValue: employeeDropdownValue,
                                 isExpanded: true,
-                                decoration: InputDecoration(
+                                dropdownColor: AppTheme.dashPanelOf(ctx),
+                                style: AppTheme.dashFieldTextStyle(ctx),
+                                decoration: AppTheme.dashInputDecoration(
+                                  ctx,
                                   labelText: 'Employee',
-                                  filled: true,
-                                  fillColor: AppTheme.offWhite,
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: BorderSide(
-                                      color: Colors.black.withValues(
-                                        alpha: 0.12,
-                                      ),
-                                    ),
-                                  ),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: BorderSide(
-                                      color: Colors.black.withValues(
-                                        alpha: 0.12,
-                                      ),
-                                    ),
-                                  ),
+                                  radius: 12,
                                   contentPadding: const EdgeInsets.symmetric(
                                     horizontal: 16,
                                     vertical: 14,
@@ -1561,7 +1686,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                               ),
                               const SizedBox(height: 14),
                               Material(
-                                color: AppTheme.offWhite,
+                                color: AppTheme.dashInputFillOf(ctx),
                                 borderRadius: BorderRadius.circular(12),
                                 child: InkWell(
                                   onTap: () async {
@@ -1586,7 +1711,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                                         Icon(
                                           Icons.calendar_today_rounded,
                                           size: 20,
-                                          color: AppTheme.primaryNavy,
+                                          color: AppTheme.dashIsDark(ctx)
+                                              ? AppTheme.primaryNavyLight
+                                              : AppTheme.primaryNavy,
                                         ),
                                         const SizedBox(width: 12),
                                         Expanded(
@@ -1594,12 +1721,15 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                                             crossAxisAlignment:
                                                 CrossAxisAlignment.start,
                                             children: [
-                                              const Text(
+                                              Text(
                                                 'Date',
                                                 style: TextStyle(
                                                   fontSize: 12,
                                                   fontWeight: FontWeight.w600,
-                                                  color: AppTheme.textSecondary,
+                                                  color:
+                                                      AppTheme.dashTextSecondaryOf(
+                                                        ctx,
+                                                      ),
                                                 ),
                                               ),
                                               const SizedBox(height: 4),
@@ -1607,10 +1737,13 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                                                 _formatDateWithWeekday(
                                                   recordDate,
                                                 ),
-                                                style: const TextStyle(
+                                                style: TextStyle(
                                                   fontSize: 15,
                                                   fontWeight: FontWeight.w600,
-                                                  color: AppTheme.textPrimary,
+                                                  color:
+                                                      AppTheme.dashTextPrimaryOf(
+                                                        ctx,
+                                                      ),
                                                 ),
                                               ),
                                             ],
@@ -1618,8 +1751,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                                         ),
                                         Icon(
                                           Icons.chevron_right_rounded,
-                                          color: AppTheme.textSecondary
-                                              .withValues(alpha: 0.7),
+                                          color: AppTheme.dashTextSecondaryOf(
+                                            ctx,
+                                          ).withValues(alpha: 0.7),
                                         ),
                                       ],
                                     ),
@@ -1633,13 +1767,14 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
                                   letterSpacing: 0.4,
-                                  color: AppTheme.textSecondary.withValues(
-                                    alpha: 0.9,
-                                  ),
+                                  color: AppTheme.dashTextSecondaryOf(
+                                    ctx,
+                                  ).withValues(alpha: 0.9),
                                 ),
                               ),
                               const SizedBox(height: 8),
                               _manualEntryPunchTile(
+                                ctx,
                                 label: 'AM In (time in)',
                                 value: timeIn,
                                 icon: Icons.wb_sunny_outlined,
@@ -1653,6 +1788,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                               ),
                               const SizedBox(height: 8),
                               _manualEntryPunchTile(
+                                ctx,
                                 label: 'AM Out (break out)',
                                 value: breakOut,
                                 icon: Icons.restaurant_outlined,
@@ -1671,13 +1807,14 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
                                   letterSpacing: 0.4,
-                                  color: AppTheme.textSecondary.withValues(
-                                    alpha: 0.9,
-                                  ),
+                                  color: AppTheme.dashTextSecondaryOf(
+                                    ctx,
+                                  ).withValues(alpha: 0.9),
                                 ),
                               ),
                               const SizedBox(height: 8),
                               _manualEntryPunchTile(
+                                ctx,
                                 label: 'PM In (break in)',
                                 value: breakIn,
                                 icon: Icons.nightlight_outlined,
@@ -1691,6 +1828,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                               ),
                               const SizedBox(height: 8),
                               _manualEntryPunchTile(
+                                ctx,
                                 label: 'PM Out (time out)',
                                 value: timeOut,
                                 icon: Icons.logout_rounded,
@@ -1721,7 +1859,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
                           ),
                         ),
                       ),
-                      const Divider(height: 1),
+                      Divider(height: 1, color: AppTheme.dashHairlineOf(ctx)),
                       Padding(
                         padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
                         child: Row(

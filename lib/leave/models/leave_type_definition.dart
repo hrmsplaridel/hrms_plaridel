@@ -13,7 +13,8 @@ class LeaveTypeDefinition {
     this.requiresAttachmentWhenOverDays,
     this.maxDays,
     this.affectsDtrNormally = true,
-    this.balanceLedgerType = 'others',
+    this.balanceLedgerType = 'none',
+    this.sexEligibility = 'any',
   });
 
   final String? id;
@@ -30,6 +31,7 @@ class LeaveTypeDefinition {
   final double? maxDays;
   final bool affectsDtrNormally;
   final String balanceLedgerType;
+  final String sexEligibility;
 
   factory LeaveTypeDefinition.fromJson(Map<String, dynamic> json) {
     return LeaveTypeDefinition(
@@ -65,7 +67,11 @@ class LeaveTypeDefinition {
       balanceLedgerType:
           json['balance_ledger_type']?.toString() ??
           json['balanceLedgerType']?.toString() ??
-          'others',
+          'none',
+      sexEligibility: normalizeLeaveTypeSexEligibility(
+        json['sex_eligibility']?.toString() ??
+            json['sexEligibility']?.toString(),
+      ),
     );
   }
 
@@ -84,6 +90,7 @@ class LeaveTypeDefinition {
       'max_days': maxDays,
       'affects_dtr_normally': affectsDtrNormally,
       'balance_ledger_type': balanceLedgerType,
+      'sex_eligibility': sexEligibility,
     };
   }
 
@@ -102,6 +109,7 @@ class LeaveTypeDefinition {
     double? maxDays,
     bool? affectsDtrNormally,
     String? balanceLedgerType,
+    String? sexEligibility,
   }) {
     return LeaveTypeDefinition(
       id: id ?? this.id,
@@ -119,6 +127,7 @@ class LeaveTypeDefinition {
       maxDays: maxDays ?? this.maxDays,
       affectsDtrNormally: affectsDtrNormally ?? this.affectsDtrNormally,
       balanceLedgerType: balanceLedgerType ?? this.balanceLedgerType,
+      sexEligibility: sexEligibility ?? this.sexEligibility,
     );
   }
 
@@ -126,5 +135,60 @@ class LeaveTypeDefinition {
     if (value == null) return null;
     if (value is num) return value.toDouble();
     return double.tryParse(value.toString());
+  }
+}
+
+String normalizeLeaveTypeSexEligibility(String? value) {
+  final normalized = (value ?? '').trim().toLowerCase();
+  switch (normalized) {
+    case 'female':
+    case 'female_only':
+    case 'femaleonly':
+      return 'female';
+    case 'male':
+    case 'male_only':
+    case 'maleonly':
+      return 'male';
+    case 'both':
+    case 'all':
+    case 'bothsexes':
+      return 'any';
+    default:
+      return 'any';
+  }
+}
+
+String leaveTypeSexEligibilityLabel(String value) {
+  switch (normalizeLeaveTypeSexEligibility(value)) {
+    case 'female':
+      return 'Female only';
+    case 'male':
+      return 'Male only';
+    default:
+      return 'Both sexes';
+  }
+}
+
+extension LeaveTypeDefinitionCreditPolicy on LeaveTypeDefinition {
+  bool get usesLeaveCredits => balanceLedgerType != 'none';
+
+  bool get usesOwnBalance => balanceLedgerType == 'ownBalance';
+
+  String get effectiveBalanceBucket {
+    if (usesOwnBalance) return name;
+    return balanceLedgerType;
+  }
+
+  String get creditPolicyLabel {
+    switch (balanceLedgerType) {
+      case 'vacationLeave':
+        return 'Deducts from Vacation Leave credits';
+      case 'sickLeave':
+        return 'Deducts from Sick Leave credits';
+      case 'ownBalance':
+        return 'Uses its own separate balance';
+      default:
+        return 'No leave credits required';
+    }
   }
 }

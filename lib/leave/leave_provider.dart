@@ -8,8 +8,29 @@ import 'models/leave_type.dart';
 
 /// Mandatory/forced leave has no separate balance row; it uses vacation credits (CSC).
 List<LeaveBalance> _filterDisplayBalances(List<LeaveBalance> raw) {
+  const noCreditSystemTypes = {
+    'mandatoryForcedLeave',
+    'maternityLeave',
+    'paternityLeave',
+    'specialPrivilegeLeave',
+    'soloParentLeave',
+    'studyLeave',
+    'tenDayVawcLeave',
+    'rehabilitationPrivilege',
+    'specialLeaveBenefitsForWomen',
+    'specialEmergencyCalamityLeave',
+    'adoptionLeave',
+    'others',
+  };
   return raw
-      .where((b) => b.leaveType != LeaveType.mandatoryForcedLeave)
+      .where((b) {
+        final typeName = b.effectiveLeaveTypeName;
+        if (typeName == LeaveType.vacationLeave.value ||
+            typeName == LeaveType.sickLeave.value) {
+          return true;
+        }
+        return !noCreditSystemTypes.contains(typeName);
+      })
       .toList();
 }
 
@@ -120,7 +141,7 @@ class LeaveProvider extends ChangeNotifier {
   LeaveBalance? balanceForType(LeaveType leaveType) {
     try {
       final ledger = leaveType.balanceLedgerType;
-      return _balances.firstWhere((b) => b.leaveType == ledger);
+      return _balances.firstWhere((b) => b.effectiveLeaveTypeName == ledger.value);
     } catch (_) {
       return null;
     }
@@ -731,8 +752,13 @@ class LeaveProvider extends ChangeNotifier {
   Future<bool> checkIsDepartmentHead({bool forceRefresh = false}) async {
     final cached = _deptHeadCheckCache;
     if (!forceRefresh && cached != null && cached.isFresh(_referenceCacheTtl)) {
-      _deptHeadCheck = Map<String, dynamic>.from(cached.value);
-      notifyListeners();
+      final cachedValue = Map<String, dynamic>.from(cached.value);
+      final changed = !mapEquals(_deptHeadCheck, cachedValue);
+      _deptHeadCheck = cachedValue;
+      if (changed) {
+        await Future<void>.delayed(Duration.zero);
+        notifyListeners();
+      }
       return isDeptHead;
     }
     try {

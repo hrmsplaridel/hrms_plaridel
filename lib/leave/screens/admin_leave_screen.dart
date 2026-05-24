@@ -13,6 +13,7 @@ import '../leave_type_definition_cache.dart';
 import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
+import '../models/leave_type_definition.dart';
 import '../utils/employee_leave_card_view_screen.dart';
 import 'leave_balance_history_screen.dart';
 import 'leave_type_management_screen.dart';
@@ -60,6 +61,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   List<AdminLeaveLeaveTypeFilterOption> _configuredLeaveTypeOptions = const [];
   String? _departmentFilter;
   String? _employeeFilter;
+  List<LeaveTypeDefinition> _leaveTypeDefinitions = const [];
   // #11: Date range filters.
   DateTime? _startDateFrom;
   DateTime? _startDateTo;
@@ -194,7 +196,10 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
               .toList()
             ..sort((a, b) => a.label.compareTo(b.label));
       if (!mounted) return;
-      setState(() => _configuredLeaveTypeOptions = options);
+      setState(() {
+        _leaveTypeDefinitions = definitions;
+        _configuredLeaveTypeOptions = options;
+      });
     } catch (_) {
       // Request rows still supply used leave types if rules cannot be loaded.
     }
@@ -228,6 +233,113 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       );
     }
     return byValue.values.toList()..sort((a, b) => a.label.compareTo(b.label));
+  }
+
+  LeaveTypeDefinition? _definitionForRequest(LeaveRequest request) {
+    final name = request.effectiveLeaveTypeName;
+    for (final item in _leaveTypeDefinitions) {
+      if (item.name == name) return item;
+    }
+    return null;
+  }
+
+  String _creditPolicyForRequest(LeaveRequest request) {
+    final raw = _definitionForRequest(request)?.balanceLedgerType.trim();
+    if (raw != null && raw.isNotEmpty) return raw;
+    return switch (request.leaveType) {
+      LeaveType.vacationLeave => 'vacationLeave',
+      LeaveType.sickLeave => 'sickLeave',
+      LeaveType.mandatoryForcedLeave => 'vacationLeave',
+      _ => 'none',
+    };
+  }
+
+  String _creditBucketForRequest(LeaveRequest request) {
+    final policy = _creditPolicyForRequest(request);
+    return policy == 'ownBalance' ? request.effectiveLeaveTypeName : policy;
+  }
+
+  LeaveBalance? _balanceForBucket(List<LeaveBalance> balances, String bucket) {
+    for (final balance in balances) {
+      if (balance.effectiveLeaveTypeName == bucket) return balance;
+    }
+    return null;
+  }
+
+  String _formatAdminDays(double days) {
+    return days % 1 == 0 ? days.toStringAsFixed(0) : days.toStringAsFixed(1);
+  }
+
+  double _workingDaysInYear(DateTime? start, DateTime? end, int year) {
+    if (start == null || end == null) return 0;
+    var d = DateTime(
+      start.year < year ? year : start.year,
+      start.year < year ? 1 : start.month,
+      start.year < year ? 1 : start.day,
+    );
+    final last = DateTime(
+      end.year > year ? year : end.year,
+      end.year > year ? 12 : end.month,
+      end.year > year ? 31 : end.day,
+    );
+    var count = 0;
+    while (!d.isAfter(last)) {
+      if (d.weekday != DateTime.saturday && d.weekday != DateTime.sunday) {
+        count += 1;
+      }
+      d = d.add(const Duration(days: 1));
+    }
+    return count.toDouble();
+  }
+
+  Future<String> _creditSummaryForRequest({
+    required LeaveRequest request,
+    required List<LeaveBalance> balances,
+  }) async {
+    final policy = _creditPolicyForRequest(request);
+    if (request.effectiveLeaveTypeName == LeaveType.specialPrivilegeLeave.value) {
+      final year = request.startDate?.year ?? DateTime.now().year;
+      final requests = await context.read<LeaveProvider>().repository.listRequests(
+        query: LeaveRequestQuery(
+          userId: request.userId,
+          leaveTypeName: LeaveType.specialPrivilegeLeave.value,
+          limit: 500,
+        ),
+      );
+      final currentId = request.id;
+      final used = requests.where((item) {
+        if (currentId != null && currentId.isNotEmpty && item.id == currentId) {
+          return false;
+        }
+        if (!(item.status.isPending || item.status == LeaveRequestStatus.approved)) {
+          return false;
+        }
+        final start = item.startDate;
+        final end = item.endDate;
+        if (start == null || end == null) return false;
+        return start.year <= year && end.year >= year;
+      }).fold<double>(
+        0,
+        (total, item) =>
+            total + _workingDaysInYear(item.startDate, item.endDate, year),
+      );
+      final remaining = (3 - used).clamp(0, 3).toDouble();
+      return 'Special Privilege Leave: ${_formatAdminDays(remaining)} of 3 day(s) remaining for $year. No VL/SL deduction.';
+    }
+    if (policy == 'none') {
+      return 'No leave credit deduction for this leave type.';
+    }
+    final bucket = _creditBucketForRequest(request);
+    final balance = _balanceForBucket(balances, bucket);
+    final bucketLabel = switch (bucket) {
+      'vacationLeave' => 'Vacation Leave',
+      'sickLeave' => 'Sick Leave',
+      _ => request.leaveTypeLabel,
+    };
+    if (balance == null) {
+      return '$bucketLabel credits: no balance row is available yet.';
+    }
+    return '$bucketLabel credits: ${balance.availableDays.toStringAsFixed(1)} available (${balance.remainingDays.toStringAsFixed(1)} remaining excl. pending).';
   }
 
   Future<void> _safeAutoRefresh({bool forceRefresh = false}) async {
@@ -557,17 +669,26 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       userId,
       forceRefresh: true,
     );
-    LeaveBalance? leaveBalance;
-    final ledgerType = request.leaveType.balanceLedgerType;
+    final creditBucket = _creditBucketForRequest(request);
+    final leaveBalance = _balanceForBucket(balances, creditBucket);
+    String creditSummary;
     try {
-      leaveBalance = balances.firstWhere((b) => b.leaveType == ledgerType);
-    } catch (_) {}
+      creditSummary = await _creditSummaryForRequest(
+        request: request,
+        balances: balances,
+      );
+    } catch (_) {
+      creditSummary = 'Credit policy could not be refreshed. Final approval will still be validated by the server.';
+    }
 
     if (!mounted) return;
     final input = await showDialog<LeaveApprovalInput>(
       context: context,
-      builder: (_) =>
-          AdminLeaveApproveDialog(request: request, leaveBalance: leaveBalance),
+      builder: (_) => AdminLeaveApproveDialog(
+        request: request,
+        leaveBalance: leaveBalance,
+        creditSummary: creditSummary,
+      ),
     );
     if (input == null || !mounted) return;
 
@@ -1035,18 +1156,7 @@ class _AdminHeaderCard extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 16),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1062,7 +1172,7 @@ class _AdminHeaderCard extends StatelessWidget {
                       Text(
                         'Leave Approvals',
                         style: TextStyle(
-                          color: AppTheme.textPrimary,
+                          color: AppTheme.dashTextPrimaryOf(context),
                           fontSize: 24,
                           fontWeight: FontWeight.w700,
                         ),
@@ -1071,7 +1181,7 @@ class _AdminHeaderCard extends StatelessWidget {
                       Text(
                         'Review employee leave applications, inspect their form details, and record approval decisions.',
                         style: TextStyle(
-                          color: AppTheme.textSecondary,
+                          color: AppTheme.dashTextSecondaryOf(context),
                           fontSize: 14,
                           height: 1.45,
                         ),
@@ -1331,12 +1441,16 @@ class _EmployeeLeaveCardPickerDialogState
             width: 38,
             height: 38,
             decoration: BoxDecoration(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+              color: AppTheme.primaryNavy.withValues(
+                alpha: AppTheme.dashIsDark(context) ? 0.28 : 0.12,
+              ),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(
               Icons.badge_outlined,
-              color: AppTheme.primaryNavy,
+              color: AppTheme.dashIsDark(context)
+                  ? AppTheme.primaryNavyLight
+                  : AppTheme.primaryNavy,
               size: 22,
             ),
           ),
@@ -1352,7 +1466,10 @@ class _EmployeeLeaveCardPickerDialogState
           children: [
             Text(
               'Choose an employee to view the leave card.',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+              style: TextStyle(
+                color: AppTheme.dashTextSecondaryOf(context),
+                fontSize: 13,
+              ),
             ),
             const SizedBox(height: 12),
             if (_loadingEmployees)
@@ -1369,22 +1486,19 @@ class _EmployeeLeaveCardPickerDialogState
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: AppTheme.offWhite,
+                  color: AppTheme.dashMutedSurfaceOf(context),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: Colors.black.withValues(alpha: 0.06),
-                  ),
+                  border: Border.all(color: AppTheme.dashHairlineOf(context)),
                 ),
                 child: Column(
                   children: [
                     DropdownButtonFormField<String>(
                       initialValue: _selectedDepartment,
                       isExpanded: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Department',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
+                      dropdownColor: AppTheme.dashPanelOf(context),
+                      style: AppTheme.dashFieldTextStyle(context),
+                      decoration: adminLeaveInputDecoration(context, 'Department')
+                          .copyWith(isDense: true),
                       items: [
                         const DropdownMenuItem<String>(
                           value: null,
@@ -1403,14 +1517,15 @@ class _EmployeeLeaveCardPickerDialogState
                     DropdownButtonFormField<String>(
                       initialValue: _selectedUserId,
                       isExpanded: true,
-                      decoration: InputDecoration(
-                        labelText: 'Employee',
-                        border: const OutlineInputBorder(),
-                        isDense: true,
-                        helperText: _employees.isEmpty
-                            ? 'No employees found for this department.'
-                            : '${_employees.length} employee(s) found',
-                      ),
+                      dropdownColor: AppTheme.dashPanelOf(context),
+                      style: AppTheme.dashFieldTextStyle(context),
+                      decoration: adminLeaveInputDecoration(context, 'Employee')
+                          .copyWith(
+                            isDense: true,
+                            helperText: _employees.isEmpty
+                                ? 'No employees found for this department.'
+                                : '${_employees.length} employee(s) found',
+                          ),
                       items: _employees
                           .map(
                             (e) => DropdownMenuItem<String>(
@@ -1536,12 +1651,16 @@ class _ForcedLeaveDeductionDialogState
             height: 42,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+              color: AppTheme.primaryNavy.withValues(
+                alpha: AppTheme.dashIsDark(context) ? 0.28 : 0.1,
+              ),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(
+            child: Icon(
               Icons.assignment_turned_in_rounded,
-              color: AppTheme.primaryNavy,
+              color: AppTheme.dashIsDark(context)
+                  ? AppTheme.primaryNavyLight
+                  : AppTheme.primaryNavy,
             ),
           ),
           const SizedBox(width: 12),
@@ -1554,7 +1673,7 @@ class _ForcedLeaveDeductionDialogState
                 Text(
                   'Deduct unused forced leave from vacation leave credits.',
                   style: TextStyle(
-                    color: AppTheme.textSecondary,
+                    color: AppTheme.dashTextSecondaryOf(context),
                     fontSize: 13,
                     fontWeight: FontWeight.w400,
                   ),
@@ -1587,7 +1706,7 @@ class _ForcedLeaveDeductionDialogState
                     initialValue: _selectedUserId,
                     isExpanded: true,
                     menuMaxHeight: 360,
-                    decoration: adminLeaveInputDecoration(
+                    decoration: adminLeaveInputDecoration(context,
                       'Employee',
                     ).copyWith(prefixIcon: const Icon(Icons.person_outline)),
                     items: _employees
@@ -1611,7 +1730,7 @@ class _ForcedLeaveDeductionDialogState
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
                         ),
-                        decoration: adminLeaveInputDecoration('Days to Deduct')
+                        decoration: adminLeaveInputDecoration(context,'Days to Deduct')
                             .copyWith(
                               prefixIcon: const Icon(
                                 Icons.remove_circle_outline,
@@ -1627,7 +1746,7 @@ class _ForcedLeaveDeductionDialogState
                       TextFormField(
                         controller: _yearController,
                         keyboardType: TextInputType.number,
-                        decoration: adminLeaveInputDecoration('Year').copyWith(
+                        decoration: adminLeaveInputDecoration(context,'Year').copyWith(
                           prefixIcon: const Icon(Icons.calendar_today_outlined),
                         ),
                         validator: (value) {
@@ -1663,7 +1782,7 @@ class _ForcedLeaveDeductionDialogState
                   controller: _remarksController,
                   minLines: 2,
                   maxLines: null,
-                  decoration: adminLeaveInputDecoration('Remarks (Optional)')
+                  decoration: adminLeaveInputDecoration(context,'Remarks (Optional)')
                       .copyWith(
                         alignLabelWithHint: true,
                         prefixIcon: const Icon(Icons.notes_outlined),
@@ -1674,11 +1793,9 @@ class _ForcedLeaveDeductionDialogState
                   width: double.infinity,
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: AppTheme.offWhite,
+                    color: AppTheme.dashMutedSurfaceOf(context),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: Colors.black.withValues(alpha: 0.06),
-                    ),
+                    border: Border.all(color: AppTheme.dashHairlineOf(context)),
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1686,7 +1803,7 @@ class _ForcedLeaveDeductionDialogState
                       Icon(
                         Icons.info_outline_rounded,
                         size: 18,
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
@@ -1694,7 +1811,7 @@ class _ForcedLeaveDeductionDialogState
                           'Fallback action for unused forced leave. This deducts vacation leave credits directly '
                           'and records an audit trail; it does not create a leave request.',
                           style: TextStyle(
-                            color: AppTheme.textSecondary,
+                            color: AppTheme.dashTextSecondaryOf(context),
                             fontSize: 12.5,
                             height: 1.35,
                           ),
@@ -1978,12 +2095,16 @@ class _ManualBalanceAdjustmentDialogState
             height: 42,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+              color: AppTheme.primaryNavy.withValues(
+                alpha: AppTheme.dashIsDark(context) ? 0.28 : 0.1,
+              ),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(
+            child: Icon(
               Icons.account_balance_wallet_outlined,
-              color: AppTheme.primaryNavy,
+              color: AppTheme.dashIsDark(context)
+                  ? AppTheme.primaryNavyLight
+                  : AppTheme.primaryNavy,
             ),
           ),
           const SizedBox(width: 12),
@@ -1996,7 +2117,7 @@ class _ManualBalanceAdjustmentDialogState
                 Text(
                   'Update leave credit buckets and record an audit note.',
                   style: TextStyle(
-                    color: AppTheme.textSecondary,
+                    color: AppTheme.dashTextSecondaryOf(context),
                     fontSize: 13,
                     fontWeight: FontWeight.w400,
                   ),
@@ -2041,7 +2162,7 @@ class _ManualBalanceAdjustmentDialogState
                     initialValue: _selectedUserId,
                     isExpanded: true,
                     menuMaxHeight: 360,
-                    decoration: adminLeaveInputDecoration(
+                    decoration: adminLeaveInputDecoration(context,
                       'Employee',
                     ).copyWith(prefixIcon: const Icon(Icons.person_outline)),
                     items: _employees
@@ -2068,7 +2189,7 @@ class _ManualBalanceAdjustmentDialogState
                         initialValue: _selectedLeaveType,
                         isExpanded: true,
                         menuMaxHeight: 360,
-                        decoration: adminLeaveInputDecoration('Leave type')
+                        decoration: adminLeaveInputDecoration(context,'Leave type')
                             .copyWith(
                               prefixIcon: const Icon(Icons.event_note_outlined),
                             ),
@@ -2149,7 +2270,7 @@ class _ManualBalanceAdjustmentDialogState
                     enabled: !saving,
                     minLines: 2,
                     maxLines: 4,
-                    decoration: adminLeaveInputDecoration('Reason / remarks')
+                    decoration: adminLeaveInputDecoration(context,'Reason / remarks')
                         .copyWith(
                           alignLabelWithHint: true,
                           prefixIcon: const Icon(Icons.notes_outlined),
@@ -2198,7 +2319,7 @@ class _ManualBalanceAdjustmentDialogState
       onTap: saving ? null : _pickAsOfDate,
       borderRadius: BorderRadius.circular(12),
       child: InputDecorator(
-        decoration: adminLeaveInputDecoration(
+        decoration: adminLeaveInputDecoration(context,
           'As of date',
         ).copyWith(prefixIcon: const Icon(Icons.calendar_month_outlined)),
         child: Row(
@@ -2206,7 +2327,9 @@ class _ManualBalanceAdjustmentDialogState
             Expanded(child: Text(formatAdminLeaveDate(_asOfDate))),
             Icon(
               Icons.expand_more_rounded,
-              color: saving ? Colors.black26 : AppTheme.textSecondary,
+              color: saving
+                  ? AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.4)
+                  : AppTheme.dashTextSecondaryOf(context),
             ),
           ],
         ),
@@ -2300,7 +2423,7 @@ class _ManualBalanceAdjustmentDialogState
         decimal: true,
         signed: allowNegative,
       ),
-      decoration: adminLeaveInputDecoration(
+      decoration: adminLeaveInputDecoration(context,
         label,
       ).copyWith(prefixIcon: Icon(icon), helperText: helperText),
       validator: (value) {
@@ -2317,16 +2440,17 @@ class _ManualBalanceAdjustmentDialogState
     required LeaveBalance draft,
   }) {
     final hasCurrent = current != null;
+    final dark = AppTheme.dashIsDark(context);
     final availableColor = draft.availableDays < 0
-        ? Colors.red.shade700
-        : AppTheme.primaryNavy;
+        ? (dark ? Colors.red.shade300 : Colors.red.shade700)
+        : (dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppTheme.white,
+        color: AppTheme.dashPanelOf(context),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2337,7 +2461,7 @@ class _ManualBalanceAdjustmentDialogState
                 child: Text(
                   hasCurrent ? 'Editing existing balance' : 'Creating balance',
                   style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.dashTextPrimaryOf(context),
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -2349,16 +2473,18 @@ class _ManualBalanceAdjustmentDialogState
                 ),
                 decoration: BoxDecoration(
                   color: hasCurrent
-                      ? AppTheme.primaryNavy.withValues(alpha: 0.1)
-                      : Colors.blueGrey.withValues(alpha: 0.1),
+                      ? AppTheme.primaryNavy.withValues(alpha: dark ? 0.28 : 0.1)
+                      : AppTheme.dashMutedSurfaceOf(context),
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
                   hasCurrent ? 'Loaded' : 'New row',
                   style: TextStyle(
                     color: hasCurrent
-                        ? AppTheme.primaryNavyDark
-                        : AppTheme.textSecondary,
+                        ? (dark
+                            ? AppTheme.primaryNavyLight
+                            : AppTheme.primaryNavyDark)
+                        : AppTheme.dashTextSecondaryOf(context),
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                   ),
@@ -2369,7 +2495,10 @@ class _ManualBalanceAdjustmentDialogState
           const SizedBox(height: 4),
           Text(
             '$_selectedEmployeeName - ${_selectedLeaveType.displayName}',
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+            style: TextStyle(
+              color: AppTheme.dashTextSecondaryOf(context),
+              fontSize: 12,
+            ),
           ),
           const SizedBox(height: 12),
           Wrap(
@@ -2381,12 +2510,12 @@ class _ManualBalanceAdjustmentDialogState
                 value: current == null
                     ? '--'
                     : _formatDays(current.availableDays),
-                color: AppTheme.textSecondary,
+                color: AppTheme.dashTextSecondaryOf(context),
               ),
               _BalanceMetric(
                 label: 'New remaining',
                 value: _formatDays(draft.remainingDays),
-                color: AppTheme.textPrimary,
+                color: AppTheme.dashTextPrimaryOf(context),
               ),
               _BalanceMetric(
                 label: 'New available',
@@ -2397,14 +2526,17 @@ class _ManualBalanceAdjustmentDialogState
               _BalanceMetric(
                 label: 'Pending reserve',
                 value: _formatDays(draft.pendingDays),
-                color: AppTheme.textPrimary,
+                color: AppTheme.dashTextPrimaryOf(context),
               ),
             ],
           ),
           const SizedBox(height: 10),
           Text(
             'Available = earned - used + adjusted - pending',
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+            style: TextStyle(
+              color: AppTheme.dashTextSecondaryOf(context),
+              fontSize: 12,
+            ),
           ),
         ],
       ),
@@ -2416,15 +2548,20 @@ class _ManualBalanceAdjustmentDialogState
     required String title,
     Widget? trailing,
   }) {
+    final dark = AppTheme.dashIsDark(context);
     return Row(
       children: [
-        Icon(icon, size: 18, color: AppTheme.primaryNavy),
+        Icon(
+          icon,
+          size: 18,
+          color: dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy,
+        ),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
             title,
             style: TextStyle(
-              color: AppTheme.textPrimary,
+              color: AppTheme.dashTextPrimaryOf(context),
               fontWeight: FontWeight.w800,
             ),
           ),
@@ -2439,11 +2576,18 @@ class _ManualBalanceAdjustmentDialogState
     required String message,
     bool warning = false,
   }) {
-    final color = warning ? Colors.red.shade700 : AppTheme.textSecondary;
-    final background = warning ? Colors.red.shade50 : AppTheme.offWhite;
+    final dark = AppTheme.dashIsDark(context);
+    final color = warning
+        ? (dark ? Colors.red.shade300 : Colors.red.shade700)
+        : AppTheme.dashTextSecondaryOf(context);
+    final background = warning
+        ? (dark
+            ? Colors.red.shade900.withValues(alpha: 0.35)
+            : Colors.red.shade50)
+        : AppTheme.dashMutedSurfaceOf(context);
     final border = warning
-        ? Colors.red.shade100
-        : Colors.black.withValues(alpha: 0.06);
+        ? (dark ? Colors.red.shade700 : Colors.red.shade100)
+        : AppTheme.dashHairlineOf(context);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -2507,7 +2651,10 @@ class _BalanceMetric extends StatelessWidget {
             label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+            style: TextStyle(
+              color: AppTheme.dashTextSecondaryOf(context),
+              fontSize: 11,
+            ),
           ),
           const SizedBox(height: 6),
           Text(

@@ -40,6 +40,7 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
   late LeaveType _leaveType;
   LeaveLocationOption? _locationOption;
   SickLeaveNature? _sickLeaveNature;
+  MaternityDeliveryType? _maternityDeliveryType;
   StudyLeavePurpose? _studyPurpose;
   LeaveOtherPurpose? _otherPurpose;
   LeaveCommutationOption _commutation = LeaveCommutationOption.notRequested;
@@ -73,6 +74,7 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
     _leaveType = initial?.leaveType ?? LeaveType.vacationLeave;
     _locationOption = initial?.locationOption;
     _sickLeaveNature = initial?.sickLeaveNature;
+    _maternityDeliveryType = initial?.maternityDeliveryType;
     _studyPurpose = initial?.studyPurpose;
     _otherPurpose = initial?.otherPurpose;
     _commutation = initial?.commutation ?? LeaveCommutationOption.notRequested;
@@ -115,6 +117,7 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
     _otherPurposeDetailsController = TextEditingController(
       text: initial?.otherPurposeDetails ?? '',
     );
+    _coerceSelectedLeaveTypeForAccount();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadEmployeeAssignmentPrefill();
       _loadEmployeeBalances(); // #Section7A: Fetch credits for table 7.A
@@ -820,7 +823,12 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
 
   Widget _buildLeaveTypePanel() {
     final employeeFileableTypes = LeaveType.values
-        .where((type) => type != LeaveType.others && type.employeeCanFile)
+        .where(
+          (type) =>
+              type != LeaveType.others &&
+              type.employeeCanFile &&
+              _isLeaveTypeAllowedForAccount(type),
+        )
         .toList();
     return _paperPanel(
       title: '6.A TYPE OF LEAVE TO BE AVAILED OF',
@@ -932,6 +940,33 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
                 ? _requiredValidator
                 : null,
             enabled: _leaveType == LeaveType.sickLeave,
+          ),
+          const SizedBox(height: 16),
+          _paperSubheading('In case of Maternity Leave:'),
+          _paperCheckRow(
+            selected:
+                _maternityDeliveryType == MaternityDeliveryType.normalDelivery,
+            label: 'Normal Delivery (Non-CS)',
+            enabled: _leaveType == LeaveType.maternityLeave,
+            onTap: _leaveType == LeaveType.maternityLeave
+                ? () => setState(
+                    () => _maternityDeliveryType =
+                        MaternityDeliveryType.normalDelivery,
+                  )
+                : null,
+          ),
+          _paperCheckRow(
+            selected:
+                _maternityDeliveryType ==
+                MaternityDeliveryType.caesareanSection,
+            label: 'Caesarean Section (CS)',
+            enabled: _leaveType == LeaveType.maternityLeave,
+            onTap: _leaveType == LeaveType.maternityLeave
+                ? () => setState(
+                    () => _maternityDeliveryType =
+                        MaternityDeliveryType.caesareanSection,
+                  )
+                : null,
           ),
           const SizedBox(height: 16),
           _paperSubheading('In case of Special Leave Benefits for Women:'),
@@ -1782,6 +1817,13 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
   bool _validateForm() {
     final valid = _formKey.currentState?.validate() ?? false;
     if (!valid) return false;
+    final accountEligibilityMessage = _leaveTypeAccountEligibilityMessage(
+      _leaveType,
+    );
+    if (accountEligibilityMessage != null) {
+      _showMessage(accountEligibilityMessage);
+      return false;
+    }
     if (_startDate == null || _endDate == null) {
       _showMessage('Please select both start and end dates.');
       return false;
@@ -1816,6 +1858,11 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
       _showMessage('Please choose the study leave purpose.');
       return false;
     }
+    if (_leaveType == LeaveType.maternityLeave &&
+        _maternityDeliveryType == null) {
+      _showMessage('Please choose the maternity leave classification.');
+      return false;
+    }
     if (_leaveType == LeaveType.others &&
         (_otherPurpose == LeaveOtherPurpose.monetizationOfLeaveCredits ||
             _otherPurpose == LeaveOtherPurpose.terminalLeave)) {
@@ -1848,6 +1895,13 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
   }
 
   LeaveRequest? _buildRequest({required LeaveRequestStatus status}) {
+    final accountEligibilityMessage = _leaveTypeAccountEligibilityMessage(
+      _leaveType,
+    );
+    if (accountEligibilityMessage != null) {
+      _showMessage(accountEligibilityMessage);
+      return null;
+    }
     final auth = context.read<AuthProvider>();
     final user = auth.user;
     if (user == null) {
@@ -1886,6 +1940,9 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
           : null,
       sickIllnessDetails: _leaveType == LeaveType.sickLeave
           ? _trimOrNull(_sickIllnessController.text)
+          : null,
+      maternityDeliveryType: _leaveType == LeaveType.maternityLeave
+          ? _maternityDeliveryType
           : null,
       womenIllnessDetails: _leaveType == LeaveType.specialLeaveBenefitsForWomen
           ? _trimOrNull(_womenIllnessController.text)
@@ -1951,6 +2008,61 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
       _leaveType == LeaveType.vacationLeave ||
       _leaveType == LeaveType.specialPrivilegeLeave;
 
+  String? _normalizedAccountSex() {
+    final sex = context.read<AuthProvider>().user?.sex?.trim().toLowerCase();
+    if (sex == null || sex.isEmpty) return null;
+    if (sex == 'f' || sex == 'female') return 'female';
+    if (sex == 'm' || sex == 'male') return 'male';
+    return sex;
+  }
+
+  String? _leaveTypeAccountEligibilityMessage(LeaveType type) {
+    final sex = _normalizedAccountSex();
+    if (type == LeaveType.maternityLeave) {
+      if (sex == null) {
+        return 'Maternity Leave requires your profile sex to be set to Female. Please update your profile or contact HR.';
+      }
+      if (sex != 'female') {
+        return 'Maternity Leave can only be filed by female accounts.';
+      }
+    }
+    if (type == LeaveType.specialLeaveBenefitsForWomen) {
+      if (sex == null) {
+        return 'Special Leave Benefits for Women requires your profile sex to be set to Female. Please update your profile or contact HR.';
+      }
+      if (sex != 'female') {
+        return 'Special Leave Benefits for Women can only be filed by female accounts.';
+      }
+    }
+    if (type == LeaveType.tenDayVawcLeave) {
+      if (sex == null) {
+        return '10-Day VAWC Leave requires your profile sex to be set to Female. Please update your profile or contact HR.';
+      }
+      if (sex != 'female') {
+        return '10-Day VAWC Leave can only be filed by female accounts.';
+      }
+    }
+    if (type == LeaveType.paternityLeave) {
+      if (sex == null) {
+        return 'Paternity Leave requires your profile sex to be set to Male. Please update your profile or contact HR.';
+      }
+      if (sex != 'male') {
+        return 'Paternity Leave can only be filed by male accounts.';
+      }
+    }
+    return null;
+  }
+
+  bool _isLeaveTypeAllowedForAccount(LeaveType type) {
+    return _leaveTypeAccountEligibilityMessage(type) == null;
+  }
+
+  void _coerceSelectedLeaveTypeForAccount() {
+    if (_isLeaveTypeAllowedForAccount(_leaveType)) return;
+    _leaveType = LeaveType.vacationLeave;
+    _resetConditionalSelectionsForType(_leaveType);
+  }
+
   String? _requiredValidator(String? value) {
     if ((value ?? '').trim().isEmpty) {
       return 'This field is required.';
@@ -1967,6 +2079,9 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
     if (value != LeaveType.sickLeave) {
       _sickLeaveNature = null;
       _sickIllnessController.clear();
+    }
+    if (value != LeaveType.maternityLeave) {
+      _maternityDeliveryType = null;
     }
     if (value != LeaveType.specialLeaveBenefitsForWomen) {
       _womenIllnessController.clear();

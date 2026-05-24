@@ -20,49 +20,49 @@ extension LeaveTypeExtension on LeaveType {
   String get value => name;
 
   String get displayName => switch (this) {
-        LeaveType.vacationLeave => 'Vacation Leave',
-        LeaveType.mandatoryForcedLeave => 'Mandatory/Forced Leave',
-        LeaveType.sickLeave => 'Sick Leave',
-        LeaveType.maternityLeave => 'Maternity Leave',
-        LeaveType.paternityLeave => 'Paternity Leave',
-        LeaveType.specialPrivilegeLeave => 'Special Privilege Leave',
-        LeaveType.soloParentLeave => 'Solo Parent Leave',
-        LeaveType.studyLeave => 'Study Leave',
-        LeaveType.tenDayVawcLeave => '10-Day VAWC Leave',
-        LeaveType.rehabilitationPrivilege => 'Rehabilitation Privilege',
-        LeaveType.specialLeaveBenefitsForWomen =>
-          'Special Leave Benefits for Women',
-        LeaveType.specialEmergencyCalamityLeave =>
-          'Special Emergency (Calamity) Leave',
-        LeaveType.adoptionLeave => 'Adoption Leave',
-        LeaveType.others => 'Others',
-      };
+    LeaveType.vacationLeave => 'Vacation Leave',
+    LeaveType.mandatoryForcedLeave => 'Mandatory/Forced Leave',
+    LeaveType.sickLeave => 'Sick Leave',
+    LeaveType.maternityLeave => 'Maternity Leave',
+    LeaveType.paternityLeave => 'Paternity Leave',
+    LeaveType.specialPrivilegeLeave => 'Special Privilege Leave',
+    LeaveType.soloParentLeave => 'Solo Parent Leave',
+    LeaveType.studyLeave => 'Study Leave',
+    LeaveType.tenDayVawcLeave => '10-Day VAWC Leave',
+    LeaveType.rehabilitationPrivilege => 'Rehabilitation Privilege',
+    LeaveType.specialLeaveBenefitsForWomen =>
+      'Special Leave Benefits for Women',
+    LeaveType.specialEmergencyCalamityLeave =>
+      'Special Emergency (Calamity) Leave',
+    LeaveType.adoptionLeave => 'Adoption Leave',
+    LeaveType.others => 'Others',
+  };
 
   /// Some leave types usually need a supporting document.
   bool get requiresAttachment => switch (this) {
-        LeaveType.sickLeave => true,
-        LeaveType.maternityLeave => true,
-        LeaveType.paternityLeave => true,
-        LeaveType.soloParentLeave => true,
-        LeaveType.studyLeave => true,
-        LeaveType.tenDayVawcLeave => true,
-        LeaveType.rehabilitationPrivilege => true,
-        LeaveType.specialLeaveBenefitsForWomen => true,
-        LeaveType.specialEmergencyCalamityLeave => true,
-        LeaveType.adoptionLeave => true,
-        LeaveType.others => true,
-        LeaveType.vacationLeave => false,
-        LeaveType.mandatoryForcedLeave => false,
-        LeaveType.specialPrivilegeLeave => false,
-      };
+    LeaveType.sickLeave => true,
+    LeaveType.maternityLeave => true,
+    LeaveType.paternityLeave => true,
+    LeaveType.soloParentLeave => true,
+    LeaveType.studyLeave => true,
+    LeaveType.tenDayVawcLeave => true,
+    LeaveType.rehabilitationPrivilege => true,
+    LeaveType.specialLeaveBenefitsForWomen => true,
+    LeaveType.specialEmergencyCalamityLeave => true,
+    LeaveType.adoptionLeave => true,
+    LeaveType.others => true,
+    LeaveType.vacationLeave => false,
+    LeaveType.mandatoryForcedLeave => false,
+    LeaveType.specialPrivilegeLeave => false,
+  };
 
   bool get requiresCustomDescription => this == LeaveType.others;
 
   /// Employee can file this leave type; false = admin-only.
   bool get employeeCanFile => switch (this) {
-        LeaveType.mandatoryForcedLeave => false,
-        _ => true,
-      };
+    LeaveType.mandatoryForcedLeave => false,
+    _ => true,
+  };
 
   /// Row key in [LeaveBalance] / `leave_balances`: mandatory/forced leave uses vacation credits (CSC).
   LeaveType get balanceLedgerType =>
@@ -70,25 +70,25 @@ extension LeaveTypeExtension on LeaveType {
 
   /// Maximum working days for this leave type; null = no limit.
   int? get maxDays => switch (this) {
-        LeaveType.mandatoryForcedLeave => 5,
-        LeaveType.maternityLeave => 105,
-        LeaveType.paternityLeave => 7,
-        LeaveType.specialPrivilegeLeave => 3,
-        LeaveType.soloParentLeave => 7,
-        LeaveType.studyLeave => 180,
-        LeaveType.tenDayVawcLeave => 10,
-        LeaveType.rehabilitationPrivilege => 180,
-        LeaveType.specialLeaveBenefitsForWomen => 60,
-        LeaveType.specialEmergencyCalamityLeave => 5,
-        _ => null,
-      };
+    LeaveType.mandatoryForcedLeave => 5,
+    LeaveType.maternityLeave => 105,
+    LeaveType.paternityLeave => 7,
+    LeaveType.specialPrivilegeLeave => 3,
+    LeaveType.soloParentLeave => 7,
+    LeaveType.studyLeave => 180,
+    LeaveType.tenDayVawcLeave => 10,
+    LeaveType.rehabilitationPrivilege => 180,
+    LeaveType.specialLeaveBenefitsForWomen => 60,
+    LeaveType.specialEmergencyCalamityLeave => 5,
+    _ => null,
+  };
 
   /// Past-date filing allowed.
   bool get allowsPastDates => switch (this) {
-        LeaveType.vacationLeave => false,
-        LeaveType.specialPrivilegeLeave => false,
-        _ => true,
-      };
+    LeaveType.vacationLeave => false,
+    LeaveType.specialPrivilegeLeave => false,
+    _ => true,
+  };
 }
 
 LeaveType leaveTypeFromString(String? s) {
@@ -96,28 +96,25 @@ LeaveType leaveTypeFromString(String? s) {
   final normalized = s.toLowerCase().replaceAll(' ', '').replaceAll('_', '');
   for (final e in LeaveType.values) {
     final enumName = e.name.toLowerCase().replaceAll('_', '');
-    final label = e.displayName.toLowerCase().replaceAll(' ', '').replaceAll(
-      '/',
-      '',
-    );
+    final label = e.displayName
+        .toLowerCase()
+        .replaceAll(' ', '')
+        .replaceAll('/', '');
     if (enumName == normalized || label == normalized) return e;
   }
   return LeaveType.others;
 }
 
 /// Detail options in the official form for vacation/special privilege leave.
-enum LeaveLocationOption {
-  withinPhilippines,
-  abroad,
-}
+enum LeaveLocationOption { withinPhilippines, abroad }
 
 extension LeaveLocationOptionExtension on LeaveLocationOption {
   String get value => name;
 
   String get displayName => switch (this) {
-        LeaveLocationOption.withinPhilippines => 'Within the Philippines',
-        LeaveLocationOption.abroad => 'Abroad',
-      };
+    LeaveLocationOption.withinPhilippines => 'Within the Philippines',
+    LeaveLocationOption.abroad => 'Abroad',
+  };
 }
 
 LeaveLocationOption? leaveLocationOptionFromString(String? s) {
@@ -132,18 +129,15 @@ LeaveLocationOption? leaveLocationOptionFromString(String? s) {
 }
 
 /// Detail options in the official form for sick leave.
-enum SickLeaveNature {
-  inHospital,
-  outPatient,
-}
+enum SickLeaveNature { inHospital, outPatient }
 
 extension SickLeaveNatureExtension on SickLeaveNature {
   String get value => name;
 
   String get displayName => switch (this) {
-        SickLeaveNature.inHospital => 'In Hospital',
-        SickLeaveNature.outPatient => 'Out Patient',
-      };
+    SickLeaveNature.inHospital => 'In Hospital',
+    SickLeaveNature.outPatient => 'Out Patient',
+  };
 }
 
 SickLeaveNature? sickLeaveNatureFromString(String? s) {
@@ -153,6 +147,47 @@ SickLeaveNature? sickLeaveNatureFromString(String? s) {
     final enumName = e.name.toLowerCase().replaceAll('_', '');
     final label = e.displayName.toLowerCase().replaceAll(' ', '');
     if (enumName == normalized || label == normalized) return e;
+  }
+  return null;
+}
+
+/// Detail options for maternity leave delivery classification.
+enum MaternityDeliveryType { normalDelivery, caesareanSection }
+
+extension MaternityDeliveryTypeExtension on MaternityDeliveryType {
+  String get value => name;
+
+  String get displayName => switch (this) {
+    MaternityDeliveryType.normalDelivery => 'Normal Delivery (Non-CS)',
+    MaternityDeliveryType.caesareanSection => 'Caesarean Section (CS)',
+  };
+}
+
+MaternityDeliveryType? maternityDeliveryTypeFromString(String? s) {
+  if (s == null || s.isEmpty) return null;
+  final normalized = s.toLowerCase().replaceAll(RegExp(r'[\s_\-/()]'), '');
+  for (final e in MaternityDeliveryType.values) {
+    final enumName = e.name.toLowerCase().replaceAll('_', '');
+    final label = e.displayName.toLowerCase().replaceAll(
+      RegExp(r'[\s_\-/()]'),
+      '',
+    );
+    if (enumName == normalized || label == normalized) return e;
+  }
+  if (normalized == 'cs' ||
+      normalized == 'csection' ||
+      normalized == 'cesarean' ||
+      normalized == 'cesareansection' ||
+      normalized == 'caesarean' ||
+      normalized == 'caesareansection') {
+    return MaternityDeliveryType.caesareanSection;
+  }
+  if (normalized == 'normal' ||
+      normalized == 'nsc' ||
+      normalized == 'noncs' ||
+      normalized == 'notcs' ||
+      normalized == 'normaldelivery') {
+    return MaternityDeliveryType.normalDelivery;
   }
   return null;
 }
@@ -168,12 +203,12 @@ extension StudyLeavePurposeExtension on StudyLeavePurpose {
   String get value => name;
 
   String get displayName => switch (this) {
-        StudyLeavePurpose.completionOfMastersDegree =>
-          "Completion of Master's Degree",
-        StudyLeavePurpose.barBoardExaminationReview =>
-          'BAR/Board Examination Review',
-        StudyLeavePurpose.otherPurpose => 'Other purpose',
-      };
+    StudyLeavePurpose.completionOfMastersDegree =>
+      "Completion of Master's Degree",
+    StudyLeavePurpose.barBoardExaminationReview =>
+      'BAR/Board Examination Review',
+    StudyLeavePurpose.otherPurpose => 'Other purpose',
+  };
 }
 
 StudyLeavePurpose? studyLeavePurposeFromString(String? s) {
@@ -192,19 +227,16 @@ StudyLeavePurpose? studyLeavePurposeFromString(String? s) {
 }
 
 /// "Other purpose" options shown in the official form.
-enum LeaveOtherPurpose {
-  monetizationOfLeaveCredits,
-  terminalLeave,
-}
+enum LeaveOtherPurpose { monetizationOfLeaveCredits, terminalLeave }
 
 extension LeaveOtherPurposeExtension on LeaveOtherPurpose {
   String get value => name;
 
   String get displayName => switch (this) {
-        LeaveOtherPurpose.monetizationOfLeaveCredits =>
-          'Monetization of Leave Credits',
-        LeaveOtherPurpose.terminalLeave => 'Terminal Leave',
-      };
+    LeaveOtherPurpose.monetizationOfLeaveCredits =>
+      'Monetization of Leave Credits',
+    LeaveOtherPurpose.terminalLeave => 'Terminal Leave',
+  };
 
   /// HR/admin process only; not employee-fileable.
   bool get isSpecialProcessOnly => true;

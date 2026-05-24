@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../api/client.dart';
+import '../../data/locator_request_type.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../realtime/app_realtime_provider.dart';
 import '../utils/locator_slip_print.dart';
@@ -39,12 +40,21 @@ class AdminLocatorManagementScreen extends StatefulWidget {
 class _AdminLocatorManagementScreenState
     extends State<AdminLocatorManagementScreen> {
   _LocatorAdminQueue _queue = _LocatorAdminQueue.all;
+  LocatorRequestType? _requestTypeFilter;
   bool _loading = false;
   bool _acting = false;
   String? _error;
   List<_LocatorAdminRecord> _items = [];
   String? _selectedItemId;
   StreamSubscription<AppRealtimeEvent>? _locatorRealtimeSub;
+
+  bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
+
+  Color _headingColor(BuildContext context) =>
+      AppTheme.dashTextPrimaryOf(context);
+
+  Color _mutedColor(BuildContext context) =>
+      AppTheme.dashTextSecondaryOf(context);
 
   @override
   void initState() {
@@ -92,17 +102,17 @@ class _AdminLocatorManagementScreenState
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Locator Slip Management',
+          'Locator Request Management',
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: _headingColor(context),
             fontSize: 22,
             fontWeight: FontWeight.w700,
           ),
         ),
         const SizedBox(height: 8),
         Text(
-          'Manage locator slip workflow from department-head endorsement up to HR final approval.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          'Manage locator, pass slip, and work-from-home requests from endorsement to HR approval.',
+          style: TextStyle(color: _mutedColor(context), fontSize: 14),
         ),
         const SizedBox(height: 16),
         Wrap(
@@ -115,29 +125,71 @@ class _AdminLocatorManagementScreenState
                   label: Text(queue.label),
                   onSelected: (_) {
                     if (_queue == queue) return;
-                    setState(() => _queue = queue);
+                    setState(() {
+                      _queue = queue;
+                      _selectedItemId = null;
+                    });
                     _load();
                   },
                 ),
               )
               .toList(),
         ),
+        const SizedBox(height: 10),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Type',
+              style: TextStyle(
+                color: _mutedColor(context),
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 190,
+              child: DropdownButtonFormField<LocatorRequestType?>(
+                value: _requestTypeFilter,
+                decoration: AppTheme.dashInputDecoration(
+                  context,
+                  radius: 10,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                ),
+                isExpanded: true,
+                items: [
+                  const DropdownMenuItem<LocatorRequestType?>(
+                    value: null,
+                    child: Text('All types'),
+                  ),
+                  ...LocatorRequestType.values.map(
+                    (type) => DropdownMenuItem<LocatorRequestType?>(
+                      value: type,
+                      child: Text(type.shortLabel),
+                    ),
+                  ),
+                ],
+                onChanged: (type) {
+                  if (_requestTypeFilter == type) return;
+                  setState(() {
+                    _requestTypeFilter = type;
+                    _selectedItemId = null;
+                  });
+                  _load();
+                },
+              ),
+            ),
+          ],
+        ),
         const SizedBox(height: 16),
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
+          decoration: AppTheme.dashSurfaceCard(context, radius: 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -148,10 +200,10 @@ class _AdminLocatorManagementScreenState
                   Expanded(
                     child: Text(
                       _queue == _LocatorAdminQueue.all
-                          ? 'Locator Slip Records'
+                          ? 'Locator Request Records'
                           : '${_queue.label} Queue',
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: _headingColor(context),
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
                       ),
@@ -214,9 +266,9 @@ class _AdminLocatorManagementScreenState
                 ),
               if (_items.isEmpty && !_loading)
                 Text(
-                  'No locator slip records in this queue.',
+                  'No locator request records in this queue.',
                   style: TextStyle(
-                    color: AppTheme.textSecondary,
+                    color: _mutedColor(context),
                     fontSize: 13,
                     height: 1.45,
                   ),
@@ -250,9 +302,10 @@ class _AdminLocatorManagementScreenState
           width: tableWidth,
           child: Column(
             children: [
-              _adminTableHeader(purposeWidth),
+              _adminTableHeader(context, purposeWidth),
               for (var index = 0; index < _items.length; index++)
                 _adminTableRow(
+                  context,
                   _items[index],
                   purposeWidth: purposeWidth,
                   isLast: index == _items.length - 1,
@@ -267,7 +320,7 @@ class _AdminLocatorManagementScreenState
           borderRadius: BorderRadius.circular(12),
           child: DecoratedBox(
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+              border: Border.all(color: AppTheme.dashHairlineOf(context)),
               borderRadius: BorderRadius.circular(12),
             ),
             child: SingleChildScrollView(
@@ -296,33 +349,37 @@ class _AdminLocatorManagementScreenState
     );
   }
 
-  Widget _adminTableHeader(double purposeWidth) {
+  Widget _adminTableHeader(BuildContext context, double purposeWidth) {
     return Container(
       height: 44,
-      color: AppTheme.offWhite,
+      color: AppTheme.dashMutedSurfaceOf(context),
       child: Row(
         children: [
-          _adminHeaderCell('Employee', width: 190),
-          _adminHeaderCell('Date', width: 120),
-          _adminHeaderCell('Purpose / Location', width: purposeWidth),
-          _adminHeaderCell('Department', width: 160),
-          _adminHeaderCell('Time', width: 120),
-          _adminHeaderCell('Status', width: 150),
+          _adminHeaderCell(context, 'Employee', width: 190),
+          _adminHeaderCell(context, 'Date', width: 120),
+          _adminHeaderCell(context, 'Purpose / Location', width: purposeWidth),
+          _adminHeaderCell(context, 'Department', width: 160),
+          _adminHeaderCell(context, 'Time', width: 120),
+          _adminHeaderCell(context, 'Status', width: 150),
         ],
       ),
     );
   }
 
   Widget _adminTableRow(
+    BuildContext context,
     _LocatorAdminRecord item, {
     required double purposeWidth,
     required bool isLast,
     required bool isSelected,
     required VoidCallback onTap,
   }) {
-    final borderColor = Colors.black.withValues(alpha: 0.06);
+    final dark = _isDark(context);
+    final borderColor = AppTheme.dashHairlineOf(context);
     final rowColor = isSelected
-        ? AppTheme.primaryNavy.withValues(alpha: 0.08)
+        ? (dark
+            ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+            : AppTheme.primaryNavy.withValues(alpha: 0.08))
         : Colors.transparent;
     final leftBorderColor = isSelected
         ? AppTheme.primaryNavy
@@ -345,11 +402,15 @@ class _AdminLocatorManagementScreenState
             children: [
               _adminBodyCell(
                 width: 186,
-                child: _adminCellText(item.employeeName, strong: true),
+                child: _adminCellText(
+                  context,
+                  item.employeeName,
+                  strong: true,
+                ),
               ),
               _adminBodyCell(
                 width: 120,
-                child: _adminCellText(item.slipDateLabel),
+                child: _adminCellText(context, item.slipDateLabel),
               ),
               _adminBodyCell(
                 width: purposeWidth,
@@ -357,12 +418,17 @@ class _AdminLocatorManagementScreenState
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _adminCellText(item.office, strong: true),
+                    _adminCellText(
+                      context,
+                      '${item.requestType.shortLabel} · ${item.office}',
+                      strong: true,
+                    ),
                     if (item.reason.trim().isNotEmpty) ...[
                       const SizedBox(height: 3),
                       _adminCellText(
+                        context,
                         item.reason,
-                        color: AppTheme.textSecondary,
+                        color: _mutedColor(context),
                         fontSize: 12,
                       ),
                     ],
@@ -372,6 +438,7 @@ class _AdminLocatorManagementScreenState
               _adminBodyCell(
                 width: 160,
                 child: _adminCellText(
+                  context,
                   item.departmentName.trim().isEmpty
                       ? '—'
                       : item.departmentName,
@@ -379,7 +446,7 @@ class _AdminLocatorManagementScreenState
               ),
               _adminBodyCell(
                 width: 120,
-                child: _adminCellText(item.segmentText),
+                child: _adminCellText(context, item.segmentText),
               ),
               _adminBodyCell(width: 150, child: _statusPill(item)),
             ],
@@ -389,7 +456,11 @@ class _AdminLocatorManagementScreenState
     );
   }
 
-  Widget _adminHeaderCell(String label, {required double width}) {
+  Widget _adminHeaderCell(
+    BuildContext context,
+    String label, {
+    required double width,
+  }) {
     return SizedBox(
       width: width,
       child: Padding(
@@ -401,7 +472,7 @@ class _AdminLocatorManagementScreenState
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: AppTheme.textSecondary,
+              color: _mutedColor(context),
               fontSize: 12,
               fontWeight: FontWeight.w700,
             ),
@@ -422,6 +493,7 @@ class _AdminLocatorManagementScreenState
   }
 
   Widget _adminCellText(
+    BuildContext context,
     String text, {
     bool strong = false,
     Color? color,
@@ -432,7 +504,7 @@ class _AdminLocatorManagementScreenState
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       style: TextStyle(
-        color: color ?? AppTheme.textPrimary,
+        color: color ?? _headingColor(context),
         fontSize: fontSize,
         fontWeight: strong ? FontWeight.w700 : FontWeight.w500,
       ),
@@ -448,8 +520,8 @@ class _AdminLocatorManagementScreenState
   void _showDetailsDialog(_LocatorAdminRecord item) {
     showDialog<void>(
       context: context,
-      builder: (_) => Dialog(
-        backgroundColor: Colors.white,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: AppTheme.dashPanelOf(dialogContext),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 680),
@@ -463,9 +535,9 @@ class _AdminLocatorManagementScreenState
                   children: [
                     Expanded(
                       child: Text(
-                        'Locator Slip Details',
+                        'Request Details',
                         style: TextStyle(
-                          color: AppTheme.textPrimary,
+                          color: _headingColor(dialogContext),
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
                         ),
@@ -473,13 +545,16 @@ class _AdminLocatorManagementScreenState
                     ),
                     IconButton(
                       tooltip: 'Close',
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.close_rounded),
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      icon: Icon(
+                        Icons.close_rounded,
+                        color: _mutedColor(dialogContext),
+                      ),
                     ),
                   ],
                 ),
               ),
-              Divider(height: 1, color: AppTheme.lightGray),
+              Divider(height: 1, color: AppTheme.dashHairlineOf(dialogContext)),
               Flexible(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.all(20),
@@ -490,7 +565,8 @@ class _AdminLocatorManagementScreenState
                       _detailTile('Employee', item.employeeName),
                       _detailTile('Department', item.departmentName),
                       _detailTile('Date', item.slipDate),
-                      _detailTile('Office/Destination', item.office),
+                      _detailTile('Type', item.requestType.label),
+                      _detailTile(item.requestType.locationLabel, item.office),
                       _detailTile('Status', item.statusLabel),
                       _detailTile('Segments', item.segmentText),
                       _detailTile(
@@ -511,23 +587,25 @@ class _AdminLocatorManagementScreenState
                   ),
                 ),
               ),
-              Divider(height: 1, color: AppTheme.lightGray),
+              Divider(height: 1, color: AppTheme.dashHairlineOf(dialogContext)),
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 12, 20, 16),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
+                      onPressed: () => Navigator.of(dialogContext).pop(),
                       child: const Text('Close'),
                     ),
                     const SizedBox(width: 12),
                     FilledButton.icon(
                       onPressed: () => LocatorSlipPrint.printForm(
-                        context: context,
+                        context: dialogContext,
                         id: item.id,
                         employeeName: item.employeeName,
                         dateText: item.slipDateLabel,
+                        requestTypeLabel: item.requestType.label,
+                        locationLabel: item.requestType.locationLabel,
                         office: item.office,
                         remarks: item.reason,
                         amIn: item.amIn,
@@ -553,8 +631,8 @@ class _AdminLocatorManagementScreenState
     final accent = AppTheme.primaryNavy;
     showDialog<void>(
       context: context,
-      builder: (_) => Dialog(
-        backgroundColor: Colors.white,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: AppTheme.dashPanelOf(dialogContext),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 760),
@@ -567,9 +645,9 @@ class _AdminLocatorManagementScreenState
                   children: [
                     Expanded(
                       child: Text(
-                        'Locator Slip History',
+                        'Request History',
                         style: TextStyle(
-                          color: AppTheme.textPrimary,
+                          color: _headingColor(dialogContext),
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
                         ),
@@ -577,13 +655,16 @@ class _AdminLocatorManagementScreenState
                     ),
                     IconButton(
                       tooltip: 'Close',
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.close_rounded),
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      icon: Icon(
+                        Icons.close_rounded,
+                        color: _mutedColor(dialogContext),
+                      ),
                     ),
                   ],
                 ),
               ),
-              Divider(height: 1, color: AppTheme.lightGray),
+              Divider(height: 1, color: AppTheme.dashHairlineOf(dialogContext)),
               Flexible(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
@@ -647,7 +728,7 @@ class _AdminLocatorManagementScreenState
                                   Text(
                                     step.title,
                                     style: TextStyle(
-                                      color: AppTheme.textPrimary,
+                                      color: _headingColor(dialogContext),
                                       fontSize: 15,
                                       fontWeight: FontWeight.w700,
                                     ),
@@ -656,7 +737,7 @@ class _AdminLocatorManagementScreenState
                                   Text(
                                     subtitle,
                                     style: TextStyle(
-                                      color: AppTheme.textSecondary,
+                                      color: _mutedColor(dialogContext),
                                       fontSize: 13,
                                       fontWeight: FontWeight.w600,
                                     ),
@@ -667,7 +748,7 @@ class _AdminLocatorManagementScreenState
                                       child: Text(
                                         step.remarks!.trim(),
                                         style: TextStyle(
-                                          color: AppTheme.textSecondary,
+                                          color: _mutedColor(dialogContext),
                                           fontSize: 13,
                                           height: 1.35,
                                         ),
@@ -683,13 +764,13 @@ class _AdminLocatorManagementScreenState
                   ),
                 ),
               ),
-              Divider(height: 1, color: AppTheme.lightGray),
+              Divider(height: 1, color: AppTheme.dashHairlineOf(dialogContext)),
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 12, 20, 16),
                 child: Align(
                   alignment: Alignment.centerRight,
                   child: FilledButton(
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: () => Navigator.of(dialogContext).pop(),
                     child: const Text('Close'),
                   ),
                 ),
@@ -707,9 +788,9 @@ class _AdminLocatorManagementScreenState
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: AppTheme.offWhite,
+          color: AppTheme.dashMutedSurfaceOf(context),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+          border: Border.all(color: AppTheme.dashHairlineOf(context)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -717,7 +798,7 @@ class _AdminLocatorManagementScreenState
             Text(
               label,
               style: TextStyle(
-                color: AppTheme.textSecondary,
+                color: _mutedColor(context),
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
               ),
@@ -725,7 +806,7 @@ class _AdminLocatorManagementScreenState
             const SizedBox(height: 5),
             Text(
               value.trim().isEmpty ? '—' : value.trim(),
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+              style: TextStyle(color: _headingColor(context), fontSize: 13),
             ),
           ],
         ),
@@ -866,9 +947,15 @@ class _AdminLocatorManagementScreenState
         _LocatorAdminQueue.rejected => null,
         _LocatorAdminQueue.cancelled => 'cancelled',
       };
-      final path = statusParam == null
-          ? '/api/locator-slips/admin'
-          : '/api/locator-slips/admin?status=$statusParam';
+      final query = <String, String>{};
+      if (statusParam != null) query['status'] = statusParam;
+      if (_requestTypeFilter != null) {
+        query['request_type'] = _requestTypeFilter!.code;
+      }
+      final path = Uri(
+        path: '/api/locator-slips/admin',
+        queryParameters: query.isEmpty ? null : query,
+      ).toString();
       final res = await ApiClient.instance.get<List<dynamic>>(path);
       final all = (res.data ?? const [])
           .whereType<Map>()
@@ -895,7 +982,7 @@ class _AdminLocatorManagementScreenState
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Failed to load locator slips: $e');
+      setState(() => _error = 'Failed to load locator requests: $e');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -910,7 +997,7 @@ class _AdminLocatorManagementScreenState
       );
       await _load();
       if (!mounted) return;
-      _showLocatorSnack('Locator slip approved.');
+      _showLocatorSnack('Request approved.');
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = 'Approve failed: $e');
@@ -928,7 +1015,7 @@ class _AdminLocatorManagementScreenState
       );
       await _load();
       if (!mounted) return;
-      _showLocatorSnack('Locator slip rejected.');
+      _showLocatorSnack('Request rejected.');
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = 'Reject failed: $e');
@@ -944,6 +1031,7 @@ class _LocatorAdminRecord {
     required this.employeeName,
     required this.departmentName,
     required this.slipDate,
+    this.requestType = LocatorRequestType.locator,
     required this.office,
     required this.reason,
     required this.status,
@@ -965,6 +1053,7 @@ class _LocatorAdminRecord {
   final String employeeName;
   final String departmentName;
   final String slipDate;
+  final LocatorRequestType requestType;
   final String office;
   final String reason;
   final String status;
@@ -1027,6 +1116,7 @@ class _LocatorAdminRecord {
       employeeName: (json['employee_name'] ?? 'Employee').toString(),
       departmentName: (json['department_name'] ?? '').toString(),
       slipDate: (json['slip_date'] ?? '').toString(),
+      requestType: LocatorRequestType.fromCode(json['request_type']),
       office: (json['office'] ?? '').toString(),
       reason: (json['reason'] ?? '').toString(),
       status: (json['status'] ?? '').toString(),

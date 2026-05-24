@@ -193,8 +193,7 @@ class _ProfilePreferenceSettingsPanelState
       if (!mounted) return;
       setState(() {
         _pEmail = p.getBool(ProfileAppSettingsKeys.prefEmail) ?? true;
-        _pAttendance =
-            p.getBool(ProfileAppSettingsKeys.prefAttendance) ?? true;
+        _pAttendance = p.getBool(ProfileAppSettingsKeys.prefAttendance) ?? true;
         _pLeave = p.getBool(ProfileAppSettingsKeys.prefLeave) ?? true;
         _pPayroll = p.getBool(ProfileAppSettingsKeys.prefPayroll) ?? true;
         _pAnnounce = p.getBool(ProfileAppSettingsKeys.prefAnnounce) ?? true;
@@ -281,11 +280,17 @@ class _ProfilePreferenceSettingsPanelState
             items: [
               DropdownMenuItem(
                 value: 'en',
-                child: Text('English', style: AppTheme.dashFieldTextStyle(context)),
+                child: Text(
+                  'English',
+                  style: AppTheme.dashFieldTextStyle(context),
+                ),
               ),
               DropdownMenuItem(
                 value: 'fil',
-                child: Text('Filipino', style: AppTheme.dashFieldTextStyle(context)),
+                child: Text(
+                  'Filipino',
+                  style: AppTheme.dashFieldTextStyle(context),
+                ),
               ),
             ],
             onChanged: (v) {
@@ -293,7 +298,10 @@ class _ProfilePreferenceSettingsPanelState
               setState(() => _prefLanguage = v);
               _setString(ProfileAppSettingsKeys.prefLanguage, v);
             },
-            decoration: AppTheme.dashInputDecoration(context, labelText: 'Language'),
+            decoration: AppTheme.dashInputDecoration(
+              context,
+              labelText: 'Language',
+            ),
             style: AppTheme.dashFieldTextStyle(context),
             dropdownColor: AppTheme.dashPanelOf(context),
           ),

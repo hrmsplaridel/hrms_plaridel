@@ -65,4 +65,26 @@ class DocumentNotification {
         typeRejected => 'Document rejected',
         _ => type,
       };
+
+  DocumentNotification copyWith({
+    String? id,
+    String? documentId,
+    String? userId,
+    String? type,
+    String? title,
+    String? body,
+    bool? read,
+    DateTime? createdAt,
+  }) {
+    return DocumentNotification(
+      id: id ?? this.id,
+      documentId: documentId ?? this.documentId,
+      userId: userId ?? this.userId,
+      type: type ?? this.type,
+      title: title ?? this.title,
+      body: body ?? this.body,
+      read: read ?? this.read,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
 }

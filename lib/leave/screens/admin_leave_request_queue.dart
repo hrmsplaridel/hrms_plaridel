@@ -78,14 +78,10 @@ class AdminLeaveFilterBar extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: EdgeInsets.all(isMobile ? 12 : 16),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 16),
       child: isMobile
           ? _buildMobileFilters(context, statusOptions)
-          : _buildDesktopFilters(statusOptions),
+          : _buildDesktopFilters(context, statusOptions),
     );
   }
 
@@ -111,17 +107,17 @@ class AdminLeaveFilterBar extends StatelessWidget {
         if (isDepartmentHead)
           Row(
             children: [
-              Expanded(child: _leaveTypeDropdown(compact: true)),
+              Expanded(child: _leaveTypeDropdown(context, compact: true)),
               const SizedBox(width: 8),
-              Expanded(child: _employeeDropdown(compact: true)),
+              Expanded(child: _employeeDropdown(context, compact: true)),
             ],
           )
         else ...[
-          _leaveTypeDropdown(compact: true),
+          _leaveTypeDropdown(context, compact: true),
           const SizedBox(height: 8),
-          _departmentDropdown(compact: true),
+          _departmentDropdown(context, compact: true),
           const SizedBox(height: 8),
-          _employeeDropdown(compact: true),
+          _employeeDropdown(context, compact: true),
         ],
         const SizedBox(height: 10),
         Row(
@@ -153,7 +149,9 @@ class AdminLeaveFilterBar extends StatelessWidget {
             icon: const Icon(Icons.filter_alt_off_rounded, size: 18),
             label: const Text('Reset Filters'),
             style: TextButton.styleFrom(
-              foregroundColor: AppTheme.primaryNavy,
+              foregroundColor: AppTheme.dashIsDark(context)
+                  ? AppTheme.primaryNavyLight
+                  : AppTheme.primaryNavy,
               textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
               padding: const EdgeInsets.symmetric(horizontal: 4),
               minimumSize: const Size(0, 36),
@@ -165,7 +163,10 @@ class AdminLeaveFilterBar extends StatelessWidget {
     );
   }
 
-  Widget _buildDesktopFilters(List<LeaveRequestStatus?> statusOptions) {
+  Widget _buildDesktopFilters(
+    BuildContext context,
+    List<LeaveRequestStatus?> statusOptions,
+  ) {
     return LayoutBuilder(
       builder: (context, constraints) {
         return ConstrainedBox(
@@ -180,7 +181,9 @@ class AdminLeaveFilterBar extends StatelessWidget {
                 child: DropdownButtonFormField<LeaveRequestStatus?>(
                   isExpanded: true,
                   initialValue: status,
-                  decoration: adminLeaveInputDecoration('Status'),
+                  decoration: adminLeaveInputDecoration(context, 'Status'),
+                  dropdownColor: AppTheme.dashPanelOf(context),
+                  style: AppTheme.dashFieldTextStyle(context),
                   items: [
                     ...statusOptions.map(
                       (value) => DropdownMenuItem<LeaveRequestStatus?>(
@@ -192,12 +195,18 @@ class AdminLeaveFilterBar extends StatelessWidget {
                   onChanged: onStatusChanged,
                 ),
               ),
-              SizedBox(width: 180, child: _leaveTypeDropdown(compact: false)),
+              SizedBox(
+                width: 180,
+                child: _leaveTypeDropdown(context, compact: false),
+              ),
               if (!isDepartmentHead)
-                SizedBox(width: 180, child: _departmentDropdown(compact: false)),
+                SizedBox(
+                  width: 180,
+                  child: _departmentDropdown(context, compact: false),
+                ),
               SizedBox(
                 width: 220,
-                child: _employeeDropdown(compact: false),
+                child: _employeeDropdown(context, compact: false),
               ),
               _AdminLeaveDateFilterChip(
                 label: 'From',
@@ -221,13 +230,16 @@ class AdminLeaveFilterBar extends StatelessWidget {
     );
   }
 
-  Widget _leaveTypeDropdown({required bool compact}) {
+  Widget _leaveTypeDropdown(BuildContext context, {required bool compact}) {
     return DropdownButtonFormField<String?>(
       isExpanded: true,
       isDense: compact,
       initialValue: _safeLeaveTypeValue(leaveType, leaveTypeOptions),
-      decoration: _queueFilterDecoration('Leave Type', compact: compact),
-      style: TextStyle(fontSize: compact ? 13 : 14, color: AppTheme.textPrimary),
+      dropdownColor: AppTheme.dashPanelOf(context),
+      decoration: _queueFilterDecoration(context, 'Leave Type', compact: compact),
+      style: AppTheme.dashFieldTextStyle(context).copyWith(
+        fontSize: compact ? 13 : 14,
+      ),
       items: [
         const DropdownMenuItem<String?>(
           value: null,
@@ -244,13 +256,16 @@ class AdminLeaveFilterBar extends StatelessWidget {
     );
   }
 
-  Widget _departmentDropdown({required bool compact}) {
+  Widget _departmentDropdown(BuildContext context, {required bool compact}) {
     return DropdownButtonFormField<String?>(
       isExpanded: true,
       isDense: compact,
       initialValue: department,
-      decoration: _queueFilterDecoration('Department', compact: compact),
-      style: TextStyle(fontSize: compact ? 13 : 14, color: AppTheme.textPrimary),
+      dropdownColor: AppTheme.dashPanelOf(context),
+      decoration: _queueFilterDecoration(context, 'Department', compact: compact),
+      style: AppTheme.dashFieldTextStyle(context).copyWith(
+        fontSize: compact ? 13 : 14,
+      ),
       items: [
         const DropdownMenuItem<String?>(
           value: null,
@@ -267,13 +282,16 @@ class AdminLeaveFilterBar extends StatelessWidget {
     );
   }
 
-  Widget _employeeDropdown({required bool compact}) {
+  Widget _employeeDropdown(BuildContext context, {required bool compact}) {
     return DropdownButtonFormField<String?>(
       isExpanded: true,
       isDense: compact,
       initialValue: employee,
-      decoration: _queueFilterDecoration('Employee', compact: compact),
-      style: TextStyle(fontSize: compact ? 13 : 14, color: AppTheme.textPrimary),
+      dropdownColor: AppTheme.dashPanelOf(context),
+      decoration: _queueFilterDecoration(context, 'Employee', compact: compact),
+      style: AppTheme.dashFieldTextStyle(context).copyWith(
+        fontSize: compact ? 13 : 14,
+      ),
       items: [
         const DropdownMenuItem<String?>(
           value: null,
@@ -295,8 +313,12 @@ class AdminLeaveFilterBar extends StatelessWidget {
     );
   }
 
-  InputDecoration _queueFilterDecoration(String label, {required bool compact}) {
-    return adminLeaveInputDecoration(label).copyWith(
+  InputDecoration _queueFilterDecoration(
+    BuildContext context,
+    String label, {
+    required bool compact,
+  }) {
+    return adminLeaveInputDecoration(context, label).copyWith(
       isDense: compact,
       contentPadding: EdgeInsets.symmetric(
         horizontal: compact ? 10 : 12,
@@ -467,7 +489,7 @@ class _AdminLeaveRequestQueuePanelState extends State<AdminLeaveRequestQueuePane
               width: double.infinity,
               constraints: BoxConstraints(maxHeight: maxQueueHeight),
               decoration: BoxDecoration(
-                border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+                border: Border.all(color: AppTheme.dashHairlineOf(context)),
                 borderRadius: BorderRadius.circular(12),
               ),
               clipBehavior: Clip.antiAlias,

@@ -5,10 +5,14 @@ const { pool } = require('./config/db');
 const { initWebSocket } = require('./websockets/biometricStream');
 const { initAppEventsWebSocket } = require('./websockets/appEvents');
 const { scheduleLeaveMonthlyAccrualCron } = require('./jobs/leaveMonthlyAccrualScheduler');
+const {
+  scheduleAuthRefreshTokenCleanupCron,
+} = require('./jobs/authRefreshTokenCleanupScheduler');
 const { generalApiLimiter } = require('./middleware/rateLimiters');
 
 const authRoutes = require('./routes/auth');
 const departmentsRoutes = require('./routes/departments');
+const officesRoutes = require('./routes/offices');
 const positionsRoutes = require('./routes/positions');
 const shiftsRoutes = require('./routes/shifts');
 const assignmentsRoutes = require('./routes/assignments');
@@ -40,6 +44,8 @@ const {
   isEmailJsConfiguredForHireEmail,
   isEmailJsContactConfigured,
 } = require('./utils/emailJsMail');
+
+const { startDocutrackerEscalationWorker } = require('./services/docutrackerEscalationWorker');
 
 const app = express();
 
@@ -107,6 +113,7 @@ app.get('/health/db', async (_req, res) => {
 app.use('/api', generalApiLimiter);
 app.use('/auth', authRoutes);
 app.use('/api/departments', departmentsRoutes);
+app.use('/api/offices', officesRoutes);
 app.use('/api/positions', positionsRoutes);
 app.use('/api/shifts', shiftsRoutes);
 app.use('/api/assignments', assignmentsRoutes);
@@ -181,6 +188,13 @@ const server = app.listen(PORT, HOST, () => {
   console.log('  GET  /api/rsp/storage/signed-url - admin signed attachment URL (service role)');
   console.log('  API  /api/rsp-ld-saved-entries/:table - RSP/L&D saved forms (admin JWT, PostgreSQL)');
   scheduleLeaveMonthlyAccrualCron(pool);
+  scheduleAuthRefreshTokenCleanupCron(pool);
+  // DocuTracker: server-side escalation worker (workflow control).
+  try {
+    startDocutrackerEscalationWorker();
+  } catch (e) {
+    console.error('[docutracker escalation worker] failed to start', e);
+  }
 });
 
 // Initialize WebSocket servers and route upgrade requests by path.

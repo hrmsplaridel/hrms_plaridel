@@ -74,9 +74,9 @@ class RequestFiltersBar<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const border = Color(0xFFD7DCE2);
-    const activePill = Color(0xFF123B6D);
-    const inactiveText = Color(0xFF2D3640);
+    final border = AppTheme.dashInputBorderOf(context);
+    final activePill = AppTheme.primaryNavy;
+    final inactiveText = AppTheme.dashTextSecondaryOf(context);
     final isMobile = MediaQuery.sizeOf(context).width < mobileBreakpoint;
 
     return Column(
@@ -84,8 +84,9 @@ class RequestFiltersBar<T> extends StatelessWidget {
       children: [
         if (_hasSearchRow)
           isMobile
-              ? _buildMobileSearchRow(border: border)
+              ? _buildMobileSearchRow(context, border: border)
               : _buildDesktopSearchRow(
+                  context,
                   border: border,
                   activePill: activePill,
                   inactiveText: inactiveText,
@@ -93,10 +94,12 @@ class RequestFiltersBar<T> extends StatelessWidget {
         if (_hasSearchRow) const SizedBox(height: 10),
         isMobile
             ? _buildMobileStatusTabs(
+                context,
                 activePill: activePill,
                 inactiveText: inactiveText,
               )
             : _buildDesktopStatusTabs(
+                context,
                 activePill: activePill,
                 inactiveText: inactiveText,
               ),
@@ -107,7 +110,7 @@ class RequestFiltersBar<T> extends StatelessWidget {
               child: Text(
                 '$visibleCount of $totalCount',
                 style: TextStyle(
-                  color: AppTheme.textSecondary,
+                  color: AppTheme.dashTextSecondaryOf(context),
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                 ),
@@ -117,7 +120,7 @@ class RequestFiltersBar<T> extends StatelessWidget {
               TextButton(
                 onPressed: onClearFilters,
                 style: TextButton.styleFrom(
-                  foregroundColor: const Color(0xFF1A568B),
+                  foregroundColor: AppTheme.primaryNavy,
                   textStyle: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -134,7 +137,10 @@ class RequestFiltersBar<T> extends StatelessWidget {
     );
   }
 
-  Widget _buildMobileSearchRow({required Color border}) {
+  Widget _buildMobileSearchRow(
+    BuildContext context, {
+    required Color border,
+  }) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -147,18 +153,18 @@ class RequestFiltersBar<T> extends StatelessWidget {
                 key: ValueKey(searchQuery),
                 initialValue: searchQuery,
                 onChanged: onSearchChanged,
-                style: const TextStyle(
-                  color: Color(0xFF2D3640),
+                style: AppTheme.dashFieldTextStyle(context).copyWith(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                 ),
                 decoration: _filterDecoration(
+                  context,
                   hintText: 'Search',
                   borderColor: border,
-                  suffixIcon: const Icon(
+                  suffixIcon: Icon(
                     Icons.search_rounded,
                     size: 20,
-                    color: Color(0xFF8792A0),
+                    color: AppTheme.dashTextSecondaryOf(context),
                   ),
                 ),
               ),
@@ -170,6 +176,7 @@ class RequestFiltersBar<T> extends StatelessWidget {
           Expanded(
             flex: 2,
             child: _dateButton(
+              context,
               label: fromDate == null ? 'From' : _format(fromDate!),
               onPressed: onPickFromDate!,
               borderColor: border,
@@ -180,6 +187,7 @@ class RequestFiltersBar<T> extends StatelessWidget {
           Expanded(
             flex: 2,
             child: _dateButton(
+              context,
               label: toDate == null ? 'To' : _format(toDate!),
               onPressed: onPickToDate!,
               borderColor: border,
@@ -191,7 +199,8 @@ class RequestFiltersBar<T> extends StatelessWidget {
     );
   }
 
-  Widget _buildDesktopSearchRow({
+  Widget _buildDesktopSearchRow(
+    BuildContext context, {
     required Color border,
     required Color activePill,
     required Color inactiveText,
@@ -209,51 +218,57 @@ class RequestFiltersBar<T> extends StatelessWidget {
               key: ValueKey(searchQuery),
               initialValue: searchQuery,
               onChanged: onSearchChanged,
-              style: const TextStyle(
-                color: Color(0xFF2D3640),
+              style: AppTheme.dashFieldTextStyle(context).copyWith(
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
               ),
               decoration: _filterDecoration(
+                context,
                 hintText: 'Search',
                 borderColor: border,
-                suffixIcon: const Icon(
+                suffixIcon: Icon(
                   Icons.search_rounded,
                   size: 20,
-                  color: Color(0xFF8792A0),
+                  color: AppTheme.dashTextSecondaryOf(context),
                 ),
               ),
             ),
           ),
         if (showDateRange) ...[
           _dateButton(
+            context,
             label: fromDate == null ? 'From' : _format(fromDate!),
             onPressed: onPickFromDate!,
             borderColor: border,
           ),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 2),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
             child: Text(
               '-',
               style: TextStyle(
-                color: Color(0xFF7F8895),
+                color: AppTheme.dashTextSecondaryOf(context),
                 fontWeight: FontWeight.w600,
                 fontSize: 15,
               ),
             ),
           ),
           _dateButton(
+            context,
             label: toDate == null ? 'To' : _format(toDate!),
             onPressed: onPickToDate!,
             borderColor: border,
           ),
         ],
-        ..._statusChips(activePill: activePill, inactiveText: inactiveText),
+        ..._statusChips(
+          context,
+          activePill: activePill,
+          inactiveText: inactiveText,
+        ),
         if (onClearFilters != null)
           TextButton(
             onPressed: onClearFilters,
             style: TextButton.styleFrom(
-              foregroundColor: const Color(0xFF1A568B),
+              foregroundColor: AppTheme.primaryNavy,
               textStyle: const TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
@@ -268,7 +283,8 @@ class RequestFiltersBar<T> extends StatelessWidget {
     );
   }
 
-  Widget _buildMobileStatusTabs({
+  Widget _buildMobileStatusTabs(
+    BuildContext context, {
     required Color activePill,
     required Color inactiveText,
   }) {
@@ -278,6 +294,7 @@ class RequestFiltersBar<T> extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         physics: const BouncingScrollPhysics(),
         children: _statusChips(
+          context,
           activePill: activePill,
           inactiveText: inactiveText,
           trailingPadding: true,
@@ -286,7 +303,8 @@ class RequestFiltersBar<T> extends StatelessWidget {
     );
   }
 
-  Widget _buildDesktopStatusTabs({
+  Widget _buildDesktopStatusTabs(
+    BuildContext context, {
     required Color activePill,
     required Color inactiveText,
   }) {
@@ -296,11 +314,16 @@ class RequestFiltersBar<T> extends StatelessWidget {
     return Wrap(
       spacing: 8,
       runSpacing: 8,
-      children: _statusChips(activePill: activePill, inactiveText: inactiveText),
+      children: _statusChips(
+        context,
+        activePill: activePill,
+        inactiveText: inactiveText,
+      ),
     );
   }
 
-  List<Widget> _statusChips({
+  List<Widget> _statusChips(
+    BuildContext context, {
     required Color activePill,
     required Color inactiveText,
     bool trailingPadding = false,
@@ -309,6 +332,7 @@ class RequestFiltersBar<T> extends StatelessWidget {
     for (var i = 0; i < options.length; i++) {
       final option = options[i];
       final chip = _statusChip(
+        context,
         label: option.label,
         selected: selectedValue == option.value,
         onTap: () => onStatusChanged(option.value),
@@ -324,7 +348,8 @@ class RequestFiltersBar<T> extends StatelessWidget {
     return chips;
   }
 
-  Widget _dateButton({
+  Widget _dateButton(
+    BuildContext context, {
     required String label,
     required VoidCallback onPressed,
     required Color borderColor,
@@ -333,7 +358,7 @@ class RequestFiltersBar<T> extends StatelessWidget {
     final button = OutlinedButton.icon(
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
-        foregroundColor: const Color(0xFF556070),
+        foregroundColor: AppTheme.dashTextSecondaryOf(context),
         side: BorderSide(color: borderColor),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         padding: EdgeInsets.symmetric(
@@ -348,7 +373,7 @@ class RequestFiltersBar<T> extends StatelessWidget {
       icon: Icon(
         Icons.calendar_today_rounded,
         size: compact ? 14 : 16,
-        color: const Color(0xFF8A95A3),
+        color: AppTheme.dashTextSecondaryOf(context),
       ),
       label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
     );
@@ -360,7 +385,8 @@ class RequestFiltersBar<T> extends StatelessWidget {
     );
   }
 
-  Widget _statusChip({
+  Widget _statusChip(
+    BuildContext context, {
     required String label,
     required bool selected,
     required VoidCallback onTap,
@@ -372,9 +398,11 @@ class RequestFiltersBar<T> extends StatelessWidget {
       child: TextButton(
         onPressed: onTap,
         style: TextButton.styleFrom(
-          backgroundColor: selected ? selectedColor : const Color(0xFFF7F8FA),
+          backgroundColor: selected
+              ? selectedColor
+              : AppTheme.dashMutedSurfaceOf(context),
           foregroundColor: selected ? Colors.white : unselectedTextColor,
-          side: const BorderSide(color: Color(0xFFDDE2E8)),
+          side: BorderSide(color: AppTheme.dashHairlineOf(context)),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
           ),
@@ -388,22 +416,21 @@ class RequestFiltersBar<T> extends StatelessWidget {
     );
   }
 
-  InputDecoration _filterDecoration({
+  InputDecoration _filterDecoration(
+    BuildContext context, {
     required String hintText,
     required Color borderColor,
     Widget? suffixIcon,
   }) {
     return InputDecoration(
       hintText: hintText,
-      hintStyle: const TextStyle(
-        color: Color(0xFF8D96A3),
-        fontSize: 14,
+      hintStyle: AppTheme.dashFieldHintStyle(context).copyWith(
         fontWeight: FontWeight.w600,
       ),
       suffixIcon: suffixIcon,
       isDense: true,
       filled: true,
-      fillColor: Colors.white,
+      fillColor: AppTheme.dashInputFillOf(context),
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
@@ -411,7 +438,7 @@ class RequestFiltersBar<T> extends StatelessWidget {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
-        borderSide: const BorderSide(color: Color(0xFF123B6D), width: 1.2),
+        borderSide: const BorderSide(color: AppTheme.primaryNavy, width: 1.2),
       ),
     );
   }
@@ -434,17 +461,18 @@ class FilterStatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const activePill = Color(0xFF123B6D);
-    const inactiveText = Color(0xFF2D3640);
-
     return SizedBox(
       height: height,
       child: TextButton(
         onPressed: onTap,
         style: TextButton.styleFrom(
-          backgroundColor: selected ? activePill : const Color(0xFFF7F8FA),
-          foregroundColor: selected ? Colors.white : inactiveText,
-          side: const BorderSide(color: Color(0xFFDDE2E8)),
+          backgroundColor: selected
+              ? AppTheme.primaryNavy
+              : AppTheme.dashMutedSurfaceOf(context),
+          foregroundColor: selected
+              ? Colors.white
+              : AppTheme.dashTextSecondaryOf(context),
+          side: BorderSide(color: AppTheme.dashHairlineOf(context)),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
           ),
@@ -503,23 +531,24 @@ class CompactFilterDateButton extends StatelessWidget {
     super.key,
     required this.label,
     required this.onPressed,
-    this.borderColor = const Color(0xFFD7DCE2),
+    this.borderColor,
   });
 
   final String label;
   final VoidCallback onPressed;
-  final Color borderColor;
+  final Color? borderColor;
 
   @override
   Widget build(BuildContext context) {
+    final border = borderColor ?? AppTheme.dashInputBorderOf(context);
     return SizedBox(
       height: 40,
       width: double.infinity,
       child: OutlinedButton.icon(
         onPressed: onPressed,
         style: OutlinedButton.styleFrom(
-          foregroundColor: const Color(0xFF556070),
-          side: BorderSide(color: borderColor),
+          foregroundColor: AppTheme.dashTextSecondaryOf(context),
+          side: BorderSide(color: border),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
           ),
@@ -527,10 +556,10 @@ class CompactFilterDateButton extends StatelessWidget {
           textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
           visualDensity: VisualDensity.compact,
         ),
-        icon: const Icon(
+        icon: Icon(
           Icons.calendar_today_rounded,
           size: 14,
-          color: Color(0xFF8A95A3),
+          color: AppTheme.dashTextSecondaryOf(context),
         ),
         label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
       ),

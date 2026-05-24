@@ -3,16 +3,11 @@ import 'package:flutter/material.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../models/leave_request.dart';
 
-InputDecoration adminLeaveInputDecoration(String label) {
-  return InputDecoration(
+InputDecoration adminLeaveInputDecoration(BuildContext context, String label) {
+  return AppTheme.dashInputDecoration(
+    context,
     labelText: label,
-    filled: true,
-    fillColor: AppTheme.offWhite,
-    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.08)),
-    ),
+    radius: 12,
   );
 }
 

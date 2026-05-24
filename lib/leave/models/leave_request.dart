@@ -115,6 +115,7 @@ class LeaveRequest {
     this.locationDetails,
     this.sickLeaveNature,
     this.sickIllnessDetails,
+    this.maternityDeliveryType,
     this.womenIllnessDetails,
     this.studyPurpose,
     this.studyPurposeDetails,
@@ -168,6 +169,7 @@ class LeaveRequest {
   final String? locationDetails;
   final SickLeaveNature? sickLeaveNature;
   final String? sickIllnessDetails;
+  final MaternityDeliveryType? maternityDeliveryType;
   final String? womenIllnessDetails;
   final StudyLeavePurpose? studyPurpose;
   final String? studyPurposeDetails;
@@ -229,6 +231,10 @@ class LeaveRequest {
         json['sick_leave_nature']?.toString(),
       ),
       sickIllnessDetails: json['sick_illness_details']?.toString(),
+      maternityDeliveryType: maternityDeliveryTypeFromString(
+        json['maternity_delivery_type']?.toString() ??
+            json['maternityDeliveryType']?.toString(),
+      ),
       womenIllnessDetails: json['women_illness_details']?.toString(),
       studyPurpose: studyLeavePurposeFromString(
         json['study_purpose']?.toString(),
@@ -255,8 +261,7 @@ class LeaveRequest {
       reviewerRole: json['reviewer_role']?.toString(),
       reviewerTitle: json['reviewer_title']?.toString(),
       reviewedAt: _parseDateTime(json['reviewed_at']),
-      departmentHeadReviewerId: json['department_head_reviewer_id']
-          ?.toString(),
+      departmentHeadReviewerId: json['department_head_reviewer_id']?.toString(),
       departmentHeadReviewerName: json['department_head_reviewer_name']
           ?.toString(),
       departmentHeadReviewedAt: _parseDateTime(
@@ -289,6 +294,7 @@ class LeaveRequest {
       'location_details': _trimOrNull(locationDetails),
       'sick_leave_nature': sickLeaveNature?.value,
       'sick_illness_details': _trimOrNull(sickIllnessDetails),
+      'maternity_delivery_type': maternityDeliveryType?.value,
       'women_illness_details': _trimOrNull(womenIllnessDetails),
       'study_purpose': studyPurpose?.value,
       'study_purpose_details': _trimOrNull(studyPurposeDetails),
@@ -339,6 +345,7 @@ class LeaveRequest {
     String? locationDetails,
     SickLeaveNature? sickLeaveNature,
     String? sickIllnessDetails,
+    MaternityDeliveryType? maternityDeliveryType,
     String? womenIllnessDetails,
     StudyLeavePurpose? studyPurpose,
     String? studyPurposeDetails,
@@ -387,6 +394,8 @@ class LeaveRequest {
       locationDetails: locationDetails ?? this.locationDetails,
       sickLeaveNature: sickLeaveNature ?? this.sickLeaveNature,
       sickIllnessDetails: sickIllnessDetails ?? this.sickIllnessDetails,
+      maternityDeliveryType:
+          maternityDeliveryType ?? this.maternityDeliveryType,
       womenIllnessDetails: womenIllnessDetails ?? this.womenIllnessDetails,
       studyPurpose: studyPurpose ?? this.studyPurpose,
       studyPurposeDetails: studyPurposeDetails ?? this.studyPurposeDetails,

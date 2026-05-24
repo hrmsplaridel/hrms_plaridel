@@ -11,6 +11,8 @@ class LeaveBalance {
     this.id,
     required this.userId,
     required this.leaveType,
+    this.leaveTypeName = '',
+    this.leaveTypeDisplayName,
     this.employeeName,
     this.earnedDays = 0,
     this.usedDays = 0,
@@ -25,6 +27,8 @@ class LeaveBalance {
   final String? id;
   final String userId;
   final LeaveType leaveType;
+  final String leaveTypeName;
+  final String? leaveTypeDisplayName;
 
   /// Optional display snapshot for admin tables/cards.
   final String? employeeName;
@@ -62,11 +66,31 @@ class LeaveBalance {
 
   bool get hasInsufficientBalance => availableDays < 0;
 
+  String get effectiveLeaveTypeName {
+    final raw = leaveTypeName.trim();
+    return raw.isEmpty ? leaveType.value : raw;
+  }
+
+  String get leaveTypeLabel {
+    final display = leaveTypeDisplayName?.trim();
+    if (display != null && display.isNotEmpty) return display;
+    if (leaveType == LeaveType.others &&
+        effectiveLeaveTypeName != LeaveType.others.value) {
+      return effectiveLeaveTypeName;
+    }
+    return leaveType.displayName;
+  }
+
   factory LeaveBalance.fromJson(Map<String, dynamic> json) {
+    final rawLeaveType = json['leave_type']?.toString() ?? '';
     return LeaveBalance(
       id: json['id']?.toString(),
       userId: json['user_id'] as String? ?? '',
-      leaveType: leaveTypeFromString(json['leave_type']?.toString()),
+      leaveType: leaveTypeFromString(rawLeaveType),
+      leaveTypeName: rawLeaveType,
+      leaveTypeDisplayName:
+          json['leave_type_display_name']?.toString() ??
+          json['leaveTypeDisplayName']?.toString(),
       employeeName: json['employee_name']?.toString(),
       earnedDays: _parseDouble(json['earned_days']) ?? 0,
       usedDays: _parseDouble(json['used_days']) ?? 0,
@@ -83,7 +107,8 @@ class LeaveBalance {
     return {
       if (id != null) 'id': id,
       'user_id': userId,
-      'leave_type': leaveType.value,
+      'leave_type': effectiveLeaveTypeName,
+      'leave_type_display_name': _trimOrNull(leaveTypeDisplayName),
       'employee_name': _trimOrNull(employeeName),
       'earned_days': earnedDays,
       'used_days': usedDays,
@@ -99,6 +124,8 @@ class LeaveBalance {
     String? id,
     String? userId,
     LeaveType? leaveType,
+    String? leaveTypeName,
+    String? leaveTypeDisplayName,
     String? employeeName,
     double? earnedDays,
     double? usedDays,
@@ -113,6 +140,8 @@ class LeaveBalance {
       id: id ?? this.id,
       userId: userId ?? this.userId,
       leaveType: leaveType ?? this.leaveType,
+      leaveTypeName: leaveTypeName ?? this.leaveTypeName,
+      leaveTypeDisplayName: leaveTypeDisplayName ?? this.leaveTypeDisplayName,
       employeeName: employeeName ?? this.employeeName,
       earnedDays: earnedDays ?? this.earnedDays,
       usedDays: usedDays ?? this.usedDays,

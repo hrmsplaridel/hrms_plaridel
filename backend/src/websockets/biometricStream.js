@@ -3,6 +3,8 @@ const WebSocket = require('ws');
 let wss = null;
 
 function initWebSocket() {
+  if (wss) return wss;
+
   wss = new WebSocket.Server({ noServer: true });
 
   wss.on('connection', (ws) => {
@@ -13,6 +15,7 @@ function initWebSocket() {
   });
 
   console.log('WebSocket server for biometrics initialized on /ws/biometrics');
+  return wss;
 }
 
 /**

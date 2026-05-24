@@ -19,25 +19,14 @@ class AdminLeaveSectionCard extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             title,
             style: TextStyle(
-              color: AppTheme.textPrimary,
+              color: AppTheme.dashTextPrimaryOf(context),
               fontSize: 18,
               fontWeight: FontWeight.w700,
             ),
@@ -46,7 +35,7 @@ class AdminLeaveSectionCard extends StatelessWidget {
           Text(
             subtitle,
             style: TextStyle(
-              color: AppTheme.textSecondary,
+              color: AppTheme.dashTextSecondaryOf(context),
               fontSize: 13,
               height: 1.4,
             ),
@@ -74,9 +63,9 @@ class AdminLeaveInfoTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppTheme.offWhite,
+        color: AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -84,7 +73,7 @@ class AdminLeaveInfoTile extends StatelessWidget {
           Text(
             label,
             style: TextStyle(
-              color: AppTheme.textSecondary,
+              color: AppTheme.dashTextSecondaryOf(context),
               fontSize: 12,
               fontWeight: FontWeight.w600,
             ),
@@ -93,7 +82,7 @@ class AdminLeaveInfoTile extends StatelessWidget {
           Text(
             value,
             style: TextStyle(
-              color: AppTheme.textPrimary,
+              color: AppTheme.dashTextPrimaryOf(context),
               fontSize: 14,
               fontWeight: FontWeight.w600,
               height: 1.35,
@@ -120,13 +109,16 @@ class AdminLeaveDetailPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: AppTheme.offWhite,
+        color: AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: RichText(
         text: TextSpan(
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+          style: TextStyle(
+            color: AppTheme.dashTextPrimaryOf(context),
+            fontSize: 13,
+          ),
           children: [
             TextSpan(
               text: '$label: ',
@@ -154,25 +146,31 @@ class AdminLeaveHeaderChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
+    final navy = dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: emphasize
-            ? AppTheme.primaryNavy.withOpacity(0.10)
-            : AppTheme.offWhite,
+            ? AppTheme.primaryNavy.withValues(alpha: dark ? 0.28 : 0.10)
+            : AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(12),
+        border: emphasize
+            ? Border.all(color: navy.withValues(alpha: 0.25))
+            : Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: RichText(
         text: TextSpan(
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+          style: TextStyle(
+            color: AppTheme.dashTextPrimaryOf(context),
+            fontSize: 13,
+          ),
           children: [
             TextSpan(
               text: '$label: ',
               style: TextStyle(
                 fontWeight: FontWeight.w700,
-                color: emphasize
-                    ? AppTheme.primaryNavyDark
-                    : AppTheme.textPrimary,
+                color: emphasize ? navy : AppTheme.dashTextPrimaryOf(context),
               ),
             ),
             TextSpan(text: value),
@@ -193,7 +191,7 @@ class AdminLeaveSubsectionTitle extends StatelessWidget {
     return Text(
       title,
       style: TextStyle(
-        color: AppTheme.textPrimary,
+        color: AppTheme.dashTextPrimaryOf(context),
         fontSize: 15,
         fontWeight: FontWeight.w700,
       ),
@@ -212,14 +210,14 @@ class AdminLeaveBodyCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppTheme.offWhite,
+        color: AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Text(
         content,
         style: TextStyle(
-          color: AppTheme.textSecondary,
+          color: AppTheme.dashTextSecondaryOf(context),
           fontSize: 14,
           height: 1.45,
         ),
@@ -239,14 +237,17 @@ class AdminLeaveCenteredState extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 28),
       decoration: BoxDecoration(
-        color: AppTheme.offWhite,
+        color: AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Text(
         message,
         textAlign: TextAlign.center,
-        style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+        style: TextStyle(
+          color: AppTheme.dashTextSecondaryOf(context),
+          fontSize: 14,
+        ),
       ),
     );
   }
@@ -264,27 +265,41 @@ class AdminLeaveErrorBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.red.shade50,
+        color: dark
+            ? Colors.red.shade900.withValues(alpha: 0.35)
+            : Colors.red.shade50,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.red.shade100),
+        border: Border.all(
+          color: dark ? Colors.red.shade700 : Colors.red.shade100,
+        ),
       ),
       child: Row(
         children: [
-          Icon(Icons.error_outline_rounded, color: Colors.red.shade700),
+          Icon(
+            Icons.error_outline_rounded,
+            color: dark ? Colors.red.shade300 : Colors.red.shade700,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               message,
-              style: TextStyle(color: Colors.red.shade900, fontSize: 13),
+              style: TextStyle(
+                color: dark ? Colors.red.shade100 : Colors.red.shade900,
+                fontSize: 13,
+              ),
             ),
           ),
           IconButton(
             onPressed: onDismiss,
-            icon: Icon(Icons.close_rounded, color: Colors.red.shade700),
+            icon: Icon(
+              Icons.close_rounded,
+              color: dark ? Colors.red.shade300 : Colors.red.shade700,
+            ),
             tooltip: 'Dismiss',
           ),
         ],

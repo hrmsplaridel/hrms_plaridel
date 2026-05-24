@@ -20,11 +20,15 @@ class LeaveCardPrintView {
 
   static Future<void> print({
     required String employeeName,
+    required String service,
     required String officeDepartment,
     DateTime? firstDayOfService,
     required List<LeaveRequest> requests,
     required double vacationEarnedDays,
     required double sickEarnedDays,
+    required double vacationRemainingDays,
+    required double sickRemainingDays,
+    Map<String, String> balanceLedgerTypes = const {},
   }) async {
     final sorted = [...requests]
       ..sort((a, b) {
@@ -37,6 +41,9 @@ class LeaveCardPrintView {
       sorted,
       vacationEarnedDays: vacationEarnedDays,
       sickEarnedDays: sickEarnedDays,
+      vacationRemainingDays: vacationRemainingDays,
+      sickRemainingDays: sickRemainingDays,
+      balanceLedgerTypes: balanceLedgerTypes,
     );
     const rowsPerPage = 34;
     final chunks = <List<_LeaveCardRow>>[];
@@ -60,6 +67,7 @@ class LeaveCardPrintView {
               children: [
                 _buildDocumentHeader(
                   employeeName: employeeName,
+                  service: service,
                   officeDepartment: officeDepartment,
                   firstDayOfService: firstDayOfService,
                 ),
@@ -84,6 +92,7 @@ class LeaveCardPrintView {
 
   static pw.Widget _buildDocumentHeader({
     required String employeeName,
+    required String service,
     required String officeDepartment,
     required DateTime? firstDayOfService,
   }) {
@@ -116,7 +125,7 @@ class LeaveCardPrintView {
                 children: [
                   _lineField('NAME', employeeName),
                   pw.SizedBox(height: 1),
-                  _lineField('SERVICE', ''),
+                  _lineField('SERVICE', service),
                 ],
               ),
             ),
@@ -160,10 +169,10 @@ class LeaveCardPrintView {
   }
 
   static pw.Widget _buildOfficialGrid(List<_LeaveCardRow> rows) {
-    const periodFlex = 17;
-    const particularsFlex = 22;
-    const vacationGroupFlex = 36;
-    const sickGroupFlex = 36;
+    const periodFlex = 15;
+    const particularsFlex = 21;
+    const vacationGroupFlex = 44;
+    const sickGroupFlex = 44;
     const dateTakenFlex = 16;
     const topHeaderHeight = 22.0;
     const subHeaderHeight = 28.0;
@@ -221,8 +230,9 @@ class LeaveCardPrintView {
                           _groupTitleCell('VACATION LEAVE', topHeaderHeight),
                           _gridRow(
                             cells: const [
-                              _CellData('EARNED', 10),
+                              _CellData('EARNED', 9),
                               _CellData('ABSENCE UNDER TIME WITH PAY', 12),
+                              _CellData('BALANCE', 9),
                               _CellData('ABSENCE UNDER TIME WITHOUT PAY', 14),
                             ],
                             height: subHeaderHeight,
@@ -239,8 +249,9 @@ class LeaveCardPrintView {
                           _groupTitleCell('SICK LEAVE', topHeaderHeight),
                           _gridRow(
                             cells: const [
-                              _CellData('EARNED', 10),
+                              _CellData('EARNED', 9),
                               _CellData('ABSENCE UNDER TIME WITH PAY', 12),
+                              _CellData('BALANCE', 9),
                               _CellData('ABSENCE UNDER TIME WITHOUT PAY', 14),
                             ],
                             height: subHeaderHeight,
@@ -265,15 +276,21 @@ class LeaveCardPrintView {
                 (row) => pw.Expanded(
                   child: _gridRow(
                     cells: [
-                      _CellData(row.period, 17),
-                      _CellData(row.particulars, 22, align: pw.TextAlign.left),
-                      _CellData(row.vacEarned, 10),
+                      _CellData(row.period, periodFlex),
+                      _CellData(
+                        row.particulars,
+                        particularsFlex,
+                        align: pw.TextAlign.left,
+                      ),
+                      _CellData(row.vacEarned, 9),
                       _CellData(row.vacWithPay, 12),
+                      _CellData(row.vacBalance, 9),
                       _CellData(row.vacWithoutPay, 14),
-                      _CellData(row.slEarned, 10),
+                      _CellData(row.slEarned, 9),
                       _CellData(row.slWithPay, 12),
+                      _CellData(row.slBalance, 9),
                       _CellData(row.slWithoutPay, 14),
-                      _CellData(row.dateTakenOnApplication, 16),
+                      _CellData(row.dateTakenOnApplication, dateTakenFlex),
                     ],
                     fontSize: 7.5,
                   ),
@@ -403,37 +420,59 @@ class LeaveCardPrintView {
     List<LeaveRequest> requests, {
     required double vacationEarnedDays,
     required double sickEarnedDays,
+    required double vacationRemainingDays,
+    required double sickRemainingDays,
+    required Map<String, String> balanceLedgerTypes,
   }) {
-    if (requests.isEmpty) {
+    final cardRequests = requests
+        .where(
+          (request) =>
+              _isVacationLedgerRequest(request, balanceLedgerTypes) ||
+              _isSickLedgerRequest(request, balanceLedgerTypes),
+        )
+        .toList();
+    if (cardRequests.isEmpty) {
       return List.generate(16, (_) => const _LeaveCardRow.empty());
     }
     final vacEarnedStr = _fmtNum(vacationEarnedDays);
     final slEarnedStr = _fmtNum(sickEarnedDays);
-    final rows = requests.map((request) {
+    final vacationUsedInRows = cardRequests
+        .where((request) => _isVacationLedgerRequest(request, balanceLedgerTypes))
+        .fold<double>(0, (sum, request) => sum + _withPayDays(request));
+    final sickUsedInRows = cardRequests
+        .where((request) => _isSickLedgerRequest(request, balanceLedgerTypes))
+        .fold<double>(0, (sum, request) => sum + _withPayDays(request));
+    var vacationBalance = vacationRemainingDays + vacationUsedInRows;
+    var sickBalance = sickRemainingDays + sickUsedInRows;
+    final rows = cardRequests.map((request) {
       final start = request.startDate;
       final end = request.endDate;
       final period = (start != null && end != null)
           ? '${_fmtDate(start)} - ${_fmtDate(end)}'
           : (start != null ? _fmtDate(start) : '');
-      final withPay =
-          request.approvedDaysWithPay ?? request.workingDaysApplied ?? 0;
-      final withoutPay = request.approvedDaysWithoutPay ?? 0;
-      final isSick = request.leaveType == LeaveType.sickLeave;
-      final isVacation =
-          request.leaveType == LeaveType.vacationLeave ||
-          request.leaveType == LeaveType.mandatoryForcedLeave;
+      final withPay = _withPayDays(request);
+      final withoutPay = _withoutPayDays(request);
+      final isSick = _isSickLedgerRequest(request, balanceLedgerTypes);
+      final isVacation = _isVacationLedgerRequest(request, balanceLedgerTypes);
+      final actionDate = request.reviewedAt ?? request.dateFiled;
+      if (isVacation) {
+        vacationBalance -= withPay;
+      }
+      if (isSick) {
+        sickBalance -= withPay;
+      }
       return _LeaveCardRow(
         period: period,
         particulars: request.leaveTypeLabel,
         vacEarned: vacEarnedStr,
         vacWithPay: isVacation ? _fmtNum(withPay) : '',
+        vacBalance: _fmtNum(vacationBalance),
         vacWithoutPay: isVacation ? _fmtNum(withoutPay) : '',
         slEarned: slEarnedStr,
         slWithPay: isSick ? _fmtNum(withPay) : '',
+        slBalance: _fmtNum(sickBalance),
         slWithoutPay: isSick ? _fmtNum(withoutPay) : '',
-        dateTakenOnApplication: request.dateFiled != null
-            ? _fmtDate(request.dateFiled!)
-            : '',
+        dateTakenOnApplication: actionDate != null ? _fmtDate(actionDate) : '',
       );
     }).toList();
     if (rows.length < 16) {
@@ -442,6 +481,61 @@ class LeaveCardPrintView {
       );
     }
     return rows;
+  }
+
+  static bool _isVacationLedgerRequest(
+    LeaveRequest request,
+    Map<String, String> balanceLedgerTypes,
+  ) {
+    return _leaveCardLedgerType(request, balanceLedgerTypes) ==
+        LeaveType.vacationLeave.value;
+  }
+
+  static bool _isSickLedgerRequest(
+    LeaveRequest request,
+    Map<String, String> balanceLedgerTypes,
+  ) {
+    return _leaveCardLedgerType(request, balanceLedgerTypes) ==
+        LeaveType.sickLeave.value;
+  }
+
+  static String _leaveCardLedgerType(
+    LeaveRequest request,
+    Map<String, String> balanceLedgerTypes,
+  ) {
+    final name = request.effectiveLeaveTypeName;
+    final configured = balanceLedgerTypes[name]?.trim();
+    final policy = configured == null || configured.isEmpty
+        ? switch (request.leaveType) {
+            LeaveType.vacationLeave => LeaveType.vacationLeave.value,
+            LeaveType.sickLeave => LeaveType.sickLeave.value,
+            LeaveType.mandatoryForcedLeave => LeaveType.vacationLeave.value,
+            _ => 'none',
+          }
+        : configured;
+    return policy == 'ownBalance' ? name : policy;
+  }
+
+  static double _withPayDays(LeaveRequest request) {
+    final approvedWithPay = request.approvedDaysWithPay;
+    if (approvedWithPay != null) {
+      return approvedWithPay.isFinite && approvedWithPay > 0
+          ? approvedWithPay
+          : 0;
+    }
+    final applied = request.workingDaysApplied ?? 0;
+    final withoutPay = request.approvedDaysWithoutPay;
+    if (withoutPay != null && withoutPay > 0) {
+      final paid = applied - withoutPay;
+      return paid.isFinite && paid > 0 ? paid : 0;
+    }
+    final value = applied;
+    return value.isFinite && value > 0 ? value : 0;
+  }
+
+  static double _withoutPayDays(LeaveRequest request) {
+    final value = request.approvedDaysWithoutPay ?? 0;
+    return value.isFinite && value > 0 ? value : 0;
   }
 
   static String _fmtNum(double value) {
@@ -470,9 +564,11 @@ class _LeaveCardRow {
     required this.particulars,
     required this.vacEarned,
     required this.vacWithPay,
+    required this.vacBalance,
     required this.vacWithoutPay,
     required this.slEarned,
     required this.slWithPay,
+    required this.slBalance,
     required this.slWithoutPay,
     required this.dateTakenOnApplication,
   });
@@ -482,9 +578,11 @@ class _LeaveCardRow {
       particulars = '',
       vacEarned = '',
       vacWithPay = '',
+      vacBalance = '',
       vacWithoutPay = '',
       slEarned = '',
       slWithPay = '',
+      slBalance = '',
       slWithoutPay = '',
       dateTakenOnApplication = '';
 
@@ -492,9 +590,11 @@ class _LeaveCardRow {
   final String particulars;
   final String vacEarned;
   final String vacWithPay;
+  final String vacBalance;
   final String vacWithoutPay;
   final String slEarned;
   final String slWithPay;
+  final String slBalance;
   final String slWithoutPay;
   final String dateTakenOnApplication;
 }

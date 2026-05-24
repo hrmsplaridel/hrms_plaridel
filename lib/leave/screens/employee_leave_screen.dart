@@ -9,6 +9,7 @@ import '../../realtime/app_realtime_provider.dart';
 import '../leave_provider.dart';
 import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
+import '../models/leave_type.dart';
 import 'leave_balance_history_screen.dart';
 import 'leave_request_form_screen.dart';
 import '../utils/leave_request_pdf.dart';
@@ -402,18 +403,7 @@ class _LeavePageHeader extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 16),
       child: Wrap(
         runSpacing: 16,
         alignment: WrapAlignment.spaceBetween,
@@ -427,7 +417,7 @@ class _LeavePageHeader extends StatelessWidget {
                 Text(
                   'My Leave',
                   style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.dashTextPrimaryOf(context),
                     fontSize: 24,
                     fontWeight: FontWeight.w700,
                   ),
@@ -436,7 +426,7 @@ class _LeavePageHeader extends StatelessWidget {
                 Text(
                   'Track your leave balances, review request status, and file a new leave request, $displayName.',
                   style: TextStyle(
-                    color: AppTheme.textSecondary,
+                    color: AppTheme.dashTextSecondaryOf(context),
                     fontSize: 14,
                     height: 1.45,
                   ),
@@ -484,18 +474,7 @@ class _SummaryCard extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -504,7 +483,7 @@ class _SummaryCard extends StatelessWidget {
           Text(
             title,
             style: TextStyle(
-              color: AppTheme.textSecondary,
+              color: AppTheme.dashTextSecondaryOf(context),
               fontSize: 13,
               fontWeight: FontWeight.w600,
             ),
@@ -513,7 +492,7 @@ class _SummaryCard extends StatelessWidget {
           Text(
             value,
             style: TextStyle(
-              color: AppTheme.textPrimary,
+              color: AppTheme.dashTextPrimaryOf(context),
               fontSize: 24,
               fontWeight: FontWeight.w700,
             ),
@@ -522,7 +501,7 @@ class _SummaryCard extends StatelessWidget {
           Text(
             subtitle,
             style: TextStyle(
-              color: AppTheme.textSecondary,
+              color: AppTheme.dashTextSecondaryOf(context),
               fontSize: 13,
               height: 1.4,
             ),
@@ -930,15 +909,39 @@ class _RequestsPanelState extends State<_RequestsPanel> {
 
     showDialog<void>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Leave Request History'),
-        content: SizedBox(width: 560, child: HistoryTimeline(events: events)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
+      builder: (dialogContext) => Dialog(
+        backgroundColor: AppTheme.dashPanelOf(dialogContext),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Leave Request History',
+                  style: TextStyle(
+                    color: AppTheme.dashTextPrimaryOf(dialogContext),
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                HistoryTimeline(events: events),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: const Text('Close'),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -994,6 +997,7 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
     final bodyMaxH = (screen.height * 0.52).clamp(220.0, 420.0);
 
     return Dialog(
+      backgroundColor: AppTheme.dashPanelOf(context),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 22),
       clipBehavior: Clip.antiAlias,
@@ -1027,7 +1031,7 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
                         Text(
                           'Leave details',
                           style: TextStyle(
-                            color: AppTheme.textPrimary,
+                            color: AppTheme.dashTextPrimaryOf(context),
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
                             letterSpacing: -0.2,
@@ -1046,7 +1050,7 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
                 ],
               ),
             ),
-            Divider(height: 1, color: Colors.black.withValues(alpha: 0.06)),
+            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
             ConstrainedBox(
               constraints: BoxConstraints(maxHeight: bodyMaxH),
               child: SingleChildScrollView(
@@ -1059,6 +1063,13 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
                       label: 'Leave type',
                       value: _leaveTypeText,
                     ),
+                    if (request.leaveType == LeaveType.maternityLeave &&
+                        request.maternityDeliveryType != null)
+                      _LeaveDetailTile(
+                        icon: Icons.medical_information_outlined,
+                        label: 'Classification',
+                        value: request.maternityDeliveryType!.displayName,
+                      ),
                     _LeaveDetailTile(
                       icon: Icons.date_range_rounded,
                       label: 'Date range',
@@ -1109,7 +1120,7 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
                 ),
               ),
             ),
-            Divider(height: 1, color: Colors.black.withValues(alpha: 0.06)),
+            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
               child: Wrap(
@@ -1166,9 +1177,9 @@ class _LeaveDetailTile extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: AppTheme.offWhite,
+          color: AppTheme.dashMutedSurfaceOf(context),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
+          border: Border.all(color: AppTheme.dashHairlineOf(context)),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1186,7 +1197,7 @@ class _LeaveDetailTile extends StatelessWidget {
                   Text(
                     label,
                     style: TextStyle(
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
                       letterSpacing: 0.2,
@@ -1196,7 +1207,7 @@ class _LeaveDetailTile extends StatelessWidget {
                   Text(
                     value,
                     style: TextStyle(
-                      color: AppTheme.textPrimary,
+                      color: AppTheme.dashTextPrimaryOf(context),
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
                       height: 1.35,
@@ -1225,9 +1236,9 @@ class _LeaveDetailReasonCard extends StatelessWidget {
         width: double.infinity,
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: AppTheme.white,
+          color: AppTheme.dashMutedSurfaceOf(context),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+          border: Border.all(color: AppTheme.dashHairlineOf(context)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1237,13 +1248,13 @@ class _LeaveDetailReasonCard extends StatelessWidget {
                 Icon(
                   Icons.notes_rounded,
                   size: 18,
-                  color: AppTheme.textSecondary,
+                  color: AppTheme.dashTextSecondaryOf(context),
                 ),
                 const SizedBox(width: 6),
                 Text(
                   'Reason',
                   style: TextStyle(
-                    color: AppTheme.textSecondary,
+                    color: AppTheme.dashTextSecondaryOf(context),
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
                   ),
@@ -1254,7 +1265,7 @@ class _LeaveDetailReasonCard extends StatelessWidget {
             Text(
               text,
               style: TextStyle(
-                color: AppTheme.textPrimary,
+                color: AppTheme.dashTextPrimaryOf(context),
                 fontSize: 14,
                 height: 1.45,
               ),
@@ -1290,8 +1301,8 @@ class _LeaveDetailNotice extends StatelessWidget {
         Colors.red.shade800,
       ),
       _LeaveNoticeTone.neutral => (
-        AppTheme.offWhite,
-        Colors.black.withValues(alpha: 0.08),
+        AppTheme.dashMutedSurfaceOf(context),
+        AppTheme.dashHairlineOf(context),
         AppTheme.primaryNavy,
       ),
     };
@@ -1315,7 +1326,7 @@ class _LeaveDetailNotice extends StatelessWidget {
                 Text(
                   title,
                   style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.dashTextPrimaryOf(context),
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                   ),
@@ -1326,7 +1337,7 @@ class _LeaveDetailNotice extends StatelessWidget {
             Text(
               body,
               style: TextStyle(
-                color: AppTheme.textPrimary,
+                color: AppTheme.dashTextPrimaryOf(context),
                 fontSize: 13,
                 height: 1.4,
               ),

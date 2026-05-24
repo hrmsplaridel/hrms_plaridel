@@ -11,7 +11,8 @@ class AdminMonthlyAccrualDialog extends StatefulWidget {
   const AdminMonthlyAccrualDialog({super.key});
 
   @override
-  State<AdminMonthlyAccrualDialog> createState() => _AdminMonthlyAccrualDialogState();
+  State<AdminMonthlyAccrualDialog> createState() =>
+      _AdminMonthlyAccrualDialogState();
 }
 
 class _AdminMonthlyAccrualDialogState extends State<AdminMonthlyAccrualDialog> {
@@ -135,12 +136,16 @@ class _AdminMonthlyAccrualDialogState extends State<AdminMonthlyAccrualDialog> {
             height: 42,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+              color: AppTheme.primaryNavy.withValues(
+                alpha: AppTheme.dashIsDark(context) ? 0.28 : 0.1,
+              ),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(
+            child: Icon(
               Icons.event_repeat_rounded,
-              color: AppTheme.primaryNavy,
+              color: AppTheme.dashIsDark(context)
+                  ? AppTheme.primaryNavyLight
+                  : AppTheme.primaryNavy,
             ),
           ),
           const SizedBox(width: 12),
@@ -153,7 +158,7 @@ class _AdminMonthlyAccrualDialogState extends State<AdminMonthlyAccrualDialog> {
                 Text(
                   'Preview affected employees before adding monthly VL and SL credits.',
                   style: TextStyle(
-                    color: AppTheme.textSecondary,
+                    color: AppTheme.dashTextSecondaryOf(context),
                     fontSize: 13,
                     fontWeight: FontWeight.w400,
                   ),
@@ -178,10 +183,16 @@ class _AdminMonthlyAccrualDialogState extends State<AdminMonthlyAccrualDialog> {
                       TextFormField(
                         controller: _targetMonthController,
                         enabled: !busy,
-                        decoration: adminLeaveInputDecoration('Target month').copyWith(
-                          prefixIcon: const Icon(Icons.calendar_month_outlined),
-                          hintText: 'YYYY-MM',
-                        ),
+                        decoration:
+                            adminLeaveInputDecoration(
+                              context,
+                              'Target month',
+                            ).copyWith(
+                              prefixIcon: const Icon(
+                                Icons.calendar_month_outlined,
+                              ),
+                              hintText: 'YYYY-MM',
+                            ),
                         validator: _validateTargetMonth,
                       ),
                       TextFormField(
@@ -189,6 +200,7 @@ class _AdminMonthlyAccrualDialogState extends State<AdminMonthlyAccrualDialog> {
                         enabled: !busy,
                         keyboardType: TextInputType.number,
                         decoration: adminLeaveInputDecoration(
+                          context,
                           'Max catch-up months',
                         ).copyWith(prefixIcon: const Icon(Icons.history)),
                         validator: _validateMaxCatchUp,
@@ -276,7 +288,8 @@ class _AdminMonthlyAccrualPreview extends StatefulWidget {
       _AdminMonthlyAccrualPreviewState();
 }
 
-class _AdminMonthlyAccrualPreviewState extends State<_AdminMonthlyAccrualPreview> {
+class _AdminMonthlyAccrualPreviewState
+    extends State<_AdminMonthlyAccrualPreview> {
   final ScrollController _detailsScrollController = ScrollController();
 
   @override
@@ -327,9 +340,9 @@ class _AdminMonthlyAccrualPreviewState extends State<_AdminMonthlyAccrualPreview
             width: double.infinity,
             constraints: const BoxConstraints(maxHeight: 360),
             decoration: BoxDecoration(
-              color: AppTheme.offWhite,
+              color: AppTheme.dashMutedSurfaceOf(context),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+              border: Border.all(color: AppTheme.dashHairlineOf(context)),
             ),
             child: Scrollbar(
               controller: _detailsScrollController,
@@ -338,10 +351,8 @@ class _AdminMonthlyAccrualPreviewState extends State<_AdminMonthlyAccrualPreview
                 primary: false,
                 shrinkWrap: true,
                 itemCount: rows.length,
-                separatorBuilder: (_, __) => Divider(
-                  height: 1,
-                  color: Colors.black.withValues(alpha: 0.06),
-                ),
+                separatorBuilder: (_, __) =>
+                    Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
                 itemBuilder: (context, index) =>
                     _AdminMonthlyAccrualDetailTile(detail: rows[index]),
               ),
@@ -353,7 +364,10 @@ class _AdminMonthlyAccrualPreviewState extends State<_AdminMonthlyAccrualPreview
 }
 
 class _AdminMonthlyAccrualSummaryChip extends StatelessWidget {
-  const _AdminMonthlyAccrualSummaryChip({required this.label, required this.value});
+  const _AdminMonthlyAccrualSummaryChip({
+    required this.label,
+    required this.value,
+  });
 
   final String label;
   final String value;
@@ -368,7 +382,10 @@ class _AdminMonthlyAccrualSummaryChip extends StatelessWidget {
       ),
       child: RichText(
         text: TextSpan(
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+          style: TextStyle(
+            color: AppTheme.dashTextPrimaryOf(context),
+            fontSize: 13,
+          ),
           children: [
             TextSpan(
               text: '$label: ',
@@ -442,7 +459,7 @@ class _AdminMonthlyAccrualDetailTile extends StatelessWidget {
                 Text(
                   detail.employeeName,
                   style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.dashTextPrimaryOf(context),
                     fontWeight: FontWeight.w700,
                     fontSize: 14,
                   ),
@@ -451,7 +468,7 @@ class _AdminMonthlyAccrualDetailTile extends StatelessWidget {
                 Text(
                   detail.leaveType.displayName,
                   style: TextStyle(
-                    color: AppTheme.textSecondary,
+                    color: AppTheme.dashTextSecondaryOf(context),
                     fontSize: 12.5,
                   ),
                 ),
@@ -460,7 +477,7 @@ class _AdminMonthlyAccrualDetailTile extends StatelessWidget {
                   Text(
                     'Last accrual date: ${detail.lastAccrualDate}',
                     style: TextStyle(
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                       fontSize: 12,
                     ),
                   ),
@@ -480,13 +497,13 @@ class _AdminMonthlyAccrualDetailTile extends StatelessWidget {
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(999),
                             border: Border.all(
-                              color: Colors.black.withValues(alpha: 0.06),
+                              color: AppTheme.dashHairlineOf(context),
                             ),
                           ),
                           child: Text(
                             tag,
                             style: TextStyle(
-                              color: AppTheme.textSecondary,
+                              color: AppTheme.dashTextSecondaryOf(context),
                               fontSize: 11,
                               height: 1,
                             ),
@@ -526,11 +543,15 @@ class _AdminMonthlyAccrualStatusPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = warning ? Colors.red.shade700 : AppTheme.textSecondary;
-    final background = warning ? Colors.red.shade50 : AppTheme.offWhite;
+    final color = warning
+        ? Colors.red.shade700
+        : AppTheme.dashTextSecondaryOf(context);
+    final background = warning
+        ? Colors.red.shade50
+        : AppTheme.dashMutedSurfaceOf(context);
     final border = warning
         ? Colors.red.shade100
-        : Colors.black.withValues(alpha: 0.06);
+        : AppTheme.dashHairlineOf(context);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),

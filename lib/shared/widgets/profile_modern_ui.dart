@@ -89,6 +89,40 @@ class ProfileRoleStyle {
   }
 }
 
+/// Circular back control for the profile hero (dashboard settings overlay).
+class ProfileBackButton extends StatelessWidget {
+  const ProfileBackButton({super.key, required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
+    return Tooltip(
+      message: 'Back',
+      child: Material(
+        color: dark
+            ? Colors.white.withValues(alpha: 0.1)
+            : Colors.white.withValues(alpha: 0.92),
+        shape: const CircleBorder(),
+        elevation: 0,
+        child: InkWell(
+          onTap: onPressed,
+          customBorder: const CircleBorder(),
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Icon(
+              Icons.arrow_back_rounded,
+              size: 22,
+              color: dark ? Colors.white : AppTheme.primaryNavy,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Identity hero: overlapping avatar, single metadata row, navy band.
 class ProfileHeroHeader extends StatelessWidget {
   const ProfileHeroHeader({
@@ -101,6 +135,7 @@ class ProfileHeroHeader extends StatelessWidget {
     this.wideLayout = false,
     this.onChangePhoto,
     this.isUploading = false,
+    this.onBack,
   });
 
   final String displayName;
@@ -111,6 +146,7 @@ class ProfileHeroHeader extends StatelessWidget {
   final bool wideLayout;
   final VoidCallback? onChangePhoto;
   final bool isUploading;
+  final VoidCallback? onBack;
 
   static const double _avatarRadius = 54;
   static const double _headerBandHeight = 118;
@@ -364,6 +400,12 @@ class ProfileHeroHeader extends StatelessWidget {
           children: [
             headerBandStack(
               children: [
+                if (onBack != null)
+                  Positioned(
+                    left: 20,
+                    top: 20,
+                    child: ProfileBackButton(onPressed: onBack!),
+                  ),
                 Positioned(
                   left: 28,
                   top: 28,
@@ -419,9 +461,15 @@ class ProfileHeroHeader extends StatelessWidget {
         children: [
           headerBandStack(
             children: [
+              if (onBack != null)
+                Positioned(
+                  top: 12,
+                  left: 12,
+                  child: ProfileBackButton(onPressed: onBack!),
+                ),
               Positioned(
                 top: 16,
-                left: 16,
+                left: onBack != null ? 56 : 16,
                 child: Opacity(
                   opacity: 0.9,
                   child: Image.asset(
@@ -502,7 +550,7 @@ class ProfileHeroHeader extends StatelessWidget {
                 const SizedBox(height: 12),
                 metaChip(
                   icon: Icons.mail_outline_rounded,
-                  text: email.isEmpty ? '—' : email,
+                  text: email.isEmpty ? '?' : email,
                   accent: AppTheme.primaryNavy,
                 ),
               ],
@@ -694,7 +742,7 @@ class ModernProfileCard extends StatelessWidget {
   }
 }
 
-/// Label–value row for the About / work info panel.
+/// Label?value row for the About / work info panel.
 class ProfileAboutRow extends StatelessWidget {
   const ProfileAboutRow({
     super.key,

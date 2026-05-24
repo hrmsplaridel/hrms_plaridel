@@ -12,6 +12,9 @@ const { broadcastAppEvent } = require('../websockets/appEvents');
 
 const router = express.Router();
 const protect = [authMiddleware];
+const LOCATOR_REQUEST_TYPES = new Set(['locator', 'pass_slip', 'work_from_home']);
+const DEFAULT_WORKING_DAYS = [1, 2, 3, 4, 5];
+const WEEKDAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 function notifySafe(fn) {
   Promise.resolve()
@@ -36,6 +39,95 @@ function broadcastLocatorUpdated(action, row = {}, extra = {}) {
   }
 }
 
+function normalizeRequestType(value) {
+  const type = (value || 'locator').toString().trim().toLowerCase();
+  return LOCATOR_REQUEST_TYPES.has(type) ? type : null;
+}
+
+function parseDateOnly(value) {
+  const raw = (value || '').toString().trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  const utcDay = parsed.getUTCDay();
+  return {
+    dateStr: raw,
+    isoWeekday: utcDay === 0 ? 7 : utcDay,
+  };
+}
+
+function toDateOnlyString(value) {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    const raw = value.trim();
+    if (!raw) return null;
+    const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+    return match ? match[1] : null;
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const y = value.getFullYear().toString().padStart(4, '0');
+    const m = String(value.getMonth() + 1).padStart(2, '0');
+    const d = String(value.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return null;
+}
+
+function normalizeWorkingDays(value) {
+  if (!Array.isArray(value)) return DEFAULT_WORKING_DAYS;
+  const days = value
+    .map((day) => Number(day))
+    .filter((day) => Number.isInteger(day) && day >= 1 && day <= 7);
+  const unique = [...new Set(days)].sort((a, b) => a - b);
+  return unique.length > 0 ? unique : DEFAULT_WORKING_DAYS;
+}
+
+async function validateLocatorSlipWorkingDay(client, employeeId, dateInfo) {
+  const result = await client.query(
+    `SELECT a.id,
+            a.shift_id,
+            s.name AS shift_name,
+            s.working_days
+     FROM assignments a
+     LEFT JOIN shifts s ON s.id = a.shift_id
+     WHERE a.employee_id = $1::uuid
+       AND (a.is_active IS NULL OR a.is_active = true)
+       AND a.effective_from <= $2::date
+       AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
+     ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
+     LIMIT 1`,
+    [employeeId, dateInfo.dateStr]
+  );
+  const assignment = result.rows[0];
+  if (!assignment || !assignment.shift_id || !assignment.shift_name) {
+    return {
+      ok: false,
+      error: 'You cannot file a locator request for this date because you have no active shift assignment.',
+    };
+  }
+
+  const workingDays = normalizeWorkingDays(assignment.working_days);
+  if (!workingDays.includes(dateInfo.isoWeekday)) {
+    const weekdayName = WEEKDAY_NAMES[dateInfo.isoWeekday - 1] || 'that day';
+    return {
+      ok: false,
+      error: `You cannot file a locator request for ${weekdayName} because it is not included in your assigned shift working days.`,
+    };
+  }
+
+  return { ok: true };
+}
+
 pool
   .query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`)
   .then(() =>
@@ -49,6 +141,9 @@ pool
         am_out BOOLEAN NOT NULL DEFAULT false,
         pm_in BOOLEAN NOT NULL DEFAULT false,
         pm_out BOOLEAN NOT NULL DEFAULT false,
+        request_type TEXT NOT NULL DEFAULT 'locator'
+          CONSTRAINT locator_slips_request_type_check
+          CHECK (request_type IN ('locator', 'pass_slip', 'work_from_home')),
         office TEXT NOT NULL,
         reason TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'pending_department_head',
@@ -70,6 +165,16 @@ pool
         ON locator_slips(department_id, updated_at DESC);
       CREATE INDEX IF NOT EXISTS idx_locator_slips_date
         ON locator_slips(slip_date DESC);
+
+      ALTER TABLE locator_slips
+        ADD COLUMN IF NOT EXISTS request_type TEXT NOT NULL DEFAULT 'locator';
+      ALTER TABLE locator_slips
+        DROP CONSTRAINT IF EXISTS locator_slips_request_type_check;
+      ALTER TABLE locator_slips
+        ADD CONSTRAINT locator_slips_request_type_check
+        CHECK (request_type IN ('locator', 'pass_slip', 'work_from_home'));
+      CREATE INDEX IF NOT EXISTS idx_locator_slips_request_type
+        ON locator_slips(request_type);
     `)
   )
   .catch((err) =>
@@ -83,11 +188,12 @@ function mapLocatorRow(row) {
     employee_name: row.employee_name || null,
     department_id: row.department_id || null,
     department_name: row.department_name || null,
-    slip_date: row.slip_date ? String(row.slip_date).slice(0, 10) : null,
+    slip_date: toDateOnlyString(row.slip_date_text || row.slip_date),
     am_in: row.am_in === true,
     am_out: row.am_out === true,
     pm_in: row.pm_in === true,
     pm_out: row.pm_out === true,
+    request_type: normalizeRequestType(row.request_type) || 'locator',
     office: row.office || '',
     reason: row.reason || '',
     status: row.status,
@@ -143,6 +249,7 @@ router.get('/my', protect, async (req, res) => {
     }
     const rows = await pool.query(
       `SELECT ls.*,
+              ls.slip_date::text AS slip_date_text,
               u.full_name AS employee_name,
               d.name AS department_name,
               dh.full_name AS dept_head_reviewer_name,
@@ -173,12 +280,16 @@ router.post('/submit', protect, async (req, res) => {
   const slipDate = (req.body?.slip_date || '').toString().trim();
   const office = (req.body?.office || '').toString().trim();
   const reason = (req.body?.reason || '').toString().trim();
+  const requestType = normalizeRequestType(req.body?.request_type);
   const amIn = req.body?.am_in === true;
   const amOut = req.body?.am_out === true;
   const pmIn = req.body?.pm_in === true;
   const pmOut = req.body?.pm_out === true;
 
   if (!slipDate) return res.status(400).json({ error: 'slip_date is required' });
+  const slipDateInfo = parseDateOnly(slipDate);
+  if (!slipDateInfo) return res.status(400).json({ error: 'Invalid slip_date' });
+  if (!requestType) return res.status(400).json({ error: 'Invalid request_type' });
   if (!office) return res.status(400).json({ error: 'office is required' });
   if (!reason) return res.status(400).json({ error: 'reason is required' });
   if (!amIn && !amOut && !pmIn && !pmOut) {
@@ -193,22 +304,40 @@ router.post('/submit', protect, async (req, res) => {
     const ownDept = await getEmployeeDepartment(client, userId);
     const submitStatus = deptInfo ? 'pending_department_head' : 'pending_hr';
     const departmentId = deptInfo?.departmentId || ownDept?.departmentId || null;
+    const workingDayCheck = await validateLocatorSlipWorkingDay(client, userId, slipDateInfo);
+    if (!workingDayCheck.ok) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: workingDayCheck.error });
+    }
 
     const inserted = await client.query(
       `INSERT INTO locator_slips (
         employee_id, department_id, slip_date, am_in, am_out, pm_in, pm_out,
-        office, reason, status, created_at, updated_at
+        request_type, office, reason, status, created_at, updated_at
       ) VALUES (
         $1::uuid, $2::uuid, $3::date, $4::boolean, $5::boolean, $6::boolean, $7::boolean,
-        $8::text, $9::text, $10::text, now(), now()
+        $8::text, $9::text, $10::text, $11::text, now(), now()
       )
       RETURNING *`,
-      [userId, departmentId, slipDate, amIn, amOut, pmIn, pmOut, office, reason, submitStatus]
+      [
+        userId,
+        departmentId,
+        slipDate,
+        amIn,
+        amOut,
+        pmIn,
+        pmOut,
+        requestType,
+        office,
+        reason,
+        submitStatus,
+      ]
     );
     await client.query('COMMIT');
 
     const out = await pool.query(
       `SELECT ls.*,
+              ls.slip_date::text AS slip_date_text,
               u.full_name AS employee_name,
               d.name AS department_name,
               dh.full_name AS dept_head_reviewer_name,
@@ -235,6 +364,7 @@ router.post('/submit', protect, async (req, res) => {
         amOut,
         pmIn,
         pmOut,
+        requestType,
         departmentHeadUserId: deptInfo?.departmentHeadUserId || null,
       })
     );
@@ -286,6 +416,7 @@ router.patch('/:id/cancel', protect, async (req, res) => {
     await client.query('COMMIT');
     const out = await pool.query(
       `SELECT ls.*,
+              ls.slip_date::text AS slip_date_text,
               u.full_name AS employee_name,
               d.name AS department_name,
               dh.full_name AS dept_head_reviewer_name,
@@ -328,6 +459,7 @@ router.get('/department-head', protect, async (req, res) => {
     }
     const rows = await client.query(
       `SELECT ls.*,
+              ls.slip_date::text AS slip_date_text,
               u.full_name AS employee_name,
               d.name AS department_name,
               dh.full_name AS dept_head_reviewer_name,
@@ -372,7 +504,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
       return res.status(403).json({ error: 'You are not a department head' });
     }
     const current = await client.query(
-      `SELECT id, status, employee_id, slip_date
+      `SELECT id, status, employee_id, slip_date::text AS slip_date, request_type
        FROM locator_slips
        WHERE id = $1::uuid
          AND department_id = $2::uuid
@@ -401,8 +533,18 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
     );
     await client.query('COMMIT');
 
+    notifySafe(() =>
+      locatorNotifications.notifyDepartmentHeadApprovedForEmployee(pool, {
+        slipId: id,
+        employeeUserId: current.rows[0].employee_id,
+        slipDate: current.rows[0].slip_date,
+        requestType: current.rows[0].request_type,
+        metadata: { reviewer_remarks: remarks },
+      })
+    );
     const out = await pool.query(
       `SELECT ls.*,
+              ls.slip_date::text AS slip_date_text,
               u.full_name AS employee_name,
               d.name AS department_name,
               dh.full_name AS dept_head_reviewer_name,
@@ -421,6 +563,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
         slipId: id,
         employeeName: mapped.employee_name,
         slipDate: mapped.slip_date,
+        requestType: mapped.request_type,
       })
     );
     broadcastLocatorUpdated('department_head_approved', mapped);
@@ -484,15 +627,16 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
         employeeUserId: current.rows[0].employee_id,
         slipId: id,
         type: 'locator_rejected_department_head',
-        title: 'Locator slip not approved by department head',
+        title: 'Locator request not approved by department head',
         body: remarks
-          ? `Your locator slip was not approved. ${remarks}`
-          : 'Your locator slip was not approved by your department head.',
+          ? `Your locator request was not approved. ${remarks}`
+          : 'Your locator request was not approved by your department head.',
         metadata: { reviewer_remarks: remarks },
       })
     );
     const out = await pool.query(
       `SELECT ls.*,
+              ls.slip_date::text AS slip_date_text,
               u.full_name AS employee_name,
               d.name AS department_name,
               dh.full_name AS dept_head_reviewer_name,
@@ -523,11 +667,17 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
 router.get('/admin', protect, requireAdminOrHr, async (req, res) => {
   try {
     const status = (req.query?.status || '').toString().trim() || null;
+    const requestTypeRaw = (req.query?.request_type || '').toString().trim();
+    const requestType = requestTypeRaw ? normalizeRequestType(requestTypeRaw) : null;
     if (status && !isValidStatus(status)) {
       return res.status(400).json({ error: 'Invalid status filter' });
     }
+    if (requestTypeRaw && !requestType) {
+      return res.status(400).json({ error: 'Invalid request_type filter' });
+    }
     const rows = await pool.query(
       `SELECT ls.*,
+              ls.slip_date::text AS slip_date_text,
               u.full_name AS employee_name,
               d.name AS department_name,
               dh.full_name AS dept_head_reviewer_name,
@@ -538,9 +688,10 @@ router.get('/admin', protect, requireAdminOrHr, async (req, res) => {
        LEFT JOIN users dh ON dh.id = ls.dept_head_reviewer_id
        LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
        WHERE ($1::text IS NULL OR ls.status = $1::text)
+         AND ($2::text IS NULL OR ls.request_type = $2::text)
        ORDER BY ls.updated_at DESC, ls.created_at DESC
        LIMIT 500`,
-      [status]
+      [status, requestType]
     );
     res.json(rows.rows.map(mapLocatorRow));
   } catch (err) {
@@ -592,16 +743,17 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         employeeUserId: current.rows[0].employee_id,
         slipId: id,
         type: 'locator_approved_hr',
-        title: 'Locator slip approved',
+        title: 'Locator request approved',
         body: remarks
-          ? `Your locator slip was approved. ${remarks}`
-          : 'Your locator slip was approved by HR.',
+          ? `Your locator request was approved. ${remarks}`
+          : 'Your locator request was approved by HR.',
         metadata: { reviewer_remarks: remarks },
       })
     );
 
     const out = await pool.query(
       `SELECT ls.*,
+              ls.slip_date::text AS slip_date_text,
               u.full_name AS employee_name,
               d.name AS department_name,
               dh.full_name AS dept_head_reviewer_name,
@@ -671,16 +823,17 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
         employeeUserId: current.rows[0].employee_id,
         slipId: id,
         type: 'locator_rejected_hr',
-        title: 'Locator slip not approved',
+        title: 'Locator request not approved',
         body: remarks
-          ? `HR did not approve this locator slip. ${remarks}`
-          : 'HR did not approve this locator slip.',
+          ? `HR did not approve this locator request. ${remarks}`
+          : 'HR did not approve this locator request.',
         metadata: { reviewer_remarks: remarks },
       })
     );
 
     const out = await pool.query(
       `SELECT ls.*,
+              ls.slip_date::text AS slip_date_text,
               u.full_name AS employee_name,
               d.name AS department_name,
               dh.full_name AS dept_head_reviewer_name,

@@ -37,6 +37,22 @@ const MAX_PAGE_SIZE = 100;
 const MAX_EXPORT_ROWS = 10000;
 const MAX_BULK_STATUS_IDS = 200;
 
+let usersOfficeColumnReady = null;
+
+async function hasUsersOfficeIdColumn() {
+  if (usersOfficeColumnReady !== null) return usersOfficeColumnReady;
+  const result = await pool.query(
+    `SELECT 1
+     FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name = 'users'
+       AND column_name = 'office_id'
+     LIMIT 1`
+  );
+  usersOfficeColumnReady = result.rowCount > 0;
+  return usersOfficeColumnReady;
+}
+
 function mapEmployeeListRow(r) {
   return {
     id: r.id,
@@ -59,6 +75,7 @@ function mapEmployeeListRow(r) {
     employment_status: r.employment_status ?? 'active',
     current_department_name: r.current_department_name ?? null,
     current_position_name: r.current_position_name ?? null,
+    ...(r.office_id !== undefined ? { office_id: r.office_id ?? null } : {}),
   };
 }
 
@@ -373,13 +390,16 @@ router.post('/bulk-status', protect, requireAdmin, async (req, res) => {
   }
 });
 
-// GET /api/employees/:id - get one employee (matches profiles)
+// GET /api/employees/:id - get one employee (matches profiles + list row department/position)
 router.get('/:id', protect, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, employee_number, full_name, role, email, is_active, avatar_path, middle_name, suffix, sex, date_of_birth, contact_number, address,
-              employment_type, salary_grade, date_hired, employment_status
-       FROM users WHERE id = $1`,
+      `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.is_active, u.avatar_path, u.middle_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
+              u.employment_type, u.salary_grade, u.date_hired, u.employment_status,
+              cur.current_department_name, cur.current_position_name
+       FROM users u
+       ${employeeListLateralCurSql()}
+       WHERE u.id = $1`,
       [req.params.id]
     );
     const r = result.rows[0];
@@ -403,6 +423,8 @@ router.get('/:id', protect, async (req, res) => {
       salary_grade: r.salary_grade,
       date_hired: r.date_hired,
       employment_status: r.employment_status ?? 'active',
+      current_department_name: r.current_department_name ?? null,
+      current_position_name: r.current_position_name ?? null,
     });
   } catch (err) {
     console.error('[employees GET :id]', err);
@@ -413,7 +435,7 @@ router.get('/:id', protect, async (req, res) => {
 // POST /api/employees - create employee (admin only); same as auth/register but admin creates
 router.post('/', protect, requireAdmin, async (req, res) => {
   try {
-    const { email, password, full_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address, employment_type, salary_grade, date_hired, employment_status } = req.body;
+    const { email, password, full_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address, employment_type, salary_grade, date_hired, employment_status, biometric_user_id } = req.body;
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
     }
@@ -425,9 +447,9 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     const empNo = await allocateEmployeeNumber();
 
     const result = await pool.query(
-      `INSERT INTO users (email, password_hash, role, full_name, middle_name, suffix, sex, date_of_birth, contact_number, address, is_active, employee_number, employment_type, salary_grade, date_hired, employment_status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, true, $11, $12, $13, COALESCE($14::date, CURRENT_DATE), $15)
-       RETURNING id, employee_number, email, role, full_name, avatar_path, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address, employment_type, salary_grade, date_hired, employment_status`,
+      `INSERT INTO users (email, password_hash, role, full_name, middle_name, suffix, sex, date_of_birth, contact_number, address, is_active, employee_number, employment_type, salary_grade, date_hired, employment_status, biometric_user_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, true, $11, $12, $13, COALESCE($14::date, CURRENT_DATE), $15, $16)
+       RETURNING id, employee_number, email, role, full_name, avatar_path, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address, employment_type, salary_grade, date_hired, employment_status, biometric_user_id`,
       [
         email.trim().toLowerCase(),
         passwordHash,
@@ -444,6 +466,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         salary_grade?.trim() || null,
         date_hired || null,
         (employment_status && ['active', 'inactive', 'resigned', 'retired', 'terminated'].includes(employment_status)) ? employment_status : 'active',
+        biometric_user_id?.trim() || null,
       ]
     );
 
@@ -461,7 +484,13 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    if (err.code === '23505') return res.status(409).json({ error: 'Email already registered' });
+    if (err.code === '23505') {
+      const constraint = String(err.constraint || '');
+      if (constraint.includes('biometric_user_id')) {
+        return res.status(409).json({ error: 'Biometric User ID is already assigned to another employee' });
+      }
+      return res.status(409).json({ error: 'Email already registered' });
+    }
     console.error('[employees POST]', err);
     res.status(500).json({ error: 'Failed to create employee' });
   }
@@ -471,7 +500,25 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 router.put('/:id', protect, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { full_name, role, email, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address, avatar_path, employment_type, salary_grade, date_hired, employment_status, biometric_user_id } = req.body;
+    const {
+      full_name,
+      role,
+      email,
+      is_active,
+      middle_name,
+      suffix,
+      sex,
+      date_of_birth,
+      contact_number,
+      address,
+      avatar_path,
+      employment_type,
+      salary_grade,
+      date_hired,
+      employment_status,
+      biometric_user_id,
+      office_id,
+    } = req.body;
 
     const existingRes = await pool.query(
       'SELECT biometric_user_id FROM users WHERE id = $1::uuid',
@@ -499,6 +546,9 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     const updates = [];
     const values = [];
     let i = 1;
+    const canUseOfficeId = office_id !== undefined
+      ? await hasUsersOfficeIdColumn()
+      : false;
 
     const fields = [
       ['full_name', full_name],
@@ -517,12 +567,19 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       ['date_hired', date_hired],
       ['employment_status', employment_status],
       ['biometric_user_id', biometric_user_id],
+      ...(canUseOfficeId ? [['office_id', office_id]] : []),
     ];
     for (const [col, val] of fields) {
       if (val !== undefined) {
         if (col === 'role' && !['admin', 'employee'].includes(val)) continue;
         if (col === 'employment_type' && val && !['regular', 'contractual', 'job_order', 'casual'].includes(val)) continue;
         if (col === 'employment_status' && val && !['active', 'inactive', 'resigned', 'retired', 'terminated'].includes(val)) continue;
+        if (col === 'office_id') {
+          const raw = val === null || val === '' ? null : String(val).trim();
+          updates.push(`office_id = $${i++}::uuid`);
+          values.push(raw);
+          continue;
+        }
         if (col === 'date_of_birth' || col === 'date_hired') {
           updates.push(`${col} = $${i++}::date`);
           values.push(val || null);
@@ -537,9 +594,31 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     updates.push('updated_at = now()');
     values.push(id);
 
+    const returningColumns = [
+      'id',
+      'employee_number',
+      'email',
+      'role',
+      'full_name',
+      'avatar_path',
+      'is_active',
+      'middle_name',
+      'suffix',
+      'sex',
+      'date_of_birth',
+      'contact_number',
+      'address',
+      'employment_type',
+      'salary_grade',
+      'date_hired',
+      'employment_status',
+      'biometric_user_id',
+      ...(canUseOfficeId ? ['office_id'] : []),
+    ];
+
     const result = await pool.query(
       `UPDATE users SET ${updates.join(', ')} WHERE id = $${i}
-       RETURNING id, employee_number, email, role, full_name, avatar_path, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address, biometric_user_id`,
+       RETURNING ${returningColumns.join(', ')}`,
       values
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Employee not found' });

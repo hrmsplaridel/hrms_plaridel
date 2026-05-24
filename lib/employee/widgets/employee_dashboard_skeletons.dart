@@ -18,16 +18,21 @@ class _DashBone extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
     return Shimmer.fromColors(
-      baseColor: AppTheme.lightGray.withValues(alpha: 0.55),
-      highlightColor: AppTheme.white,
+      baseColor: dark
+          ? const Color(0xFF2A3140)
+          : AppTheme.lightGray.withValues(alpha: 0.55),
+      highlightColor: dark ? const Color(0xFF3D4451) : AppTheme.white,
       period: _kDashShimmerPeriod,
       child: SizedBox(
         width: width,
         height: height,
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: AppTheme.lightGray.withValues(alpha: 0.85),
+            color: dark
+                ? const Color(0xFF343B4A)
+                : AppTheme.lightGray.withValues(alpha: 0.85),
             borderRadius: BorderRadius.circular(borderRadius),
           ),
         ),
@@ -56,8 +61,8 @@ class AttendanceOverviewLoadingBody extends StatelessWidget {
               final crossAxisCount = cw >= 720
                   ? 5
                   : cw >= 440
-                      ? 3
-                      : 2;
+                  ? 3
+                  : 2;
               const spacing = 8.0;
               const ratio = 1.38;
               return GridView.count(
@@ -67,10 +72,7 @@ class AttendanceOverviewLoadingBody extends StatelessWidget {
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 childAspectRatio: ratio,
-                children: List.generate(
-                  5,
-                  (_) => const _KpiTileSkeleton(),
-                ),
+                children: List.generate(5, (_) => const _KpiTileSkeleton()),
               );
             },
           ),
@@ -254,11 +256,7 @@ class LeaveBalanceSummaryCardSkeleton extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-            _DashBone(
-              width: 48,
-              height: 48,
-              borderRadius: 14,
-            ),
+            _DashBone(width: 48, height: 48, borderRadius: 14),
           ],
         ),
       ),
@@ -282,18 +280,7 @@ class EmployeeTimeRecordsLoadingSkeleton extends StatelessWidget {
               ? _minTableWidth
               : constraints.maxWidth;
           return Container(
-            decoration: BoxDecoration(
-              color: AppTheme.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
+            decoration: AppTheme.dashSurfaceCard(context, radius: 12),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: SingleChildScrollView(
@@ -310,7 +297,12 @@ class EmployeeTimeRecordsLoadingSkeleton extends StatelessWidget {
                           vertical: 12,
                         ),
                         decoration: BoxDecoration(
-                          color: AppTheme.lightGray.withValues(alpha: 0.5),
+                          color: AppTheme.dashMutedSurfaceOf(context),
+                          border: Border(
+                            bottom: BorderSide(
+                              color: AppTheme.dashHairlineOf(context),
+                            ),
+                          ),
                         ),
                         child: Row(
                           children: [
@@ -335,9 +327,12 @@ class EmployeeTimeRecordsLoadingSkeleton extends StatelessWidget {
                             vertical: 10,
                           ),
                           decoration: BoxDecoration(
+                            color: i.isEven
+                                ? AppTheme.dashPanelOf(context)
+                                : AppTheme.dashMutedSurfaceOf(context),
                             border: Border(
                               top: BorderSide(
-                                color: Colors.black.withValues(alpha: 0.06),
+                                color: AppTheme.dashHairlineOf(context),
                               ),
                             ),
                           ),

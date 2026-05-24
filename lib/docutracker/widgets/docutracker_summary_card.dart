@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../landingpage/constants/app_theme.dart';
+import '../theme/docutracker_tokens.dart';
 
 /// Summary card for DocuTracker dashboard, matching admin summary cards.
 /// Layout: icon at top in rounded square, then title, value, subtitle.
@@ -24,16 +25,16 @@ class DocuTrackerSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
         color: backgroundColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusLg),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
@@ -41,35 +42,40 @@ class DocuTrackerSummaryCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: iconColor.withOpacity(0.3),
-              borderRadius: BorderRadius.circular(14),
+              color: iconColor.withValues(alpha: 0.22),
+              borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(icon, size: 26, color: iconColor),
+            child: Icon(icon, size: 22, color: iconColor),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 14),
           Text(
             title,
             style: TextStyle(
               color: AppTheme.textSecondary,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.2,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
           Text(
             value,
             style: TextStyle(
               color: AppTheme.textPrimary,
-              fontSize: 22,
+              fontSize: 24,
               fontWeight: FontWeight.w800,
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 2),
           Text(
             subtitle,
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+            style: TextStyle(
+              color: AppTheme.textSecondary.withValues(alpha: 0.95),
+              fontSize: 11.5,
+              height: 1.25,
+            ),
           ),
         ],
       ),

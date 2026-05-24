@@ -9,6 +9,8 @@ class WorkflowStep {
     this.officeId,
     this.userIds,
     this.label,
+    this.enabled = true,
+    this.deadlineHours,
   });
 
   /// 1-based step order in the workflow.
@@ -32,6 +34,12 @@ class WorkflowStep {
   /// Human-readable label (e.g. "HR Staff", "Procurement")
   final String? label;
 
+  /// Whether this step is active in the workflow.
+  final bool enabled;
+
+  /// Optional per-step deadline in hours. If null, workflow default applies.
+  final int? deadlineHours;
+
   factory WorkflowStep.fromJson(Map<String, dynamic> json) {
     final userIdsRaw = json['user_ids'];
     return WorkflowStep(
@@ -44,6 +52,8 @@ class WorkflowStep {
           ? (userIdsRaw).map((e) => e.toString()).toList()
           : null,
       label: json['label']?.toString(),
+      enabled: json['enabled'] != false,
+      deadlineHours: (json['deadline_hours'] as num?)?.toInt(),
     );
   }
 
@@ -55,5 +65,7 @@ class WorkflowStep {
         if (officeId != null) 'office_id': officeId,
         if (userIds != null) 'user_ids': userIds,
         if (label != null) 'label': label,
+        'enabled': enabled,
+        if (deadlineHours != null) 'deadline_hours': deadlineHours,
       };
 }
