@@ -84,6 +84,9 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
                     ? req.status == LeaveRequestStatus.pendingDepartmentHead
                     : req.status.isPending;
                 final approved = req.status == LeaveRequestStatus.approved;
+                final revokeDisabledReason = approved && onRevoke != null
+                    ? adminLeaveRevokeDisabledReason(req)
+                    : null;
                 return SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                   child: _AdminLeaveRequestDetailsPanel(
@@ -93,8 +96,14 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
                     onApprove: canReview ? () => onApprove(req) : null,
                     onReturn: canReview ? () => onReturn(req) : null,
                     onReject: canReview ? () => onReject(req) : null,
-                    onRevoke: approved && onRevoke != null
+                    onRevoke:
+                        approved &&
+                            onRevoke != null &&
+                            revokeDisabledReason == null
                         ? () => onRevoke!(req)
+                        : null,
+                    revokeDisabledReason: approved && onRevoke != null
+                        ? revokeDisabledReason
                         : null,
                     onPrint: () => onPrint(req),
                   ),
@@ -117,6 +126,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
     this.onReturn,
     this.onReject,
     this.onRevoke, // #15
+    this.revokeDisabledReason,
     this.onPrint,
   });
 
@@ -127,6 +137,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
   final VoidCallback? onReturn;
   final VoidCallback? onReject;
   final VoidCallback? onRevoke; // #15
+  final String? revokeDisabledReason;
   final VoidCallback? onPrint;
 
   @override
@@ -249,15 +260,22 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
                   label: const Text('Reject'),
                 ),
               // #15: Revoke — shown only when status is approved.
-              if (onRevoke != null)
-                OutlinedButton.icon(
-                  onPressed: reviewing ? null : onRevoke,
-                  icon: const Icon(Icons.undo_rounded),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.orange.shade800,
-                    side: BorderSide(color: Colors.orange.shade300),
+              if (onRevoke != null || revokeDisabledReason != null)
+                Tooltip(
+                  message: revokeDisabledReason ?? 'Revoke approval',
+                  child: OutlinedButton.icon(
+                    onPressed: reviewing ? null : onRevoke,
+                    icon: const Icon(Icons.undo_rounded),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.orange.shade800,
+                      side: BorderSide(color: Colors.orange.shade300),
+                    ),
+                    label: Text(
+                      revokeDisabledReason == null
+                          ? 'Revoke Approval'
+                          : 'Revoke period expired',
+                    ),
                   ),
-                  label: const Text('Revoke Approval'),
                 ),
               if (onPrint != null)
                 OutlinedButton.icon(

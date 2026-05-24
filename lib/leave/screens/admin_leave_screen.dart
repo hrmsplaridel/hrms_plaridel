@@ -297,32 +297,41 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     required List<LeaveBalance> balances,
   }) async {
     final policy = _creditPolicyForRequest(request);
-    if (request.effectiveLeaveTypeName == LeaveType.specialPrivilegeLeave.value) {
+    if (request.effectiveLeaveTypeName ==
+        LeaveType.specialPrivilegeLeave.value) {
       final year = request.startDate?.year ?? DateTime.now().year;
-      final requests = await context.read<LeaveProvider>().repository.listRequests(
-        query: LeaveRequestQuery(
-          userId: request.userId,
-          leaveTypeName: LeaveType.specialPrivilegeLeave.value,
-          limit: 500,
-        ),
-      );
+      final requests = await context
+          .read<LeaveProvider>()
+          .repository
+          .listRequests(
+            query: LeaveRequestQuery(
+              userId: request.userId,
+              leaveTypeName: LeaveType.specialPrivilegeLeave.value,
+              limit: 500,
+            ),
+          );
       final currentId = request.id;
-      final used = requests.where((item) {
-        if (currentId != null && currentId.isNotEmpty && item.id == currentId) {
-          return false;
-        }
-        if (!(item.status.isPending || item.status == LeaveRequestStatus.approved)) {
-          return false;
-        }
-        final start = item.startDate;
-        final end = item.endDate;
-        if (start == null || end == null) return false;
-        return start.year <= year && end.year >= year;
-      }).fold<double>(
-        0,
-        (total, item) =>
-            total + _workingDaysInYear(item.startDate, item.endDate, year),
-      );
+      final used = requests
+          .where((item) {
+            if (currentId != null &&
+                currentId.isNotEmpty &&
+                item.id == currentId) {
+              return false;
+            }
+            if (!(item.status.isPending ||
+                item.status == LeaveRequestStatus.approved)) {
+              return false;
+            }
+            final start = item.startDate;
+            final end = item.endDate;
+            if (start == null || end == null) return false;
+            return start.year <= year && end.year >= year;
+          })
+          .fold<double>(
+            0,
+            (total, item) =>
+                total + _workingDaysInYear(item.startDate, item.endDate, year),
+          );
       final remaining = (3 - used).clamp(0, 3).toDouble();
       return 'Special Privilege Leave: ${_formatAdminDays(remaining)} of 3 day(s) remaining for $year. No VL/SL deduction.';
     }
@@ -678,7 +687,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         balances: balances,
       );
     } catch (_) {
-      creditSummary = 'Credit policy could not be refreshed. Final approval will still be validated by the server.';
+      creditSummary =
+          'Credit policy could not be refreshed. Final approval will still be validated by the server.';
     }
 
     if (!mounted) return;
@@ -833,6 +843,11 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
 
   // #15: Revoke approval.
   Future<void> _revokeApproval(LeaveRequest request) async {
+    final revokeDisabledReason = adminLeaveRevokeDisabledReason(request);
+    if (revokeDisabledReason != null) {
+      _showMessage(revokeDisabledReason);
+      return;
+    }
     final leaveProvider = context.read<LeaveProvider>();
     final auth = context.read<AuthProvider>();
     final input = await showDialog<LeaveReviewDecisionInput>(
@@ -1497,8 +1512,10 @@ class _EmployeeLeaveCardPickerDialogState
                       isExpanded: true,
                       dropdownColor: AppTheme.dashPanelOf(context),
                       style: AppTheme.dashFieldTextStyle(context),
-                      decoration: adminLeaveInputDecoration(context, 'Department')
-                          .copyWith(isDense: true),
+                      decoration: adminLeaveInputDecoration(
+                        context,
+                        'Department',
+                      ).copyWith(isDense: true),
                       items: [
                         const DropdownMenuItem<String>(
                           value: null,
@@ -1706,7 +1723,8 @@ class _ForcedLeaveDeductionDialogState
                     initialValue: _selectedUserId,
                     isExpanded: true,
                     menuMaxHeight: 360,
-                    decoration: adminLeaveInputDecoration(context,
+                    decoration: adminLeaveInputDecoration(
+                      context,
                       'Employee',
                     ).copyWith(prefixIcon: const Icon(Icons.person_outline)),
                     items: _employees
@@ -1730,8 +1748,11 @@ class _ForcedLeaveDeductionDialogState
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
                         ),
-                        decoration: adminLeaveInputDecoration(context,'Days to Deduct')
-                            .copyWith(
+                        decoration:
+                            adminLeaveInputDecoration(
+                              context,
+                              'Days to Deduct',
+                            ).copyWith(
                               prefixIcon: const Icon(
                                 Icons.remove_circle_outline,
                               ),
@@ -1746,9 +1767,12 @@ class _ForcedLeaveDeductionDialogState
                       TextFormField(
                         controller: _yearController,
                         keyboardType: TextInputType.number,
-                        decoration: adminLeaveInputDecoration(context,'Year').copyWith(
-                          prefixIcon: const Icon(Icons.calendar_today_outlined),
-                        ),
+                        decoration: adminLeaveInputDecoration(context, 'Year')
+                            .copyWith(
+                              prefixIcon: const Icon(
+                                Icons.calendar_today_outlined,
+                              ),
+                            ),
                         validator: (value) {
                           final parsed = int.tryParse((value ?? '').trim());
                           if (parsed == null) return 'Enter a valid year';
@@ -1782,8 +1806,11 @@ class _ForcedLeaveDeductionDialogState
                   controller: _remarksController,
                   minLines: 2,
                   maxLines: null,
-                  decoration: adminLeaveInputDecoration(context,'Remarks (Optional)')
-                      .copyWith(
+                  decoration:
+                      adminLeaveInputDecoration(
+                        context,
+                        'Remarks (Optional)',
+                      ).copyWith(
                         alignLabelWithHint: true,
                         prefixIcon: const Icon(Icons.notes_outlined),
                       ),
@@ -2162,7 +2189,8 @@ class _ManualBalanceAdjustmentDialogState
                     initialValue: _selectedUserId,
                     isExpanded: true,
                     menuMaxHeight: 360,
-                    decoration: adminLeaveInputDecoration(context,
+                    decoration: adminLeaveInputDecoration(
+                      context,
                       'Employee',
                     ).copyWith(prefixIcon: const Icon(Icons.person_outline)),
                     items: _employees
@@ -2189,8 +2217,11 @@ class _ManualBalanceAdjustmentDialogState
                         initialValue: _selectedLeaveType,
                         isExpanded: true,
                         menuMaxHeight: 360,
-                        decoration: adminLeaveInputDecoration(context,'Leave type')
-                            .copyWith(
+                        decoration:
+                            adminLeaveInputDecoration(
+                              context,
+                              'Leave type',
+                            ).copyWith(
                               prefixIcon: const Icon(Icons.event_note_outlined),
                             ),
                         items: LeaveType.values
@@ -2270,8 +2301,11 @@ class _ManualBalanceAdjustmentDialogState
                     enabled: !saving,
                     minLines: 2,
                     maxLines: 4,
-                    decoration: adminLeaveInputDecoration(context,'Reason / remarks')
-                        .copyWith(
+                    decoration:
+                        adminLeaveInputDecoration(
+                          context,
+                          'Reason / remarks',
+                        ).copyWith(
                           alignLabelWithHint: true,
                           prefixIcon: const Icon(Icons.notes_outlined),
                           hintText:
@@ -2319,7 +2353,8 @@ class _ManualBalanceAdjustmentDialogState
       onTap: saving ? null : _pickAsOfDate,
       borderRadius: BorderRadius.circular(12),
       child: InputDecorator(
-        decoration: adminLeaveInputDecoration(context,
+        decoration: adminLeaveInputDecoration(
+          context,
           'As of date',
         ).copyWith(prefixIcon: const Icon(Icons.calendar_month_outlined)),
         child: Row(
@@ -2423,7 +2458,8 @@ class _ManualBalanceAdjustmentDialogState
         decimal: true,
         signed: allowNegative,
       ),
-      decoration: adminLeaveInputDecoration(context,
+      decoration: adminLeaveInputDecoration(
+        context,
         label,
       ).copyWith(prefixIcon: Icon(icon), helperText: helperText),
       validator: (value) {
@@ -2473,7 +2509,9 @@ class _ManualBalanceAdjustmentDialogState
                 ),
                 decoration: BoxDecoration(
                   color: hasCurrent
-                      ? AppTheme.primaryNavy.withValues(alpha: dark ? 0.28 : 0.1)
+                      ? AppTheme.primaryNavy.withValues(
+                          alpha: dark ? 0.28 : 0.1,
+                        )
                       : AppTheme.dashMutedSurfaceOf(context),
                   borderRadius: BorderRadius.circular(999),
                 ),
@@ -2482,8 +2520,8 @@ class _ManualBalanceAdjustmentDialogState
                   style: TextStyle(
                     color: hasCurrent
                         ? (dark
-                            ? AppTheme.primaryNavyLight
-                            : AppTheme.primaryNavyDark)
+                              ? AppTheme.primaryNavyLight
+                              : AppTheme.primaryNavyDark)
                         : AppTheme.dashTextSecondaryOf(context),
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
@@ -2582,8 +2620,8 @@ class _ManualBalanceAdjustmentDialogState
         : AppTheme.dashTextSecondaryOf(context);
     final background = warning
         ? (dark
-            ? Colors.red.shade900.withValues(alpha: 0.35)
-            : Colors.red.shade50)
+              ? Colors.red.shade900.withValues(alpha: 0.35)
+              : Colors.red.shade50)
         : AppTheme.dashMutedSurfaceOf(context);
     final border = warning
         ? (dark ? Colors.red.shade700 : Colors.red.shade100)

@@ -1,4 +1,3 @@
-import 'dart:typed_data';
 import 'package:excel/excel.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
@@ -75,9 +74,96 @@ class _ExportTotals {
   final double adjustedEquivalentDay;
 }
 
+const String _meedoManagerPositionTitle = 'MEEDO A-Manager';
+const String _hrOfficerPositionTitle =
+    'Human Resource Mgt. and Dev\'t. Officer';
+
+class DtrExportSignatory {
+  const DtrExportSignatory({required this.positionTitle, this.employeeName});
+
+  final String positionTitle;
+  final String? employeeName;
+
+  String get displayName {
+    final value = employeeName?.trim();
+    if (value == null || value.isEmpty) return 'Not configured';
+    return value.toUpperCase();
+  }
+}
+
+class DtrExportSignatories {
+  const DtrExportSignatories({
+    required this.meedoManager,
+    required this.hrOfficer,
+  });
+
+  final DtrExportSignatory meedoManager;
+  final DtrExportSignatory hrOfficer;
+
+  static const empty = DtrExportSignatories(
+    meedoManager: DtrExportSignatory(positionTitle: _meedoManagerPositionTitle),
+    hrOfficer: DtrExportSignatory(positionTitle: _hrOfficerPositionTitle),
+  );
+}
+
 /// DTR export to PDF, Excel, and Word (HTML) — single page, matches official form.
 class DtrExport {
   DtrExport._();
+
+  static Future<DtrExportSignatories> resolveSignatories() async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/employees',
+        queryParameters: {'status': 'Active', 'role': 'All'},
+      );
+      final rows = res.data ?? const <dynamic>[];
+      return DtrExportSignatories(
+        meedoManager: DtrExportSignatory(
+          positionTitle: _meedoManagerPositionTitle,
+          employeeName: _findEmployeeNameByExactPosition(
+            rows,
+            _meedoManagerPositionTitle,
+          ),
+        ),
+        hrOfficer: DtrExportSignatory(
+          positionTitle: _hrOfficerPositionTitle,
+          employeeName: _findEmployeeNameByExactPosition(
+            rows,
+            _hrOfficerPositionTitle,
+          ),
+        ),
+      );
+    } catch (_) {
+      return DtrExportSignatories.empty;
+    }
+  }
+
+  static String? _findEmployeeNameByExactPosition(
+    List<dynamic> rows,
+    String positionTitle,
+  ) {
+    final expectedPosition = positionTitle.trim().toLowerCase();
+    for (final row in rows) {
+      if (row is! Map) continue;
+      final actualPosition = row['current_position_name']
+          ?.toString()
+          .trim()
+          .toLowerCase();
+      if (actualPosition != expectedPosition) continue;
+      final name = row['full_name']?.toString().trim();
+      if (name != null && name.isNotEmpty) return name;
+    }
+    return null;
+  }
+
+  static String _escapeHtml(String value) {
+    return value
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+  }
 
   static String _formatTime(DateTime? dt) {
     if (dt == null) return '-';
@@ -188,8 +274,9 @@ class DtrExport {
   /// Returns empty when we have punches so times are shown instead.
   static String _getRowRemark(TimeRecord? r, DateTime dt, bool isWeekend) {
     if (r == null) return isWeekend ? '' : 'ABSENT';
-    if (r.timeIn != null || r.breakIn != null)
+    if (r.timeIn != null || r.breakIn != null) {
       return ''; // Show times, not remark
+    }
     if (r.timeIn == null) {
       final s = r.status;
       if (s == 'holiday') return r.holidayName ?? 'HOLIDAY';
@@ -233,8 +320,9 @@ class DtrExport {
   ) {
     if (isWeekendOrNonWorking) return (0, 0);
     if (r != null && r.status == 'holiday') return (0, 0);
-    if (r != null && (r.status == 'on_leave' || r.leaveRequestId != null))
+    if (r != null && (r.status == 'on_leave' || r.leaveRequestId != null)) {
       return (0, 0);
+    }
     final wh = workHoursPerDay > 0 ? workHoursPerDay : 8.0;
 
     // Absent: no punch at all (no timeIn and no breakIn).
@@ -327,6 +415,7 @@ class DtrExport {
   static pw.Widget _buildFormFooter(
     _ExportTotals totals,
     _ExportAttendancePolicy policy, {
+    required DtrExportSignatories signatories,
     List<String> noteLines = const [],
   }) {
     const double lineWidth = 170;
@@ -370,20 +459,23 @@ class DtrExport {
         // Extra space for handwritten signature above HR officer title.
         pw.SizedBox(height: 8),
         pw.Text(
-          'JACYNTH MARIE T. RABOSA',
+          signatories.meedoManager.displayName,
           style: pw.TextStyle(fontSize: 6, fontWeight: pw.FontWeight.bold),
         ),
-        pw.Text('MEEDO A-Manager', style: const pw.TextStyle(fontSize: 5.5)),
+        pw.Text(
+          signatories.meedoManager.positionTitle,
+          style: const pw.TextStyle(fontSize: 5.5),
+        ),
         pw.SizedBox(height: 6),
         // Second signature block: line above Human Resource Mgt. and Dev't. Officer.
         pw.Container(width: lineWidth, height: 1, color: PdfColors.black),
         pw.SizedBox(height: 3),
         pw.Text(
-          'MARCELO B. CAÑARES',
+          signatories.hrOfficer.displayName,
           style: pw.TextStyle(fontSize: 6, fontWeight: pw.FontWeight.bold),
         ),
         pw.Text(
-          'Human Resource Mgt. and Dev\'t. Officer',
+          signatories.hrOfficer.positionTitle,
           style: const pw.TextStyle(fontSize: 5.5),
         ),
         if (noteLines.isNotEmpty) ...[
@@ -417,8 +509,10 @@ class DtrExport {
     List<int>? workingDays,
     DateTime? assignmentEffectiveFrom,
     DateTime? assignmentEffectiveTo,
+    DtrExportSignatories? signatories,
   }) async {
     final policy = await _loadDefaultAttendancePolicy();
+    final exportSignatories = signatories ?? await resolveSignatories();
     final (formRows, totals) = _buildFormTableRows(
       year: year,
       month: month,
@@ -455,10 +549,11 @@ class DtrExport {
       department: department,
       position: position,
       officialHours: officialHours ?? '8:00AM-12:00PM 01:00PM-5:00PM',
+      signatories: exportSignatories,
       noteLines: noteLines,
     );
 
-    // Unicode-safe theme so names (e.g. CAÑARES), remarks, and accents render.
+    // Unicode-safe theme so names, remarks, and accents render.
     // Prefer TTF from assets; fallback to OpenSans from printing package.
     pw.ThemeData theme;
     try {
@@ -853,6 +948,7 @@ class DtrExport {
     String? department,
     String? position,
     String officialHours = '8:00AM-12:00PM 01:00PM-5:00PM',
+    required DtrExportSignatories signatories,
     List<String> noteLines = const [],
   }) {
     const fsHeader = 7.0;
@@ -921,12 +1017,17 @@ class DtrExport {
           children: tableRows,
         ),
         pw.SizedBox(height: 9),
-        _buildFormFooter(totals, policy, noteLines: noteLines),
+        _buildFormFooter(
+          totals,
+          policy,
+          signatories: signatories,
+          noteLines: noteLines,
+        ),
       ],
     );
   }
 
-  /// Generate Excel bytes — same layout as PDF (title, merged header, footer with JACYNTH/MEEDO + MARCELO/HR).
+  /// Generate Excel bytes — same layout as PDF (title, merged header, footer signatories).
   static Future<Uint8List> generateExcel({
     required String employeeName,
     required int year,
@@ -940,8 +1041,10 @@ class DtrExport {
     List<int>? workingDays,
     DateTime? assignmentEffectiveFrom,
     DateTime? assignmentEffectiveTo,
+    DtrExportSignatories? signatories,
   }) async {
     final policy = await _loadDefaultAttendancePolicy();
+    final exportSignatories = signatories ?? await resolveSignatories();
     final noteLines = <String>[];
     for (var d = 1; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
@@ -1319,7 +1422,7 @@ class DtrExport {
     setCellBoth(
       0,
       row,
-      TextCellValue('JACYNTH MARIE T. RABOSA'),
+      TextCellValue(exportSignatories.meedoManager.displayName),
       CellStyle(
         fontSize: 9,
         bold: true,
@@ -1328,7 +1431,12 @@ class DtrExport {
     );
     mergeBoth(0, row, 6, row);
     row++;
-    setCellBoth(0, row, TextCellValue('MEEDO A-Manager'), footerCenterStyle);
+    setCellBoth(
+      0,
+      row,
+      TextCellValue(exportSignatories.meedoManager.positionTitle),
+      footerCenterStyle,
+    );
     mergeBoth(0, row, 6, row);
     row += 2;
     setCellBoth(
@@ -1342,7 +1450,7 @@ class DtrExport {
     setCellBoth(
       0,
       row,
-      TextCellValue('MARCELO B. CAÑARES'),
+      TextCellValue(exportSignatories.hrOfficer.displayName),
       CellStyle(
         fontSize: 9,
         bold: true,
@@ -1354,7 +1462,7 @@ class DtrExport {
     setCellBoth(
       0,
       row,
-      TextCellValue('Human Resource Mgt. and Dev\'t. Officer'),
+      TextCellValue(exportSignatories.hrOfficer.positionTitle),
       footerCenterStyle,
     );
     mergeBoth(0, row, 6, row);
@@ -1389,8 +1497,10 @@ class DtrExport {
     List<int>? workingDays,
     DateTime? assignmentEffectiveFrom,
     DateTime? assignmentEffectiveTo,
+    DtrExportSignatories? signatories,
   }) async {
     final policy = await _loadDefaultAttendancePolicy();
+    final exportSignatories = signatories ?? await resolveSignatories();
     final noteLines = <String>[];
     for (var d = 1; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
@@ -1554,13 +1664,13 @@ class DtrExport {
       '<p style="margin:0 0 4px;border-top:1px solid #000;width:180px;margin-left:auto;margin-right:auto;"></p>',
     );
     oneCopy.writeln(
-      '<p style="margin:0 0 16px;"><strong>JACYNTH MARIE T. RABOSA</strong><br>MEEDO A-Manager</p>',
+      '<p style="margin:0 0 16px;"><strong>${_escapeHtml(exportSignatories.meedoManager.displayName)}</strong><br>${_escapeHtml(exportSignatories.meedoManager.positionTitle)}</p>',
     );
     oneCopy.writeln(
       '<p style="margin:0 0 4px;border-top:1px solid #000;width:180px;margin-left:auto;margin-right:auto;"></p>',
     );
     oneCopy.writeln(
-      '<p style="margin:0;"><strong>MARCELO B. CAÑARES</strong><br>Human Resource Mgt. and Dev\'t. Officer</p>',
+      '<p style="margin:0;"><strong>${_escapeHtml(exportSignatories.hrOfficer.displayName)}</strong><br>${_escapeHtml(exportSignatories.hrOfficer.positionTitle)}</p>',
     );
     if (noteLines.isNotEmpty) {
       oneCopy.writeln(
@@ -1616,6 +1726,7 @@ class DtrExport {
     List<int>? workingDays,
     DateTime? assignmentEffectiveFrom,
     DateTime? assignmentEffectiveTo,
+    DtrExportSignatories signatories = DtrExportSignatories.empty,
   }) {
     final policy = _ExportAttendancePolicy.defaults;
     final noteLines = <String>[];
@@ -1785,13 +1896,13 @@ class DtrExport {
       '<p style="margin:0 0 4px;border-top:1px solid #000;width:180px;margin-left:auto;margin-right:auto;"></p>',
     );
     oneCopy.writeln(
-      '<p style="margin:0 0 16px;"><strong>JACYNTH MARIE T. RABOSA</strong><br>MEEDO A-Manager</p>',
+      '<p style="margin:0 0 16px;"><strong>${_escapeHtml(signatories.meedoManager.displayName)}</strong><br>${_escapeHtml(signatories.meedoManager.positionTitle)}</p>',
     );
     oneCopy.writeln(
       '<p style="margin:0 0 4px;border-top:1px solid #000;width:180px;margin-left:auto;margin-right:auto;"></p>',
     );
     oneCopy.writeln(
-      '<p style="margin:0;"><strong>MARCELO B. CAÑARES</strong><br>Human Resource Mgt. and Dev\'t. Officer</p>',
+      '<p style="margin:0;"><strong>${_escapeHtml(signatories.hrOfficer.displayName)}</strong><br>${_escapeHtml(signatories.hrOfficer.positionTitle)}</p>',
     );
     if (noteLines.isNotEmpty) {
       oneCopy.writeln(

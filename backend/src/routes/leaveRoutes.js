@@ -123,6 +123,8 @@ const LEGACY_NO_CREDIT_LEDGER_TYPES = new Set([
 ]);
 const SPECIAL_PRIVILEGE_LEAVE_TYPE = 'specialPrivilegeLeave';
 const SPECIAL_PRIVILEGE_LEAVE_ANNUAL_LIMIT = 3;
+const LEAVE_REVOKE_WINDOW_DAYS = 3;
+const LEAVE_REVOKE_WINDOW_MS = LEAVE_REVOKE_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 const SPECIAL_PRIVILEGE_LEAVE_USAGE_STATUSES = [
   'pending',
   'pending_department_head',
@@ -3015,6 +3017,7 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
               COALESCE(lr.number_of_days, lr.total_days) AS days,
               lr.user_id, lr.employee_id,
               lr.start_date, lr.end_date,
+              lr.approved_at, lr.reviewed_at,
               lt.name AS leave_type_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
@@ -3031,6 +3034,22 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(400).json({
         error: `Cannot revoke a leave request with status '${r.status}'. Only approved requests can be revoked.`,
+      });
+    }
+
+    const approvalTimestamp = r.approved_at || r.reviewed_at;
+    if (!approvalTimestamp) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: 'Cannot determine the HR approval date for this request. Approval can only be revoked within 3 days.',
+      });
+    }
+    const approvedAt = new Date(approvalTimestamp);
+    const revokeDeadline = new Date(approvedAt.getTime() + LEAVE_REVOKE_WINDOW_MS);
+    if (Date.now() > revokeDeadline.getTime()) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: `Revoke period expired. Approved leave can only be revoked within ${LEAVE_REVOKE_WINDOW_DAYS} days after HR approval.`,
       });
     }
 
