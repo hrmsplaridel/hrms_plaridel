@@ -95,7 +95,10 @@ class TimeRecord {
 
   String get locatorSlipPrintLabel => locatorRequestType.dtrPrintLabel;
 
-  String get locatorSlipDisplayLabel => locatorRequestType.label;
+  String get locatorSlipDisplayLabel =>
+      locatorRequestType == LocatorRequestType.workFromHome
+      ? locatorRequestType.shortLabel
+      : locatorRequestType.label;
 
   static const String tableName = 'time_records';
 

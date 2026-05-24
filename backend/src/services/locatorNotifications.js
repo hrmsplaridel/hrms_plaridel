@@ -99,6 +99,26 @@ async function notifyDepartmentHeadApprovedForHr(
   });
 }
 
+async function notifyDepartmentHeadApprovedForEmployee(
+  pool,
+  { slipId, employeeUserId, slipDate, requestType, metadata = null }
+) {
+  if (!employeeUserId) return;
+  const requestLabel = requestTypeLabel(requestType);
+  await insertNotification(pool, {
+    userId: employeeUserId,
+    category: 'locator',
+    type: 'locator_approved_department_head',
+    title: 'Locator request endorsed',
+    body: `Your ${requestLabel} for ${fmtDate(
+      slipDate
+    )} was endorsed by your department head and forwarded to HR.`,
+    referenceType: 'locator_slip',
+    referenceId: slipId,
+    metadata,
+  });
+}
+
 async function notifyEmployee(
   pool,
   { employeeUserId, slipId, type, title, body, metadata = null }
@@ -119,5 +139,6 @@ async function notifyEmployee(
 module.exports = {
   notifyAfterSubmit,
   notifyDepartmentHeadApprovedForHr,
+  notifyDepartmentHeadApprovedForEmployee,
   notifyEmployee,
 };

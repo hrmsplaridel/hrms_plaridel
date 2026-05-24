@@ -34,6 +34,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   bool _requiresAttachment = false;
   bool _affectsDtrNormally = true;
   String _balanceLedgerType = 'none';
+  String _sexEligibility = 'any';
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
 
@@ -50,6 +51,12 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     'vacationLeave': 'Deduct from Vacation Leave',
     'sickLeave': 'Deduct from Sick Leave',
     'ownBalance': 'Use own separate balance',
+  };
+
+  static const _sexEligibilityTypes = <String, String>{
+    'any': 'Both sexes',
+    'female': 'Female only',
+    'male': 'Male only',
   };
 
   @override
@@ -125,6 +132,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     _balanceLedgerType = _ledgerTypes.containsKey(item.balanceLedgerType)
         ? item.balanceLedgerType
         : 'none';
+    _sexEligibility = _sexEligibilityTypes.containsKey(item.sexEligibility)
+        ? item.sexEligibility
+        : 'any';
   }
 
   void _newCustom() {
@@ -142,6 +152,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       _requiresAttachment = false;
       _affectsDtrNormally = true;
       _balanceLedgerType = 'none';
+      _sexEligibility = 'any';
     });
   }
 
@@ -277,6 +288,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       'max_days': _numberOrNull(_maxDaysController.text),
       'affects_dtr_normally': _affectsDtrNormally,
       'balance_ledger_type': _balanceLedgerType,
+      'sex_eligibility': _sexEligibility,
     };
   }
 
@@ -593,6 +605,43 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 16),
+                  if (systemLocked)
+                    _ReadOnlyValue(
+                      label: 'Employee sex eligibility',
+                      value:
+                          _sexEligibilityTypes[_sexEligibility] ??
+                          leaveTypeSexEligibilityLabel(_sexEligibility),
+                      helperText:
+                          'Protected types keep their assigned eligibility rule.',
+                    )
+                  else
+                    DropdownButtonFormField<String>(
+                      key: ValueKey('sex-$_sexEligibility'),
+                      initialValue: _sexEligibility,
+                      isExpanded: true,
+                      dropdownColor: AppTheme.dashPanelOf(context),
+                      style: AppTheme.dashFieldTextStyle(context),
+                      decoration: _inputDecoration(
+                        'Employee sex eligibility',
+                        helperText:
+                            'Controls which employee accounts can file this leave type.',
+                      ),
+                      items: _sexEligibilityTypes.entries
+                          .map(
+                            (entry) => DropdownMenuItem(
+                              value: entry.key,
+                              child: Text(
+                                entry.value,
+                                style: AppTheme.dashFieldTextStyle(context),
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: _saving
+                          ? null
+                          : (v) => setState(() => _sexEligibility = v ?? 'any'),
+                    ),
                   const SizedBox(height: 16),
                   Row(
                     children: [

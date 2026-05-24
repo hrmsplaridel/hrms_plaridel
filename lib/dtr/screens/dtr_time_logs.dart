@@ -179,11 +179,7 @@ class _RemarksChip extends StatelessWidget {
       case 'Pass Slip':
       case 'Work From Home':
       case 'WFH':
-        return _chipPair(
-          Colors.teal.shade700,
-          Colors.teal.shade50,
-          dark: dark,
-        );
+        return _chipPair(Colors.teal.shade700, Colors.teal.shade50, dark: dark);
       case 'Incomplete':
         return _chipPair(
           Colors.amber.shade800,
@@ -454,7 +450,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
   /// Backend sends shift-aware attendance_remark; this is a simple fallback.
   static String getAttendanceRemark(TimeRecord r) {
     if (r.attendanceRemark != null && r.attendanceRemark!.isNotEmpty) {
-      return r.attendanceRemark!;
+      return _normalizeAttendanceRemark(r.attendanceRemark!);
     }
     if (r.status == 'holiday' || r.holidayId != null) {
       return r.holidayName ?? 'Holiday';
@@ -485,6 +481,12 @@ class _DtrTimeLogsState extends State<DtrTimeLogs> with WidgetsBindingObserver {
     if (late) return 'Late';
     if (under) return 'Undertime';
     return 'On Time';
+  }
+
+  static String _normalizeAttendanceRemark(String remark) {
+    final value = remark.trim();
+    if (value.toLowerCase().startsWith('work from home')) return 'WFH';
+    return value;
   }
 
   /// Display late minutes: "X min", "0 min", or "—" for holiday/leave.

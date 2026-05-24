@@ -44,6 +44,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   bool _loadingCreditContext = false;
   LeaveLocationOption? _locationOption;
   SickLeaveNature? _sickLeaveNature;
+  MaternityDeliveryType? _maternityDeliveryType;
   StudyLeavePurpose? _studyPurpose;
   LeaveOtherPurpose? _otherPurpose;
   LeaveCommutationOption _commutation = LeaveCommutationOption.notRequested;
@@ -72,6 +73,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _leaveTypeName = initial?.effectiveLeaveTypeName ?? _leaveType.value;
     _locationOption = initial?.locationOption;
     _sickLeaveNature = initial?.sickLeaveNature;
+    _maternityDeliveryType = initial?.maternityDeliveryType;
     _studyPurpose = initial?.studyPurpose;
     _otherPurpose = initial?.otherPurpose;
     _commutation = initial?.commutation ?? LeaveCommutationOption.notRequested;
@@ -100,6 +102,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _workingDaysController = TextEditingController(
       text: initial?.workingDaysApplied?.toString() ?? '',
     );
+    _coerceSelectedLeaveTypeForAccount();
     _loadLeaveTypes();
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadCreditContext());
   }
@@ -125,6 +128,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   void _resetConditionalSelectionsForType(LeaveType type) {
     _locationOption = null;
     _sickLeaveNature = null;
+    _maternityDeliveryType = null;
     _studyPurpose = null;
     _otherPurpose = null;
     _customLeaveTypeController.clear();
@@ -167,6 +171,91 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     return def?.maxDays ?? _leaveType.maxDays?.toDouble();
   }
 
+  String? _normalizedAccountSex() {
+    final sex = context.read<AuthProvider>().user?.sex?.trim().toLowerCase();
+    if (sex == null || sex.isEmpty) return null;
+    if (sex == 'f' || sex == 'female') return 'female';
+    if (sex == 'm' || sex == 'male') return 'male';
+    return sex;
+  }
+
+  String _defaultSexEligibilityForLeaveType(LeaveType type) {
+    switch (type) {
+      case LeaveType.maternityLeave:
+      case LeaveType.specialLeaveBenefitsForWomen:
+      case LeaveType.tenDayVawcLeave:
+        return 'female';
+      case LeaveType.paternityLeave:
+        return 'male';
+      default:
+        return 'any';
+    }
+  }
+
+  String? _accountEligibilityMessage({
+    required String label,
+    required String sexEligibility,
+  }) {
+    final sex = _normalizedAccountSex();
+    final normalized = normalizeLeaveTypeSexEligibility(sexEligibility);
+    if (normalized == 'female') {
+      if (sex == null) {
+        return '$label requires your profile sex to be set to Female. Please update your profile or contact HR.';
+      }
+      if (sex != 'female') {
+        return '$label can only be filed by female accounts.';
+      }
+    }
+    if (normalized == 'male') {
+      if (sex == null) {
+        return '$label requires your profile sex to be set to Male. Please update your profile or contact HR.';
+      }
+      if (sex != 'male') {
+        return '$label can only be filed by male accounts.';
+      }
+    }
+    return null;
+  }
+
+  String? _leaveTypeAccountEligibilityMessage(LeaveType type) {
+    return _accountEligibilityMessage(
+      label: type.displayName,
+      sexEligibility: _defaultSexEligibilityForLeaveType(type),
+    );
+  }
+
+  String? _leaveTypeDefinitionAccountEligibilityMessage(
+    LeaveTypeDefinition definition,
+  ) {
+    return _accountEligibilityMessage(
+      label: definition.displayName,
+      sexEligibility: definition.sexEligibility,
+    );
+  }
+
+  String? _selectedAccountEligibilityMessage() {
+    final definition = _selectedLeaveTypeDefinition;
+    if (definition != null) {
+      return _leaveTypeDefinitionAccountEligibilityMessage(definition);
+    }
+    return _leaveTypeAccountEligibilityMessage(_leaveType);
+  }
+
+  bool _isLeaveTypeAllowedForAccount(LeaveType type) {
+    return _leaveTypeAccountEligibilityMessage(type) == null;
+  }
+
+  bool _isLeaveTypeDefinitionAllowedForAccount(LeaveTypeDefinition definition) {
+    return _leaveTypeDefinitionAccountEligibilityMessage(definition) == null;
+  }
+
+  void _coerceSelectedLeaveTypeForAccount() {
+    if (_isLeaveTypeAllowedForAccount(_leaveType)) return;
+    _leaveType = LeaveType.vacationLeave;
+    _leaveTypeName = LeaveType.vacationLeave.value;
+    _resetConditionalSelectionsForType(_leaveType);
+  }
+
   Future<void> _loadLeaveTypes() async {
     setState(() => _loadingLeaveTypes = true);
     try {
@@ -174,13 +263,18 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
           .listActiveEmployeeTypes();
       if (!mounted) return;
       setState(() {
-        _leaveTypeDefinitions = items;
+        final allowedItems = items
+            .where(_isLeaveTypeDefinitionAllowedForAccount)
+            .toList();
+        _leaveTypeDefinitions = allowedItems;
         _loadingLeaveTypes = false;
-        final selectedExists = items.any((item) => item.name == _leaveTypeName);
-        if (!selectedExists && items.isNotEmpty) {
-          final fallback = items.firstWhere(
+        final selectedExists = allowedItems.any(
+          (item) => item.name == _leaveTypeName,
+        );
+        if (!selectedExists && allowedItems.isNotEmpty) {
+          final fallback = allowedItems.firstWhere(
             (item) => item.name == LeaveType.vacationLeave.value,
-            orElse: () => items.first,
+            orElse: () => allowedItems.first,
           );
           _selectLeaveTypeDefinition(fallback, resetDetails: false);
         }
@@ -243,8 +337,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       final items = _leaveTypeDefinitions
           .where(
             (item) =>
-                (item.employeeCanFile && !item.adminOnly) ||
-                item.name == _leaveTypeName,
+                _isLeaveTypeDefinitionAllowedForAccount(item) &&
+                (item.employeeCanFile && !item.adminOnly),
           )
           .map(
             (item) => DropdownMenuItem<String>(
@@ -264,7 +358,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       return items;
     }
     return LeaveType.values
-        .where((t) => t.employeeCanFile || t == _leaveType)
+        .where((t) => t.employeeCanFile && _isLeaveTypeAllowedForAccount(t))
         .map(
           (t) => DropdownMenuItem<String>(
             value: t.value,
@@ -299,25 +393,34 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
   double _specialPrivilegeUsedForYear(int year) {
     final currentId = (_savedRequest ?? widget.initialRequest)?.id;
-    return _creditRequests.where((request) {
-      if (request.effectiveLeaveTypeName != LeaveType.specialPrivilegeLeave.value) {
-        return false;
-      }
-      if (currentId != null && currentId.isNotEmpty && request.id == currentId) {
-        return false;
-      }
-      if (!(request.status.isPending ||
-          request.status == LeaveRequestStatus.approved)) {
-        return false;
-      }
-      final start = request.startDate;
-      final end = request.endDate;
-      if (start == null || end == null) return false;
-      return start.year <= year && end.year >= year;
-    }).fold<double>(0, (total, request) {
-      final days = _workingDaysInYear(request.startDate, request.endDate, year);
-      return total + (days > 0 ? days : request.workingDaysApplied ?? 0);
-    });
+    return _creditRequests
+        .where((request) {
+          if (request.effectiveLeaveTypeName !=
+              LeaveType.specialPrivilegeLeave.value) {
+            return false;
+          }
+          if (currentId != null &&
+              currentId.isNotEmpty &&
+              request.id == currentId) {
+            return false;
+          }
+          if (!(request.status.isPending ||
+              request.status == LeaveRequestStatus.approved)) {
+            return false;
+          }
+          final start = request.startDate;
+          final end = request.endDate;
+          if (start == null || end == null) return false;
+          return start.year <= year && end.year >= year;
+        })
+        .fold<double>(0, (total, request) {
+          final days = _workingDaysInYear(
+            request.startDate,
+            request.endDate,
+            year,
+          );
+          return total + (days > 0 ? days : request.workingDaysApplied ?? 0);
+        });
   }
 
   double _workingDaysInYear(DateTime? start, DateTime? end, int year) {
@@ -348,6 +451,11 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
   Future<void> _saveDraft() async {
     if (!_formKey.currentState!.validate()) return;
+    final accountEligibilityMessage = _selectedAccountEligibilityMessage();
+    if (accountEligibilityMessage != null) {
+      _showMessage(accountEligibilityMessage);
+      return;
+    }
     if (_startDate == null || _endDate == null) {
       _showMessage('Please select date(s)');
       return;
@@ -358,6 +466,11 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
   Future<void> _submitRequest() async {
     if (!_formKey.currentState!.validate()) return;
+    final accountEligibilityMessage = _selectedAccountEligibilityMessage();
+    if (accountEligibilityMessage != null) {
+      _showMessage(accountEligibilityMessage);
+      return;
+    }
     if (_startDate == null || _endDate == null) {
       _showMessage('Please select start and end dates');
       return;
@@ -385,6 +498,11 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       }
     }
 
+    if (_leaveType == LeaveType.maternityLeave &&
+        _maternityDeliveryType == null) {
+      _showMessage('Please choose the maternity leave classification.');
+      return;
+    }
     if (_shouldShowAttachmentSection() && !_hasAttachment()) {
       _showMessage('Attachment is required for this leave type.');
       return;
@@ -581,6 +699,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
             ? _sickLeaveNature
             : null,
         sickIllnessDetails: _sickIllnessController.text.trim(),
+        maternityDeliveryType: _leaveType == LeaveType.maternityLeave
+            ? _maternityDeliveryType
+            : null,
         womenIllnessDetails:
             _leaveType == LeaveType.specialLeaveBenefitsForWomen
             ? _womenIllnessController.text.trim()
@@ -941,7 +1062,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
           : '${_formatDays(remaining)} of 3 day(s) remaining for $year. This leave does not deduct VL or SL credits.';
     } else if (policy == 'none') {
       icon = Icons.remove_done_outlined;
-      message = 'No leave credits required. This request will not deduct Vacation or Sick Leave credits.';
+      message =
+          'No leave credits required. This request will not deduct Vacation or Sick Leave credits.';
     } else {
       final bucket = _selectedCreditBucket;
       final balance = _balanceForBucket(bucket);
@@ -1130,6 +1252,58 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                 (v == null || v.trim().isEmpty) ? 'Required' : null,
           ),
         ],
+      ]);
+    } else if (_leaveType == LeaveType.maternityLeave) {
+      children.addAll([
+        const SizedBox(height: 16),
+        Text(
+          'Maternity Leave Classification',
+          style: TextStyle(
+            fontWeight: FontWeight.w500,
+            color: AppTheme.dashTextPrimaryOf(context),
+          ),
+        ),
+        const SizedBox(height: 8),
+        for (final option in MaternityDeliveryType.values)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => setState(() => _maternityDeliveryType = option),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: _maternityDeliveryType == option
+                        ? AppTheme.primaryNavy
+                        : AppTheme.dashHairlineOf(context),
+                  ),
+                  color: _maternityDeliveryType == option
+                      ? AppTheme.primaryNavy.withValues(alpha: 0.08)
+                      : AppTheme.dashPanelOf(context),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _maternityDeliveryType == option
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_unchecked,
+                      size: 20,
+                      color: _maternityDeliveryType == option
+                          ? AppTheme.primaryNavy
+                          : AppTheme.dashTextSecondaryOf(context),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(child: Text(option.displayName)),
+                  ],
+                ),
+              ),
+            ),
+          ),
       ]);
     } else if (_leaveType == LeaveType.specialLeaveBenefitsForWomen) {
       children.addAll([

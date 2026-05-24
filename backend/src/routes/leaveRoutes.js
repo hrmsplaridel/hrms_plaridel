@@ -99,6 +99,7 @@ const BALANCE_LEDGER_CONFIG_TYPES = new Set([
   'vacationLeave',
   'sickLeave',
 ]);
+const SEX_ELIGIBILITY_TYPES = new Set(['any', 'female', 'male']);
 const CREDIT_BALANCE_BUCKET_TYPES = new Set([
   'vacationLeave',
   'sickLeave',
@@ -145,6 +146,7 @@ pool
         ADD COLUMN IF NOT EXISTS max_days NUMERIC,
         ADD COLUMN IF NOT EXISTS affects_dtr_normally BOOLEAN NOT NULL DEFAULT true,
         ADD COLUMN IF NOT EXISTS balance_ledger_type TEXT NOT NULL DEFAULT 'none',
+        ADD COLUMN IF NOT EXISTS sex_eligibility TEXT NOT NULL DEFAULT 'any',
         ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT false,
         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
     `);
@@ -159,6 +161,14 @@ pool
       SET balance_ledger_type = 'none',
           updated_at = COALESCE(updated_at, now())
       WHERE COALESCE(NULLIF(balance_ledger_type, ''), 'none') = 'others';
+    `);
+
+    await pool.query(`
+      UPDATE leave_types
+      SET sex_eligibility = 'any',
+          updated_at = COALESCE(updated_at, now())
+      WHERE sex_eligibility IS NULL
+         OR sex_eligibility NOT IN ('any', 'female', 'male');
     `);
 
     await pool.query(`
@@ -210,6 +220,11 @@ pool
             WHEN name = 'mandatoryForcedLeave' THEN 'vacationLeave'
             WHEN name IN ('vacationLeave', 'sickLeave') THEN name
             ELSE 'none'
+          END,
+          sex_eligibility = CASE
+            WHEN name IN ('maternityLeave', 'tenDayVawcLeave', 'specialLeaveBenefitsForWomen') THEN 'female'
+            WHEN name = 'paternityLeave' THEN 'male'
+            ELSE 'any'
           END,
           is_active = true
       WHERE name = ANY($1::text[]);
@@ -484,7 +499,29 @@ function leaveTypeRuleDefaults(name) {
     requires_attachment_when_over_days: null,
     max_days: null,
     affects_dtr_normally: true,
+    sex_eligibility: defaultSexEligibilityForLeaveType(name),
   };
+}
+
+function defaultSexEligibilityForLeaveType(leaveTypeName) {
+  if (
+    leaveTypeName === 'maternityLeave' ||
+    leaveTypeName === 'tenDayVawcLeave' ||
+    leaveTypeName === 'specialLeaveBenefitsForWomen'
+  ) {
+    return 'female';
+  }
+  if (leaveTypeName === 'paternityLeave') return 'male';
+  return 'any';
+}
+
+function normalizeSexEligibility(value, leaveTypeName) {
+  const raw = (value || '').toString().trim().toLowerCase();
+  if (raw === 'female_only' || raw === 'femaleonly') return 'female';
+  if (raw === 'male_only' || raw === 'maleonly') return 'male';
+  if (raw === 'both' || raw === 'all' || raw === 'bothsexes') return 'any';
+  if (SEX_ELIGIBILITY_TYPES.has(raw)) return raw;
+  return defaultSexEligibilityForLeaveType(leaveTypeName);
 }
 
 function defaultLedgerTypeForLeaveType(leaveTypeName) {
@@ -550,6 +587,10 @@ function leaveTypeRowToApi(row = {}) {
         ? row.affects_dtr_normally === true
         : fallback.affects_dtr_normally !== false,
     balance_ledger_type: normalizeLedgerType(row.balance_ledger_type, name),
+    sex_eligibility: normalizeSexEligibility(
+      row.sex_eligibility ?? fallback.sex_eligibility,
+      name
+    ),
     created_at: row.created_at || null,
     updated_at: row.updated_at || null,
   };
@@ -569,6 +610,48 @@ async function getLeaveTypeDefinition(client, name) {
   return leaveTypeRowToApi(found.rows[0]);
 }
 
+function normalizeUserSexForLeave(value) {
+  const sex = (value || '').toString().trim().toLowerCase();
+  if (!sex) return null;
+  if (sex === 'f' || sex === 'female') return 'female';
+  if (sex === 'm' || sex === 'male') return 'male';
+  return sex;
+}
+
+function leaveTypeSexEligibilityError({ leaveType, leaveTypeLabel, sexEligibility, userSex }) {
+  const label = (leaveTypeLabel || systemLeaveTypeDisplayName(leaveType) || 'This leave type')
+    .toString()
+    .trim();
+  const sex = normalizeUserSexForLeave(userSex);
+  const eligibility = normalizeSexEligibility(sexEligibility, leaveType);
+  if (eligibility === 'female') {
+    if (!sex) {
+      return `${label} requires your profile sex to be set to Female. Please update your profile or contact HR.`;
+    }
+    if (sex !== 'female') {
+      return `${label} can only be filed by female accounts.`;
+    }
+  }
+  if (eligibility === 'male') {
+    if (!sex) {
+      return `${label} requires your profile sex to be set to Male. Please update your profile or contact HR.`;
+    }
+    if (sex !== 'male') {
+      return `${label} can only be filed by male accounts.`;
+    }
+  }
+  return null;
+}
+
+async function getUserSexForLeaveValidation(client, userId) {
+  if (!userId) return null;
+  const result = await client.query(
+    'SELECT sex FROM users WHERE id = $1 LIMIT 1',
+    [userId]
+  );
+  return result.rows[0]?.sex || null;
+}
+
 function validateEmployeeLeaveRequestWithRule(opts) {
   const {
     rule,
@@ -576,9 +659,22 @@ function validateEmployeeLeaveRequestWithRule(opts) {
     otherPurpose,
     startDateStr,
     numberOfDays,
+    userSex,
   } = opts;
 
   if (!rule) return { valid: true };
+  const sexEligibilityError = leaveTypeSexEligibilityError({
+    leaveType,
+    leaveTypeLabel: rule.display_name,
+    sexEligibility: rule.sex_eligibility,
+    userSex,
+  });
+  if (sexEligibilityError) {
+    return {
+      valid: false,
+      error: sexEligibilityError,
+    };
+  }
   if (rule.admin_only) {
     return {
       valid: false,
@@ -810,6 +906,13 @@ function leaveTypePayloadFromBody(body = {}, existing = null) {
     maxDays: numberField('max_days', existing?.max_days ?? base.max_days ?? null),
     affectsDtrNormally: boolField('affects_dtr_normally', existing?.affects_dtr_normally ?? base.affects_dtr_normally !== false),
     balanceLedgerType: normalizeLedgerType(body.balance_ledger_type ?? body.balanceLedgerType ?? existing?.balance_ledger_type, name),
+    sexEligibility: normalizeSexEligibility(
+      body.sex_eligibility ??
+        body.sexEligibility ??
+        existing?.sex_eligibility ??
+        base.sex_eligibility,
+      name
+    ),
   };
 }
 
@@ -851,6 +954,7 @@ router.post('/types', protect, requireAdminOrHr, async (req, res) => {
           employee_can_file, admin_only, allows_past_dates,
           requires_attachment, requires_attachment_when_over_days,
           max_days, affects_dtr_normally, balance_ledger_type,
+          sex_eligibility,
           created_at, updated_at
         )
         VALUES (
@@ -858,6 +962,7 @@ router.post('/types', protect, requireAdminOrHr, async (req, res) => {
           $5, $6, $7,
           $8, $9,
           $10, $11, $12,
+          $13,
           now(), now()
         )
         RETURNING *`,
@@ -874,6 +979,7 @@ router.post('/types', protect, requireAdminOrHr, async (req, res) => {
         payload.maxDays,
         payload.affectsDtrNormally,
         payload.balanceLedgerType,
+        payload.sexEligibility,
       ]
     );
     res.status(201).json(leaveTypeRowToApi(q.rows[0]));
@@ -924,8 +1030,9 @@ router.put('/types/:id', protect, requireAdminOrHr, async (req, res) => {
            max_days = $11,
            affects_dtr_normally = $12,
            balance_ledger_type = $13,
+           sex_eligibility = $14,
            updated_at = now()
-       WHERE id = $14::uuid
+       WHERE id = $15::uuid
        RETURNING *`,
       [
         nextName,
@@ -941,6 +1048,7 @@ router.put('/types/:id', protect, requireAdminOrHr, async (req, res) => {
         payload.maxDays,
         payload.affectsDtrNormally,
         nextBalanceLedgerType,
+        isSystem ? defaultSexEligibilityForLeaveType(nextName) : payload.sexEligibility,
         req.params.id,
       ]
     );
@@ -1360,6 +1468,7 @@ router.post('/draft', protect, async (req, res) => {
         : { ...rest, leave_type, start_date: startStr, end_date: endStr };
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
       const leaveRule = await getLeaveTypeDefinition(client, leave_type);
+      const userSex = await getUserSexForLeaveValidation(client, userId);
       const validation = validateEmployeeLeaveRequestWithRule({
         rule: leaveRule,
         leaveType: leave_type,
@@ -1368,6 +1477,7 @@ router.post('/draft', protect, async (req, res) => {
         endDateStr: endStr,
         numberOfDays: effectiveDaysDraft,
         hasAttachment: false,
+        userSex,
       });
       if (!validation.valid) {
         await client.query('ROLLBACK');
@@ -1475,6 +1585,7 @@ router.post('/submit', protect, async (req, res) => {
       }
 
       const leaveRule = await getLeaveTypeDefinition(client, leave_type);
+      const userSex = await getUserSexForLeaveValidation(client, userId);
       const validation = validateEmployeeLeaveRequestWithRule({
         rule: leaveRule,
         leaveType: leave_type,
@@ -1483,6 +1594,7 @@ router.post('/submit', protect, async (req, res) => {
         endDateStr: endStr,
         numberOfDays: effectiveDaysSubmit,
         hasAttachment: false,
+        userSex,
       });
       if (!validation.valid) {
         await client.query('ROLLBACK');
@@ -1663,6 +1775,7 @@ router.put('/:id', protect, async (req, res) => {
       if (leave_type && startStr && endStr) {
 
         const leaveRule = await getLeaveTypeDefinition(client, leave_type);
+        const userSex = await getUserSexForLeaveValidation(client, userId);
         const validation = validateEmployeeLeaveRequestWithRule({
           rule: leaveRule,
           leaveType: leave_type,
@@ -1671,6 +1784,7 @@ router.put('/:id', protect, async (req, res) => {
           endDateStr: endStr,
           numberOfDays: effectiveDays,
           hasAttachment: false,
+          userSex,
         });
         if (!validation.valid) {
           await client.query('ROLLBACK');

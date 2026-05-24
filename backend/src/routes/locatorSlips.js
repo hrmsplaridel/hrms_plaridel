@@ -504,7 +504,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
       return res.status(403).json({ error: 'You are not a department head' });
     }
     const current = await client.query(
-      `SELECT id, status, employee_id, slip_date
+      `SELECT id, status, employee_id, slip_date::text AS slip_date, request_type
        FROM locator_slips
        WHERE id = $1::uuid
          AND department_id = $2::uuid
@@ -533,6 +533,15 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
     );
     await client.query('COMMIT');
 
+    notifySafe(() =>
+      locatorNotifications.notifyDepartmentHeadApprovedForEmployee(pool, {
+        slipId: id,
+        employeeUserId: current.rows[0].employee_id,
+        slipDate: current.rows[0].slip_date,
+        requestType: current.rows[0].request_type,
+        metadata: { reviewer_remarks: remarks },
+      })
+    );
     const out = await pool.query(
       `SELECT ls.*,
               ls.slip_date::text AS slip_date_text,

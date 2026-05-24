@@ -366,9 +366,15 @@ class _DtrReportsState extends State<DtrReports> {
     if (rec == null) return '';
     final attendanceRemark = rec.attendanceRemark?.trim();
     if (attendanceRemark != null && attendanceRemark.isNotEmpty) {
-      return attendanceRemark;
+      return _normalizeAttendanceRemark(attendanceRemark);
     }
     return _getRemarks(rec);
+  }
+
+  static String _normalizeAttendanceRemark(String remark) {
+    final value = remark.trim();
+    if (value.toLowerCase().startsWith('work from home')) return 'WFH';
+    return value;
   }
 
   Future<void> _generateDtr(

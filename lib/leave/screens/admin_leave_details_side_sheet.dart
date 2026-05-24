@@ -431,6 +431,10 @@ class _AdminLeaveDetailGrid extends StatelessWidget {
             : '—',
       ),
       (label: 'Custom Leave Type', value: request.customLeaveTypeText ?? '—'),
+      (
+        label: 'Maternity Classification',
+        value: request.maternityDeliveryType?.displayName ?? '—',
+      ),
       (label: 'Location', value: request.locationOption?.displayName ?? '—'),
       (label: 'Location Details', value: request.locationDetails ?? '—'),
       (

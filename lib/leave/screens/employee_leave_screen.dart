@@ -9,6 +9,7 @@ import '../../realtime/app_realtime_provider.dart';
 import '../leave_provider.dart';
 import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
+import '../models/leave_type.dart';
 import 'leave_balance_history_screen.dart';
 import 'leave_request_form_screen.dart';
 import '../utils/leave_request_pdf.dart';
@@ -1062,6 +1063,13 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
                       label: 'Leave type',
                       value: _leaveTypeText,
                     ),
+                    if (request.leaveType == LeaveType.maternityLeave &&
+                        request.maternityDeliveryType != null)
+                      _LeaveDetailTile(
+                        icon: Icons.medical_information_outlined,
+                        label: 'Classification',
+                        value: request.maternityDeliveryType!.displayName,
+                      ),
                     _LeaveDetailTile(
                       icon: Icons.date_range_rounded,
                       label: 'Date range',

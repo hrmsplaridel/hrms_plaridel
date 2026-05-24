@@ -90,6 +90,7 @@ class ManageAssignment extends StatefulWidget {
 class _ManageAssignmentState extends State<ManageAssignment> {
   final _searchController = TextEditingController();
   String _employeeStatusFilter = 'All';
+  String? _employeeDepartmentFilterId;
   String _assignmentStatusFilter = 'Active';
   String? _selectedEmployeeId;
   List<_EmployeeSummary> _employees = [];
@@ -175,9 +176,17 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           : _employeeStatusFilter == 'Inactive'
           ? 'Inactive'
           : 'All';
+      final queryParameters = <String, dynamic>{
+        'status': status,
+        'role': 'All',
+      };
+      final departmentId = _employeeDepartmentFilterId?.trim();
+      if (departmentId != null && departmentId.isNotEmpty) {
+        queryParameters['department_id'] = departmentId;
+      }
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/employees',
-        queryParameters: {'status': status, 'role': 'All'},
+        queryParameters: queryParameters,
       );
       final data = res.data ?? [];
       _employees = data.map((e) {
@@ -191,9 +200,14 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               : (empNum != null ? int.tryParse(empNum.toString()) : null),
         );
       }).toList();
+      if (_selectedEmployeeId != null &&
+          !_employees.any((e) => e.id == _selectedEmployeeId)) {
+        _clearEmployeeSelection();
+      }
     } catch (e) {
       debugPrint('Load employees failed: $e');
       _employees = [];
+      _clearEmployeeSelection();
     }
     if (mounted) setState(() => _loadingEmployees = false);
     if (!_initialPrefillApplied && widget.initialEmployeeId != null) {
@@ -242,6 +256,12 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         final m = e as Map<String, dynamic>;
         return {'id': m['id'], 'name': m['name'] as String? ?? ''};
       }).toList();
+      if (_employeeDepartmentFilterId != null &&
+          !_departments.any(
+            (d) => d['id']?.toString() == _employeeDepartmentFilterId,
+          )) {
+        _employeeDepartmentFilterId = null;
+      }
       _positions = (posRes.data ?? []).map((e) {
         final m = e as Map<String, dynamic>;
         return {
@@ -260,10 +280,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
             (m['policy_name'] as String?) ?? (m['name'] as String?) ?? '';
         return {'id': m['id'], 'name': name};
       }).toList();
-      if (!_positionBelongsToDepartment(
-        _selectedPositionId,
-        _selectedDeptId,
-      )) {
+      if (!_positionBelongsToDepartment(_selectedPositionId, _selectedDeptId)) {
         _selectedPositionId = null;
       }
     } catch (e) {
@@ -430,6 +447,19 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     });
   }
 
+  void _clearEmployeeSelection() {
+    _selectedEmployeeId = null;
+    _assignments = [];
+    _selectedAssignment = null;
+    _selectedDeptId = null;
+    _selectedPositionId = null;
+    _selectedShiftId = null;
+    _selectedPolicyId = null;
+    _effectiveFrom = null;
+    _effectiveTo = null;
+    _remarksController.clear();
+  }
+
   /// Calendar-day comparison (ignores time) so picker values stay valid across timezones.
   bool _isEffectiveRangeValid(DateTime from, DateTime? to) {
     if (to == null) return true;
@@ -442,10 +472,8 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     _updateAssignmentFormState(() {
       _selectedAssignment = a;
       _selectedDeptId = a.departmentId;
-      _selectedPositionId = _positionBelongsToDepartment(
-        a.positionId,
-        a.departmentId,
-      )
+      _selectedPositionId =
+          _positionBelongsToDepartment(a.positionId, a.departmentId)
           ? a.positionId
           : null;
       _selectedShiftId = a.shiftId;
@@ -681,7 +709,9 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       await showGeneralDialog<void>(
         context: context,
         barrierDismissible: true,
-        barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+        barrierLabel: MaterialLocalizations.of(
+          context,
+        ).modalBarrierDismissLabel,
         barrierColor: Colors.black.withValues(alpha: 0.32),
         transitionDuration: const Duration(milliseconds: 220),
         pageBuilder: (dialogContext, _, __) {
@@ -751,10 +781,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                 ),
                 IconButton(
                   onPressed: () => Navigator.of(drawerContext).pop(),
-                  icon: Icon(
-                    Icons.close_rounded,
-                    color: _mutedColor(context),
-                  ),
+                  icon: Icon(Icons.close_rounded, color: _mutedColor(context)),
                   tooltip: 'Close',
                 ),
               ],
@@ -895,7 +922,8 @@ class _ManageAssignmentState extends State<ManageAssignment> {
             runSpacing: 12,
             children: [
               SizedBox(width: 180, child: _buildSearchField()),
-              _buildFilterDropdown(),
+              _buildDepartmentFilterDropdown(),
+              _buildEmployeeStatusDropdown(),
             ],
           ),
           const SizedBox(height: 20),
@@ -1039,7 +1067,70 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     );
   }
 
-  Widget _buildFilterDropdown() {
+  Widget _buildDepartmentFilterDropdown() {
+    final safeValue =
+        _employeeDepartmentFilterId != null &&
+            _departments.any(
+              (d) => d['id']?.toString() == _employeeDepartmentFilterId,
+            )
+        ? _employeeDepartmentFilterId
+        : null;
+
+    return SizedBox(
+      width: 180,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        decoration: _filterDecoration(context),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String?>(
+            value: safeValue,
+            dropdownColor: AppTheme.dashPanelOf(context),
+            style: AppTheme.dashFieldTextStyle(context),
+            icon: Icon(
+              Icons.arrow_drop_down_rounded,
+              color: _mutedColor(context),
+            ),
+            hint: Text(
+              'All departments',
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+              style: AppTheme.dashFieldHintStyle(context),
+            ),
+            isExpanded: true,
+            isDense: true,
+            items: [
+              DropdownMenuItem<String?>(
+                value: null,
+                child: Text(
+                  'All departments',
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                  style: AppTheme.dashFieldTextStyle(context),
+                ),
+              ),
+              ..._departments.map(
+                (d) => DropdownMenuItem<String?>(
+                  value: d['id']?.toString(),
+                  child: Text(
+                    d['name']?.toString() ?? '',
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                    style: AppTheme.dashFieldTextStyle(context),
+                  ),
+                ),
+              ),
+            ],
+            onChanged: (v) {
+              setState(() => _employeeDepartmentFilterId = v);
+              _loadEmployees();
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmployeeStatusDropdown() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: _filterDecoration(context),
@@ -1317,10 +1408,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   TextStyle _tableCellStyle(BuildContext context) =>
       TextStyle(fontSize: 13, color: _headingColor(context));
 
-  Widget _buildAssignmentForm({
-    bool framed = true,
-    bool showActions = true,
-  }) {
+  Widget _buildAssignmentForm({bool framed = true, bool showActions = true}) {
     String? safeValue(String? value, List<Map<String, dynamic>> items) {
       if (value == null) return null;
       return items.any((item) => item['id']?.toString() == value)
@@ -1342,259 +1430,246 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         : filteredPositions.isEmpty
         ? 'No positions'
         : 'Select';
-    final selectedPositionValue = filteredPositions.any(
-      (position) => position['id']?.toString() == _selectedPositionId,
-    )
+    final selectedPositionValue =
+        filteredPositions.any(
+          (position) => position['id']?.toString() == _selectedPositionId,
+        )
         ? _selectedPositionId
         : null;
 
     final content = Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final useRow = constraints.maxWidth >= 600;
-              if (useRow) {
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      flex: 1,
-                      child: _buildFormDropdown(
-                        'Department',
-                        selectedDeptValue,
-                        _departments,
-                        _setDepartment,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      flex: 1,
-                      child: _buildFormDropdown(
-                        'Position',
-                        selectedPositionValue,
-                        filteredPositions,
-                        (v) => _updateAssignmentFormState(
-                          () => _selectedPositionId = v,
-                        ),
-                        enabled: canSelectPosition,
-                        selectLabel: positionSelectLabel,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      flex: 1,
-                      child: _buildFormDropdown(
-                        'Shift',
-                        selectedShiftValue,
-                        _shifts,
-                        (v) => _updateAssignmentFormState(
-                          () => _selectedShiftId = v,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      flex: 1,
-                      child: _buildFormDropdown(
-                        'Attendance Policy (opt)',
-                        selectedPolicyValue,
-                        _attendancePolicies,
-                        (v) => _updateAssignmentFormState(
-                          () => _selectedPolicyId = v,
-                        ),
-                      ),
-                    ),
-                  ],
-                );
-              }
-              return Wrap(
-                spacing: 16,
-                runSpacing: 16,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final useRow = constraints.maxWidth >= 600;
+            if (useRow) {
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildFormDropdown(
-                    'Department',
-                    selectedDeptValue,
-                    _departments,
-                    _setDepartment,
-                  ),
-                  _buildFormDropdown(
-                    'Position',
-                    selectedPositionValue,
-                    filteredPositions,
-                    (v) => _updateAssignmentFormState(
-                      () => _selectedPositionId = v,
-                    ),
-                    enabled: canSelectPosition,
-                    selectLabel: positionSelectLabel,
-                  ),
-                  _buildFormDropdown(
-                    'Shift',
-                    selectedShiftValue,
-                    _shifts,
-                    (v) => _updateAssignmentFormState(
-                      () => _selectedShiftId = v,
+                  Expanded(
+                    flex: 1,
+                    child: _buildFormDropdown(
+                      'Department',
+                      selectedDeptValue,
+                      _departments,
+                      _setDepartment,
                     ),
                   ),
-                  _buildFormDropdown(
-                    'Attendance Policy (opt)',
-                    selectedPolicyValue,
-                    _attendancePolicies,
-                    (v) => _updateAssignmentFormState(
-                      () => _selectedPolicyId = v,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 1,
+                    child: _buildFormDropdown(
+                      'Position',
+                      selectedPositionValue,
+                      filteredPositions,
+                      (v) => _updateAssignmentFormState(
+                        () => _selectedPositionId = v,
+                      ),
+                      enabled: canSelectPosition,
+                      selectLabel: positionSelectLabel,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 1,
+                    child: _buildFormDropdown(
+                      'Shift',
+                      selectedShiftValue,
+                      _shifts,
+                      (v) => _updateAssignmentFormState(
+                        () => _selectedShiftId = v,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 1,
+                    child: _buildFormDropdown(
+                      'Attendance Policy (opt)',
+                      selectedPolicyValue,
+                      _attendancePolicies,
+                      (v) => _updateAssignmentFormState(
+                        () => _selectedPolicyId = v,
+                      ),
                     ),
                   ),
                 ],
               );
-            },
-          ),
-          const SizedBox(height: 16),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final useRow = constraints.maxWidth >= 520;
-              if (useRow) {
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: _buildDatePicker(
-                        'Effective from',
-                        _effectiveFrom,
-                        (d) => _updateAssignmentFormState(
-                          () => _effectiveFrom = d,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: _buildDatePicker(
-                        'Effective to (opt)',
-                        _effectiveTo,
-                        (d) => _updateAssignmentFormState(
-                          () => _effectiveTo = d,
-                        ),
-                      ),
-                    ),
-                  ],
-                );
-              }
-              return Wrap(
-                spacing: 16,
-                runSpacing: 16,
-                children: [
-                  _buildDatePicker(
-                    'Effective from',
-                    _effectiveFrom,
-                    (d) => _updateAssignmentFormState(
-                      () => _effectiveFrom = d,
-                    ),
-                  ),
-                  _buildDatePicker(
-                    'Effective to (opt)',
-                    _effectiveTo,
-                    (d) => _updateAssignmentFormState(
-                      () => _effectiveTo = d,
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Remarks (optional)',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: _mutedColor(context),
-            ),
-          ),
-          const SizedBox(height: 6),
-          TextFormField(
-            controller: _remarksController,
-            style: AppTheme.dashFieldTextStyle(context),
-            decoration: AppTheme.dashInputDecoration(
-              context,
-              hintText: 'Notes about this assignment',
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 12,
-              ),
-              radius: 8,
-            ),
-            maxLines: 2,
-          ),
-          if (showActions) ...[
-            const SizedBox(height: 24),
-            Row(
+            }
+            return Wrap(
+              spacing: 16,
+              runSpacing: 16,
               children: [
-                FilledButton.icon(
-                  onPressed: _loadingLookups ? null : () => _addAssignment(),
-                  icon: const Icon(Icons.add_rounded, size: 18),
-                  label: const Text('Add Assignment'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF4CAF50),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 12,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    elevation: 0,
-                  ),
+                _buildFormDropdown(
+                  'Department',
+                  selectedDeptValue,
+                  _departments,
+                  _setDepartment,
                 ),
-                const SizedBox(width: 12),
-                OutlinedButton.icon(
-                  onPressed: _selectedAssignment != null
-                      ? () => _updateAssignment()
-                      : null,
-                  icon: const Icon(Icons.edit_rounded, size: 18),
-                  label: const Text('Update'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF4CAF50),
-                    side: const BorderSide(color: Color(0xFF4CAF50)),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 12,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
+                _buildFormDropdown(
+                  'Position',
+                  selectedPositionValue,
+                  filteredPositions,
+                  (v) =>
+                      _updateAssignmentFormState(() => _selectedPositionId = v),
+                  enabled: canSelectPosition,
+                  selectLabel: positionSelectLabel,
                 ),
-                const SizedBox(width: 12),
-                FilledButton.icon(
-                  onPressed: _selectedAssignment != null
-                      ? () => _deactivateAssignment()
-                      : null,
-                  icon: const Icon(Icons.person_off_rounded, size: 18),
-                  label: const Text('Deactivate'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFFE53935),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 12,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    elevation: 0,
-                  ),
+                _buildFormDropdown(
+                  'Shift',
+                  selectedShiftValue,
+                  _shifts,
+                  (v) => _updateAssignmentFormState(() => _selectedShiftId = v),
+                ),
+                _buildFormDropdown(
+                  'Attendance Policy (opt)',
+                  selectedPolicyValue,
+                  _attendancePolicies,
+                  (v) =>
+                      _updateAssignmentFormState(() => _selectedPolicyId = v),
                 ),
               ],
+            );
+          },
+        ),
+        const SizedBox(height: 16),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final useRow = constraints.maxWidth >= 520;
+            if (useRow) {
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: _buildDatePicker(
+                      'Effective from',
+                      _effectiveFrom,
+                      (d) =>
+                          _updateAssignmentFormState(() => _effectiveFrom = d),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: _buildDatePicker(
+                      'Effective to (opt)',
+                      _effectiveTo,
+                      (d) => _updateAssignmentFormState(() => _effectiveTo = d),
+                    ),
+                  ),
+                ],
+              );
+            }
+            return Wrap(
+              spacing: 16,
+              runSpacing: 16,
+              children: [
+                _buildDatePicker(
+                  'Effective from',
+                  _effectiveFrom,
+                  (d) => _updateAssignmentFormState(() => _effectiveFrom = d),
+                ),
+                _buildDatePicker(
+                  'Effective to (opt)',
+                  _effectiveTo,
+                  (d) => _updateAssignmentFormState(() => _effectiveTo = d),
+                ),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Remarks (optional)',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: _mutedColor(context),
+          ),
+        ),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: _remarksController,
+          style: AppTheme.dashFieldTextStyle(context),
+          decoration: AppTheme.dashInputDecoration(
+            context,
+            hintText: 'Notes about this assignment',
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 12,
             ),
-          ],
+            radius: 8,
+          ),
+          maxLines: 2,
+        ),
+        if (showActions) ...[
+          const SizedBox(height: 24),
+          Row(
+            children: [
+              FilledButton.icon(
+                onPressed: _loadingLookups ? null : () => _addAssignment(),
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('Add Assignment'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF4CAF50),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  elevation: 0,
+                ),
+              ),
+              const SizedBox(width: 12),
+              OutlinedButton.icon(
+                onPressed: _selectedAssignment != null
+                    ? () => _updateAssignment()
+                    : null,
+                icon: const Icon(Icons.edit_rounded, size: 18),
+                label: const Text('Update'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF4CAF50),
+                  side: const BorderSide(color: Color(0xFF4CAF50)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              FilledButton.icon(
+                onPressed: _selectedAssignment != null
+                    ? () => _deactivateAssignment()
+                    : null,
+                icon: const Icon(Icons.person_off_rounded, size: 18),
+                label: const Text('Deactivate'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFE53935),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  elevation: 0,
+                ),
+              ),
+            ],
+          ),
         ],
-      );
+      ],
+    );
 
     if (!framed) {
-      return Padding(
-        padding: const EdgeInsets.all(24),
-        child: content,
-      );
+      return Padding(padding: const EdgeInsets.all(24), child: content);
     }
 
     return Container(

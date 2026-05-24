@@ -9,7 +9,7 @@ import '../../landingpage/constants/app_theme.dart';
 /// For holidays, uses holiday name when available.
 String getAttendanceRemark(TimeRecord r) {
   if (r.attendanceRemark != null && r.attendanceRemark!.isNotEmpty) {
-    return r.attendanceRemark!;
+    return normalizeAttendanceRemark(r.attendanceRemark!);
   }
   if (r.status == 'holiday' || r.holidayId != null) {
     return r.holidayName ?? 'Holiday';
@@ -39,6 +39,12 @@ String getAttendanceRemark(TimeRecord r) {
   if (late) return 'Late';
   if (under) return 'Undertime';
   return 'On Time';
+}
+
+String normalizeAttendanceRemark(String remark) {
+  final value = remark.trim();
+  if (value.toLowerCase().startsWith('work from home')) return 'WFH';
+  return value;
 }
 
 /// Display late minutes: "X min", "0 min", or "—" for holiday/leave.

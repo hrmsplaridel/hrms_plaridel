@@ -30,13 +30,16 @@ function locatorRequestTypeLabel(value) {
     case 'pass_slip':
       return 'Pass Slip';
     case 'work_from_home':
-      return 'Work From Home';
+      return 'WFH';
     default:
       return 'Locator Slip';
   }
 }
 
 function locatorAttendanceRemark(locator) {
+  if (normalizeLocatorRequestType(locator?.request_type) === 'work_from_home') {
+    return 'WFH';
+  }
   const segText =
     locator?.segments && locator.segments.length > 0
       ? ` (${locator.segments.join(', ')})`
@@ -520,6 +523,12 @@ async function computeAttendanceRemark(
   if (!hasAnyLog) return 'Absent';
   if (record.status === 'invalid') return 'Invalid Log';
   if (record.status === 'on_field' && !hasPhysicalLog) {
+    if (
+      normalizeLocatorRequestType(record.locator_slip_request_type) ===
+      'work_from_home'
+    ) {
+      return 'WFH';
+    }
     const segments = Array.from(locatorSegSet);
     const segText = segments.length > 0 ? ` (${segments.join(', ')})` : '';
     return `${locatorRequestTypeLabel(record.locator_slip_request_type)}${segText}`;

@@ -213,9 +213,15 @@ class DtrExport {
         att != 'On Time' &&
         att != 'Late' &&
         att != 'Undertime') {
-      return att.toUpperCase();
+      return _normalizeAttendanceRemark(att).toUpperCase();
     }
     return '';
+  }
+
+  static String _normalizeAttendanceRemark(String remark) {
+    final value = remark.trim();
+    if (value.toLowerCase().startsWith('work from home')) return 'WFH';
+    return value;
   }
 
   /// Returns (hours, minutes) of undertime. Absent = 8h 0m. Non-working day / Holiday / Leave = 0.

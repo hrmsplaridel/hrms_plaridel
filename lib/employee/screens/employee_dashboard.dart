@@ -83,7 +83,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
   Widget _settingsPanel() => DashboardProfilePanel(
         key: _settingsPanelKey,
         onBack: _closeMyProfile,
-      );
+      );  
 
   @override
   void initState() {
