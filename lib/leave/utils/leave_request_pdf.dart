@@ -238,10 +238,18 @@ class LeaveRequestPdf {
   static Future<pw.Document> buildPdf({
     required LeaveRequest request,
     List<LeaveBalance>? balances,
+    String? certificationOfficerName,
+    String? certificationOfficerTitle,
+    String? recommendationOfficerName,
+    String? recommendationOfficerTitle,
   }) async {
     return _LeaveRequestPdfFixedEngine.buildPdf(
       request: request,
       balances: balances,
+      certificationOfficerName: certificationOfficerName,
+      certificationOfficerTitle: certificationOfficerTitle,
+      recommendationOfficerName: recommendationOfficerName,
+      recommendationOfficerTitle: recommendationOfficerTitle,
     );
   }
 
@@ -251,11 +259,19 @@ class LeaveRequestPdf {
     required LeaveRequest request,
     List<LeaveBalance>? balances,
     String? name,
+    String? certificationOfficerName,
+    String? certificationOfficerTitle,
+    String? recommendationOfficerName,
+    String? recommendationOfficerTitle,
   }) async {
     return _LeaveRequestPdfFixedEngine.printLeaveRequest(
       request: request,
       balances: balances,
       name: name,
+      certificationOfficerName: certificationOfficerName,
+      certificationOfficerTitle: certificationOfficerTitle,
+      recommendationOfficerName: recommendationOfficerName,
+      recommendationOfficerTitle: recommendationOfficerTitle,
     );
   }
 
@@ -1557,6 +1573,10 @@ class _LeaveRequestPdfFixedEngine {
   static Future<pw.Document> buildPdf({
     required LeaveRequest request,
     List<LeaveBalance>? balances,
+    String? certificationOfficerName,
+    String? certificationOfficerTitle,
+    String? recommendationOfficerName,
+    String? recommendationOfficerTitle,
   }) async {
     final b = balances ?? const <LeaveBalance>[];
     final vl = b
@@ -1577,6 +1597,15 @@ class _LeaveRequestPdfFixedEngine {
     final reviewerTitle = _s(request.reviewerTitle).isNotEmpty
         ? _s(request.reviewerTitle)
         : _s(request.reviewerRole);
+    final certifierName = _s(certificationOfficerName);
+    final certifierTitle = _s(certificationOfficerTitle);
+    final recommendationName = _s(recommendationOfficerName);
+    final recommendationTitle = _s(recommendationOfficerTitle);
+    final hasDepartmentHeadRecommendation =
+        request.departmentHeadAction == 'department_head_approved';
+    final hasDepartmentHeadDisapproval =
+        request.departmentHeadAction == 'department_head_rejected' ||
+        request.status == LeaveRequestStatus.rejectedByDepartmentHead;
 
     final vlDed =
         (request.leaveType == LeaveType.vacationLeave ||
@@ -2437,20 +2466,20 @@ class _LeaveRequestPdfFixedEngine {
                                       color: _borderColor,
                                     ),
                                     pw.SizedBox(height: 4),
-                                    if (reviewerName.isNotEmpty)
+                                    if (certifierName.isNotEmpty)
                                       pw.Center(
                                         child: pw.Text(
-                                          reviewerName,
+                                          certifierName,
                                           style: pw.TextStyle(
                                             fontSize: _small,
                                             fontWeight: pw.FontWeight.bold,
                                           ),
                                         ),
                                       ),
-                                    if (reviewerTitle.isNotEmpty)
+                                    if (certifierTitle.isNotEmpty)
                                       pw.Center(
                                         child: pw.Text(
-                                          reviewerTitle,
+                                          certifierTitle,
                                           style: const pw.TextStyle(
                                             fontSize: _small,
                                           ),
@@ -2468,13 +2497,15 @@ class _LeaveRequestPdfFixedEngine {
                                     _sectionHeader('7.B RECOMMENDATION'),
                                     _checkLine(
                                       'For approval',
-                                      request.status ==
-                                          LeaveRequestStatus.approved,
+                                      hasDepartmentHeadRecommendation ||
+                                          request.status ==
+                                              LeaveRequestStatus.approved,
                                     ),
                                     _checkLine(
                                       'For disapproval due to',
-                                      request.status ==
-                                          LeaveRequestStatus.rejected,
+                                      hasDepartmentHeadDisapproval ||
+                                          request.status ==
+                                              LeaveRequestStatus.rejected,
                                     ),
                                     pw.SizedBox(height: 2),
                                     pw.Container(
@@ -2525,12 +2556,32 @@ class _LeaveRequestPdfFixedEngine {
                                       color: _borderColor,
                                     ),
                                     pw.SizedBox(height: 4),
-                                    pw.Center(
-                                      child: pw.Text(
-                                        '(Authorized Officer)',
-                                        style: pw.TextStyle(fontSize: _small),
+                                    if (recommendationName.isNotEmpty)
+                                      pw.Center(
+                                        child: pw.Text(
+                                          recommendationName,
+                                          style: pw.TextStyle(
+                                            fontSize: _small,
+                                            fontWeight: pw.FontWeight.bold,
+                                          ),
+                                        ),
+                                      )
+                                    else
+                                      pw.Center(
+                                        child: pw.Text(
+                                          '(Authorized Officer)',
+                                          style: pw.TextStyle(fontSize: _small),
+                                        ),
                                       ),
-                                    ),
+                                    if (recommendationTitle.isNotEmpty)
+                                      pw.Center(
+                                        child: pw.Text(
+                                          recommendationTitle,
+                                          style: const pw.TextStyle(
+                                            fontSize: _small,
+                                          ),
+                                        ),
+                                      ),
                                   ],
                                 ),
                               ),
@@ -2709,8 +2760,19 @@ class _LeaveRequestPdfFixedEngine {
     required LeaveRequest request,
     List<LeaveBalance>? balances,
     String? name,
+    String? certificationOfficerName,
+    String? certificationOfficerTitle,
+    String? recommendationOfficerName,
+    String? recommendationOfficerTitle,
   }) async {
-    final doc = await buildPdf(request: request, balances: balances);
+    final doc = await buildPdf(
+      request: request,
+      balances: balances,
+      certificationOfficerName: certificationOfficerName,
+      certificationOfficerTitle: certificationOfficerTitle,
+      recommendationOfficerName: recommendationOfficerName,
+      recommendationOfficerTitle: recommendationOfficerTitle,
+    );
     await Printing.layoutPdf(
       onLayout: (format) async => doc.save(),
       name: name ?? 'Leave_Application_${request.id ?? request.userId}.pdf',

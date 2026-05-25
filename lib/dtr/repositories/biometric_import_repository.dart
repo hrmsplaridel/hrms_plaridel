@@ -6,12 +6,20 @@ class BiometricImportApiResponse {
   const BiometricImportApiResponse({
     required this.inserted,
     required this.duplicatesSkipped,
+    required this.skippedNoSchedule,
+    required this.skippedHoliday,
+    required this.skippedLeave,
+    required this.skippedInvalidTimestamp,
     required this.summariesInserted,
     required this.summariesUpdated,
   });
 
   final int inserted;
   final int duplicatesSkipped;
+  final int skippedNoSchedule;
+  final int skippedHoliday;
+  final int skippedLeave;
+  final int skippedInvalidTimestamp;
   final int summariesInserted;
   final int summariesUpdated;
 
@@ -19,6 +27,11 @@ class BiometricImportApiResponse {
     return BiometricImportApiResponse(
       inserted: (json['inserted'] as num?)?.toInt() ?? 0,
       duplicatesSkipped: (json['duplicates_skipped'] as num?)?.toInt() ?? 0,
+      skippedNoSchedule: (json['skipped_no_schedule'] as num?)?.toInt() ?? 0,
+      skippedHoliday: (json['skipped_holiday'] as num?)?.toInt() ?? 0,
+      skippedLeave: (json['skipped_leave'] as num?)?.toInt() ?? 0,
+      skippedInvalidTimestamp:
+          (json['skipped_invalid_timestamp'] as num?)?.toInt() ?? 0,
       summariesInserted: (json['summaries_inserted'] as num?)?.toInt() ?? 0,
       summariesUpdated: (json['summaries_updated'] as num?)?.toInt() ?? 0,
     );
@@ -43,9 +56,11 @@ class BiometricImportRepository {
 
     final data = res.data ?? [];
     return data
-        .map((e) => BiometricMatchedEmployee.fromJson(
-              Map<String, dynamic>.from(e as Map),
-            ))
+        .map(
+          (e) => BiometricMatchedEmployee.fromJson(
+            Map<String, dynamic>.from(e as Map),
+          ),
+        )
         .where((e) => e.biometricUserId.isNotEmpty && e.id.isNotEmpty)
         .toList();
   }
@@ -59,6 +74,10 @@ class BiometricImportRepository {
       return const BiometricImportApiResponse(
         inserted: 0,
         duplicatesSkipped: 0,
+        skippedNoSchedule: 0,
+        skippedHoliday: 0,
+        skippedLeave: 0,
+        skippedInvalidTimestamp: 0,
         summariesInserted: 0,
         summariesUpdated: 0,
       );
@@ -66,15 +85,10 @@ class BiometricImportRepository {
 
     final res = await ApiClient.instance.post<Map<String, dynamic>>(
       '/api/biometric-attendance-logs/import',
-      data: {
-        'rows': rows,
-        'source_file_name': sourceFileName,
-      },
+      data: {'rows': rows, 'source_file_name': sourceFileName},
     );
 
     final data = res.data ?? {};
-    return BiometricImportApiResponse.fromJson(
-      Map<String, dynamic>.from(data),
-    );
+    return BiometricImportApiResponse.fromJson(Map<String, dynamic>.from(data));
   }
 }

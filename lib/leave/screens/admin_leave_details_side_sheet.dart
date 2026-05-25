@@ -259,23 +259,15 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
                   ),
                   label: const Text('Reject'),
                 ),
-              // #15: Revoke — shown only when status is approved.
-              if (onRevoke != null || revokeDisabledReason != null)
-                Tooltip(
-                  message: revokeDisabledReason ?? 'Revoke approval',
-                  child: OutlinedButton.icon(
-                    onPressed: reviewing ? null : onRevoke,
-                    icon: const Icon(Icons.undo_rounded),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.orange.shade800,
-                      side: BorderSide(color: Colors.orange.shade300),
-                    ),
-                    label: Text(
-                      revokeDisabledReason == null
-                          ? 'Revoke Approval'
-                          : 'Revoke period expired',
-                    ),
+              if (onRevoke != null)
+                OutlinedButton.icon(
+                  onPressed: reviewing ? null : onRevoke,
+                  icon: const Icon(Icons.undo_rounded),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.orange.shade800,
+                    side: BorderSide(color: Colors.orange.shade300),
                   ),
+                  label: const Text('Revoke Approval'),
                 ),
               if (onPrint != null)
                 OutlinedButton.icon(
@@ -439,42 +431,7 @@ class _AdminLeaveDetailGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final rows = <({String label, String value})>[
-      (label: 'Office/Department', value: request.officeDepartment ?? '—'),
-      (label: 'Position Title', value: request.positionTitle ?? '—'),
-      (
-        label: 'Salary',
-        value: request.salary != null
-            ? request.salary!.toStringAsFixed(2)
-            : '—',
-      ),
-      (label: 'Custom Leave Type', value: request.customLeaveTypeText ?? '—'),
-      (
-        label: 'Maternity Classification',
-        value: request.maternityDeliveryType?.displayName ?? '—',
-      ),
-      (label: 'Location', value: request.locationOption?.displayName ?? '—'),
-      (label: 'Location Details', value: request.locationDetails ?? '—'),
-      (
-        label: 'Sick Leave Nature',
-        value: request.sickLeaveNature?.displayName ?? '—',
-      ),
-      (label: 'Sick Illness Details', value: request.sickIllnessDetails ?? '—'),
-      (
-        label: 'Women Illness Details',
-        value: request.womenIllnessDetails ?? '—',
-      ),
-      (label: 'Study Purpose', value: request.studyPurpose?.displayName ?? '—'),
-      (
-        label: 'Study Purpose Details',
-        value: request.studyPurposeDetails ?? '—',
-      ),
-      (label: 'Other Purpose', value: request.otherPurpose?.displayName ?? '—'),
-      (
-        label: 'Other Purpose Details',
-        value: request.otherPurposeDetails ?? '—',
-      ),
-    ];
+    final rows = _buildDetailRows(request);
 
     final attachmentName = request.attachmentName?.trim();
     final hasAttachment = attachmentName != null && attachmentName.isNotEmpty;
@@ -502,6 +459,112 @@ class _AdminLeaveDetailGrid extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  List<({String label, String value})> _buildDetailRows(LeaveRequest request) {
+    final rows = <({String label, String value})>[
+      (
+        label: 'Office/Department',
+        value: _displayValue(request.officeDepartment),
+      ),
+      (label: 'Position Title', value: _displayValue(request.positionTitle)),
+      (
+        label: 'Salary',
+        value: request.salary != null
+            ? request.salary!.toStringAsFixed(2)
+            : '—',
+      ),
+    ];
+
+    void addRelevant({
+      required String label,
+      required String? value,
+      required bool applies,
+    }) {
+      if (!applies && !_hasValue(value)) return;
+      rows.add((label: label, value: _displayValue(value)));
+    }
+
+    void addRelevantEnum({
+      required String label,
+      required String? value,
+      required bool applies,
+    }) {
+      if (!applies && !_hasValue(value)) return;
+      rows.add((label: label, value: value ?? '—'));
+    }
+
+    final leaveType = request.leaveType;
+
+    addRelevant(
+      label: 'Custom Leave Type',
+      value: request.customLeaveTypeText,
+      applies: leaveType == LeaveType.others,
+    );
+    addRelevantEnum(
+      label: 'Maternity Classification',
+      value: request.maternityDeliveryType?.displayName,
+      applies: leaveType == LeaveType.maternityLeave,
+    );
+    addRelevantEnum(
+      label: 'Location',
+      value: request.locationOption?.displayName,
+      applies:
+          leaveType == LeaveType.vacationLeave ||
+          leaveType == LeaveType.specialPrivilegeLeave,
+    );
+    addRelevant(
+      label: 'Location Details',
+      value: request.locationDetails,
+      applies:
+          leaveType == LeaveType.vacationLeave ||
+          leaveType == LeaveType.specialPrivilegeLeave,
+    );
+    addRelevantEnum(
+      label: 'Sick Leave Nature',
+      value: request.sickLeaveNature?.displayName,
+      applies: leaveType == LeaveType.sickLeave,
+    );
+    addRelevant(
+      label: 'Sick Illness Details',
+      value: request.sickIllnessDetails,
+      applies: leaveType == LeaveType.sickLeave,
+    );
+    addRelevant(
+      label: 'Women Illness Details',
+      value: request.womenIllnessDetails,
+      applies: leaveType == LeaveType.specialLeaveBenefitsForWomen,
+    );
+    addRelevantEnum(
+      label: 'Study Purpose',
+      value: request.studyPurpose?.displayName,
+      applies: leaveType == LeaveType.studyLeave,
+    );
+    addRelevant(
+      label: 'Study Purpose Details',
+      value: request.studyPurposeDetails,
+      applies: leaveType == LeaveType.studyLeave,
+    );
+    addRelevantEnum(
+      label: 'Other Purpose',
+      value: request.otherPurpose?.displayName,
+      applies: leaveType == LeaveType.others,
+    );
+    addRelevant(
+      label: 'Other Purpose Details',
+      value: request.otherPurposeDetails,
+      applies: leaveType == LeaveType.others,
+    );
+
+    return rows;
+  }
+
+  static bool _hasValue(String? value) =>
+      value != null && value.trim().isNotEmpty;
+
+  static String _displayValue(String? value) {
+    final trimmed = value?.trim();
+    return trimmed == null || trimmed.isEmpty ? '—' : trimmed;
   }
 }
 

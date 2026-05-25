@@ -15,6 +15,7 @@ import '../models/leave_request.dart';
 import '../models/leave_type.dart';
 import '../models/leave_type_definition.dart';
 import '../utils/employee_leave_card_view_screen.dart';
+import '../utils/leave_form_signatories.dart';
 import 'leave_balance_history_screen.dart';
 import 'leave_type_management_screen.dart';
 import '../utils/leave_request_pdf.dart';
@@ -641,6 +642,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         reviewerName: signerInfo.name,
         reviewerTitle: signerInfo.title,
       );
+      final formSignatories = await loadLeaveFormSignatories(request: target);
 
       final balances = await provider.fetchBalancesForUser(
         target.userId,
@@ -656,6 +658,11 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       await LeaveRequestPdf.printLeaveRequest(
         request: target,
         balances: balances,
+        certificationOfficerName: formSignatories.certificationOfficer?.name,
+        certificationOfficerTitle: formSignatories.certificationOfficer?.title,
+        recommendationOfficerName: formSignatories.recommendationOfficer?.name,
+        recommendationOfficerTitle:
+            formSignatories.recommendationOfficer?.title,
         name: 'Leave_Application_${target.id ?? target.userId}.pdf',
       );
     } catch (e) {
@@ -1901,7 +1908,9 @@ class _ManualBalanceAdjustmentDialogState
   bool _loadingEmployees = true;
   bool _loadingBalances = false;
   String? _employeesError;
+  List<String> _departments = const [];
   List<Map<String, String>> _employees = const [];
+  String? _selectedDepartment;
   String? _selectedUserId;
   DateTime _asOfDate = DateTime.now();
 
@@ -1947,6 +1956,19 @@ class _ManualBalanceAdjustmentDialogState
       _employeesError = null;
     });
     try {
+      final departmentsRes = await ApiClient.instance.get<List<dynamic>>(
+        '/api/departments',
+        queryParameters: const {'status': 'Active'},
+      );
+      final departmentsFromApi =
+          (departmentsRes.data ?? const [])
+              .whereType<Map>()
+              .map((e) => e['name']?.toString().trim() ?? '')
+              .where((name) => name.isNotEmpty)
+              .toSet()
+              .toList()
+            ..sort();
+
       final res = await ApiClient.instance.get<dynamic>(
         '/api/employees',
         queryParameters: const {'status': 'Active', 'limit': 1000, 'offset': 0},
@@ -1963,21 +1985,32 @@ class _ManualBalanceAdjustmentDialogState
                 (e) => {
                   'id': e['id']?.toString() ?? '',
                   'name': e['full_name']?.toString() ?? 'Unnamed',
+                  'department':
+                      e['current_department_name']?.toString().trim() ?? '',
                 },
               )
               .where((e) => (e['id'] ?? '').isNotEmpty)
               .toList()
             ..sort((a, b) => (a['name']!).compareTo(b['name']!));
-      final firstId = rows.isNotEmpty ? rows.first['id'] : null;
+      final departmentsFromEmployees =
+          rows
+              .map((e) => (e['department'] ?? '').trim())
+              .where((department) => department.isNotEmpty)
+              .toSet()
+              .toList()
+            ..sort();
+      final departments = departmentsFromApi.isNotEmpty
+          ? departmentsFromApi
+          : departmentsFromEmployees;
       if (!mounted) return;
       setState(() {
+        _departments = departments;
         _employees = rows;
-        _selectedUserId = firstId;
+        _selectedDepartment = null;
+        _selectedUserId = null;
         _loadingEmployees = false;
       });
-      if (firstId != null && firstId.isNotEmpty) {
-        await _loadBalancesFor(firstId);
-      }
+      _applyBalanceToFields();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -2030,6 +2063,15 @@ class _ManualBalanceAdjustmentDialogState
     if (id != null && id.isNotEmpty) {
       await _loadBalancesFor(id);
     }
+  }
+
+  void _onDepartmentChanged(String? department) {
+    setState(() {
+      _selectedDepartment = department;
+      _selectedUserId = null;
+      _balances = const [];
+    });
+    _applyBalanceToFields();
   }
 
   Future<void> _pickAsOfDate() async {
@@ -2096,19 +2138,32 @@ class _ManualBalanceAdjustmentDialogState
         return employee['name'] ?? 'Selected employee';
       }
     }
-    return 'Selected employee';
+    return 'Select an employee';
+  }
+
+  List<Map<String, String>> get _filteredEmployees {
+    final department = _selectedDepartment?.trim();
+    if (department == null || department.isEmpty) return const [];
+    return _employees
+        .where((e) => (e['department'] ?? '').trim() == department)
+        .toList();
   }
 
   @override
   Widget build(BuildContext context) {
     final saving = context.watch<LeaveProvider>().submitting;
-    final hasEmployees = _employees.isNotEmpty;
+    final hasDepartments = _departments.isNotEmpty;
+    final hasEmployees = _filteredEmployees.isNotEmpty;
+    final hasSelectedEmployee =
+        _selectedUserId != null && _selectedUserId!.isNotEmpty;
     final canSave =
         !saving &&
         !_loadingEmployees &&
         !_loadingBalances &&
         _employeesError == null &&
-        hasEmployees;
+        hasDepartments &&
+        hasEmployees &&
+        hasSelectedEmployee;
 
     return AlertDialog(
       titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
@@ -2173,11 +2228,11 @@ class _ManualBalanceAdjustmentDialogState
                     'Failed to load employees: $_employeesError',
                     style: TextStyle(color: Colors.red.shade700),
                   )
-                else if (!hasEmployees)
+                else if (!hasDepartments)
                   _statusPanel(
-                    icon: Icons.person_off_outlined,
+                    icon: Icons.apartment_outlined,
                     message:
-                        'No active employees are available for adjustment.',
+                        'No active departments are available for adjustment.',
                   )
                 else ...[
                   _sectionHeader(
@@ -2186,14 +2241,46 @@ class _ManualBalanceAdjustmentDialogState
                   ),
                   const SizedBox(height: 10),
                   DropdownButtonFormField<String>(
+                    key: ValueKey(
+                      'manual-balance-department-${_selectedDepartment ?? ''}',
+                    ),
+                    initialValue: _selectedDepartment,
+                    isExpanded: true,
+                    menuMaxHeight: 360,
+                    decoration: adminLeaveInputDecoration(context, 'Department')
+                        .copyWith(
+                          prefixIcon: const Icon(Icons.apartment_outlined),
+                        ),
+                    items: _departments
+                        .map(
+                          (department) => DropdownMenuItem<String>(
+                            value: department,
+                            child: Text(department),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: saving ? null : _onDepartmentChanged,
+                    validator: (v) =>
+                        (v == null || v.isEmpty) ? 'Select a department' : null,
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    key: ValueKey(
+                      'manual-balance-employee-${_selectedDepartment ?? ''}-${_selectedUserId ?? ''}',
+                    ),
                     initialValue: _selectedUserId,
                     isExpanded: true,
                     menuMaxHeight: 360,
-                    decoration: adminLeaveInputDecoration(
-                      context,
-                      'Employee',
-                    ).copyWith(prefixIcon: const Icon(Icons.person_outline)),
-                    items: _employees
+                    decoration: adminLeaveInputDecoration(context, 'Employee')
+                        .copyWith(
+                          prefixIcon: const Icon(Icons.person_outline),
+                          hintText: _selectedDepartment == null
+                              ? 'Select department first'
+                              : (hasEmployees
+                                    ? 'Select employee'
+                                    : 'No employees in this department'),
+                        ),
+                    items: _filteredEmployees
                         .map(
                           (e) => DropdownMenuItem<String>(
                             value: e['id'],
@@ -2201,7 +2288,7 @@ class _ManualBalanceAdjustmentDialogState
                           ),
                         )
                         .toList(),
-                    onChanged: saving
+                    onChanged: saving || _selectedDepartment == null
                         ? null
                         : (v) {
                             if (v != null) unawaited(_onEmployeeChanged(v));
@@ -2209,6 +2296,13 @@ class _ManualBalanceAdjustmentDialogState
                     validator: (v) =>
                         (v == null || v.isEmpty) ? 'Select an employee' : null,
                   ),
+                  if (_selectedDepartment != null && !hasEmployees) ...[
+                    const SizedBox(height: 12),
+                    _statusPanel(
+                      icon: Icons.person_off_outlined,
+                      message: 'No active employees found for this department.',
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   LayoutBuilder(
                     builder: (context, constraints) {
@@ -2240,7 +2334,9 @@ class _ManualBalanceAdjustmentDialogState
                                 _applyBalanceToFields();
                               },
                       );
-                      final asOfField = _asOfDateField(saving);
+                      final asOfField = _asOfDateField(
+                        saving || !hasSelectedEmployee,
+                      );
                       if (narrow) {
                         return Column(
                           children: [
@@ -2289,7 +2385,10 @@ class _ManualBalanceAdjustmentDialogState
                     ),
                   ),
                   const SizedBox(height: 10),
-                  _balanceFieldGrid(enabled: !saving && !_loadingBalances),
+                  _balanceFieldGrid(
+                    enabled:
+                        !saving && !_loadingBalances && hasSelectedEmployee,
+                  ),
                   const SizedBox(height: 16),
                   _sectionHeader(
                     icon: Icons.history_edu_outlined,
@@ -2298,7 +2397,7 @@ class _ManualBalanceAdjustmentDialogState
                   const SizedBox(height: 10),
                   TextFormField(
                     controller: _remarksController,
-                    enabled: !saving,
+                    enabled: !saving && hasSelectedEmployee,
                     minLines: 2,
                     maxLines: 4,
                     decoration:

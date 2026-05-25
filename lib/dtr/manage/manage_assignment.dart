@@ -71,6 +71,33 @@ class _AssignmentRecord {
   final String? remarks;
 }
 
+/// Extra role/designation record that can coexist with the primary assignment.
+class _DesignationRecord {
+  const _DesignationRecord({
+    required this.id,
+    required this.employeeId,
+    this.departmentId,
+    this.positionId,
+    required this.effectiveFrom,
+    this.effectiveTo,
+    required this.isActive,
+    this.remarks,
+    this.departmentName,
+    this.positionName,
+  });
+
+  final String id;
+  final String employeeId;
+  final String? departmentId;
+  final String? positionId;
+  final DateTime effectiveFrom;
+  final DateTime? effectiveTo;
+  final bool isActive;
+  final String? remarks;
+  final String? departmentName;
+  final String? positionName;
+}
+
 /// Assignment management screen: employee list + assignment CRUD.
 class ManageAssignment extends StatefulWidget {
   const ManageAssignment({
@@ -98,6 +125,8 @@ class _ManageAssignmentState extends State<ManageAssignment> {
 
   List<_AssignmentRecord> _assignments = [];
   bool _loadingAssignments = false;
+  List<_DesignationRecord> _designations = [];
+  bool _loadingDesignations = false;
 
   List<Map<String, dynamic>> _departments = [];
   List<Map<String, dynamic>> _positions = [];
@@ -114,6 +143,14 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   final _remarksController = TextEditingController();
   _AssignmentRecord? _selectedAssignment;
   StateSetter? _drawerSetState;
+  String? _designationDeptId;
+  String? _designationPositionId;
+  DateTime? _designationEffectiveFrom;
+  DateTime? _designationEffectiveTo;
+  bool _designationIsActive = true;
+  final _designationRemarksController = TextEditingController();
+  _DesignationRecord? _selectedDesignation;
+  StateSetter? _designationDrawerSetState;
 
   bool _initialPrefillApplied = false;
 
@@ -148,6 +185,17 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     }
   }
 
+  void _updateDesignationFormState(VoidCallback update) {
+    if (mounted) setState(update);
+    final drawerSetState = _designationDrawerSetState;
+    if (!mounted || drawerSetState == null) return;
+    try {
+      drawerSetState(() {});
+    } catch (_) {
+      _designationDrawerSetState = null;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -165,6 +213,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   void dispose() {
     _searchController.dispose();
     _remarksController.dispose();
+    _designationRemarksController.dispose();
     super.dispose();
   }
 
@@ -228,7 +277,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     }
     if (!mounted) return;
     setState(() => _selectedEmployeeId = id);
-    await _loadAssignments();
+    await Future.wait([_loadAssignments(), _loadDesignations()]);
     widget.onInitialEmployeeConsumed?.call();
   }
 
@@ -366,6 +415,52 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     }
   }
 
+  Future<void> _loadDesignations() async {
+    if (_selectedEmployeeId == null) {
+      _designations = [];
+      _updateDesignationFormState(() {});
+      return;
+    }
+    setState(() => _loadingDesignations = true);
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/employee-other-positions',
+        queryParameters: {'employee_id': _selectedEmployeeId!, 'status': 'All'},
+      );
+      final data = res.data ?? [];
+      _designations = data.map((e) {
+        final m = e as Map<String, dynamic>;
+        final fromDate = m['effective_from'];
+        final toDate = m['effective_to'];
+        return _DesignationRecord(
+          id: m['id'] as String,
+          employeeId: m['employee_id'] as String? ?? _selectedEmployeeId!,
+          departmentId: m['department_id'] as String?,
+          positionId: m['position_id'] as String?,
+          effectiveFrom: fromDate != null
+              ? DateTime.parse(fromDate.toString())
+              : DateTime.now(),
+          effectiveTo: toDate != null && toDate.toString().isNotEmpty
+              ? DateTime.tryParse(toDate.toString())
+              : null,
+          isActive: m['is_active'] as bool? ?? true,
+          remarks: m['remarks'] as String?,
+          departmentName: m['department_name'] as String?,
+          positionName: m['position_name'] as String?,
+        );
+      }).toList();
+    } catch (e) {
+      debugPrint('Load designations failed: $e');
+      _designations = [];
+    }
+    if (mounted) {
+      _updateDesignationFormState(() {
+        _loadingDesignations = false;
+        _selectedDesignation = null;
+      });
+    }
+  }
+
   Map<String, dynamic>? _resolvePolicyForAssignmentRange(
     List<Map<String, dynamic>> policies,
     String? assignmentFromRaw,
@@ -420,8 +515,49 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     return to == null ? from : '$from → ${_dateStr(to)}';
   }
 
+  String _designationEffectivePeriodStr(_DesignationRecord designation) {
+    final from = _dateStr(designation.effectiveFrom);
+    final to = designation.effectiveTo;
+    return to == null ? from : '$from → ${_dateStr(to)}';
+  }
+
+  String _designationTitle(_DesignationRecord designation) {
+    final position = designation.positionName?.trim();
+    if (position != null && position.isNotEmpty) return position;
+    return '—';
+  }
+
+  String _designationStatus(_DesignationRecord designation) {
+    if (!designation.isActive) return 'Inactive';
+    final today = DateTime.now();
+    final currentDay = DateTime(today.year, today.month, today.day);
+    final from = DateTime(
+      designation.effectiveFrom.year,
+      designation.effectiveFrom.month,
+      designation.effectiveFrom.day,
+    );
+    final to = designation.effectiveTo == null
+        ? null
+        : DateTime(
+            designation.effectiveTo!.year,
+            designation.effectiveTo!.month,
+            designation.effectiveTo!.day,
+          );
+    if (from.isAfter(currentDay)) return 'Upcoming';
+    if (to != null && to.isBefore(currentDay)) return 'Expired';
+    return 'Active';
+  }
+
   List<Map<String, dynamic>> get _positionsForSelectedDepartment {
     final deptId = _selectedDeptId;
+    if (deptId == null || deptId.isEmpty) return const [];
+    return _positions
+        .where((p) => p['department_id']?.toString() == deptId)
+        .toList();
+  }
+
+  List<Map<String, dynamic>> get _positionsForDesignationDepartment {
+    final deptId = _designationDeptId;
     if (deptId == null || deptId.isEmpty) return const [];
     return _positions
         .where((p) => p['department_id']?.toString() == deptId)
@@ -438,6 +574,15 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     return false;
   }
 
+  bool _designationPositionBelongsToDepartment(
+    String? positionId,
+    String? departmentId,
+  ) {
+    if (positionId == null) return false;
+    if (departmentId == null || departmentId.isEmpty) return false;
+    return _positionBelongsToDepartment(positionId, departmentId);
+  }
+
   void _setDepartment(String? departmentId) {
     _updateAssignmentFormState(() {
       _selectedDeptId = departmentId;
@@ -447,17 +592,37 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     });
   }
 
+  void _setDesignationDepartment(String? departmentId) {
+    _updateDesignationFormState(() {
+      _designationDeptId = departmentId;
+      if (!_designationPositionBelongsToDepartment(
+        _designationPositionId,
+        departmentId,
+      )) {
+        _designationPositionId = null;
+      }
+    });
+  }
+
   void _clearEmployeeSelection() {
     _selectedEmployeeId = null;
     _assignments = [];
+    _designations = [];
     _selectedAssignment = null;
+    _selectedDesignation = null;
     _selectedDeptId = null;
     _selectedPositionId = null;
     _selectedShiftId = null;
     _selectedPolicyId = null;
     _effectiveFrom = null;
     _effectiveTo = null;
+    _designationDeptId = null;
+    _designationPositionId = null;
+    _designationEffectiveFrom = null;
+    _designationEffectiveTo = null;
+    _designationIsActive = true;
     _remarksController.clear();
+    _designationRemarksController.clear();
   }
 
   /// Calendar-day comparison (ignores time) so picker values stay valid across timezones.
@@ -494,6 +659,36 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       _effectiveFrom = null;
       _effectiveTo = null;
       _remarksController.clear();
+    });
+  }
+
+  void _selectDesignation(_DesignationRecord designation) {
+    _updateDesignationFormState(() {
+      _selectedDesignation = designation;
+      _designationDeptId = designation.departmentId;
+      _designationPositionId =
+          _designationPositionBelongsToDepartment(
+            designation.positionId,
+            designation.departmentId,
+          )
+          ? designation.positionId
+          : null;
+      _designationEffectiveFrom = designation.effectiveFrom;
+      _designationEffectiveTo = designation.effectiveTo;
+      _designationIsActive = designation.isActive;
+      _designationRemarksController.text = designation.remarks ?? '';
+    });
+  }
+
+  void _clearDesignationForm() {
+    _updateDesignationFormState(() {
+      _selectedDesignation = null;
+      _designationDeptId = null;
+      _designationPositionId = null;
+      _designationEffectiveFrom = null;
+      _designationEffectiveTo = null;
+      _designationIsActive = true;
+      _designationRemarksController.clear();
     });
   }
 
@@ -690,6 +885,160 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     }
   }
 
+  Map<String, dynamic>? _designationPayload() {
+    if (_selectedEmployeeId == null) return null;
+    if (_designationPositionId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a position.')),
+      );
+      return null;
+    }
+    if (_designationEffectiveFrom == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please set Effective From date.')),
+      );
+      return null;
+    }
+    if (!_isEffectiveRangeValid(
+      _designationEffectiveFrom!,
+      _designationEffectiveTo,
+    )) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Effective to must be on or after effective from.'),
+        ),
+      );
+      return null;
+    }
+    return {
+      'employee_id': _selectedEmployeeId,
+      'department_id': _designationDeptId,
+      'position_id': _designationPositionId,
+      'effective_from': _designationEffectiveFrom!.toIso8601String().split(
+        'T',
+      )[0],
+      'effective_to': _designationEffectiveTo != null
+          ? _designationEffectiveTo!.toIso8601String().split('T')[0]
+          : null,
+      'is_active': _designationIsActive,
+      'remarks': _designationRemarksController.text.trim().isEmpty
+          ? null
+          : _designationRemarksController.text.trim(),
+    };
+  }
+
+  Future<bool> _addDesignation() async {
+    final data = _designationPayload();
+    if (data == null) return false;
+    try {
+      await ApiClient.instance.post(
+        '/api/employee-other-positions',
+        data: data,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Other position added.')));
+        _clearDesignationForm();
+        _loadDesignations();
+      }
+      return true;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_userFacingApiError(e))));
+      }
+      return false;
+    }
+  }
+
+  Future<bool> _updateDesignation() async {
+    final designation = _selectedDesignation;
+    if (designation == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select another position to update.')),
+      );
+      return false;
+    }
+    final data = _designationPayload();
+    if (data == null) return false;
+    data.remove('employee_id');
+    try {
+      await ApiClient.instance.put(
+        '/api/employee-other-positions/${designation.id}',
+        data: data,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Other position updated.')),
+        );
+        _clearDesignationForm();
+        _loadDesignations();
+      }
+      return true;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_userFacingApiError(e))));
+      }
+      return false;
+    }
+  }
+
+  Future<bool> _deactivateDesignation() async {
+    final designation = _selectedDesignation;
+    if (designation == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select another position to deactivate.')),
+      );
+      return false;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Deactivate other position?'),
+        content: const Text(
+          'This keeps the history but removes it from active other positions.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Deactivate'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return false;
+    try {
+      await ApiClient.instance.put(
+        '/api/employee-other-positions/${designation.id}',
+        data: {'is_active': false},
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Other position deactivated.')),
+        );
+        _clearDesignationForm();
+        _loadDesignations();
+      }
+      return true;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_userFacingApiError(e))));
+      }
+      return false;
+    }
+  }
+
   Future<void> _openAssignmentDrawer({_AssignmentRecord? assignment}) async {
     _drawerSetState = null;
     if (_selectedEmployeeId == null) {
@@ -755,6 +1104,71 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     }
   }
 
+  Future<void> _openDesignationDrawer({_DesignationRecord? designation}) async {
+    _designationDrawerSetState = null;
+    if (_selectedEmployeeId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select an employee first.')),
+      );
+      return;
+    }
+
+    if (designation == null) {
+      _clearDesignationForm();
+    } else {
+      _selectDesignation(designation);
+    }
+
+    try {
+      await showGeneralDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        barrierLabel: MaterialLocalizations.of(
+          context,
+        ).modalBarrierDismissLabel,
+        barrierColor: Colors.black.withValues(alpha: 0.32),
+        transitionDuration: const Duration(milliseconds: 220),
+        pageBuilder: (dialogContext, _, __) {
+          final screenWidth = MediaQuery.of(dialogContext).size.width;
+          final drawerWidth = screenWidth < 760 ? screenWidth : 620.0;
+          return Align(
+            alignment: Alignment.centerRight,
+            child: SizedBox(
+              width: drawerWidth,
+              height: double.infinity,
+              child: Material(
+                color: AppTheme.dashPanelOf(dialogContext),
+                elevation: 18,
+                child: StatefulBuilder(
+                  builder: (context, drawerSetState) {
+                    _designationDrawerSetState = drawerSetState;
+                    return _buildDesignationDrawer(dialogContext);
+                  },
+                ),
+              ),
+            ),
+          );
+        },
+        transitionBuilder: (context, animation, _, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(1, 0),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          );
+        },
+      );
+    } finally {
+      _designationDrawerSetState = null;
+    }
+  }
+
   Widget _buildAssignmentDrawer(BuildContext drawerContext) {
     final isEditing = _selectedAssignment != null;
     return SafeArea(
@@ -771,7 +1185,9 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               children: [
                 Expanded(
                   child: Text(
-                    isEditing ? 'Edit Assignment' : 'Add Assignment',
+                    isEditing
+                        ? 'Edit Primary Assignment'
+                        : 'Add Primary Assignment',
                     style: TextStyle(
                       color: _headingColor(context),
                       fontSize: 20,
@@ -847,7 +1263,112 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               isEditing ? Icons.edit_rounded : Icons.add_rounded,
               size: 18,
             ),
-            label: Text(isEditing ? 'Update' : 'Add Assignment'),
+            label: Text(isEditing ? 'Update' : 'Add Primary Assignment'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFE85D04),
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesignationDrawer(BuildContext drawerContext) {
+    final isEditing = _selectedDesignation != null;
+    return SafeArea(
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    isEditing ? 'Edit Other Position' : 'Add Other Position',
+                    style: TextStyle(
+                      color: _headingColor(context),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(drawerContext).pop(),
+                  icon: Icon(Icons.close_rounded, color: _mutedColor(context)),
+                  tooltip: 'Close',
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              child: _buildDesignationForm(framed: false),
+            ),
+          ),
+          _buildDesignationDrawerFooter(drawerContext),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesignationDrawerFooter(BuildContext drawerContext) {
+    final isEditing = _selectedDesignation != null;
+    final canDeactivate =
+        isEditing && (_selectedDesignation?.isActive ?? false);
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        border: Border(
+          top: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        ),
+      ),
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 8,
+        alignment: WrapAlignment.end,
+        children: [
+          TextButton(
+            onPressed: () => Navigator.of(drawerContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          if (canDeactivate)
+            OutlinedButton.icon(
+              onPressed: () async {
+                final ok = await _deactivateDesignation();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
+              icon: const Icon(Icons.person_off_rounded, size: 18),
+              label: const Text('Deactivate'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+              ),
+            ),
+          FilledButton.icon(
+            onPressed: _loadingLookups
+                ? null
+                : () async {
+                    final ok = isEditing
+                        ? await _updateDesignation()
+                        : await _addDesignation();
+                    if (ok && drawerContext.mounted) {
+                      Navigator.of(drawerContext).pop();
+                    }
+                  },
+            icon: Icon(
+              isEditing ? Icons.edit_rounded : Icons.add_rounded,
+              size: 18,
+            ),
+            label: Text(isEditing ? 'Update' : 'Add Other Position'),
             style: FilledButton.styleFrom(
               backgroundColor: const Color(0xFFE85D04),
               foregroundColor: Colors.white,
@@ -1000,9 +1521,17 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                       _selectedPolicyId = null;
                       _effectiveFrom = null;
                       _effectiveTo = null;
+                      _selectedDesignation = null;
+                      _designationDeptId = null;
+                      _designationPositionId = null;
+                      _designationEffectiveFrom = null;
+                      _designationEffectiveTo = null;
+                      _designationIsActive = true;
                       _remarksController.clear();
+                      _designationRemarksController.clear();
                     });
                     _loadAssignments();
+                    _loadDesignations();
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(
@@ -1186,7 +1715,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Manage Assignments for ${hasSelection ? sel.fullName : 'Select an employee'}',
+                    'Assignments for ${hasSelection ? sel.fullName : 'Select an employee'}',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -1204,7 +1733,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                         ? null
                         : () => _openAssignmentDrawer(),
                     icon: const Icon(Icons.add_rounded, size: 18),
-                    label: const Text('Add Assignment'),
+                    label: const Text('Add Primary'),
                     style: FilledButton.styleFrom(
                       backgroundColor: const Color(0xFFE85D04),
                       foregroundColor: Colors.white,
@@ -1221,6 +1750,10 @@ class _ManageAssignmentState extends State<ManageAssignment> {
             ),
             const SizedBox(height: 24),
             _buildAssignmentsTable(hasSelection),
+            if (hasSelection) ...[
+              const SizedBox(height: 24),
+              _buildDesignationsSection(),
+            ],
           ],
         ),
       ),
@@ -1280,6 +1813,30 @@ class _ManageAssignmentState extends State<ManageAssignment> {
             ),
             child: Row(
               children: [
+                Icon(
+                  Icons.assignment_ind_rounded,
+                  size: 18,
+                  color: _mutedColor(context),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Primary Assignment',
+                    style: _tableHeaderStyle(context),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+              ),
+            ),
+            child: Row(
+              children: [
                 Expanded(
                   flex: 2,
                   child: Text('Department', style: _tableHeaderStyle(context)),
@@ -1320,7 +1877,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               padding: const EdgeInsets.symmetric(vertical: 48),
               child: Center(
                 child: Text(
-                  'No content in table',
+                  'No primary assignment yet',
                   style: TextStyle(color: _mutedColor(context)),
                 ),
               ),
@@ -1395,6 +1952,206 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               );
             }),
         ],
+      ),
+    );
+  }
+
+  Widget _buildDesignationsSection() {
+    final dark = _isDark(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: dark
+            ? AppTheme.dashMutedSurfaceOf(context).withValues(alpha: 0.65)
+            : AppTheme.lightGray.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            decoration: BoxDecoration(
+              color: AppTheme.dashMutedSurfaceOf(context),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(8),
+              ),
+              border: Border(
+                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.badge_rounded,
+                  size: 18,
+                  color: _mutedColor(context),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Other Positions',
+                    style: _tableHeaderStyle(context),
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: _loadingLookups
+                      ? null
+                      : () => _openDesignationDrawer(),
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('Add Other'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFFE85D04),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (_loadingDesignations)
+            const Padding(
+              padding: EdgeInsets.all(32),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_designations.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 32),
+              child: Center(
+                child: Text(
+                  'No other positions yet',
+                  style: TextStyle(color: _mutedColor(context)),
+                ),
+              ),
+            )
+          else ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: Text(
+                      'Department',
+                      style: _tableHeaderStyle(context),
+                    ),
+                  ),
+                  Expanded(
+                    flex: 3,
+                    child: Text('Position', style: _tableHeaderStyle(context)),
+                  ),
+                  Expanded(
+                    flex: 2,
+                    child: Text(
+                      'Effective period',
+                      style: _tableHeaderStyle(context),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 92,
+                    child: Text('Status', style: _tableHeaderStyle(context)),
+                  ),
+                ],
+              ),
+            ),
+            ..._designations.map((designation) {
+              final isSelected = _selectedDesignation?.id == designation.id;
+              final status = _designationStatus(designation);
+              return Material(
+                color: isSelected
+                    ? (dark
+                          ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                          : AppTheme.primaryNavy.withValues(alpha: 0.08))
+                    : Colors.transparent,
+                child: InkWell(
+                  onTap: () => _openDesignationDrawer(designation: designation),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(
+                          color: AppTheme.dashHairlineOf(
+                            context,
+                          ).withValues(alpha: 0.55),
+                        ),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          flex: 2,
+                          child: Text(
+                            designation.departmentName ?? '—',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: _tableCellStyle(context),
+                          ),
+                        ),
+                        Expanded(
+                          flex: 3,
+                          child: Text(
+                            _designationTitle(designation),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: _tableCellStyle(context),
+                          ),
+                        ),
+                        Expanded(
+                          flex: 2,
+                          child: Text(
+                            _designationEffectivePeriodStr(designation),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: _tableCellStyle(context),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 92,
+                          child: _buildDesignationStatusBadge(status),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesignationStatusBadge(String status) {
+    final Color color = switch (status) {
+      'Active' => const Color(0xFF2E7D32),
+      'Upcoming' => const Color(0xFF1565C0),
+      'Expired' => const Color(0xFF6B7280),
+      _ => const Color(0xFFC62828),
+    };
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: _isDark(context) ? 0.18 : 0.12),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: color.withValues(alpha: 0.55)),
+        ),
+        child: Text(
+          status,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: _isDark(context) ? color.withValues(alpha: 0.9) : color,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
       ),
     );
   }
@@ -1609,7 +2366,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               FilledButton.icon(
                 onPressed: _loadingLookups ? null : () => _addAssignment(),
                 icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Add Assignment'),
+                label: const Text('Add Primary Assignment'),
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFF4CAF50),
                   foregroundColor: Colors.white,
@@ -1682,6 +2439,229 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: content,
+    );
+  }
+
+  Widget _buildDesignationForm({bool framed = true}) {
+    String? safeValue(String? value, List<Map<String, dynamic>> items) {
+      if (value == null) return null;
+      return items.any((item) => item['id']?.toString() == value)
+          ? value
+          : null;
+    }
+
+    final selectedDeptValue = safeValue(_designationDeptId, _departments);
+    final filteredPositions = _positionsForDesignationDepartment;
+    final hasDepartment = selectedDeptValue != null;
+    final canSelectPosition = hasDepartment && filteredPositions.isNotEmpty;
+    final positionSelectLabel = !hasDepartment
+        ? 'Select department first'
+        : filteredPositions.isEmpty
+        ? 'No positions'
+        : 'Select';
+    final selectedPositionValue =
+        filteredPositions.any(
+          (position) => position['id']?.toString() == _designationPositionId,
+        )
+        ? _designationPositionId
+        : null;
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final useRow = constraints.maxWidth >= 560;
+            if (useRow) {
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: _buildFormDropdown(
+                      'Department',
+                      selectedDeptValue,
+                      _departments,
+                      _setDesignationDepartment,
+                      selectLabel: 'Select department',
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildFormDropdown(
+                      'Position',
+                      selectedPositionValue,
+                      filteredPositions,
+                      (v) => _updateDesignationFormState(
+                        () => _designationPositionId = v,
+                      ),
+                      enabled: canSelectPosition,
+                      selectLabel: positionSelectLabel,
+                    ),
+                  ),
+                ],
+              );
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildFormDropdown(
+                  'Department',
+                  selectedDeptValue,
+                  _departments,
+                  _setDesignationDepartment,
+                  selectLabel: 'Select department',
+                ),
+                const SizedBox(height: 16),
+                _buildFormDropdown(
+                  'Position',
+                  selectedPositionValue,
+                  filteredPositions,
+                  (v) => _updateDesignationFormState(
+                    () => _designationPositionId = v,
+                  ),
+                  enabled: canSelectPosition,
+                  selectLabel: positionSelectLabel,
+                ),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 16),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final useRow = constraints.maxWidth >= 520;
+            if (useRow) {
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: _buildDatePicker(
+                      'Effective from',
+                      _designationEffectiveFrom,
+                      (d) => _updateDesignationFormState(
+                        () => _designationEffectiveFrom = d,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: _buildDatePicker(
+                      'Effective to (opt)',
+                      _designationEffectiveTo,
+                      (d) => _updateDesignationFormState(
+                        () => _designationEffectiveTo = d,
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            }
+            return Wrap(
+              spacing: 16,
+              runSpacing: 16,
+              children: [
+                _buildDatePicker(
+                  'Effective from',
+                  _designationEffectiveFrom,
+                  (d) => _updateDesignationFormState(
+                    () => _designationEffectiveFrom = d,
+                  ),
+                ),
+                _buildDatePicker(
+                  'Effective to (opt)',
+                  _designationEffectiveTo,
+                  (d) => _updateDesignationFormState(
+                    () => _designationEffectiveTo = d,
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 16),
+        Container(
+          decoration: BoxDecoration(
+            color: _isDark(context)
+                ? AppTheme.dashMutedSurfaceOf(context)
+                : AppTheme.lightGray.withValues(alpha: 0.2),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppTheme.dashHairlineOf(context)),
+          ),
+          child: SwitchListTile(
+            value: _designationIsActive,
+            onChanged: (value) =>
+                _updateDesignationFormState(() => _designationIsActive = value),
+            title: Text(
+              'Active other position',
+              style: TextStyle(
+                color: _headingColor(context),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            activeThumbColor: const Color(0xFFE85D04),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+          ),
+        ),
+        const SizedBox(height: 16),
+        _buildTextField(
+          label: 'Remarks (optional)',
+          controller: _designationRemarksController,
+          hintText: 'Notes about this other position',
+          maxLines: 2,
+        ),
+      ],
+    );
+
+    if (!framed) {
+      return Padding(padding: const EdgeInsets.all(24), child: content);
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: _isDark(context)
+            ? AppTheme.dashMutedSurfaceOf(context)
+            : AppTheme.lightGray.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: content,
+    );
+  }
+
+  Widget _buildTextField({
+    required String label,
+    required TextEditingController controller,
+    required String hintText,
+    int maxLines = 1,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: _mutedColor(context),
+          ),
+        ),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: controller,
+          style: AppTheme.dashFieldTextStyle(context),
+          decoration: AppTheme.dashInputDecoration(
+            context,
+            hintText: hintText,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 12,
+            ),
+            radius: 8,
+          ),
+          maxLines: maxLines,
+        ),
+      ],
     );
   }
 

@@ -12,6 +12,7 @@ import '../models/leave_request.dart';
 import '../models/leave_type.dart';
 import 'leave_balance_history_screen.dart';
 import 'leave_request_form_screen.dart';
+import '../utils/leave_form_signatories.dart';
 import '../utils/leave_request_pdf.dart';
 import '../utils/responsive_leave_form_host.dart';
 import '../widgets/leave_balance_card.dart';
@@ -319,6 +320,7 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
         target.userId,
         forceRefresh: true,
       );
+      final formSignatories = await loadLeaveFormSignatories(request: target);
 
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -328,6 +330,11 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
       await LeaveRequestPdf.printLeaveRequest(
         request: target,
         balances: balances,
+        certificationOfficerName: formSignatories.certificationOfficer?.name,
+        certificationOfficerTitle: formSignatories.certificationOfficer?.title,
+        recommendationOfficerName: formSignatories.recommendationOfficer?.name,
+        recommendationOfficerTitle:
+            formSignatories.recommendationOfficer?.title,
         name: 'Leave_Application_${target.id ?? target.userId}.pdf',
       );
     } catch (e) {

@@ -28,6 +28,26 @@ bool _hasUndertime(TimeRecord r) {
   return ar.contains('undertime');
 }
 
+bool _hasAttendanceActivity(TimeRecord r) {
+  return r.timeIn != null ||
+      r.breakOut != null ||
+      r.breakIn != null ||
+      r.timeOut != null;
+}
+
+DateTime? _latestAttendanceActivityAt(TimeRecord r) {
+  DateTime? latest;
+  for (final value in [r.timeIn, r.breakOut, r.breakIn, r.timeOut]) {
+    if (value == null) continue;
+    if (latest == null || value.isAfter(latest)) latest = value;
+  }
+  return latest;
+}
+
+DateTime? _displayAttendanceActivityAt(TimeRecord r) {
+  return r.timeIn ?? r.breakIn ?? r.breakOut ?? r.timeOut;
+}
+
 /// Build 30 consecutive calendar days ending at [windowEnd] (inclusive).
 List<DateTime> _daysWindow(DateTime windowEnd) {
   final end = _dateOnly(windowEnd);
@@ -125,14 +145,14 @@ DtrDashboardAnalyticsSnapshot computeDashboardAnalytics({
     qualifies: (r) => !_isExplicitAbsent(r) && _hasUndertime(r),
   );
 
-  final sortedRecent = List<TimeRecord>.from(filtered)
+  final sortedRecent = filtered.where(_hasAttendanceActivity).toList()
     ..sort((a, b) {
       final ad = _dateOnly(a.recordDate);
       final bd = _dateOnly(b.recordDate);
       final c = bd.compareTo(ad);
       if (c != 0) return c;
-      final at = a.timeIn ?? a.createdAt;
-      final bt = b.timeIn ?? b.createdAt;
+      final at = _latestAttendanceActivityAt(a);
+      final bt = _latestAttendanceActivityAt(b);
       if (at == null && bt == null) return 0;
       if (at == null) return 1;
       if (bt == null) return -1;
@@ -147,7 +167,7 @@ DtrDashboardAnalyticsSnapshot computeDashboardAnalytics({
             ? '—'
             : r.employeeName!.trim(),
         department: userIdToDepartment[r.userId]?.trim() ?? '—',
-        timeIn: _formatTime(r.timeIn),
+        timeIn: _formatTime(_displayAttendanceActivityAt(r)),
         status: _statusLabel(r),
         method: _sourceLabel(r.source),
       ),

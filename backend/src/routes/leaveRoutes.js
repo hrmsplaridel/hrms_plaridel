@@ -18,6 +18,7 @@ const {
   validateAdminTransition,
 } = require('../services/leaveWorkflowRules');
 const {
+  getEmployeeDepartment,
   getDepartmentHeadForEmployee,
   isDepartmentHead,
 } = require('../services/departmentHeadService');
@@ -88,6 +89,131 @@ function broadcastDtrLeaveRefresh(action, { userId, leaveRequestId, dateFrom, da
 }
 const protect = [authMiddleware];
 
+async function findActiveAssignmentProfileByUserId(db, userId) {
+  if (!userId) return null;
+  const result = await db.query(
+    `SELECT u.id AS user_id,
+            u.full_name,
+            p.name AS position_title,
+            a.department_id,
+            d.name AS department_name
+     FROM users u
+     LEFT JOIN LATERAL (
+       SELECT a.department_id, a.position_id, a.effective_from
+       FROM assignments a
+       WHERE a.employee_id = u.id
+         AND (a.is_active IS NULL OR a.is_active = true)
+       ORDER BY a.effective_from DESC NULLS LAST, a.created_at DESC NULLS LAST
+       LIMIT 1
+     ) a ON true
+     LEFT JOIN departments d ON d.id = a.department_id
+     LEFT JOIN positions p ON p.id = a.position_id
+     WHERE u.id = $1
+     LIMIT 1`,
+    [userId]
+  );
+  return result.rows[0] || null;
+}
+
+let ensureOtherPositionsPromise = null;
+
+async function ensureEmployeeOtherPositionsTable(db) {
+  if (!ensureOtherPositionsPromise) {
+    ensureOtherPositionsPromise = (async () => {
+      await db.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS employee_other_positions (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+          position_id UUID NOT NULL REFERENCES positions(id) ON DELETE RESTRICT,
+          effective_from DATE NOT NULL,
+          effective_to DATE,
+          is_active BOOLEAN NOT NULL DEFAULT true,
+          remarks TEXT,
+          created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `);
+      await db.query(`
+        CREATE INDEX IF NOT EXISTS idx_employee_other_positions_employee
+          ON employee_other_positions(employee_id, effective_from DESC)
+      `);
+      await db.query(`
+        CREATE INDEX IF NOT EXISTS idx_employee_other_positions_position
+          ON employee_other_positions(position_id)
+      `);
+    })().catch((err) => {
+      ensureOtherPositionsPromise = null;
+      throw err;
+    });
+  }
+  return ensureOtherPositionsPromise;
+}
+
+async function findActiveEmployeeByPositionTitle(db, positionTitle) {
+  await ensureEmployeeOtherPositionsTable(db);
+  const result = await db.query(
+    `WITH candidates AS (
+       SELECT u.id AS user_id,
+              u.full_name,
+              p.name AS position_title,
+              a.department_id,
+              d.name AS department_name,
+              0 AS source_priority,
+              a.effective_from
+       FROM assignments a
+       JOIN users u ON u.id = a.employee_id
+       JOIN positions p ON p.id = a.position_id
+       LEFT JOIN departments d ON d.id = a.department_id
+       WHERE (a.is_active IS NULL OR a.is_active = true)
+         AND (u.is_active IS NULL OR u.is_active = true)
+         AND (p.is_active IS NULL OR p.is_active = true)
+         AND (a.effective_from IS NULL OR a.effective_from <= CURRENT_DATE)
+         AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
+         AND LOWER(p.name) = LOWER($1)
+
+       UNION ALL
+
+       SELECT u.id AS user_id,
+              u.full_name,
+              p.name AS position_title,
+              eop.department_id,
+              d.name AS department_name,
+              1 AS source_priority,
+              eop.effective_from
+       FROM employee_other_positions eop
+       JOIN users u ON u.id = eop.employee_id
+       JOIN positions p ON p.id = eop.position_id
+       LEFT JOIN departments d ON d.id = eop.department_id
+       WHERE eop.is_active = true
+         AND (u.is_active IS NULL OR u.is_active = true)
+         AND (p.is_active IS NULL OR p.is_active = true)
+         AND eop.effective_from <= CURRENT_DATE
+         AND (eop.effective_to IS NULL OR eop.effective_to >= CURRENT_DATE)
+         AND LOWER(p.name) = LOWER($1)
+     )
+     SELECT user_id, full_name, position_title, department_id, department_name
+     FROM candidates
+     ORDER BY source_priority, effective_from DESC NULLS LAST, full_name
+     LIMIT 1`,
+    [positionTitle]
+  );
+  return result.rows[0] || null;
+}
+
+function mapSignatoryProfile(row) {
+  if (!row) return null;
+  return {
+    user_id: row.user_id || null,
+    name: row.full_name || null,
+    position_title: row.position_title || null,
+    department_id: row.department_id || null,
+    department_name: row.department_name || null,
+  };
+}
+
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
 const LEAVE_ATTACHMENT_SUBDIR = 'leave-attachments';
 const SYSTEM_LEAVE_TYPE_NAMES = Object.freeze(Object.keys(LEAVE_TYPE_RULES));
@@ -104,6 +230,7 @@ const CREDIT_BALANCE_BUCKET_TYPES = new Set([
   'vacationLeave',
   'sickLeave',
 ]);
+const HR_CERTIFICATION_POSITION_TITLE = 'Administrative Officer V';
 const SYSTEM_NO_CREDIT_LEAVE_TYPES = new Set([
   'maternityLeave',
   'paternityLeave',
@@ -2063,6 +2190,58 @@ router.get('/my', protect, async (req, res) => {
   } catch (err) {
     console.error('[leave GET /my]', err);
     res.status(500).json({ error: 'Failed to fetch my leave requests' });
+  }
+});
+
+// GET /api/leave/signatories?employee_id=uuid
+// Printable leave form signatories:
+// 7.A = active employee with Administrative Officer V position.
+// 7.B = department head of the requesting employee's current department.
+router.get('/signatories', protect, async (req, res) => {
+  const requesterId = req.user?.id;
+  const role = req.user?.role;
+  if (!requesterId) return res.status(401).json({ error: 'Not authenticated' });
+  const employeeId = (req.query?.employee_id || '').toString().trim();
+  if (!employeeId) return res.status(400).json({ error: 'employee_id is required' });
+
+  try {
+    const privileged = role === 'admin' || role === 'hr';
+    if (!privileged && requesterId !== employeeId) {
+      const requesterDept = await isDepartmentHead(pool, requesterId);
+      const employeeDept = await getEmployeeDepartment(pool, employeeId);
+      if (
+        !requesterDept.isDeptHead ||
+        !requesterDept.departmentId ||
+        !employeeDept?.departmentId ||
+        requesterDept.departmentId !== employeeDept.departmentId
+      ) {
+        return res.status(403).json({ error: 'Not authorized to view leave form signatories' });
+      }
+    }
+
+    const hrCertifier = await findActiveEmployeeByPositionTitle(
+      pool,
+      HR_CERTIFICATION_POSITION_TITLE
+    );
+    const departmentHeadInfo = await getDepartmentHeadForEmployee(pool, employeeId);
+    const departmentHeadProfile = departmentHeadInfo?.departmentHeadUserId
+      ? await findActiveAssignmentProfileByUserId(pool, departmentHeadInfo.departmentHeadUserId)
+      : null;
+
+    res.json({
+      hr_certification_officer: mapSignatoryProfile(hrCertifier),
+      recommendation_officer: departmentHeadProfile
+        ? mapSignatoryProfile({
+            ...departmentHeadProfile,
+            department_id: departmentHeadInfo.departmentId || departmentHeadProfile.department_id,
+            department_name:
+              departmentHeadInfo.departmentName || departmentHeadProfile.department_name,
+          })
+        : null,
+    });
+  } catch (err) {
+    console.error('[leave GET /signatories]', err);
+    res.status(500).json({ error: 'Failed to fetch leave form signatories' });
   }
 });
 

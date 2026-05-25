@@ -9,6 +9,7 @@ import '../leave_provider.dart';
 import '../models/leave_balance.dart';
 import '../models/leave_request.dart';
 import '../models/leave_type.dart';
+import '../utils/leave_form_signatories.dart';
 import '../utils/leave_request_pdf.dart';
 
 typedef LeaveRequestAction = Future<bool> Function(LeaveRequest request);
@@ -1724,10 +1725,16 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
       final balances = _employeeBalances.isNotEmpty
           ? _employeeBalances
           : await context.read<LeaveProvider>().fetchBalancesForUser(userId);
+      final formSignatories = await loadLeaveFormSignatories(request: request);
 
       await LeaveRequestPdf.printLeaveRequest(
         request: request,
         balances: balances,
+        certificationOfficerName: formSignatories.certificationOfficer?.name,
+        certificationOfficerTitle: formSignatories.certificationOfficer?.title,
+        recommendationOfficerName: formSignatories.recommendationOfficer?.name,
+        recommendationOfficerTitle:
+            formSignatories.recommendationOfficer?.title,
         name: 'Leave_Application_${request.id ?? request.userId}.pdf',
       );
     } catch (e) {

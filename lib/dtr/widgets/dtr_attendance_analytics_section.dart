@@ -370,10 +370,9 @@ class _DepartmentDropdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fieldStyle = AppTheme.dashFieldTextStyle(context).copyWith(
-      fontSize: 14,
-      fontWeight: FontWeight.w500,
-    );
+    final fieldStyle = AppTheme.dashFieldTextStyle(
+      context,
+    ).copyWith(fontSize: 14, fontWeight: FontWeight.w500);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
@@ -455,7 +454,7 @@ class _RecentAttendanceTable extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 24),
         child: Center(
           child: Text(
-            'No recent attendance rows for the selected filter.',
+            'No recent attendance activity for the selected filter.',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
           ),

@@ -5,8 +5,10 @@ import '../../landingpage/constants/app_theme.dart';
 
 // --- Public chart widgets (data-driven) ---------------------------------------------------------
 
+enum _AttendanceTrendSeries { present, late, undertime, absent }
+
 /// Line chart: Present, Late, Undertime, Absent (30 points: oldest → newest day).
-class AttendanceTrendLineChart extends StatelessWidget {
+class AttendanceTrendLineChart extends StatefulWidget {
   const AttendanceTrendLineChart({
     super.key,
     required this.presentByDay,
@@ -33,23 +35,84 @@ class AttendanceTrendLineChart extends StatelessWidget {
       v.length == 30 ? v : List<int>.filled(30, 0);
 
   @override
+  State<AttendanceTrendLineChart> createState() =>
+      _AttendanceTrendLineChartState();
+}
+
+class _AttendanceTrendLineChartState extends State<AttendanceTrendLineChart> {
+  final Set<_AttendanceTrendSeries> _visible = {
+    _AttendanceTrendSeries.present,
+    _AttendanceTrendSeries.late,
+    _AttendanceTrendSeries.undertime,
+    _AttendanceTrendSeries.absent,
+  };
+
+  void _toggleSeries(_AttendanceTrendSeries series, bool visible) {
+    setState(() {
+      if (visible) {
+        _visible.add(series);
+      } else {
+        _visible.remove(series);
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (loading && presentByDay.isEmpty) {
+    if (widget.loading && widget.presentByDay.isEmpty) {
       return SizedBox(
-        height: height,
+        height: widget.height,
         child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
       );
     }
 
-    final p = _len30(presentByDay);
-    final l = _len30(lateByDay);
-    final u = _len30(undertimeByDay);
-    final a = _len30(absentByDay);
+    final p = AttendanceTrendLineChart._len30(widget.presentByDay);
+    final l = AttendanceTrendLineChart._len30(widget.lateByDay);
+    final u = AttendanceTrendLineChart._len30(widget.undertimeByDay);
+    final a = AttendanceTrendLineChart._len30(widget.absentByDay);
+
+    final allSeries = <_TrendSeriesConfig>[
+      _TrendSeriesConfig(
+        id: _AttendanceTrendSeries.present,
+        color: AttendanceTrendLineChart._present,
+        label: 'Present',
+        values: p,
+        fillTop: 0.18,
+      ),
+      _TrendSeriesConfig(
+        id: _AttendanceTrendSeries.late,
+        color: AttendanceTrendLineChart._late,
+        label: 'Late',
+        values: l,
+        fillTop: 0.15,
+      ),
+      _TrendSeriesConfig(
+        id: _AttendanceTrendSeries.undertime,
+        color: AttendanceTrendLineChart._undertime,
+        label: 'Undertime',
+        values: u,
+        dotRadius: 2,
+        fillTop: 0.12,
+      ),
+      _TrendSeriesConfig(
+        id: _AttendanceTrendSeries.absent,
+        color: AttendanceTrendLineChart._absent,
+        label: 'Absent',
+        values: a,
+        dotRadius: 2,
+        fillTop: 0.1,
+      ),
+    ];
+
+    final visibleSeries = allSeries
+        .where((item) => _visible.contains(item.id))
+        .toList(growable: false);
 
     var maxVal = 0;
-    for (var i = 0; i < 30; i++) {
-      final m = [p[i], l[i], u[i], a[i]].reduce((x, y) => x > y ? x : y);
-      if (m > maxVal) maxVal = m;
+    for (final item in visibleSeries) {
+      for (final value in item.values) {
+        if (value > maxVal) maxVal = value;
+      }
     }
     final maxY = (maxVal + 5).clamp(5, 200).toDouble();
 
@@ -58,27 +121,19 @@ class AttendanceTrendLineChart extends StatelessWidget {
       (i) => FlSpot((i + 1).toDouble(), series[i].toDouble()),
     );
 
-    final seriesColors = [_present, _late, _undertime, _absent];
-    final seriesLabels = ['Present', 'Late', 'Undertime', 'Absent'];
-
-    LineChartBarData lineBar(
-      List<FlSpot> spotList,
-      Color color, {
-      double dotR = 2.5,
-      double fillTop = 0.14,
-    }) {
+    LineChartBarData lineBar(_TrendSeriesConfig item) {
       return LineChartBarData(
-        spots: spotList,
+        spots: toSpots(item.values),
         isCurved: true,
         curveSmoothness: 0.22,
-        color: color,
+        color: item.color,
         barWidth: 2,
         isStrokeCapRound: true,
         dotData: FlDotData(
           show: true,
           getDotPainter: (s, p, b, i) => FlDotCirclePainter(
-            radius: dotR,
-            color: color,
+            radius: item.dotRadius,
+            color: item.color,
             strokeWidth: 1,
             strokeColor: Colors.white,
           ),
@@ -89,8 +144,8 @@ class AttendanceTrendLineChart extends StatelessWidget {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              color.withValues(alpha: fillTop),
-              color.withValues(alpha: 0.02),
+              item.color.withValues(alpha: item.fillTop),
+              item.color.withValues(alpha: 0.02),
             ],
           ),
         ),
@@ -108,123 +163,143 @@ class AttendanceTrendLineChart extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _ChartLegend(
-          items: [
-            _LegendItem(color: _present, label: 'Present'),
-            _LegendItem(color: _late, label: 'Late'),
-            _LegendItem(color: _undertime, label: 'Undertime'),
-            _LegendItem(color: _absent, label: 'Absent'),
-          ],
+        _ChartSeriesToggles<_AttendanceTrendSeries>(
+          items: allSeries
+              .map(
+                (item) => _SeriesToggleItem(
+                  value: item.id,
+                  color: item.color,
+                  label: item.label,
+                ),
+              )
+              .toList(growable: false),
+          selected: _visible,
+          onChanged: _toggleSeries,
         ),
         const SizedBox(height: 12),
-        SizedBox(
-          height: height,
-          width: double.infinity,
-          child: LineChart(
-            LineChartData(
-              minX: 1,
-              maxX: 30,
-              minY: 0,
-              maxY: maxY,
-              clipData: const FlClipData.all(),
-              gridData: FlGridData(
-                show: true,
-                drawVerticalLine: false,
-                horizontalInterval: maxY > 20 ? 5 : (maxY / 5).ceilToDouble(),
-                getDrawingHorizontalLine: (v) =>
-                    FlLine(color: gridColor, strokeWidth: 1),
+        if (visibleSeries.isEmpty)
+          SizedBox(
+            height: widget.height,
+            width: double.infinity,
+            child: Center(
+              child: Text(
+                'Select at least one metric to view the chart.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: AppTheme.dashTextSecondaryOf(context),
+                ),
               ),
-              titlesData: FlTitlesData(
-                topTitles: const AxisTitles(
-                  sideTitles: SideTitles(showTitles: false),
+            ),
+          )
+        else
+          SizedBox(
+            height: widget.height,
+            width: double.infinity,
+            child: LineChart(
+              LineChartData(
+                minX: 1,
+                maxX: 30,
+                minY: 0,
+                maxY: maxY,
+                clipData: const FlClipData.all(),
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  horizontalInterval: maxY > 20 ? 5 : (maxY / 5).ceilToDouble(),
+                  getDrawingHorizontalLine: (v) =>
+                      FlLine(color: gridColor, strokeWidth: 1),
                 ),
-                rightTitles: const AxisTitles(
-                  sideTitles: SideTitles(showTitles: false),
-                ),
-                leftTitles: AxisTitles(
-                  sideTitles: SideTitles(
-                    showTitles: true,
-                    reservedSize: 32,
-                    interval: maxY > 20 ? 5 : 1,
-                    getTitlesWidget: (v, m) => Text(
-                      v.toInt().toString(),
-                      style: TextStyle(fontSize: 10, color: axisLabelColor),
+                titlesData: FlTitlesData(
+                  topTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
+                  rightTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 32,
+                      interval: maxY > 20 ? 5 : 1,
+                      getTitlesWidget: (v, m) => Text(
+                        v.toInt().toString(),
+                        style: TextStyle(fontSize: 10, color: axisLabelColor),
+                      ),
+                    ),
+                  ),
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 22,
+                      interval: 5,
+                      getTitlesWidget: (v, m) {
+                        final n = v.toInt();
+                        if (n == 1 || n == 10 || n == 20 || n == 30) {
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              '$n',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: axisLabelColor,
+                              ),
+                            ),
+                          );
+                        }
+                        return const SizedBox.shrink();
+                      },
                     ),
                   ),
                 ),
-                bottomTitles: AxisTitles(
-                  sideTitles: SideTitles(
-                    showTitles: true,
-                    reservedSize: 22,
-                    interval: 5,
-                    getTitlesWidget: (v, m) {
-                      final n = v.toInt();
-                      if (n == 1 || n == 10 || n == 20 || n == 30) {
-                        return Padding(
-                          padding: const EdgeInsets.only(top: 6),
-                          child: Text(
-                            '$n',
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: axisLabelColor,
-                            ),
+                borderData: FlBorderData(
+                  show: true,
+                  border: Border(
+                    bottom: BorderSide(color: borderColor),
+                    left: BorderSide(color: borderColor),
+                  ),
+                ),
+                lineTouchData: LineTouchData(
+                  enabled: true,
+                  touchTooltipData: LineTouchTooltipData(
+                    tooltipRoundedRadius: 8,
+                    tooltipPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    maxContentWidth: 220,
+                    // Default fl_chart tooltip is dark; series colors (esp. grey/blue) fail contrast.
+                    getTooltipColor: (_) => AppTheme.dashPanelOf(context),
+                    tooltipBorder: BorderSide(
+                      color: AppTheme.dashHairlineOf(context),
+                    ),
+                    getTooltipItems: (touched) {
+                      return touched.map((s) {
+                        final idx = s.barIndex.clamp(
+                          0,
+                          visibleSeries.length - 1,
+                        );
+                        final item = visibleSeries[idx];
+                        return LineTooltipItem(
+                          '${item.label}: ${s.y.toStringAsFixed(0)}',
+                          TextStyle(
+                            color: item.color,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            height: 1.25,
                           ),
                         );
-                      }
-                      return const SizedBox.shrink();
+                      }).toList();
                     },
                   ),
                 ),
+                lineBarsData: visibleSeries
+                    .map(lineBar)
+                    .toList(growable: false),
               ),
-              borderData: FlBorderData(
-                show: true,
-                border: Border(
-                  bottom: BorderSide(color: borderColor),
-                  left: BorderSide(color: borderColor),
-                ),
-              ),
-              lineTouchData: LineTouchData(
-                enabled: true,
-                touchTooltipData: LineTouchTooltipData(
-                  tooltipRoundedRadius: 8,
-                  tooltipPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  maxContentWidth: 220,
-                  // Default fl_chart tooltip is dark; series colors (esp. grey/blue) fail contrast.
-                  getTooltipColor: (_) => AppTheme.dashPanelOf(context),
-                  tooltipBorder: BorderSide(
-                    color: AppTheme.dashHairlineOf(context),
-                  ),
-                  getTooltipItems: (touched) {
-                    return touched.map((s) {
-                      final idx = s.barIndex.clamp(0, 3);
-                      final color = seriesColors[idx];
-                      final label = seriesLabels[idx];
-                      return LineTooltipItem(
-                        '$label: ${s.y.toStringAsFixed(0)}',
-                        TextStyle(
-                          color: color,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                          height: 1.25,
-                        ),
-                      );
-                    }).toList();
-                  },
-                ),
-              ),
-              lineBarsData: [
-                lineBar(toSpots(p), _present, fillTop: 0.18),
-                lineBar(toSpots(l), _late, fillTop: 0.15),
-                lineBar(toSpots(u), _undertime, dotR: 2, fillTop: 0.12),
-                lineBar(toSpots(a), _absent, dotR: 2, fillTop: 0.1),
-              ],
+              duration: Duration.zero,
             ),
-            duration: Duration.zero,
           ),
-        ),
       ],
     );
   }
@@ -569,6 +644,147 @@ class _LegendItem {
 
   final Color color;
   final String label;
+}
+
+class _TrendSeriesConfig {
+  const _TrendSeriesConfig({
+    required this.id,
+    required this.color,
+    required this.label,
+    required this.values,
+    this.dotRadius = 2.5,
+    this.fillTop = 0.14,
+  });
+
+  final _AttendanceTrendSeries id;
+  final Color color;
+  final String label;
+  final List<int> values;
+  final double dotRadius;
+  final double fillTop;
+}
+
+class _SeriesToggleItem<T> {
+  const _SeriesToggleItem({
+    required this.value,
+    required this.color,
+    required this.label,
+  });
+
+  final T value;
+  final Color color;
+  final String label;
+}
+
+class _ChartSeriesToggles<T> extends StatelessWidget {
+  const _ChartSeriesToggles({
+    required this.items,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final List<_SeriesToggleItem<T>> items;
+  final Set<T> selected;
+  final void Function(T value, bool selected) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 8,
+      children: items
+          .map((item) {
+            final checked = selected.contains(item.value);
+            return _ChartSeriesToggle<T>(
+              item: item,
+              checked: checked,
+              onChanged: onChanged,
+            );
+          })
+          .toList(growable: false),
+    );
+  }
+}
+
+class _ChartSeriesToggle<T> extends StatelessWidget {
+  const _ChartSeriesToggle({
+    required this.item,
+    required this.checked,
+    required this.onChanged,
+  });
+
+  final _SeriesToggleItem<T> item;
+  final bool checked;
+  final void Function(T value, bool selected) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final textColor = AppTheme.dashTextSecondaryOf(context);
+    final borderColor = checked
+        ? item.color.withValues(alpha: 0.55)
+        : AppTheme.dashHairlineOf(context);
+    final bgColor = checked
+        ? item.color.withValues(
+            alpha: AppTheme.dashIsDark(context) ? 0.14 : 0.08,
+          )
+        : Colors.transparent;
+
+    return Material(
+      color: bgColor,
+      borderRadius: BorderRadius.circular(6),
+      child: InkWell(
+        onTap: () => onChanged(item.value, !checked),
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          height: 32,
+          padding: const EdgeInsets.only(left: 8, right: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: borderColor),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: Checkbox(
+                  value: checked,
+                  onChanged: (value) => onChanged(item.value, value ?? false),
+                  activeColor: item.color,
+                  checkColor: Colors.white,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                  side: BorderSide(color: item.color, width: 1.6),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                width: 14,
+                height: 3,
+                decoration: BoxDecoration(
+                  color: item.color,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(width: 7),
+              Text(
+                item.label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: textColor,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _ChartLegend extends StatelessWidget {

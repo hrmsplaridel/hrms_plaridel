@@ -7,10 +7,11 @@ Use these placeholders:
 - `YOUR_SERVER_IP`: your VPS public IP, example `79.108.225.134`
 - `YOUR_DOMAIN`: your API domain, example `hrms.example.gov.ph`
 - `YOUR_REPO_URL`: your Git repository URL (GitHub or other)
-- `YOUR_OFFICE_TAILSCALE_IP`: the office PostgreSQL host Tailscale address, example `100.64.0.12` (shown in Tailscale admin or `tailscale ip -4` on that machine)
-- `YOUR_VPS_TAILSCALE_IP`: the VPS Tailscale address (for office firewall or Postgres allow rules if you prefer allowlisting the VPS)
-- `YOUR_DB_USER`: PostgreSQL role used only for the API, example `hrms_api`
+- `YOUR_OFFICE_TAILSCALE_IP`: the office PostgreSQL host Tailscale address (Tailscale admin → Machines, or `tailscale ip -4` on that PC), example `100.88.123.26`
+- `YOUR_VPS_TAILSCALE_IP`: the VPS Tailscale address (for `pg_hba.conf` and optional firewall allow rules), example `100.108.196.109`
+- `YOUR_DB_USER`: PostgreSQL role the API uses, often `postgres` on a dev/office install or a dedicated role such as `hrms_api`
 - `YOUR_DB_PASSWORD`: that role password (avoid raw `@` in passwords or encode as `%40` inside URLs)
+- `YOUR_DB_PORT`: PostgreSQL port on the office host, default `5432`; use `5433` if you installed PostgreSQL 18 alongside an older version on `5432`
 - `YOUR_EMAIL`: email for Let's Encrypt certificate notices
 
 Example names you can copy or rename:
@@ -26,8 +27,11 @@ Example names you can copy or rename:
 Important layout:
 
 - PostgreSQL runs in the office, not on the VPS.
-- Do not expose PostgreSQL port 5432 to the public internet.
-- Tailscale runs on the Kamatera VPS and on the office machine that hosts PostgreSQL (or on a PC that can reach Postgres on the LAN with subnet routing enabled in Tailscale, advanced).
+- Do not expose PostgreSQL (`5432`, `5433`, or any custom port) to the public internet. Only the VPS reaches it over Tailscale.
+- Tailscale runs on the Kamatera VPS and on the Windows PC that hosts PostgreSQL (machine name in Tailscale is often something like `earlbullet`). Install Tailscale on your dev laptop only if that laptop is not the DB host and you want admin access to the tailnet.
+- Node.js on the VPS (API runtime) and `postgresql-client` on the VPS (`psql` for tests) do not need to match the PostgreSQL server major version on the office PC. PostgreSQL 18 on the office with client tools 16 on the VPS is fine.
+
+**Deployment order (summary):** VPS basics (sections 1–5) → Node.js (6) → Tailscale VPS (7) → Tailscale office PC (8) → PostgreSQL config on office (9) → `psql` test from VPS (10) → clone app (11+) → DNS/HTTPS when Nginx is ready (16–17). DNS A records can point at the VPS before steps 16–17; Certbot needs Nginx on port 80 first.
 
 ---
 
@@ -210,17 +214,56 @@ sudo ufw delete allow 3000/tcp
 sudo ufw status
 ```
 
+## 5.1 Optional: apply Ubuntu updates and reboot
+
+After first login, Ubuntu may report packages that can be upgraded and sometimes `*** System restart required ***`.
+
+```bash
+sudo apt update
+sudo apt list --upgradable
+sudo apt upgrade -y
+```
+
+If reboot is required:
+
+```bash
+test -f /var/run/reboot-required && echo "Reboot needed" || echo "No reboot needed"
+sudo reboot
+```
+
+SSH back in as `deploy`, then continue with section 6. Rebooting before Tailscale or PostgreSQL testing is fine and often recommended after kernel updates.
+
 ---
 
 # 6. Install Node.js LTS
 
+Use **Node.js 22 or 24** on the VPS (Active or Maintenance LTS). Do **not** install Node 20 on new deployments in 2026; it is end-of-life.
+
+Your development PC can stay on Node 22 while the VPS uses 24; they do not have to match exactly.
+
 Run on the VPS:
 
 ```bash
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 sudo apt install -y nodejs build-essential
 node -v
 npm -v
+```
+
+Expected: `node -v` shows **v24.x** (or v22.x if you deliberately chose `setup_22.x`).
+
+`build-essential` is required so npm packages with native code (for example `bcrypt`) compile during `npm install`.
+
+### 6.1 Node on your Windows dev PC (optional)
+
+Updating Node on the PC is separate from the VPS. If the API already runs locally, you can keep Node 22 until you choose to upgrade. To align with the VPS later, install Node 24 LTS from https://nodejs.org or run `winget install OpenJS.NodeJS.LTS` (use the same Tailscale/Google account only for Tailscale, not for Node).
+
+Installing Node on Windows does **not** change files in your project folder; after a major Node upgrade, refresh dependencies if needed:
+
+```powershell
+cd C:\path\to\hrms_plaridel\backend
+Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue
+npm install
 ```
 
 ---
@@ -234,74 +277,165 @@ curl -fsSL https://tailscale.com/install.sh | sh
 sudo tailscale up
 ```
 
-Complete browser login when the command prints a URL.
+The command prints a URL like `https://login.tailscale.com/a/...`. Open it on your PC (not on the VPS), sign in with **Google or GitHub**, and approve adding the machine (hostname often `hrmsplaridel`).
 
-Confirm Tailscale IP:
+After login, confirm on the VPS:
 
 ```bash
 tailscale ip -4
+tailscale status
 ```
 
-Save this value as `YOUR_VPS_TAILSCALE_IP` if you document allow rules.
+Save the IPv4 address as `YOUR_VPS_TAILSCALE_IP` (example `100.108.196.109`). You need it for `pg_hba.conf` on the office PC.
 
 ---
 
 # 8. Install Tailscale on the office PostgreSQL host
 
-On the Windows or Linux machine that runs PostgreSQL (or that has LAN access to it with subnet routing, advanced):
+On the **Windows PC where PostgreSQL actually runs** (not only your dev laptop unless that laptop hosts the database):
 
-1. Install Tailscale from https://tailscale.com/download
-2. Sign in with the same Tailscale organization as the VPS
-3. Note the machine Tailscale IP, example `100.x.x.x`
+1. Install Tailscale from https://tailscale.com/download (Windows).
+2. Sign in with the **same account** you used on the VPS (Google or GitHub is fine; use the same provider and email on both).
+3. When the installer finishes, you can click **Close** on the “Connect to your tailnet devices” dialog.
+4. Note this PC’s Tailscale IP (`100.x.x.x`) from the system tray Tailscale icon or https://login.tailscale.com/admin/machines → Machines.
 
-Save this as `YOUR_OFFICE_TAILSCALE_IP` for `DATABASE_URL` and for testing.
+Save it as `YOUR_OFFICE_TAILSCALE_IP` (example `100.88.123.26`, hostname example `earlbullet`).
 
-From the VPS, test:
+From the VPS, test connectivity (high latency from PH to Singapore is normal):
 
 ```bash
 ping -c 4 YOUR_OFFICE_TAILSCALE_IP
+tailscale status
 ```
+
+You should see the office machine as **active** (ideally `direct`, not only relay).
 
 ---
 
 # 9. Office PostgreSQL listen addresses and authentication
 
-On the office DB server:
+PostgreSQL must accept TCP connections on the office machine. The VPS connects to `YOUR_OFFICE_TAILSCALE_IP`:`YOUR_DB_PORT`, not to `localhost` on the VPS.
 
-1. Edit postgresql.conf and set listen_addresses so the server accepts connections on the interface Tailscale uses. Follow the PostgreSQL documentation for listen_addresses (the setting that listens on all configured interfaces is the standard choice when you lock down access with pg_hba.conf).
+### 9.1 Find your port and config folder (Windows)
 
-Narrowing to specific interfaces is possible if you know your OS layout; restrict who may connect using pg_hba.conf and Windows Firewall, not only listen_addresses.
+Default PostgreSQL uses port **5432**. If you installed **PostgreSQL 18** alongside an older version, it may use **5433** (check in pgAdmin, or `postgresql.conf`).
 
-2. Edit `pg_hba.conf` and add a line that allows the VPS to connect over Tailscale only if you use one fixed VPS Tailscale IP (recommended narrow rule):
+Typical data directory on Windows:
+
+```text
+C:\Program Files\PostgreSQL\18\data\
+```
+
+Files to edit:
+
+```text
+postgresql.conf
+pg_hba.conf
+```
+
+Find the Windows service name in `services.msc` (example `postgresql-x64-18`).
+
+### 9.2 `postgresql.conf` (Windows and Linux)
+
+Open `postgresql.conf` as Administrator and set:
+
+```conf
+listen_addresses = '*'
+port = 5433
+```
+
+Use your real port (`5432` or `5433`). `listen_addresses = '*'` is normal when access is restricted by `pg_hba.conf` and the office firewall, not by port-forwarding from the internet.
+
+Save the file, then **restart** the PostgreSQL Windows service (Services → postgresql-x64-… → Restart). On Linux: `sudo systemctl restart postgresql`.
+
+### 9.3 `pg_hba.conf` — allow only the VPS Tailscale IP
+
+Open `pg_hba.conf` in the same `data` folder (Notepad **as Administrator**, File → Open → show **All files**).
+
+In the `# IPv4 local connections:` section, **keep** existing lines such as `127.0.0.1`. Add **one new line** below them (tabs or spaces are fine):
 
 ```text
 host    hrms_plaridel    YOUR_DB_USER    YOUR_VPS_TAILSCALE_IP/32    scram-sha-256
 ```
 
-Replace database name and user name to match your setup. Use a dedicated role for the API, not the postgres superuser.
+Example if user is `postgres`, VPS Tailscale IP is `100.108.196.109`:
 
-3. Reload or restart PostgreSQL. On Linux:
-
-```bash
-sudo systemctl reload postgresql
+```text
+host    hrms_plaridel    postgres    100.108.196.109/32    scram-sha-256
 ```
 
-On Windows, restart the PostgreSQL service from Services or use pg_ctl.
+- Database name must match your DB (`hrms_plaridel`).
+- `YOUR_DB_USER` must match what you put in `DATABASE_URL` on the VPS.
+- Using the `postgres` superuser works for small deployments; a dedicated `hrms_api` role is better for production.
 
-4. On the office firewall, do not forward port 5432 from the internet. Allow PostgreSQL only from LAN and from Tailscale as needed.
+Save, then **restart** the PostgreSQL service again.
+
+### 9.4 Windows Firewall (inbound)
+
+Allow the database port for Tailscale/private networks so the VPS can connect.
+
+**Windows Defender Firewall with Advanced Security** → **Inbound Rules** → **New Rule**:
+
+1. Rule type: **Port**
+2. TCP, specific local ports: **YOUR_DB_PORT** (example `5433`)
+3. Action: **Allow the connection**
+4. Profile: check **Domain**, **Private**, and **Public** (or at least **Private** while testing)
+5. Name: example `PostgreSQL YOUR_DB_PORT Tailscale`
+
+Do **not** set up router port-forwarding of 5432/5433 to the internet.
+
+### 9.5 Linux office server (if applicable)
+
+Same logic: `listen_addresses`, `port` in `postgresql.conf`, `pg_hba.conf` line with `YOUR_VPS_TAILSCALE_IP/32`, `ufw` or firewalld allowing the port from Tailscale only if you use host firewall rules.
+
+### 9.6 Local test on the office PC
+
+```powershell
+psql -U YOUR_DB_USER -p YOUR_DB_PORT -d hrms_plaridel -c "SELECT 1;"
+```
 
 ---
 
 # 10. Test database connectivity from the VPS
 
-On the Kamatera VPS:
+Install the PostgreSQL **client** on the VPS (provides `psql`; version 16 client against PostgreSQL 18 server is OK):
 
 ```bash
 sudo apt install -y postgresql-client
-psql "postgresql://YOUR_DB_USER:YOUR_DB_PASSWORD@YOUR_OFFICE_TAILSCALE_IP:5432/hrms_plaridel" -c "SELECT 1;"
 ```
 
-If this fails, fix Tailscale login on both sides, `pg_hba.conf`, password, listen_addresses, or office firewall before continuing.
+If you see `Command 'psql' not found`, the package is not installed yet; run the command above.
+
+Test from the VPS to the office over Tailscale (use **your** port and password):
+
+```bash
+psql "postgresql://YOUR_DB_USER:YOUR_DB_PASSWORD@YOUR_OFFICE_TAILSCALE_IP:YOUR_DB_PORT/hrms_plaridel" -c "SELECT 1;"
+```
+
+Example with port `5433`:
+
+```bash
+psql "postgresql://postgres:YOUR_DB_PASSWORD@100.88.123.26:5433/hrms_plaridel" -c "SELECT 1;"
+```
+
+Success looks like:
+
+```text
+ ?column?
+----------
+        1
+(1 row)
+```
+
+If this fails, fix Tailscale on both sides, `listen_addresses`, `port`, `pg_hba.conf`, Windows Firewall, user/password, or database name before continuing.
+
+| Symptom | Likely fix |
+|--------|------------|
+| `psql: command not found` | Run `sudo apt install -y postgresql-client` on the VPS |
+| `Connection refused` | PostgreSQL not listening on that port; wrong `port` in `postgresql.conf`; service stopped |
+| `no pg_hba.conf entry` | Add/fix `pg_hba` line; restart PostgreSQL |
+| `password authentication failed` | Wrong user/password in URL |
+| Timeout | Windows Firewall blocking `YOUR_DB_PORT`; Tailscale offline on office PC |
 
 ---
 
@@ -355,12 +489,13 @@ nano .env
 Minimal content:
 
 ```env
-DATABASE_URL=postgresql://YOUR_DB_USER:YOUR_DB_PASSWORD@YOUR_OFFICE_TAILSCALE_IP:5432/hrms_plaridel
+DATABASE_URL=postgresql://YOUR_DB_USER:YOUR_DB_PASSWORD@YOUR_OFFICE_TAILSCALE_IP:YOUR_DB_PORT/hrms_plaridel
 JWT_SECRET=PASTE_FIRST_HEX_HERE
 JWT_REFRESH_SECRET=PASTE_SECOND_HEX_HERE
 HOST=127.0.0.1
 PORT=3000
 TRUST_PROXY=1
+HRMS_TIMEZONE=Asia/Manila
 ```
 
 Notes:
@@ -673,6 +808,8 @@ sudo systemctl reload nginx
 
 # 16. Domain DNS
 
+You can create these records **before** finishing sections 11–15. The domain can point to the VPS while you still configure Tailscale and PostgreSQL. HTTPS (section 17) only works after Nginx listens on port 80.
+
 In your DNS provider, add:
 
 ```text
@@ -696,6 +833,8 @@ Check from Windows:
 ```powershell
 nslookup YOUR_DOMAIN
 ```
+
+The `Server:` line in `nslookup` may show your router (`fe80::1`); that is normal. What matters is that the **Address** for your hostname is `YOUR_SERVER_IP`.
 
 ---
 
@@ -866,21 +1005,25 @@ sudo journalctl -u hrms-api -n 100 --no-pager
 curl -s http://127.0.0.1:3000/health/db
 ```
 
-Test psql from VPS to office again:
+Test psql from VPS to office again (include `YOUR_DB_PORT`, not only 5432):
 
 ```bash
-psql "postgresql://YOUR_DB_USER:YOUR_DB_PASSWORD@YOUR_OFFICE_TAILSCALE_IP:5432/hrms_plaridel" -c "SELECT 1;"
+psql "postgresql://YOUR_DB_USER:YOUR_DB_PASSWORD@YOUR_OFFICE_TAILSCALE_IP:YOUR_DB_PORT/hrms_plaridel" -c "SELECT 1;"
 ```
 
 ## 26.2 Tailscale works but Postgres refuses
 
-Revisit `pg_hba.conf`, role password, database name, and `listen_addresses`.
+Revisit `pg_hba.conf` (VPS IP `/32`, correct database and user), `postgresql.conf` (`listen_addresses`, `port`), and PostgreSQL service restarted on Windows.
 
-## 26.3 Could not translate host name containing password
+## 26.3 Connection refused on port 5432 but PostgreSQL uses 5433
+
+Your `DATABASE_URL` and firewall rule must use the same port as `port =` in `postgresql.conf` (often `5433` for PostgreSQL 18 on Windows).
+
+## 26.4 Could not translate host name containing password
 
 If the password contains `@`, encode it as `%40` inside `DATABASE_URL`, or change the password.
 
-## 26.4 Nginx 502 Bad Gateway
+## 26.5 Nginx 502 Bad Gateway
 
 Node is down or not listening:
 
@@ -889,7 +1032,7 @@ sudo systemctl status hrms-api --no-pager
 curl -s http://127.0.0.1:3000/health
 ```
 
-## 26.5 Flutter web CORS errors
+## 26.6 Flutter web CORS errors
 
 Set `CORS_ORIGINS` in backend `.env` to the exact web origin including scheme and port. Mobile apps do not use browser CORS.
 

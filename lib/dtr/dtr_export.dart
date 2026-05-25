@@ -117,20 +117,20 @@ class DtrExport {
         queryParameters: {'status': 'Active', 'role': 'All'},
       );
       final rows = res.data ?? const <dynamic>[];
+      final meedoManagerName =
+          _findEmployeeNameByExactPosition(rows, _meedoManagerPositionTitle) ??
+          await _findOtherPositionEmployeeName(_meedoManagerPositionTitle);
+      final hrOfficerName =
+          _findEmployeeNameByExactPosition(rows, _hrOfficerPositionTitle) ??
+          await _findOtherPositionEmployeeName(_hrOfficerPositionTitle);
       return DtrExportSignatories(
         meedoManager: DtrExportSignatory(
           positionTitle: _meedoManagerPositionTitle,
-          employeeName: _findEmployeeNameByExactPosition(
-            rows,
-            _meedoManagerPositionTitle,
-          ),
+          employeeName: meedoManagerName,
         ),
         hrOfficer: DtrExportSignatory(
           positionTitle: _hrOfficerPositionTitle,
-          employeeName: _findEmployeeNameByExactPosition(
-            rows,
-            _hrOfficerPositionTitle,
-          ),
+          employeeName: hrOfficerName,
         ),
       );
     } catch (_) {
@@ -152,6 +152,31 @@ class DtrExport {
       if (actualPosition != expectedPosition) continue;
       final name = row['full_name']?.toString().trim();
       if (name != null && name.isNotEmpty) return name;
+    }
+    return null;
+  }
+
+  static Future<String?> _findOtherPositionEmployeeName(
+    String positionTitle,
+  ) async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/employee-other-positions',
+        queryParameters: {'position_title': positionTitle, 'status': 'Active'},
+      );
+      final rows = res.data ?? const <dynamic>[];
+      for (final row in rows) {
+        if (row is! Map) continue;
+        final actualPosition = row['position_name']
+            ?.toString()
+            .trim()
+            .toLowerCase();
+        if (actualPosition != positionTitle.trim().toLowerCase()) continue;
+        final name = row['employee_name']?.toString().trim();
+        if (name != null && name.isNotEmpty) return name;
+      }
+    } catch (_) {
+      // Keep DTR export usable even if optional Other Positions lookup fails.
     }
     return null;
   }

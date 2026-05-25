@@ -289,6 +289,10 @@ class _ImportBiometricAttendanceLogsDialogState
         matchedRowsAttempted: matchedRows.length,
         inserted: apiResponse.inserted,
         duplicatesSkipped: apiResponse.duplicatesSkipped,
+        skippedNoSchedule: apiResponse.skippedNoSchedule,
+        skippedHoliday: apiResponse.skippedHoliday,
+        skippedLeave: apiResponse.skippedLeave,
+        skippedInvalidTimestamp: apiResponse.skippedInvalidTimestamp,
         unmatchedRows: unmatchedRowCount,
         invalidRows: preview.invalidRows,
         summariesInserted: apiResponse.summariesInserted,
@@ -354,6 +358,26 @@ class _ImportBiometricAttendanceLogsDialogState
               _PreviewRow(
                 label: 'Duplicates skipped',
                 value: '${result.duplicatesSkipped}',
+              ),
+              const SizedBox(height: 6),
+              _PreviewRow(
+                label: 'Skipped: no schedule',
+                value: '${result.skippedNoSchedule}',
+              ),
+              const SizedBox(height: 6),
+              _PreviewRow(
+                label: 'Skipped: holiday',
+                value: '${result.skippedHoliday}',
+              ),
+              const SizedBox(height: 6),
+              _PreviewRow(
+                label: 'Skipped: approved leave',
+                value: '${result.skippedLeave}',
+              ),
+              const SizedBox(height: 6),
+              _PreviewRow(
+                label: 'Skipped: invalid timestamp',
+                value: '${result.skippedInvalidTimestamp}',
               ),
               const SizedBox(height: 6),
               _PreviewRow(
@@ -457,9 +481,11 @@ class _ImportBiometricAttendanceLogsDialogState
                 width: double.infinity,
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: AppTheme.lightGray.withOpacity(0.35),
+                  color: AppTheme.lightGray.withValues(alpha: 0.35),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.black.withOpacity(0.08)),
+                  border: Border.all(
+                    color: Colors.black.withValues(alpha: 0.08),
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -602,8 +628,8 @@ class _DatFileDropArea extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DragTarget<Object>(
-      onWillAccept: (_) => true,
-      onAccept: onDropPayload,
+      onWillAcceptWithDetails: (_) => true,
+      onAcceptWithDetails: (details) => onDropPayload(details.data),
       builder: (context, _, __) {
         return InkWell(
           onTap: () {
@@ -614,10 +640,10 @@ class _DatFileDropArea extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: AppTheme.lightGray.withOpacity(0.35),
+              color: AppTheme.lightGray.withValues(alpha: 0.35),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: Colors.black.withOpacity(0.15),
+                color: Colors.black.withValues(alpha: 0.15),
                 width: 1,
               ),
             ),
@@ -727,9 +753,9 @@ class _MatchingSummarySection extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppTheme.lightGray.withOpacity(0.35),
+        color: AppTheme.lightGray.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.08)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
