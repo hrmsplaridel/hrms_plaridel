@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../landingpage/constants/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../docutracker_provider.dart';
 import '../docutracker_styles.dart';
@@ -10,12 +9,13 @@ import '../models/document_action.dart';
 import '../models/document_status.dart';
 import '../models/document_type.dart';
 import '../theme/docutracker_tokens.dart';
+import '../docutracker_document_navigation.dart';
 import '../widgets/docutracker_create_document_dialog.dart';
+import '../widgets/docutracker_error_banner.dart';
 import '../widgets/docutracker_module_header.dart';
-import '../widgets/docutracker_responsive_body.dart';
 import '../widgets/docutracker_status_badge.dart';
 import '../widgets/docutracker_status_theme.dart';
-import 'docutracker_document_detail_screen.dart';
+import '../widgets/docutracker_warm_widgets.dart';
 
 /// Document list screen. Step 2: Role-Based Visibility - shows only
 /// documents assigned to user, their office, or department.
@@ -73,289 +73,217 @@ class _DocuTrackerDocumentsScreenState
   Widget build(BuildContext context) {
     final provider = context.watch<DocuTrackerProvider>();
     final auth = context.watch<AuthProvider>();
+    final userId = auth.user?.id ?? '';
+    final visibleDocuments = docuTrackerDocumentsForDisplay(
+      documents: provider.documents,
+      isAdmin: widget.isAdmin,
+      userId: userId,
+    );
 
-    return DocuTrackerResponsiveBody(
-      maxWidth: DocuTrackerTokens.maxContentWidth,
-      padding: EdgeInsets.zero,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          DocuTrackerModuleHeader(
-            title: 'Documents',
-            subtitle:
-                'Everything you can see by assignment, office, or department.',
-            trailing: _canCreateDocuments == true
-                ? FilledButton.icon(
-                    onPressed: provider.loading
-                        ? null
-                        : () => showDocuTrackerCreateDocumentDialog(
-                            context,
-                            auth: auth,
-                            provider: provider,
-                            onCreated: _load,
-                          ),
-                    icon: const Icon(Icons.add_rounded, size: 18),
-                    label: const Text('Create Draft'),
-                    style: DocuTrackerStyles.primaryButtonStyleNavy(),
-                  )
-                : null,
-          ),
-          const SizedBox(height: 16),
-          // Modern Dashboard Toolbar
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFE5E7EB)),
+    final showFab = _canCreateDocuments == true;
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            DocuTrackerModuleHeader(
+              title: 'Documents',
+              subtitle: widget.isAdmin
+                  ? 'All routed documents in the organization.'
+                  : 'Documents you created, hold, or are assigned to review.',
             ),
-            child: Column(
-              children: [
-                // Search Bar
-                TextField(
-                  onChanged: (val) {
-                    setState(() => _searchQuery = val.toLowerCase());
-                  },
-                  decoration: InputDecoration(
-                    hintText: 'Search documents by title, number, or sender...',
-                    hintStyle: const TextStyle(
-                      color: Color(0xFF9CA3AF),
-                      fontSize: 14,
-                    ),
-                    prefixIcon: const Icon(
-                      Icons.search_rounded,
-                      color: Color(0xFF9CA3AF),
-                      size: 20,
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(
-                        color: Color(0xFF3B82F6),
-                        width: 1.5,
+            const SizedBox(height: 16),
+            DocuTrackerWarmSurfaceCard(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.tune_rounded,
+                        size: 18,
+                        color: DocuTrackerTokens.terracotta,
                       ),
-                    ),
-                    isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Filters',
+                        style: DocuTrackerTokens.titleStyle(
+                          context,
+                        ).copyWith(fontSize: 13),
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 12),
-                // Filter Chips & Sort
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    const Icon(
-                      Icons.filter_list_rounded,
-                      size: 16,
-                      color: Color(0xFF6B7280),
+                  const SizedBox(height: 10),
+                  TextField(
+                    onChanged: (val) {
+                      setState(() => _searchQuery = val.toLowerCase());
+                    },
+                    decoration: DocuTrackerTokens.warmSearchDecoration(
+                      'Search documents by title, number, or sender...',
                     ),
-                    DocuTrackerStyles.filterDropdownWrapper(
-                      DropdownButton<String?>(
-                        value: _filterType,
-                        hint: const Text('Type'),
-                        underline: const SizedBox.shrink(),
-                        isDense: true,
-                        iconSize: 18,
-                        items: [
-                          const DropdownMenuItem(
-                            value: null,
-                            child: Text('All types'),
-                          ),
-                          ...DocumentType.values.map(
-                            (t) => DropdownMenuItem(
-                              value: t.value,
-                              child: Text(t.displayName),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            _warmDropdown(
+                              DropdownButton<String?>(
+                                value: _filterType,
+                                hint: const Text('Type'),
+                                underline: const SizedBox.shrink(),
+                                isDense: true,
+                                iconSize: 18,
+                                items: [
+                                  const DropdownMenuItem(
+                                    value: null,
+                                    child: Text('All types'),
+                                  ),
+                                  ...DocumentType.values.map(
+                                    (t) => DropdownMenuItem(
+                                      value: t.value,
+                                      child: Text(t.displayName),
+                                    ),
+                                  ),
+                                ],
+                                onChanged: (v) {
+                                  setState(() => _filterType = v);
+                                  _load();
+                                },
+                              ),
                             ),
-                          ),
-                        ],
-                        onChanged: (v) {
-                          setState(() => _filterType = v);
-                          _load();
-                        },
-                      ),
-                    ),
-                    DocuTrackerStyles.filterDropdownWrapper(
-                      DropdownButton<DocumentStatus?>(
-                        value: _filterStatus,
-                        hint: const Text('Status'),
-                        underline: const SizedBox.shrink(),
-                        isDense: true,
-                        iconSize: 18,
-                        items: [
-                          const DropdownMenuItem(
-                            value: null,
-                            child: Text('All statuses'),
-                          ),
-                          ...DocumentStatus.values.map(
-                            (s) => DropdownMenuItem(
-                              value: s,
-                              child: Text(s.displayName),
+                            _warmDropdown(
+                              DropdownButton<DocumentStatus?>(
+                                value: _filterStatus,
+                                hint: const Text('Status'),
+                                underline: const SizedBox.shrink(),
+                                isDense: true,
+                                iconSize: 18,
+                                items: [
+                                  const DropdownMenuItem(
+                                    value: null,
+                                    child: Text('All statuses'),
+                                  ),
+                                  ...DocumentStatus.values.map(
+                                    (s) => DropdownMenuItem(
+                                      value: s,
+                                      child: Text(s.displayName),
+                                    ),
+                                  ),
+                                ],
+                                onChanged: (v) {
+                                  setState(() => _filterStatus = v);
+                                  _load();
+                                },
+                              ),
                             ),
-                          ),
-                        ],
-                        onChanged: (v) {
-                          setState(() => _filterStatus = v);
-                          _load();
-                        },
-                      ),
-                    ),
-                    DocuTrackerStyles.filterDropdownWrapper(
-                      DropdownButton<bool>(
-                        value: _sortByDeadline,
-                        underline: const SizedBox.shrink(),
-                        isDense: true,
-                        iconSize: 18,
-                        items: const [
-                          DropdownMenuItem(
-                            value: false,
-                            child: Text('Sort by newest'),
-                          ),
-                          DropdownMenuItem(
-                            value: true,
-                            child: Text('Sort by deadline'),
-                          ),
-                        ],
-                        onChanged: (v) {
-                          if (v != null) {
-                            setState(() => _sortByDeadline = v);
-                          }
-                        },
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.refresh_rounded, size: 20),
-                      onPressed: provider.loading ? null : _load,
-                      tooltip: 'Refresh',
-                      style: IconButton.styleFrom(
-                        foregroundColor: const Color(0xFF4B5563),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
+                            _warmDropdown(
+                              DropdownButton<bool>(
+                                value: _sortByDeadline,
+                                underline: const SizedBox.shrink(),
+                                isDense: true,
+                                iconSize: 18,
+                                items: const [
+                                  DropdownMenuItem(
+                                    value: false,
+                                    child: Text('Sort by newest'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: true,
+                                    child: Text('Sort by deadline'),
+                                  ),
+                                ],
+                                onChanged: (v) {
+                                  if (v != null) {
+                                    setState(() => _sortByDeadline = v);
+                                  }
+                                },
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _QuickStatusChip(
-                      label: 'Overdue',
-                      selected: _filterStatus == DocumentStatus.overdue,
-                      onTap: () {
-                        setState(() {
-                          _filterStatus = _filterStatus == DocumentStatus.overdue
-                              ? null
-                              : DocumentStatus.overdue;
-                        });
-                        _load();
-                      },
-                    ),
-                    _QuickStatusChip(
-                      label: 'Escalated',
-                      selected: _filterStatus == DocumentStatus.escalated,
-                      onTap: () {
-                        setState(() {
-                          _filterStatus = _filterStatus == DocumentStatus.escalated
-                              ? null
-                              : DocumentStatus.escalated;
-                        });
-                        _load();
-                      },
-                    ),
-                    _QuickStatusChip(
-                      label: 'In Review',
-                      selected: _filterStatus == DocumentStatus.inReview,
-                      onTap: () {
-                        setState(() {
-                          _filterStatus = _filterStatus == DocumentStatus.inReview
-                              ? null
-                              : DocumentStatus.inReview;
-                        });
-                        _load();
-                      },
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          if (provider.error != null) ...[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.red.shade50,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.red.shade200),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.error_outline,
-                    color: Colors.red.shade700,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      provider.error!,
-                      style: TextStyle(
-                        color: Colors.red.shade900,
-                        fontSize: 13,
+                      const SizedBox(width: 8),
+                      DocuTrackerUtilityIconButton(
+                        icon: Icons.refresh_rounded,
+                        tooltip: 'Refresh',
+                        onPressed: provider.loading ? null : _load,
                       ),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () => provider.clearError(),
-                    style: TextButton.styleFrom(
-                      foregroundColor: AppTheme.primaryNavy,
-                    ),
-                    child: const Text('Dismiss'),
+                    ],
                   ),
                 ],
               ),
             ),
-          ],
-          const SizedBox(height: 24),
-          if (provider.loading)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(32),
-                child: CircularProgressIndicator(),
+            if (provider.error != null) ...[
+              const SizedBox(height: 12),
+              DocuTrackerErrorBanner(
+                message: provider.error!,
+                onDismiss: () => provider.clearError(),
               ),
-            )
-          else if (provider.documents.isEmpty)
-            _EmptyState(
-              onCreateTap: _canCreateDocuments == true
-                  ? () => showDocuTrackerCreateDocumentDialog(
-                      context,
-                      auth: auth,
-                      provider: provider,
-                      onCreated: _load,
-                    )
-                  : null,
-            )
-          else
-            _DocumentList(
-              documents: provider.documents,
-              isAdmin: widget.isAdmin,
-              onRefresh: _load,
-              searchQuery: _searchQuery,
-              sortByDeadline: _sortByDeadline,
+            ],
+            const SizedBox(height: 20),
+            if (provider.loading)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(32),
+                  child: CircularProgressIndicator(
+                    color: DocuTrackerTokens.terracotta,
+                  ),
+                ),
+              )
+            else if (visibleDocuments.isEmpty)
+              _EmptyState(
+                onCreateTap: _canCreateDocuments == true
+                    ? () => showDocuTrackerCreateDocumentDialog(
+                        context,
+                        auth: auth,
+                        provider: provider,
+                        onCreated: _load,
+                      )
+                    : null,
+              )
+            else
+              _DocumentList(
+                documents: visibleDocuments,
+                isAdmin: widget.isAdmin,
+                userId: userId,
+                onRefresh: _load,
+                searchQuery: _searchQuery,
+                sortByDeadline: _sortByDeadline,
+              ),
+          ],
+        ),
+        if (showFab)
+          Positioned(
+            right: 0,
+            bottom: 0,
+            child: DocuTrackerCreateFab(
+              enabled: !provider.loading,
+              onPressed: () => showDocuTrackerCreateDocumentDialog(
+                context,
+                auth: auth,
+                provider: provider,
+                onCreated: _load,
+              ),
             ),
-        ],
-      ),
+          ),
+      ],
+    );
+  }
+
+  Widget _warmDropdown(Widget child) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: DocuTrackerTokens.warmDropdownDecoration(),
+      child: DocuTrackerStyles.filterDropdownWrapper(child),
     );
   }
 }
@@ -372,18 +300,7 @@ class _EmptyState extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 72, horizontal: 32),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
+      decoration: DocuTrackerTokens.cardDecoration(),
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
@@ -396,16 +313,16 @@ class _EmptyState extends StatelessWidget {
                 height: 88,
                 decoration: BoxDecoration(
                   color: canCreate
-                      ? const Color(0xFFEEF2FF)
-                      : const Color(0xFFF3F4F6),
+                      ? DocuTrackerTokens.surfaceCream
+                      : DocuTrackerTokens.borderSubtle.withValues(alpha: 0.4),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
                   canCreate ? Icons.description_outlined : Icons.inbox_outlined,
                   size: 40,
                   color: canCreate
-                      ? const Color(0xFF3B5BDB)
-                      : const Color(0xFF9CA3AF),
+                      ? DocuTrackerTokens.terracotta
+                      : DocuTrackerTokens.textMuted,
                 ),
               ),
               const SizedBox(height: 24),
@@ -413,10 +330,10 @@ class _EmptyState extends StatelessWidget {
               // Title
               Text(
                 canCreate ? 'No documents yet' : 'No documents assigned to you',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
-                  color: Color(0xFF111827),
+                  color: DocuTrackerTokens.textPrimary,
                   height: 1.3,
                 ),
                 textAlign: TextAlign.center,
@@ -428,11 +345,7 @@ class _EmptyState extends StatelessWidget {
                 canCreate
                     ? 'Create your first document to begin a workflow. It will be routed to the assigned reviewers automatically.'
                     : 'Documents assigned to you for review will appear here. You will also receive a notification when action is required.',
-                style: const TextStyle(
-                  fontSize: 14,
-                  color: Color(0xFF6B7280),
-                  height: 1.6,
-                ),
+                style: DocuTrackerTokens.subtitleStyle(),
                 textAlign: TextAlign.center,
               ),
 
@@ -445,27 +358,23 @@ class _EmptyState extends StatelessWidget {
                     vertical: 12,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF9FAFB),
+                    color: DocuTrackerTokens.surfaceCream,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFE5E7EB)),
+                    border: Border.all(color: DocuTrackerTokens.borderSubtle),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
-                    children: const [
+                    children: [
                       Icon(
                         Icons.info_outline_rounded,
                         size: 16,
-                        color: Color(0xFF6B7280),
+                        color: DocuTrackerTokens.textMuted,
                       ),
-                      SizedBox(width: 8),
+                      const SizedBox(width: 8),
                       Flexible(
                         child: Text(
                           'Only selected personnel are authorized to create documents.',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Color(0xFF6B7280),
-                            height: 1.5,
-                          ),
+                          style: DocuTrackerTokens.metaStyle(),
                         ),
                       ),
                     ],
@@ -480,19 +389,15 @@ class _EmptyState extends StatelessWidget {
                   onPressed: onCreateTap,
                   icon: const Icon(Icons.add_rounded, size: 18),
                   label: const Text('Create Draft'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF3B5BDB),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 24,
-                      vertical: 14,
+                  style: DocuTrackerTokens.terracottaFilledStyle().copyWith(
+                    padding: WidgetStateProperty.all(
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                     ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    textStyle: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
+                    textStyle: WidgetStateProperty.all(
+                      const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ),
@@ -509,6 +414,7 @@ class _DocumentList extends StatelessWidget {
   const _DocumentList({
     required this.documents,
     required this.isAdmin,
+    required this.userId,
     required this.onRefresh,
     required this.searchQuery,
     required this.sortByDeadline,
@@ -516,6 +422,7 @@ class _DocumentList extends StatelessWidget {
 
   final List<DocuTrackerDocument> documents;
   final bool isAdmin;
+  final String userId;
   final VoidCallback onRefresh;
   final String searchQuery;
   final bool sortByDeadline;
@@ -544,11 +451,7 @@ class _DocumentList extends StatelessWidget {
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 32),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
-        ),
+        decoration: DocuTrackerTokens.cardDecoration(),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -556,32 +459,24 @@ class _DocumentList extends StatelessWidget {
               width: 64,
               height: 64,
               decoration: BoxDecoration(
-                color: const Color(0xFFF3F4F6),
+                color: DocuTrackerTokens.surfaceCream,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.search_off_rounded,
                 size: 32,
-                color: Color(0xFF9CA3AF),
+                color: DocuTrackerTokens.textMuted,
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'No matching documents',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF111827),
-              ),
+              style: DocuTrackerTokens.titleStyle(context),
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'Try adjusting your search or filter criteria.',
-              style: TextStyle(
-                fontSize: 13,
-                color: Color(0xFF6B7280),
-                height: 1.5,
-              ),
+              style: DocuTrackerTokens.subtitleStyle(),
               textAlign: TextAlign.center,
             ),
           ],
@@ -591,10 +486,11 @@ class _DocumentList extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (constraints.maxWidth >= 1020) {
+        if (constraints.maxWidth >= 860) {
           return _DocumentDataTable(
             documents: filtered,
             isAdmin: isAdmin,
+            userId: userId,
             onRefresh: onRefresh,
           );
         }
@@ -610,6 +506,7 @@ class _DocumentList extends StatelessWidget {
               statusForUi: statusForUi,
               isOverdue: isOverdue,
               isAdmin: isAdmin,
+              userId: userId,
               onRefresh: onRefresh,
             );
           }).toList(),
@@ -619,46 +516,17 @@ class _DocumentList extends StatelessWidget {
   }
 }
 
-class _QuickStatusChip extends StatelessWidget {
-  const _QuickStatusChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return ChoiceChip(
-      label: Text(label),
-      selected: selected,
-      onSelected: (_) => onTap(),
-      selectedColor: AppTheme.primaryNavy.withValues(alpha: 0.14),
-      side: BorderSide(
-        color: selected
-            ? AppTheme.primaryNavy.withValues(alpha: 0.5)
-            : const Color(0xFFE5E7EB),
-      ),
-      labelStyle: TextStyle(
-        color: selected ? AppTheme.primaryNavy : const Color(0xFF4B5563),
-        fontWeight: FontWeight.w600,
-      ),
-    );
-  }
-}
-
 class _DocumentDataTable extends StatelessWidget {
   const _DocumentDataTable({
     required this.documents,
     required this.isAdmin,
+    required this.userId,
     required this.onRefresh,
   });
 
   final List<DocuTrackerDocument> documents;
   final bool isAdmin;
+  final String userId;
   final VoidCallback onRefresh;
 
   String _deadlineLabel(DateTime? date) {
@@ -693,25 +561,27 @@ class _DocumentDataTable extends StatelessWidget {
             DataColumn(label: Text('Holder')),
           ],
           rows: documents.map((doc) {
-            final isOverdue = doc.status == DocumentStatus.overdue ||
-                (doc.deadlineTime != null && DateTime.now().isAfter(doc.deadlineTime!));
+            final isOverdue =
+                doc.status == DocumentStatus.overdue ||
+                (doc.deadlineTime != null &&
+                    DateTime.now().isAfter(doc.deadlineTime!));
             final statusForUi = isOverdue ? DocumentStatus.overdue : doc.status;
             final title = doc.title;
             return DataRow(
               onSelectChanged: (_) async {
-                await Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => DocuTrackerDocumentDetailScreen(
-                      document: doc,
-                      isAdmin: isAdmin,
-                    ),
-                  ),
+                await openDocuTrackerDocumentDetail(
+                  context,
+                  document: doc,
+                  isAdmin: isAdmin,
+                  userId: userId,
+                  onReturned: onRefresh,
                 );
-                onRefresh();
               },
               color: WidgetStateProperty.resolveWith<Color?>((states) {
                 if (isOverdue) return const Color(0xFFFEF2F2);
-                if (doc.status == DocumentStatus.escalated) return const Color(0xFFF5F3FF);
+                if (doc.status == DocumentStatus.escalated) {
+                  return const Color(0xFFF5F3FF);
+                }
                 return null;
               }),
               cells: [
@@ -726,8 +596,12 @@ class _DocumentDataTable extends StatelessWidget {
                     ),
                   ),
                 ),
-                DataCell(Text(documentTypeFromString(doc.documentType).displayName)),
-                DataCell(DocuTrackerStatusBadge(status: statusForUi, compact: true)),
+                DataCell(
+                  Text(documentTypeFromString(doc.documentType).displayName),
+                ),
+                DataCell(
+                  DocuTrackerStatusBadge(status: statusForUi, compact: true),
+                ),
                 DataCell(Text(_deadlineLabel(doc.deadlineTime))),
                 DataCell(
                   ConstrainedBox(
@@ -754,6 +628,7 @@ class _DocumentRowCard extends StatefulWidget {
     required this.statusForUi,
     required this.isOverdue,
     required this.isAdmin,
+    required this.userId,
     required this.onRefresh,
   });
 
@@ -761,6 +636,7 @@ class _DocumentRowCard extends StatefulWidget {
   final DocumentStatus statusForUi;
   final bool isOverdue;
   final bool isAdmin;
+  final String userId;
   final VoidCallback onRefresh;
 
   @override
@@ -769,6 +645,7 @@ class _DocumentRowCard extends StatefulWidget {
 
 class _DocumentRowCardState extends State<_DocumentRowCard> {
   bool _isHovered = false;
+  bool _opening = false;
 
   static const _typeColors = <String, Color>{
     'memo': Color(0xFF3B82F6),
@@ -802,6 +679,22 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
         !dl.difference(DateTime.now()).isNegative;
   }
 
+  Future<void> _openDetail() async {
+    if (_opening) return;
+    setState(() => _opening = true);
+    try {
+      await openDocuTrackerDocumentDetail(
+        context,
+        document: widget.doc,
+        isAdmin: widget.isAdmin,
+        userId: widget.userId,
+        onReturned: widget.onRefresh,
+      );
+    } finally {
+      if (mounted) setState(() => _opening = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final doc = widget.doc;
@@ -816,24 +709,26 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
     final isEscalated = doc.status == DocumentStatus.escalated;
 
     // Background logic
-    Color bgColor = Colors.white;
+    Color bgColor = DocuTrackerTokens.surface;
     if (isOverdue) {
-      bgColor = const Color(0xFFFEF2F2); // Red 50
+      bgColor = DocuTrackerTokens.overduePink;
     } else if (isEscalated) {
-      bgColor = const Color(0xFFF5F3FF); // Purple 50
+      bgColor = const Color(0xFFF5F3FF);
     } else if (_isHovered) {
-      bgColor = const Color(0xFFF9FAFB); // Gray 50
+      bgColor = DocuTrackerTokens.surfaceCream;
     }
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: bgColor,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusMd),
         border: Border.all(
           color: _isHovered
-              ? const Color(0xFFD1D5DB)
-              : (isOverdue ? const Color(0xFFFECACA) : const Color(0xFFE5E7EB)),
+              ? DocuTrackerTokens.terracotta.withValues(alpha: 0.35)
+              : (isOverdue
+                    ? DocuTrackerTokens.overdueAccent.withValues(alpha: 0.35)
+                    : DocuTrackerTokens.borderSubtle),
         ),
         boxShadow: _isHovered
             ? [
@@ -860,23 +755,16 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
           ),
           child: InkWell(
             onHover: (val) => setState(() => _isHovered = val),
-            onTap: () async {
-              await Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => DocuTrackerDocumentDetailScreen(
-                    document: doc,
-                    isAdmin: widget.isAdmin,
-                  ),
-                ),
-              );
-              widget.onRefresh();
-            },
+            onTap: _opening ? null : _openDetail,
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final compact = constraints.maxWidth < 760;
                 if (compact) {
                   return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -949,7 +837,8 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                               ),
                           ],
                         ),
-                        if (doc.assigneeName != null || doc.creatorName != null) ...[
+                        if (doc.assigneeName != null ||
+                            doc.creatorName != null) ...[
                           const SizedBox(height: 8),
                           Text(
                             doc.assigneeName != null
@@ -968,220 +857,223 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                   );
                 }
                 return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                  // 1. Icon & Core Details (Left)
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: typeColor.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(typeIcon, color: typeColor, size: 22),
-                  ),
-                  const SizedBox(width: 16),
+                      // 1. Icon & Core Details (Left)
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: typeColor.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(typeIcon, color: typeColor, size: 22),
+                      ),
+                      const SizedBox(width: 16),
 
-                  // 2. Title and Subtitle (Flex)
-                  Expanded(
-                    flex: 3,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
+                      // 2. Title and Subtitle (Flex)
+                      Expanded(
+                        flex: 3,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            if (doc.documentNumber != null) ...[
-                              Text(
-                                doc.documentNumber!,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFF6B7280),
+                            Row(
+                              children: [
+                                if (doc.documentNumber != null) ...[
+                                  Text(
+                                    doc.documentNumber!,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF6B7280),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  const Text(
+                                    '•',
+                                    style: TextStyle(
+                                      color: Color(0xFFD1D5DB),
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                ],
+                                Text(
+                                  docTypeName,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                    color: typeColor,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(width: 8),
-                              const Text(
-                                '•',
-                                style: TextStyle(
-                                  color: Color(0xFFD1D5DB),
-                                  fontSize: 12,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                            ],
-                            Text(
-                              docTypeName,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w500,
-                                color: typeColor,
-                              ),
+                              ],
                             ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          doc.title,
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: isOverdue
-                                ? const Color(0xFF991B1B)
-                                : const Color(0xFF111827),
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // 3. Current State / Workflow Details (Flex)
-                  Expanded(
-                    flex: 2,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (!isTerminal && doc.currentStep != null) ...[
-                          Row(
-                            children: [
-                              const Text(
-                                'Step',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFF9CA3AF),
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              _StepDots(current: doc.currentStep!),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                        ],
-                        if (doc.assigneeName != null)
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.person_rounded,
-                                size: 13,
-                                color: Color(0xFF9CA3AF),
-                              ),
-                              const SizedBox(width: 4),
-                              Flexible(
-                                child: Text(
-                                  doc.assigneeName!,
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    color: Color(0xFF4B5563),
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          )
-                        else if (doc.creatorName != null)
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.send_rounded,
-                                size: 12,
-                                color: Color(0xFF9CA3AF),
-                              ),
-                              const SizedBox(width: 4),
-                              Flexible(
-                                child: Text(
-                                  'From ${doc.creatorName}',
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    color: Color(0xFF4B5563),
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                      ],
-                    ),
-                  ),
-
-                  // 4. Deadline Indicator
-                  if (deadlineLabel.isNotEmpty && !isTerminal) ...[
-                    Container(
-                      width: 100,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: _isUrgent || isOverdue
-                            ? const Color(0xFFFEF2F2)
-                            : const Color(0xFFF3F4F6),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(
-                          color: _isUrgent || isOverdue
-                              ? const Color(0xFFFECACA)
-                              : Colors.transparent,
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            isOverdue
-                                ? Icons.warning_amber_rounded
-                                : Icons.schedule_rounded,
-                            size: 12,
-                            color: _isUrgent || isOverdue
-                                ? const Color(0xFFDC2626)
-                                : const Color(0xFF6B7280),
-                          ),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text(
-                              deadlineLabel,
+                            const SizedBox(height: 4),
+                            Text(
+                              doc.title,
                               style: TextStyle(
-                                fontSize: 11,
+                                fontSize: 15,
                                 fontWeight: FontWeight.w600,
-                                color: _isUrgent || isOverdue
-                                    ? const Color(0xFFDC2626)
-                                    : const Color(0xFF4B5563),
+                                color: isOverdue
+                                    ? const Color(0xFF991B1B)
+                                    : const Color(0xFF111827),
                               ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 16),
-                  ],
 
-                  // 5. Status Badge & Chevron (Right)
-                  SizedBox(
-                    width: 130,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        DocuTrackerStatusBadge(
-                          status: widget.statusForUi,
-                          compact: true,
-                          showIcon: false,
-                          dotStyle: true,
+                      // 3. Current State / Workflow Details (Flex)
+                      Expanded(
+                        flex: 2,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (!isTerminal && doc.currentStep != null) ...[
+                              Row(
+                                children: [
+                                  const Text(
+                                    'Step',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF9CA3AF),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  _StepDots(current: doc.currentStep!),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                            ],
+                            if (doc.assigneeName != null)
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.person_rounded,
+                                    size: 13,
+                                    color: Color(0xFF9CA3AF),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Flexible(
+                                    child: Text(
+                                      doc.assigneeName!,
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        color: Color(0xFF4B5563),
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              )
+                            else if (doc.creatorName != null)
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.send_rounded,
+                                    size: 12,
+                                    color: Color(0xFF9CA3AF),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Flexible(
+                                    child: Text(
+                                      'From ${doc.creatorName}',
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        color: Color(0xFF4B5563),
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                          ],
                         ),
-                        const SizedBox(width: 8),
-                        Icon(
-                          Icons.chevron_right_rounded,
-                          color: _isHovered
-                              ? const Color(0xFF6B7280)
-                              : const Color(0xFFD1D5DB),
+                      ),
+
+                      // 4. Deadline Indicator
+                      if (deadlineLabel.isNotEmpty && !isTerminal) ...[
+                        Container(
+                          width: 100,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _isUrgent || isOverdue
+                                ? const Color(0xFFFEF2F2)
+                                : const Color(0xFFF3F4F6),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: _isUrgent || isOverdue
+                                  ? const Color(0xFFFECACA)
+                                  : Colors.transparent,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                isOverdue
+                                    ? Icons.warning_amber_rounded
+                                    : Icons.schedule_rounded,
+                                size: 12,
+                                color: _isUrgent || isOverdue
+                                    ? const Color(0xFFDC2626)
+                                    : const Color(0xFF6B7280),
+                              ),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  deadlineLabel,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: _isUrgent || isOverdue
+                                        ? const Color(0xFFDC2626)
+                                        : const Color(0xFF4B5563),
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
+                        const SizedBox(width: 16),
                       ],
-                    ),
-                  ),
+
+                      // 5. Status Badge & Chevron (Right)
+                      SizedBox(
+                        width: 130,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            DocuTrackerStatusBadge(
+                              status: widget.statusForUi,
+                              compact: true,
+                              showIcon: false,
+                              dotStyle: true,
+                            ),
+                            const SizedBox(width: 8),
+                            Icon(
+                              Icons.chevron_right_rounded,
+                              color: _isHovered
+                                  ? const Color(0xFF6B7280)
+                                  : const Color(0xFFD1D5DB),
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                 );

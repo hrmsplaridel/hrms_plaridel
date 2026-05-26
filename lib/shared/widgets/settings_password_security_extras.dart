@@ -110,23 +110,50 @@ class _SettingsPasswordSecurityExtrasState
     }
   }
 
-  String _sessionLabel(Map<String, dynamic> row) {
-    final device = row['device_info'] as String?;
-    if (device != null && device.trim().isNotEmpty) return device.trim();
-    return 'Unknown device';
+  String? _str(dynamic v) {
+    if (v == null) return null;
+    final t = v.toString().trim();
+    return t.isEmpty ? null : t;
   }
 
-  String _sessionSub(Map<String, dynamic> row) {
-    final ip = row['ip_address'] as String?;
-    final created = row['created_at']?.toString();
-    final parts = <String>[];
-    if (ip != null && ip.isNotEmpty) parts.add(ip);
-    if (created != null && created.isNotEmpty) {
-      parts.add(
-        'since ${created.length > 16 ? created.substring(0, 16) : created}',
-      );
+  String _sessionLabel(Map<String, dynamic> row) {
+    return _str(row['device_label']) ??
+        _str(row['device_info']) ??
+        'Unknown device';
+  }
+
+  String? _sessionUnit(Map<String, dynamic> row) {
+    return _str(row['device_model']) ?? _str(row['client_unit']);
+  }
+
+  String? _sessionLocation(Map<String, dynamic> row) {
+    return _str(row['location_label']);
+  }
+
+  String? _sessionSince(Map<String, dynamic> row) {
+    final raw = row['created_at']?.toString();
+    if (raw == null || raw.isEmpty) return null;
+    final parsed = DateTime.tryParse(raw);
+    if (parsed == null) {
+      return raw.length > 16 ? raw.substring(0, 16) : raw;
     }
-    return parts.isEmpty ? 'Active session' : parts.join(' · ');
+    final l = parsed.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${l.year}-${two(l.month)}-${two(l.day)} · ${two(l.hour)}:${two(l.minute)}';
+  }
+
+  IconData _sessionIcon(Map<String, dynamic> row) {
+    final type = (_str(row['device_type']) ?? '').toLowerCase();
+    switch (type) {
+      case 'mobile':
+        return Icons.smartphone_rounded;
+      case 'tablet':
+        return Icons.tablet_mac_rounded;
+      case 'desktop':
+        return Icons.computer_rounded;
+      default:
+        return Icons.devices_other_rounded;
+    }
   }
 
   @override
@@ -240,52 +267,123 @@ class _SettingsPasswordSecurityExtrasState
               ),
             )
           else
-            ..._sessions.map((s) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: ProfileInsetSurface(
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: AppTheme.primaryNavy.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Icon(
-                            Icons.computer_rounded,
-                            color: AppTheme.primaryNavy,
-                            size: 20,
-                          ),
+            ..._sessions.map((s) {
+              final unit = _sessionUnit(s);
+              final location = _sessionLocation(s);
+              final since = _sessionSince(s);
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: ProfileInsetSurface(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                _sessionLabel(s),
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 13.5,
-                                  color: AppTheme.dashTextPrimaryOf(context),
-                                ),
+                        child: Icon(
+                          _sessionIcon(s),
+                          color: AppTheme.primaryNavy,
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _sessionLabel(s),
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13.5,
+                                color: AppTheme.dashTextPrimaryOf(context),
                               ),
-                              const SizedBox(height: 2),
-                              Text(
-                                _sessionSub(s),
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: AppTheme.dashTextSecondaryOf(context),
-                                ),
+                            ),
+                            if (unit != null) ...[
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.devices_rounded,
+                                    size: 14,
+                                    color: AppTheme.dashTextSecondaryOf(context),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      unit,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppTheme.dashTextSecondaryOf(
+                                          context,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
-                          ),
+                            if (location != null) ...[
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.place_outlined,
+                                    size: 14,
+                                    color: AppTheme.dashTextSecondaryOf(context),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      location,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: AppTheme.dashTextSecondaryOf(
+                                          context,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                            if (since != null) ...[
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.schedule_rounded,
+                                    size: 14,
+                                    color: AppTheme.dashTextSecondaryOf(context),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      'Active since $since',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: AppTheme.dashTextSecondaryOf(
+                                          context,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                )),
+                ),
+              );
+            }),
           const SizedBox(height: 16),
           Material(
             color: dark

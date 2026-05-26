@@ -22,6 +22,7 @@ class DocumentHistoryEntry {
 
   final String? id;
   final String documentId;
+
   /// Action taken: created, assigned, reviewed, approved, rejected, returned, forwarded, escalated, overdue
   final String? action;
   final String? actorId;
@@ -60,17 +61,17 @@ class DocumentHistoryEntry {
   }
 
   Map<String, dynamic> toJson() => {
-        if (id != null) 'id': id,
-        'document_id': documentId,
-        if (action != null) 'action': action,
-        if (actorId != null) 'actor_id': actorId,
-        if (fromStep != null) 'from_step': fromStep,
-        if (toStep != null) 'to_step': toStep,
-        if (fromStatus != null) 'from_status': fromStatus!.value,
-        if (toStatus != null) 'to_status': toStatus!.value,
-        if (remarks != null) 'remarks': remarks,
-        'is_overdue_log': isOverdueLog,
-        'is_escalation_log': isEscalationLog,
-        if (escalationLevel != null) 'escalation_level': escalationLevel,
-      };
+    if (id != null) 'id': id,
+    'document_id': documentId,
+    if (action != null) 'action': action,
+    if (actorId != null) 'actor_id': actorId,
+    if (fromStep != null) 'from_step': fromStep,
+    if (toStep != null) 'to_step': toStep,
+    if (fromStatus != null) 'from_status': fromStatus!.value,
+    if (toStatus != null) 'to_status': toStatus!.value,
+    if (remarks != null) 'remarks': remarks,
+    'is_overdue_log': isOverdueLog,
+    'is_escalation_log': isEscalationLog,
+    if (escalationLevel != null) 'escalation_level': escalationLevel,
+  };
 }

@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
-import '../../widgets/rsp_form_header_footer.dart';
 import '../docutracker_repository.dart';
 import '../docutracker_styles.dart';
+import '../theme/docutracker_tokens.dart';
 import '../widgets/docutracker_responsive_body.dart';
+import '../widgets/docutracker_module_header.dart';
 import '../models/document_action.dart';
 import '../models/document_permission.dart';
 import '../models/document_type.dart';
@@ -47,8 +48,8 @@ class _DocuTrackerSetupPermissionsScreenState
     ),
     _RestrictionItem(
       action: DocumentAction.view,
-      title: 'Auditing',
-      icon: Icons.history_rounded,
+      title: 'View module (does not show all documents)',
+      icon: Icons.visibility_outlined,
     ),
     _RestrictionItem(
       action: DocumentAction.forward,
@@ -252,18 +253,8 @@ class _DocuTrackerSetupPermissionsScreenState
                     ],
                   ),
 
-                  Text(
-                    'Setup permissions',
-                    style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-
-                  RspFormHeader(
-                    formTitle: 'User Permissions',
+                  const DocuTrackerModuleHeader(
+                    title: 'Setup permissions',
                     subtitle: 'Edit explicit permissions for a single employee',
                   ),
                   const SizedBox(height: 12),
@@ -293,9 +284,10 @@ class _DocuTrackerSetupPermissionsScreenState
                     )
                   else
                     DropdownButtonFormField<String>(
-                      value: _selectedUserId,
+                      initialValue: _selectedUserId,
                       decoration: DocuTrackerStyles.dropdownDecoration(
-context,                         'Select user',
+                        context,
+                        'Select user',
                       ),
                       items: _employees
                           .map(
@@ -337,9 +329,10 @@ context,                         'Select user',
                   const SizedBox(height: 8),
 
                   DropdownButtonFormField<String>(
-                    value: _selectedDocumentType,
+                    initialValue: _selectedDocumentType,
                     decoration: DocuTrackerStyles.dropdownDecoration(
-context,                       'Select type',
+                      context,
+                      'Select type',
                     ),
                     items: [
                       const DropdownMenuItem(
@@ -399,14 +392,14 @@ context,                       'Select type',
                               width: 34,
                               height: 34,
                               decoration: BoxDecoration(
-                                color: AppTheme.primaryNavy.withValues(
+                                color: DocuTrackerTokens.brand.withValues(
                                   alpha: 0.12,
                                 ),
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Icon(
                                 item.icon,
-                                color: AppTheme.primaryNavy,
+                                color: DocuTrackerTokens.brand,
                                 size: 18,
                               ),
                             ),
@@ -430,7 +423,7 @@ context,                       'Select type',
                                   _grantedByActionName[item.action.name] = v;
                                 });
                               },
-                              activeTrackColor: AppTheme.primaryNavy.withValues(
+                              activeTrackColor: DocuTrackerTokens.brand.withValues(
                                 alpha: 0.6,
                               ),
                             ),

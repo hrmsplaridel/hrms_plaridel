@@ -8,6 +8,8 @@ import 'models/document_status.dart';
 import 'models/document_type.dart';
 import 'docutracker_api_result.dart';
 import 'docutracker_repository.dart';
+import 'services/docutracker_access_policy.dart';
+import 'services/docutracker_document_visibility.dart';
 import 'services/docutracker_workflow_service.dart';
 import 'services/docutracker_notification_service.dart';
 
@@ -28,11 +30,6 @@ class DocuTrackerProvider extends ChangeNotifier {
   late final DocuTrackerRepository _repo;
   late final DocuTrackerWorkflowService _workflowService;
   late final DocuTrackerNotificationService _notificationService;
-
-  @override
-  void dispose() {
-    super.dispose();
-  }
 
   List<DocuTrackerDocument> _documents = [];
   List<DocumentRoutingConfig> _routingConfigs = [];
@@ -129,6 +126,7 @@ class DocuTrackerProvider extends ChangeNotifier {
           _upsertLocalDocument(result.value);
           await refreshDocument(documentId, reloadHistory: true);
           await loadNotifications(forceRefresh: true);
+          await _reloadDocumentsIfCached();
           return true;
         }
         _error = failureMessage;
@@ -147,7 +145,11 @@ class DocuTrackerProvider extends ChangeNotifier {
     required int fromStep,
     required Future<bool> Function() run,
   }) async {
-    if (!_beginTransition(documentId, action, fromStep)) return false;
+    if (!_beginTransition(documentId, action, fromStep)) {
+      _error = 'This action is already in progress. Please wait.';
+      notifyListeners();
+      return false;
+    }
     _loading = true;
     _error = null;
     notifyListeners();
@@ -175,6 +177,13 @@ class DocuTrackerProvider extends ChangeNotifier {
     _documents = [updated, ..._documents];
   }
 
+  String? _documentsLoadUserId;
+  bool _documentsLoadIsAdmin = false;
+  String? _documentsLoadRoleId;
+  String? _documentsLoadDepartmentId;
+  String? _documentsLoadOfficeId;
+  bool _documentsLoadMobileRestricted = false;
+
   List<DocuTrackerDocument> get documents => List.unmodifiable(_documents);
   List<DocumentHistoryEntry> get documentHistory =>
       List.unmodifiable(_documentHistory);
@@ -184,10 +193,20 @@ class DocuTrackerProvider extends ChangeNotifier {
   int get unreadNotificationsCount =>
       _notificationService.unreadCount(_notifications);
 
-  /// Step 10: Employee dashboard - incoming (assigned to me, pending/inReview).
+  /// WIP drafts created by [userId], not yet submitted into workflow.
+  List<DocuTrackerDocument> myDraftsForUser(String userId) => _documents
+      .where(
+        (d) =>
+            DocuTrackerDocumentVisibility.isWorkInProgressDraft(d) &&
+            d.createdBy == userId,
+      )
+      .toList();
+
+  /// Active reviews assigned to [userId] (excludes unsubmitted WIP drafts).
   List<DocuTrackerDocument> incomingForUser(String userId) => _documents
       .where(
         (d) =>
+            !DocuTrackerDocumentVisibility.isWorkInProgressDraft(d) &&
             d.currentHolderId == userId &&
             (d.status == DocumentStatus.pending ||
                 d.status == DocumentStatus.inReview ||
@@ -246,6 +265,10 @@ class DocuTrackerProvider extends ChangeNotifier {
   /// Step 10: Admin - escalated documents.
   List<DocuTrackerDocument> get escalatedDocuments =>
       _documents.where((d) => d.status == DocumentStatus.escalated).toList();
+
+  /// Documents flagged by the escalation worker for admin attention.
+  List<DocuTrackerDocument> get documentsNeedingAdminIntervention =>
+      _documents.where((d) => d.needsAdminIntervention).toList();
   List<DocumentRoutingConfig> get routingConfigs =>
       List.unmodifiable(_routingConfigs);
   List<DocumentPermission> get permissions => List.unmodifiable(_permissions);
@@ -270,6 +293,20 @@ class DocuTrackerProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> _reloadDocumentsIfCached() async {
+    final userId = _documentsLoadUserId;
+    if (userId == null || userId.isEmpty) return;
+    await loadDocumentsForUser(
+      userId: userId,
+      roleId: _documentsLoadRoleId,
+      departmentId: _documentsLoadDepartmentId,
+      officeId: _documentsLoadOfficeId,
+      isAdmin: _documentsLoadIsAdmin,
+      mobileRestricted: _documentsLoadMobileRestricted,
+      showLoading: false,
+    );
+  }
+
   /// Load documents for current user (Step 2: Role-Based Visibility).
   Future<void> loadDocumentsForUser({
     required String userId,
@@ -279,12 +316,23 @@ class DocuTrackerProvider extends ChangeNotifier {
     String? documentType,
     DocumentStatus? status,
     bool isAdmin = false,
+    bool mobileRestricted = false,
+    bool showLoading = true,
   }) async {
-    _loading = true;
-    _error = null;
-    notifyListeners();
+    _documentsLoadUserId = userId;
+    _documentsLoadIsAdmin = isAdmin;
+    _documentsLoadRoleId = roleId;
+    _documentsLoadDepartmentId = departmentId;
+    _documentsLoadOfficeId = officeId;
+    _documentsLoadMobileRestricted = mobileRestricted;
+    if (showLoading) {
+      _loading = true;
+      _error = null;
+      notifyListeners();
+    }
     try {
-      if (isAdmin) {
+      final effectiveIsAdmin = isAdmin && !mobileRestricted;
+      if (effectiveIsAdmin) {
         final r = await _repo.listAllDocuments(
           documentType: documentType,
           status: status,
@@ -304,6 +352,7 @@ class DocuTrackerProvider extends ChangeNotifier {
           userRoleId: roleId,
           userDepartmentId: departmentId,
           userOfficeId: officeId,
+          createdBy: mobileRestricted ? userId : null,
           documentType: documentType,
           status: status,
           limit: 100,
@@ -312,10 +361,19 @@ class DocuTrackerProvider extends ChangeNotifier {
           _documents = [];
           _error = r.message;
         } else if (r is DocuTrackerSuccess<List<DocuTrackerDocument>>) {
-          _documents = r.value;
+          _documents = DocuTrackerDocumentVisibility.filterForUser(
+            r.value,
+            userId: userId,
+          );
         } else {
           _documents = [];
         }
+      }
+      if (mobileRestricted) {
+        _documents = DocuTrackerAccessPolicy.filterDocumentsForMobileUser(
+          _documents,
+          userId: userId,
+        );
       }
     } catch (e) {
       _documents = [];
@@ -358,13 +416,36 @@ class DocuTrackerProvider extends ChangeNotifier {
     return null;
   }
 
+  /// True when the document type has at least one enabled workflow step.
+  bool hasRunnableWorkflowForType(DocumentType type) {
+    final cfg = getRoutingConfigForType(type);
+    if (cfg == null) return false;
+    return cfg.steps.any((s) => s.enabled && s.stepOrder > 0);
+  }
+
+  /// User-facing hint when workflow routing is missing or empty.
+  String? workflowConfigIssueForType(DocumentType type) {
+    final cfg = getRoutingConfigForType(type);
+    if (cfg == null) {
+      return 'No workflow is configured for ${type.displayName}. '
+          'Ask an admin to set up routing in DocuTracker → Admin → Workflows.';
+    }
+    final enabled = cfg.steps.where((s) => s.enabled && s.stepOrder > 0).toList();
+    if (enabled.isEmpty) {
+      return 'The ${type.displayName} workflow has no active steps. '
+          'An admin must add at least one step with assignees and save.';
+    }
+    return null;
+  }
+
   /// Load document history for audit trail (Step 9).
   Future<void> loadDocumentHistory(String documentId) async {
     try {
       _documentHistory = await _repo.listDocumentHistory(documentId);
       notifyListeners();
-    } catch (_) {
+    } catch (e) {
       _documentHistory = [];
+      _error = 'Could not load document history.';
       notifyListeners();
     }
   }
@@ -376,8 +457,9 @@ class DocuTrackerProvider extends ChangeNotifier {
         forceRefresh: forceRefresh,
       );
       notifyListeners();
-    } catch (_) {
+    } catch (e) {
       _notifications = [];
+      _error = 'Could not load notifications.';
       notifyListeners();
     }
   }
@@ -406,17 +488,29 @@ class DocuTrackerProvider extends ChangeNotifier {
 
   /// Refresh a single document from backend and update local state.
   /// Useful when server-side workflows (escalation worker) update status/holder.
-  Future<void> refreshDocument(String documentId,
-      {bool reloadHistory = false}) async {
+  Future<void> refreshDocument(
+    String documentId, {
+    bool reloadHistory = false,
+  }) async {
     try {
       final res = await _repo.getDocument(documentId);
+      if (res is DocuTrackerFailure<DocuTrackerDocument>) {
+        _error = res.message.isNotEmpty
+            ? res.message
+            : 'Could not refresh document.';
+        notifyListeners();
+        return;
+      }
       if (res is! DocuTrackerSuccess<DocuTrackerDocument>) return;
       _upsertLocalDocument(res.value);
       if (reloadHistory) {
         await loadDocumentHistory(documentId);
       }
       notifyListeners();
-    } catch (_) {}
+    } catch (e) {
+      _error = e.toString();
+      notifyListeners();
+    }
   }
 
   /// Create document and start workflow.
@@ -445,7 +539,9 @@ class DocuTrackerProvider extends ChangeNotifier {
       // doc insert + routing_record step 1 + history + notification.
       final created = await _repo.createDocument(doc);
       if (created is DocuTrackerFailure<DocuTrackerDocument>) {
-        _error = created.message.isNotEmpty ? created.message : 'Failed to create document.';
+        _error = created.message.isNotEmpty
+            ? created.message
+            : 'Failed to create document.';
         _loading = false;
         notifyListeners();
         return null;
@@ -576,5 +672,51 @@ class DocuTrackerProvider extends ChangeNotifier {
   void clearError() {
     _error = null;
     notifyListeners();
+  }
+
+  Future<DocuTrackerDocument?> uploadAttachment({
+    required String documentId,
+    required List<int> fileBytes,
+    required String fileName,
+  }) async {
+    _error = null;
+    final res = await _repo.uploadAttachment(
+      documentId: documentId,
+      fileBytes: fileBytes,
+      fileName: fileName,
+    );
+    if (res is DocuTrackerFailure<DocuTrackerDocument>) {
+      _error = res.message.isNotEmpty ? res.message : 'Upload failed.';
+      notifyListeners();
+      return null;
+    }
+    if (res is! DocuTrackerSuccess<DocuTrackerDocument>) return null;
+    _upsertLocalDocument(res.value);
+    notifyListeners();
+    return res.value;
+  }
+
+  Future<DocuTrackerDocument?> removeAttachment(String documentId) async {
+    _error = null;
+    final res = await _repo.removeAttachment(documentId);
+    if (res is DocuTrackerFailure<DocuTrackerDocument>) {
+      _error = res.message.isNotEmpty ? res.message : 'Could not remove file.';
+      notifyListeners();
+      return null;
+    }
+    if (res is! DocuTrackerSuccess<DocuTrackerDocument>) return null;
+    _upsertLocalDocument(res.value);
+    notifyListeners();
+    return res.value;
+  }
+
+  Future<List<int>?> getAttachmentBytes(String documentId) async {
+    try {
+      return await _repo.getAttachmentBytes(documentId);
+    } catch (e) {
+      _error = e.toString();
+      notifyListeners();
+      rethrow;
+    }
   }
 }

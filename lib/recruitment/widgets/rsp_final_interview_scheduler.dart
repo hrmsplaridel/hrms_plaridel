@@ -68,8 +68,10 @@ class _RspFinalInterviewSchedulerState
 
   ({String label, IconData icon, Color fg, Color bg, Color border})
       _statusSpec(
+    BuildContext context,
     RecruitmentApplication app,
   ) {
+    final dark = AppTheme.dashIsDark(context);
     final registered = _isRegistered(app);
     final scheduled = app.finalInterviewAt;
     final outcome = app.finalInterviewPassed;
@@ -79,53 +81,62 @@ class _RspFinalInterviewSchedulerState
       return (
         label: 'Hired · Account linked',
         icon: Icons.verified_rounded,
-        fg: const Color(0xFF1B5E20),
-        bg: const Color(0xFFE8F5E9),
-        border: const Color(0xFF2E7D32).withValues(alpha: 0.35),
+        fg: dark ? const Color(0xFF81C784) : const Color(0xFF1B5E20),
+        bg: dark ? const Color(0xFF1E3A24) : const Color(0xFFE8F5E9),
+        border: (dark ? const Color(0xFF81C784) : const Color(0xFF2E7D32))
+            .withValues(alpha: 0.35),
       );
     }
     if (outcome == true && hrDone) {
       return (
         label: 'Final passed · Step 8 done',
         icon: Icons.task_alt_rounded,
-        fg: const Color(0xFF1B5E20),
-        bg: const Color(0xFFE8F5E9),
-        border: const Color(0xFF2E7D32).withValues(alpha: 0.35),
+        fg: dark ? const Color(0xFF81C784) : const Color(0xFF1B5E20),
+        bg: dark ? const Color(0xFF1E3A24) : const Color(0xFFE8F5E9),
+        border: (dark ? const Color(0xFF81C784) : const Color(0xFF2E7D32))
+            .withValues(alpha: 0.35),
       );
     }
     if (outcome == true) {
       return (
         label: 'Final interview passed · Pending account',
         icon: Icons.hourglass_bottom_rounded,
-        fg: const Color(0xFF0D47A1),
-        bg: const Color(0xFFE3F2FD),
-        border: const Color(0xFF1565C0).withValues(alpha: 0.35),
+        fg: dark ? const Color(0xFF90CAF9) : const Color(0xFF0D47A1),
+        bg: dark ? const Color(0xFF1A2940) : const Color(0xFFE3F2FD),
+        border: (dark ? const Color(0xFF90CAF9) : const Color(0xFF1565C0))
+            .withValues(alpha: 0.35),
       );
     }
     if (outcome == false) {
       return (
         label: 'Final interview: Not passed',
         icon: Icons.cancel_rounded,
-        fg: const Color(0xFFB71C1C),
-        bg: const Color(0xFFFFEBEE),
-        border: const Color(0xFFC62828).withValues(alpha: 0.35),
+        fg: dark ? const Color(0xFFEF9A9A) : const Color(0xFFB71C1C),
+        bg: dark ? const Color(0xFF3A2020) : const Color(0xFFFFEBEE),
+        border: (dark ? const Color(0xFFEF9A9A) : const Color(0xFFC62828))
+            .withValues(alpha: 0.35),
       );
     }
     if (scheduled != null) {
       return (
         label: 'Final interview scheduled',
         icon: Icons.event_available_rounded,
-        fg: const Color(0xFF7A3E00),
-        bg: const Color(0xFFFFF3E0),
-        border: const Color(0xFFEF6C00).withValues(alpha: 0.35),
+        fg: dark ? const Color(0xFFFFB74D) : const Color(0xFF7A3E00),
+        bg: dark ? const Color(0xFF3A2E1A) : const Color(0xFFFFF3E0),
+        border: (dark ? const Color(0xFFFFB74D) : const Color(0xFFEF6C00))
+            .withValues(alpha: 0.35),
       );
     }
     return (
       label: 'Waiting for final interview schedule',
       icon: Icons.schedule_rounded,
-      fg: AppTheme.textSecondary.withValues(alpha: 0.95),
-      bg: const Color(0xFFF5F7FA),
-      border: Colors.black.withValues(alpha: 0.08),
+      fg: dark
+          ? const Color(0xFFB0BEC5)
+          : AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.95),
+      bg: dark ? const Color(0xFF2A3140) : const Color(0xFFF5F7FA),
+      border: dark
+          ? const Color(0xFF4A5568)
+          : Colors.black.withValues(alpha: 0.08),
     );
   }
 
@@ -134,7 +145,7 @@ class _RspFinalInterviewSchedulerState
     EdgeInsets padding = const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
     double fontSize = 12,
   }) {
-    final s = _statusSpec(app);
+    final s = _statusSpec(context, app);
     return Container(
       padding: padding,
       decoration: BoxDecoration(
@@ -321,7 +332,8 @@ class _RspFinalInterviewSchedulerState
   }
 
   /// Compact status strip (left accent) instead of a full-width loud banner.
-  Widget _outcomeStatusStrip(bool? passed) {
+  Widget _outcomeStatusStrip(BuildContext context, bool? passed) {
+    final dark = AppTheme.dashIsDark(context);
     late Color accent;
     late Color bg;
     late Color fg;
@@ -331,8 +343,9 @@ class _RspFinalInterviewSchedulerState
     switch (passed) {
       case true:
         accent = const Color(0xFF2E7D32);
-        bg = const Color(0xFFE8F5E9).withValues(alpha: 0.55);
-        fg = const Color(0xFF1B5E20);
+        bg = (dark ? const Color(0xFF1E3A24) : const Color(0xFFE8F5E9))
+            .withValues(alpha: dark ? 1 : 0.55);
+        fg = dark ? const Color(0xFF81C784) : const Color(0xFF1B5E20);
         icon = Icons.check_circle_outline_rounded;
         headline = 'Passed';
         detail =
@@ -340,16 +353,21 @@ class _RspFinalInterviewSchedulerState
         break;
       case false:
         accent = const Color(0xFFC62828);
-        bg = const Color(0xFFFFEBEE).withValues(alpha: 0.5);
-        fg = const Color(0xFFB71C1C);
+        bg = (dark ? const Color(0xFF3A2020) : const Color(0xFFFFEBEE))
+            .withValues(alpha: dark ? 1 : 0.5);
+        fg = dark ? const Color(0xFFEF9A9A) : const Color(0xFFB71C1C);
         icon = Icons.cancel_outlined;
         headline = 'Not passed';
         detail = 'No employee account is created from this hiring flow.';
         break;
       default:
-        accent = AppTheme.textSecondary.withValues(alpha: 0.45);
-        bg = AppTheme.offWhite;
-        fg = AppTheme.textSecondary;
+        accent = dark
+            ? const Color(0xFF78909C)
+            : AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.45);
+        bg = dark
+            ? AppTheme.dashMutedSurfaceOf(context)
+            : AppTheme.offWhite;
+        fg = AppTheme.dashTextSecondaryOf(context);
         icon = Icons.hourglass_empty_rounded;
         headline = 'Pending';
         detail = 'Record the result after the in-person interview.';
@@ -358,7 +376,7 @@ class _RspFinalInterviewSchedulerState
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: IntrinsicHeight(
         child: Row(
@@ -404,7 +422,7 @@ class _RspFinalInterviewSchedulerState
                               fontSize: 13,
                               height: 1.45,
                               fontWeight: FontWeight.w500,
-                              color: AppTheme.textPrimary.withValues(
+                              color: AppTheme.dashTextPrimaryOf(context).withValues(
                                 alpha: 0.82,
                               ),
                             ),
@@ -468,11 +486,11 @@ class _RspFinalInterviewSchedulerState
           icon: Icon(
             Icons.restart_alt_rounded,
             size: 20,
-            color: AppTheme.textSecondary,
+            color: AppTheme.dashTextSecondaryOf(context),
           ),
           label: Text(
             'Clear and set pending',
-            style: TextStyle(color: AppTheme.textSecondary),
+            style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
           ),
         ),
       ];
@@ -493,11 +511,11 @@ class _RspFinalInterviewSchedulerState
         icon: Icon(
           Icons.restart_alt_rounded,
           size: 20,
-          color: AppTheme.textSecondary,
+          color: AppTheme.dashTextSecondaryOf(context),
         ),
         label: Text(
           'Clear and set pending',
-          style: TextStyle(color: AppTheme.textSecondary),
+          style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
         ),
       ),
     ];
@@ -543,12 +561,12 @@ class _RspFinalInterviewSchedulerState
           label: Text(emailSent ? 'Email sent' : 'Email applicant'),
           style: OutlinedButton.styleFrom(
             foregroundColor: emailSent
-                ? AppTheme.textSecondary
+                ? AppTheme.dashTextSecondaryOf(context)
                 : navy,
-            disabledForegroundColor: AppTheme.textSecondary,
+            disabledForegroundColor: AppTheme.dashTextSecondaryOf(context),
             side: BorderSide(
               color: emailSent
-                  ? AppTheme.textSecondary.withValues(alpha: 0.35)
+                  ? AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.35)
                   : navy.withValues(alpha: 0.55),
             ),
             backgroundColor:
@@ -600,7 +618,7 @@ class _RspFinalInterviewSchedulerState
                 style: TextStyle(
                   fontSize: 12,
                   height: 1.4,
-                  color: AppTheme.textSecondary,
+                  color: AppTheme.dashTextSecondaryOf(context),
                   fontStyle: FontStyle.italic,
                 ),
               ),
@@ -611,7 +629,7 @@ class _RspFinalInterviewSchedulerState
               style: TextStyle(
                 fontSize: 12,
                 height: 1.4,
-                color: AppTheme.textSecondary.withValues(alpha: 0.95),
+                color: AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.95),
                 fontStyle: FontStyle.italic,
               ),
             ),
@@ -626,7 +644,7 @@ class _RspFinalInterviewSchedulerState
                       style: TextStyle(
                         fontSize: 13,
                         height: 1.45,
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                       ),
                     ),
                   ),
@@ -645,7 +663,7 @@ class _RspFinalInterviewSchedulerState
                 style: TextStyle(
                   fontSize: 13,
                   height: 1.45,
-                  color: AppTheme.textSecondary,
+                  color: AppTheme.dashTextSecondaryOf(context),
                 ),
               ),
               const SizedBox(height: 14),
@@ -654,14 +672,14 @@ class _RspFinalInterviewSchedulerState
               SizedBox(width: double.infinity, child: openBtn),
             ],
             const SizedBox(height: 22),
-            Divider(height: 1, color: Colors.black.withValues(alpha: 0.08)),
+            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
             const SizedBox(height: 18),
             Text(
               'What applicants see (Step 8)',
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
-                color: AppTheme.textPrimary,
+                color: AppTheme.dashTextPrimaryOf(context),
               ),
             ),
             const SizedBox(height: 6),
@@ -670,7 +688,7 @@ class _RspFinalInterviewSchedulerState
               style: TextStyle(
                 fontSize: 12,
                 height: 1.45,
-                color: AppTheme.textSecondary,
+                color: AppTheme.dashTextSecondaryOf(context),
               ),
             ),
             const SizedBox(height: 14),
@@ -716,7 +734,7 @@ class _RspFinalInterviewSchedulerState
               style: TextStyle(
                 fontSize: 12,
                 fontStyle: FontStyle.italic,
-                color: AppTheme.textSecondary.withValues(alpha: 0.92),
+                color: AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.92),
               ),
             ),
           ],
@@ -758,7 +776,7 @@ class _RspFinalInterviewSchedulerState
     );
   }
 
-  Widget _applicantInitials(String name) {
+  Widget _applicantInitials(BuildContext context, String name) {
     final parts = name.trim().split(RegExp(r'\s+'));
     String initials = '';
     if (parts.isNotEmpty && parts.first.isNotEmpty) {
@@ -788,9 +806,11 @@ class _RspFinalInterviewSchedulerState
       alignment: Alignment.center,
       child: Text(
         initials,
-        style: const TextStyle(
+        style: TextStyle(
           fontFamily: 'NotoSans',
-          color: AppTheme.primaryNavy,
+          color: AppTheme.dashIsDark(context)
+              ? AppTheme.primaryNavyLight
+              : AppTheme.primaryNavy,
           fontWeight: FontWeight.w800,
           fontSize: 16,
         ),
@@ -802,6 +822,10 @@ class _RspFinalInterviewSchedulerState
   Widget build(BuildContext context) {
     final hairline = AppTheme.dashHairlineOf(context);
     final muted = AppTheme.dashMutedSurfaceOf(context);
+    final panel = AppTheme.dashPanelOf(context);
+    final accentNavy = AppTheme.dashIsDark(context)
+        ? AppTheme.primaryNavyLight
+        : AppTheme.primaryNavy;
 
     final refreshBtn = FilledButton.icon(
       onPressed: _loading ? null : _load,
@@ -841,10 +865,12 @@ class _RspFinalInterviewSchedulerState
                   color: AppTheme.primaryNavy.withValues(alpha: 0.2),
                 ),
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.event_available_outlined,
                 size: 26,
-                color: AppTheme.primaryNavy,
+                color: AppTheme.dashIsDark(context)
+                    ? AppTheme.primaryNavyLight
+                    : AppTheme.primaryNavy,
               ),
             ),
             const SizedBox(width: 16),
@@ -979,7 +1005,7 @@ class _RspFinalInterviewSchedulerState
                             ),
                             child: Row(
                               children: [
-                                _applicantInitials(app.fullName),
+                                _applicantInitials(context, app.fullName),
                                 const SizedBox(width: 14),
                                 Expanded(
                                   child: Column(
@@ -1032,9 +1058,9 @@ class _RspFinalInterviewSchedulerState
                                     ),
                                     child: Text(
                                       '${exam.scorePercent.toStringAsFixed(0)}%',
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontFamily: 'NotoSans',
-                                        color: AppTheme.primaryNavy,
+                                        color: accentNavy,
                                         fontSize: 14,
                                         fontWeight: FontWeight.w800,
                                       ),
@@ -1109,7 +1135,7 @@ class _RspFinalInterviewSchedulerState
                                 ),
                                 label: const Text('Show less'),
                                 style: TextButton.styleFrom(
-                                  foregroundColor: AppTheme.primaryNavy,
+                                  foregroundColor: accentNavy,
                                 ),
                               ),
                             ],
@@ -1126,7 +1152,7 @@ class _RspFinalInterviewSchedulerState
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                _applicantInitials(app.fullName),
+                                _applicantInitials(context, app.fullName),
                                 const SizedBox(width: 14),
                                 Expanded(
                                   child: Column(
@@ -1149,9 +1175,11 @@ class _RspFinalInterviewSchedulerState
                                       const SizedBox(height: 6),
                                       Text(
                                         app.email,
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontFamily: 'NotoSans',
-                                          color: AppTheme.textSecondary,
+                                          color: AppTheme.dashTextSecondaryOf(
+                                            context,
+                                          ),
                                           fontSize: 14,
                                           height: 1.35,
                                           fontWeight: FontWeight.w500,
@@ -1166,8 +1194,10 @@ class _RspFinalInterviewSchedulerState
                                           'Position: ${app.positionAppliedFor!.trim()}',
                                           style: TextStyle(
                                             fontFamily: 'NotoSans',
-                                            color: AppTheme.primaryNavy
-                                                .withValues(alpha: 0.95),
+                                            color: AppTheme.dashIsDark(context)
+                                                ? AppTheme.primaryNavyLight
+                                                : AppTheme.primaryNavy
+                                                    .withValues(alpha: 0.95),
                                             fontSize: 13,
                                             fontWeight: FontWeight.w700,
                                             height: 1.3,
@@ -1191,7 +1221,9 @@ class _RspFinalInterviewSchedulerState
                                                   vertical: 6,
                                                 ),
                                                 decoration: BoxDecoration(
-                                                  color: Colors.white,
+                                                  color: AppTheme.dashPanelOf(
+                                                    context,
+                                                  ),
                                                   borderRadius:
                                                       BorderRadius.circular(
                                                     999,
@@ -1219,8 +1251,7 @@ class _RspFinalInterviewSchedulerState
                                                   'Exam: ${exam.scorePercent.toStringAsFixed(0)}%',
                                                   style: TextStyle(
                                                     fontFamily: 'NotoSans',
-                                                    color: AppTheme.primaryNavy
-                                                        .withValues(
+                                                    color: accentNavy.withValues(
                                                       alpha: 0.92,
                                                     ),
                                                     fontSize: 12,
@@ -1243,7 +1274,7 @@ class _RspFinalInterviewSchedulerState
                                       vertical: 10,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: Colors.white,
+                                      color: panel,
                                       borderRadius: BorderRadius.circular(12),
                                       border: Border.all(
                                         color: AppTheme.primaryNavy.withValues(
@@ -1265,7 +1296,7 @@ class _RspFinalInterviewSchedulerState
                                         Icon(
                                           Icons.badge_rounded,
                                           size: 20,
-                                          color: AppTheme.primaryNavy,
+                                          color: accentNavy,
                                         ),
                                         const SizedBox(width: 8),
                                         Text(
@@ -1274,7 +1305,7 @@ class _RspFinalInterviewSchedulerState
                                             fontFamily: 'NotoSans',
                                             fontWeight: FontWeight.w800,
                                             fontSize: 12,
-                                            color: AppTheme.primaryNavy,
+                                            color: accentNavy,
                                           ),
                                         ),
                                       ],
@@ -1312,11 +1343,9 @@ class _RspFinalInterviewSchedulerState
                                 Container(
                                   width: double.infinity,
                                   decoration: BoxDecoration(
-                                    color: Colors.white,
+                                    color: panel,
                                     borderRadius: BorderRadius.circular(14),
-                                    border: Border.all(
-                                      color: const Color(0xFFE2E6EA),
-                                    ),
+                                    border: Border.all(color: hairline),
                                   ),
                                   child: IntrinsicHeight(
                                     child: Row(
@@ -1331,7 +1360,7 @@ class _RspFinalInterviewSchedulerState
                                             bottom: 12,
                                           ),
                                           decoration: BoxDecoration(
-                                            color: AppTheme.primaryNavy,
+                                            color: accentNavy,
                                             borderRadius: BorderRadius.circular(
                                               3,
                                             ),
@@ -1352,8 +1381,9 @@ class _RspFinalInterviewSchedulerState
                                                 Icon(
                                                   Icons.event_note_rounded,
                                                   size: 22,
-                                                  color: AppTheme.primaryNavy
-                                                      .withValues(alpha: 0.88),
+                                                  color: accentNavy.withValues(
+                                                    alpha: 0.88,
+                                                  ),
                                                 ),
                                                 const SizedBox(width: 12),
                                                 Expanded(
@@ -1378,8 +1408,16 @@ class _RspFinalInterviewSchedulerState
                                                           color:
                                                               scheduled == null
                                                               ? AppTheme
-                                                                    .textSecondary
+                                                                    .dashTextSecondaryOf(
+                                                                  context,
+                                                                )
                                                               : AppTheme
+                                                                    .dashIsDark(
+                                                                  context,
+                                                                )
+                                                                ? AppTheme
+                                                                    .primaryNavyLight
+                                                                : AppTheme
                                                                     .primaryNavy,
                                                           height: 1.3,
                                                         ),
@@ -1392,12 +1430,14 @@ class _RspFinalInterviewSchedulerState
                                                               ),
                                                           child: Text(
                                                             'Pick a date and time for the in-person final interview.',
-                                                            style: const TextStyle(
+                                                            style: TextStyle(
                                                               fontFamily:
                                                                   'NotoSans',
                                                               fontSize: 12,
                                                               color: AppTheme
-                                                                  .textSecondary,
+                                                                  .dashTextSecondaryOf(
+                                                                context,
+                                                              ),
                                                               height: 1.4,
                                                               fontWeight:
                                                                   FontWeight
@@ -1449,12 +1489,12 @@ class _RspFinalInterviewSchedulerState
                                       icon: Icon(
                                         Icons.event_busy_rounded,
                                         size: 20,
-                                        color: AppTheme.textSecondary,
+                                        color: AppTheme.dashTextSecondaryOf(context),
                                       ),
                                       label: Text(
                                         'Clear',
                                         style: TextStyle(
-                                          color: AppTheme.textSecondary,
+                                          color: AppTheme.dashTextSecondaryOf(context),
                                         ),
                                       ),
                                     ),
@@ -1475,7 +1515,7 @@ class _RspFinalInterviewSchedulerState
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                _outcomeStatusStrip(outcome),
+                                _outcomeStatusStrip(context, outcome),
                                 if (actions.isNotEmpty) ...[
                                   const SizedBox(height: 14),
                                   Wrap(
@@ -1514,7 +1554,7 @@ class _RspFinalInterviewSchedulerState
                                   'Create Account shortcut is not available here. Use the full admin sidebar.',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: AppTheme.textSecondary,
+                                    color: AppTheme.dashTextSecondaryOf(context),
                                   ),
                                 ),
                               ),

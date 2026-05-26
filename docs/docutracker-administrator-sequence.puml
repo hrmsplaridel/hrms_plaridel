@@ -1,0 +1,29 @@
+@startuml
+title Figure 7. DocuTracker Administrator Sequence
+
+actor Administrator as Admin
+participant "DocuTracker App" as App
+participant "Server" as Server
+database Database
+
+Admin -> App : **1.** Open Admin settings
+App -> Server : **2.** Load current config
+Server -> Database : **3.** Read workflows\nand permissions
+Database --> App : **4.** Show settings
+
+Admin -> App : **5.** Save workflow steps
+App -> Server : **6.** Save new workflow version
+Server -> Database : **7.** Store steps\nand assignees
+Database --> App : **8.** Saved
+
+Admin -> App : **9.** Set user permissions
+App -> Server : **10.** Save permission rules
+Server -> Database : **11.** Store permissions
+Database --> App : **12.** Saved
+
+Admin -> App : **13.** View overdue documents
+App -> Server : **14.** Request overdue list
+Server -> Database : **15.** Query overdue records
+Database --> App : **16.** Display list
+
+@enduml

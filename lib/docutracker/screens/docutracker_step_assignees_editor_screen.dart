@@ -7,11 +7,22 @@ import '../../landingpage/constants/app_theme.dart';
 import '../docutracker_api_result.dart';
 import '../docutracker_repository.dart';
 import '../docutracker_styles.dart';
+import '../theme/docutracker_tokens.dart';
 import '../models/document_routing_config.dart';
 import '../models/document_type.dart';
+import '../widgets/docutracker_error_banner.dart';
+import '../widgets/docutracker_module_header.dart';
+import '../widgets/docutracker_responsive_body.dart';
 
 class DocuTrackerStepAssigneesEditorScreen extends StatefulWidget {
-  const DocuTrackerStepAssigneesEditorScreen({super.key});
+  const DocuTrackerStepAssigneesEditorScreen({
+    super.key,
+    this.initialDocumentType,
+    this.initialWorkflowVersion,
+  });
+
+  final String? initialDocumentType;
+  final int? initialWorkflowVersion;
 
   @override
   State<DocuTrackerStepAssigneesEditorScreen> createState() =>
@@ -128,9 +139,12 @@ class _DocuTrackerStepAssigneesEditorScreenState
   @override
   void initState() {
     super.initState();
-    _documentType = DocumentRoutingConfig.defaults.isEmpty
-        ? null
-        : DocumentRoutingConfig.defaults.first.documentType.value;
+    _documentType =
+        widget.initialDocumentType ??
+        (DocumentRoutingConfig.defaults.isEmpty
+            ? null
+            : DocumentRoutingConfig.defaults.first.documentType.value);
+    _workflowVersion = widget.initialWorkflowVersion;
     _empSearchController.addListener(_scheduleEmpSearch);
     _load();
   }
@@ -363,6 +377,7 @@ class _DocuTrackerStepAssigneesEditorScreenState
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setModalState) {
+            final canSave = draft.isNotEmpty && draft.any((a) => a.isPrimary);
             final youMustHavePrimary =
                 draft.isNotEmpty && !draft.any((a) => a.isPrimary);
             return Padding(
@@ -436,7 +451,8 @@ class _DocuTrackerStepAssigneesEditorScreenState
                                                       _empSearchController,
                                                   decoration:
                                                       DocuTrackerStyles.inputDecoration(
-context,                                                         'Search name',
+                                                        context,
+                                                        'Search name',
                                                         Icons.search_rounded,
                                                       ),
                                                 ),
@@ -617,9 +633,9 @@ context,                                                         'Search name',
                           const SizedBox(width: 12),
                           Expanded(
                             child: FilledButton.icon(
-                              onPressed: youMustHavePrimary
-                                  ? null
-                                  : () => Navigator.of(ctx).pop(true),
+                              onPressed: canSave && !youMustHavePrimary
+                                  ? () => Navigator.of(ctx).pop(true)
+                                  : null,
                               icon: const Icon(Icons.save_rounded, size: 18),
                               label: const Text('Save assignees'),
                             ),
@@ -671,21 +687,22 @@ context,                                                         'Search name',
     ].toSet().toList()..sort();
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Workflow step assignees'),
-        actions: [
-          IconButton(
-            tooltip: 'Reload',
-            onPressed: _loading ? null : _load,
-            icon: const Icon(Icons.refresh_rounded),
-          ),
-        ],
-      ),
-      body: Padding(
+      body: DocuTrackerResponsiveBody(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            DocuTrackerModuleHeader(
+              title: 'Workflow step assignees',
+              subtitle:
+                  'Set primary/backup reviewers and allowed workflow actions per step.',
+              trailing: OutlinedButton.icon(
+                onPressed: _loading ? null : _load,
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('Refresh'),
+              ),
+            ),
+            const SizedBox(height: 12),
             Material(
               color: AppTheme.white,
               shape: RoundedRectangleBorder(
@@ -713,7 +730,8 @@ context,                                                         'Search name',
                           child: DropdownButtonFormField<String>(
                             initialValue: _documentType,
                             decoration: DocuTrackerStyles.dropdownDecoration(
-context,                               'Document type',
+                              context,
+                              'Document type',
                             ),
                             items: [
                               for (final t in typeOptions)
@@ -735,7 +753,8 @@ context,                               'Document type',
                           child: TextFormField(
                             initialValue: _workflowVersion?.toString() ?? '',
                             decoration: DocuTrackerStyles.inputDecoration(
-context,                               'Version',
+                              context,
+                              'Version',
                               Icons.tag_rounded,
                             ),
                             keyboardType: TextInputType.number,
@@ -761,21 +780,20 @@ context,                               'Version',
               ),
             ),
             const SizedBox(height: 12),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(
-                  _error!,
-                  style: TextStyle(color: Colors.red.shade700),
-                ),
+            if (_error != null) ...[
+              DocuTrackerErrorBanner(
+                message: _error!,
+                onDismiss: () => setState(() => _error = null),
               ),
+              const SizedBox(height: 8),
+            ],
             Expanded(
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
                   : ListView.builder(
-                      itemCount: _steps.length,
+                      itemCount: _steps.where((s) => s.enabled).length,
                       itemBuilder: (ctx, i) {
-                        final s = _steps[i];
+                        final s = _steps.where((s) => s.enabled).elementAt(i);
                         final primary = s.assignees
                             .where((a) => a.isPrimary)
                             .toList();
@@ -1039,7 +1057,7 @@ class _AssigneeEditorCard extends StatelessWidget {
                           ? Icons.radio_button_checked_rounded
                           : Icons.radio_button_off_rounded,
                       size: 18,
-                      color: AppTheme.primaryNavy,
+                      color: DocuTrackerTokens.brand,
                     ),
                     label: Text(
                       assignee.isPrimary ? 'Primary' : 'Make primary',

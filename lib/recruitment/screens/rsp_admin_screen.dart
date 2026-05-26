@@ -1293,20 +1293,19 @@ class _RspBiFormSectionState extends State<_RspBiFormSection> {
 
   Future<void> _printBi(BiFormEntry entry) async {
     try {
-      final doc = await FormPdf.buildBiFormPdf(entry);
-      await FormPdf.printDocument(doc, name: 'BI_Form.pdf');
+      await FormPdf.printForm(
+        context: context,
+        buildDocument: () => FormPdf.buildBiFormPdf(entry),
+        filename: 'BI_Form.pdf',
+        format: FormPdf.biPrintPageFormat,
+        dynamicLayout: false,
+      );
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
-      }
-    }
+    } catch (_) {}
   }
 
   Future<void> _downloadBi(BiFormEntry entry) async {
@@ -1362,6 +1361,12 @@ class _BiFormEditorState extends State<_BiFormEditor> {
   late TextEditingController _respondentPosition;
   late String _relationship;
   late List<int?> _ratings;
+  late List<bool> _functionalChecks;
+  late TextEditingController _otherArea;
+  late TextEditingController _perf3Years;
+  late TextEditingController _challenges;
+  late TextEditingController _compliance;
+  late TextEditingController _otherRelevant;
 
   @override
   void initState() {
@@ -1387,6 +1392,17 @@ class _BiFormEditorState extends State<_BiFormEditor> {
       e.rating8,
       e.rating9,
     ];
+    _otherArea = TextEditingController(text: e.otherFunctionalArea ?? '');
+    _perf3Years = TextEditingController(text: e.performance3Years ?? '');
+    _challenges = TextEditingController(text: e.challengesCoping ?? '');
+    _compliance = TextEditingController(text: e.complianceAttendance ?? '');
+    _otherRelevant = TextEditingController(
+      text: e.otherRelevantInformation ?? '',
+    );
+    _functionalChecks = List.generate(
+      BiFormEntry.functionalAreaOptions.length,
+      (i) => e.functionalAreas.contains(BiFormEntry.functionalAreaOptions[i]),
+    );
   }
 
   @override
@@ -1397,10 +1413,21 @@ class _BiFormEditorState extends State<_BiFormEditor> {
     _positionApplied.dispose();
     _respondentName.dispose();
     _respondentPosition.dispose();
+    _otherArea.dispose();
+    _perf3Years.dispose();
+    _challenges.dispose();
+    _compliance.dispose();
+    _otherRelevant.dispose();
     super.dispose();
   }
 
   BiFormEntry _buildCurrentEntry() {
+    final areas = <String>[];
+    for (var i = 0; i < BiFormEntry.functionalAreaOptions.length; i++) {
+      if (_functionalChecks[i]) {
+        areas.add(BiFormEntry.functionalAreaOptions[i]);
+      }
+    }
     return BiFormEntry(
       id: widget.entry.id,
       applicantName: _applicantName.text.trim(),
@@ -1427,6 +1454,22 @@ class _BiFormEditorState extends State<_BiFormEditor> {
       rating7: _ratings[6],
       rating8: _ratings[7],
       rating9: _ratings[8],
+      functionalAreas: areas,
+      otherFunctionalArea: _otherArea.text.trim().isEmpty
+          ? null
+          : _otherArea.text.trim(),
+      performance3Years: _perf3Years.text.trim().isEmpty
+          ? null
+          : _perf3Years.text.trim(),
+      challengesCoping: _challenges.text.trim().isEmpty
+          ? null
+          : _challenges.text.trim(),
+      complianceAttendance: _compliance.text.trim().isEmpty
+          ? null
+          : _compliance.text.trim(),
+      otherRelevantInformation: _otherRelevant.text.trim().isEmpty
+          ? null
+          : _otherRelevant.text.trim(),
       createdAt: widget.entry.createdAt,
       updatedAt: widget.entry.updatedAt,
     );
@@ -1441,6 +1484,8 @@ class _BiFormEditorState extends State<_BiFormEditor> {
   @override
   Widget build(BuildContext context) {
     final ro = widget.readOnly;
+    const functionalOptions = BiFormEntry.functionalAreaOptions;
+    const functionalLeftCount = 6;
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -1685,6 +1730,181 @@ class _BiFormEditorState extends State<_BiFormEditor> {
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 28),
+              Divider(color: AppTheme.lightGray, height: 1),
+              const SizedBox(height: 20),
+              Text(
+                'Page 2 — Functional areas & performance',
+                style: TextStyle(
+                  color: AppTheme.primaryNavy,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'A. Functional Areas:',
+                style: TextStyle(
+                  color: AppTheme.primaryNavy,
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Please check (/) the boxes opposite the functional area where the applicant can perform effectively.',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (var i = 0;
+                            i < functionalLeftCount &&
+                                i < functionalOptions.length;
+                            i++)
+                          CheckboxListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(
+                              functionalOptions[i],
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                            value: _functionalChecks[i],
+                            onChanged: ro
+                                ? null
+                                : (v) => setState(
+                                      () => _functionalChecks[i] = v ?? false,
+                                    ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (var i = functionalLeftCount;
+                            i < functionalOptions.length;
+                            i++)
+                          CheckboxListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(
+                              functionalOptions[i],
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                            value: _functionalChecks[i],
+                            onChanged: ro
+                                ? null
+                                : (v) => setState(
+                                      () => _functionalChecks[i] = v ?? false,
+                                    ),
+                          ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Other (Please specify)',
+                          style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 13,
+                          ),
+                        ),
+                        RspSpacedOutlineField(
+                          child: TextFormField(
+                            controller: _otherArea,
+                            readOnly: ro,
+                            decoration: rspUnderlinedField(''),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'I. On performance and other relevant information.',
+                style: TextStyle(
+                  color: AppTheme.primaryNavy,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Please tell us about the work performance of the applicants in the last three (3) years. What are the applicant\'s outstanding accomplishments recognition received and significant contributions to your office if any?',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+              ),
+              const SizedBox(height: 6),
+              RspSpacedOutlineField(
+                child: TextFormField(
+                  controller: _perf3Years,
+                  readOnly: ro,
+                  decoration: rspUnderlinedField(''),
+                  maxLines: 4,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'What do you think are the challenges or difficulties of the applicant in performing his/her duties and responsibilities in his/her position? How did the applicant cope with these challenges?',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+              ),
+              const SizedBox(height: 6),
+              RspSpacedOutlineField(
+                child: TextFormField(
+                  controller: _challenges,
+                  readOnly: ro,
+                  decoration: rspUnderlinedField(''),
+                  maxLines: 4,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'In terms of compliance with rules and regulation, please provide us information on the applicant\'s attendance to flag ceremonies/ retreats and other office programs and activities?',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+              ),
+              const SizedBox(height: 6),
+              RspSpacedOutlineField(
+                child: TextFormField(
+                  controller: _compliance,
+                  readOnly: ro,
+                  decoration: rspUnderlinedField(''),
+                  maxLines: 4,
+                ),
+              ),
+              const SizedBox(height: 28),
+              Divider(color: AppTheme.lightGray, height: 1),
+              const SizedBox(height: 20),
+              Text(
+                'Page 3 — Other relevant information',
+                style: TextStyle(
+                  color: AppTheme.primaryNavy,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Other relevant information/ data (critical incidents, family background, health profile habits, vices, membership in unions/ associations, or any derogatory records) about the applicants, if any.',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              RspSpacedOutlineField(
+                child: TextFormField(
+                  controller: _otherRelevant,
+                  readOnly: ro,
+                  decoration: rspUnderlinedField(''),
+                  maxLines: 8,
+                ),
               ),
               const SizedBox(height: 24),
               const RspFormFooter(),
@@ -2037,20 +2257,17 @@ class _RspPerformanceEvaluationSectionState
 
   Future<void> _printPerf(PerformanceEvaluationEntry entry) async {
     try {
-      final doc = await FormPdf.buildPerformanceEvaluationPdf(entry);
-      await FormPdf.printDocument(doc, name: 'Performance_Evaluation.pdf');
+      await FormPdf.printForm(
+        context: context,
+        buildDocument: () => FormPdf.buildPerformanceEvaluationPdf(entry),
+        filename: 'Performance_Evaluation.pdf',
+      );
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
-      }
-    }
+    } catch (_) {}
   }
 
   Future<void> _downloadPerf(PerformanceEvaluationEntry entry) async {
@@ -2507,20 +2724,13 @@ class _RspIdpSectionState extends State<_RspIdpSection> {
 
   Future<void> _printIdp(IdpEntry entry) async {
     try {
-      final doc = await FormPdf.buildIdpPdf(entry);
-      await FormPdf.printDocument(doc, name: 'IDP.pdf');
+      await FormPdf.printIdpPdf(context, entry);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
-      }
-    }
+    } catch (_) {}
   }
 
   Future<void> _downloadIdp(IdpEntry entry) async {
@@ -2695,6 +2905,7 @@ class _IdpFormEditorState extends State<_IdpFormEditor> {
       TextEditingController(text: e.experience ?? ''),
       TextEditingController(text: e.training ?? ''),
       TextEditingController(text: e.eligibility ?? ''),
+      TextEditingController(text: e.significantAccomplishments ?? ''),
       TextEditingController(text: e.targetPosition1 ?? ''),
       TextEditingController(text: e.targetPosition2 ?? ''),
       TextEditingController(text: e.avgRating ?? ''),
@@ -2710,18 +2921,23 @@ class _IdpFormEditorState extends State<_IdpFormEditor> {
     _performanceRating = e.performanceRating;
     _competenceRating = e.competenceRating;
     _successionPriorityRating = e.successionPriorityRating;
-    _planRows = e.developmentPlanRows.isEmpty
-        ? [_rowControllers('', '', '', '')]
-        : e.developmentPlanRows
-              .map(
-                (r) => _rowControllers(
-                  r.objectives ?? '',
-                  r.ldProgram ?? '',
-                  r.requirements ?? '',
-                  r.timeFrame ?? '',
-                ),
-              )
-              .toList();
+    final plan = e.developmentPlanRows.isEmpty
+        ? <IdpPlanRow>[const IdpPlanRow(), const IdpPlanRow()]
+        : List<IdpPlanRow>.from(e.developmentPlanRows);
+    while (plan.length < 2) {
+      plan.add(const IdpPlanRow());
+    }
+    _planRows = plan
+        .take(2)
+        .map(
+          (r) => _rowControllers(
+            r.objectives ?? '',
+            r.ldProgram ?? '',
+            r.requirements ?? '',
+            r.timeFrame ?? '',
+          ),
+        )
+        .toList();
   }
 
   Map<String, TextEditingController> _rowControllers(
@@ -2749,22 +2965,6 @@ class _IdpFormEditorState extends State<_IdpFormEditor> {
       }
     }
     super.dispose();
-  }
-
-  void _addPlanRow() {
-    if (widget.readOnly) return;
-    setState(() => _planRows.add(_rowControllers('', '', '', '')));
-  }
-
-  void _removePlanRow(int index) {
-    if (widget.readOnly) return;
-    if (_planRows.length <= 1) return;
-    setState(() {
-      for (final c in _planRows[index].values) {
-        c.dispose();
-      }
-      _planRows.removeAt(index);
-    });
   }
 
   IdpEntry _buildCurrentEntry() {
@@ -2815,43 +3015,46 @@ class _IdpFormEditorState extends State<_IdpFormEditor> {
       eligibility: _controllers[8].text.trim().isEmpty
           ? null
           : _controllers[8].text.trim(),
-      targetPosition1: _controllers[9].text.trim().isEmpty
+      significantAccomplishments: _controllers[9].text.trim().isEmpty
           ? null
           : _controllers[9].text.trim(),
-      targetPosition2: _controllers[10].text.trim().isEmpty
+      targetPosition1: _controllers[10].text.trim().isEmpty
           ? null
           : _controllers[10].text.trim(),
-      avgRating: _controllers[11].text.trim().isEmpty
+      targetPosition2: _controllers[11].text.trim().isEmpty
           ? null
           : _controllers[11].text.trim(),
-      opcr: _controllers[12].text.trim().isEmpty
+      avgRating: _controllers[12].text.trim().isEmpty
           ? null
           : _controllers[12].text.trim(),
-      ipcr: _controllers[13].text.trim().isEmpty
+      opcr: _controllers[13].text.trim().isEmpty
           ? null
           : _controllers[13].text.trim(),
-      performanceRating: _performanceRating,
-      competencyDescription: _controllers[14].text.trim().isEmpty
+      ipcr: _controllers[14].text.trim().isEmpty
           ? null
           : _controllers[14].text.trim(),
-      competenceRating: _competenceRating,
-      successionPriorityScore: _controllers[15].text.trim().isEmpty
+      performanceRating: _performanceRating,
+      competencyDescription: _controllers[15].text.trim().isEmpty
           ? null
           : _controllers[15].text.trim(),
-      successionPriorityRating: _successionPriorityRating,
-      developmentPlanRows: rows,
-      preparedBy: _controllers[16].text.trim().isEmpty
+      competenceRating: _competenceRating,
+      successionPriorityScore: _controllers[16].text.trim().isEmpty
           ? null
           : _controllers[16].text.trim(),
-      reviewedBy: _controllers[17].text.trim().isEmpty
+      successionPriorityRating: _successionPriorityRating,
+      developmentPlanRows: rows,
+      preparedBy: _controllers[17].text.trim().isEmpty
           ? null
           : _controllers[17].text.trim(),
-      notedBy: _controllers[18].text.trim().isEmpty
+      reviewedBy: _controllers[18].text.trim().isEmpty
           ? null
           : _controllers[18].text.trim(),
-      approvedBy: _controllers[19].text.trim().isEmpty
+      notedBy: _controllers[19].text.trim().isEmpty
           ? null
           : _controllers[19].text.trim(),
+      approvedBy: _controllers[20].text.trim().isEmpty
+          ? null
+          : _controllers[20].text.trim(),
       createdAt: widget.entry.createdAt,
       updatedAt: widget.entry.updatedAt,
     );
@@ -2881,226 +3084,321 @@ class _IdpFormEditorState extends State<_IdpFormEditor> {
               subtitle: 'LOCAL GOVERNMENT UNIT OF PLARIDEL',
             ),
             const SizedBox(height: 16),
-            Text(
-              'Personal & position',
-              style: TextStyle(
-                color: AppTheme.primaryNavy,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            _field('Name', _controllers[0]),
-            _field('Position', _controllers[1]),
-            _field('Category', _controllers[2]),
-            _field('Division', _controllers[3]),
-            _field('Department', _controllers[4]),
-            const SizedBox(height: rspFormSectionGap),
-            Text(
-              'Qualifications',
-              style: TextStyle(
-                color: AppTheme.primaryNavy,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            _field('Education', _controllers[5]),
-            _field('Experience', _controllers[6]),
-            _field('Training', _controllers[7]),
-            _field('Eligibility', _controllers[8]),
-            const SizedBox(height: rspFormSectionGap),
-            Text(
-              'Succession analysis – target positions',
-              style: TextStyle(
-                color: AppTheme.primaryNavy,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            _field('Target position 1', _controllers[9]),
-            _field('Target position 2', _controllers[10]),
-            const SizedBox(height: rspFormSectionGap),
-            Text(
-              'Performance (avg 2 latest SPMS-IPCR)',
-              style: TextStyle(
-                color: AppTheme.primaryNavy,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            _field('Average rating', _controllers[11]),
-            _field('OPCR', _controllers[12]),
-            _field('IPCR', _controllers[13]),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 12,
-              runSpacing: 10,
-              children: IdpEntry.performanceRatingOptions
-                  .map(
-                    (v) => ChoiceChip(
-                      label: Text(v.replaceAll('_', ' ')),
-                      selected: _performanceRating == v,
-                      onSelected: ro
-                          ? null
-                          : (_) => setState(() => _performanceRating = v),
-                    ),
-                  )
-                  .toList(),
-            ),
-            const SizedBox(height: rspFormSectionGap),
-            Text(
-              'Competence assessment',
-              style: TextStyle(
-                color: AppTheme.primaryNavy,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            _field('Competency', _controllers[14]),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 12,
-              runSpacing: 10,
-              children: IdpEntry.competenceRatingOptions
-                  .map(
-                    (v) => ChoiceChip(
-                      label: Text(v[0].toUpperCase() + v.substring(1)),
-                      selected: _competenceRating == v,
-                      onSelected: ro
-                          ? null
-                          : (_) => setState(() => _competenceRating = v),
-                    ),
-                  )
-                  .toList(),
-            ),
-            const SizedBox(height: rspFormSectionGap),
-            Text(
-              'Succession priority',
-              style: TextStyle(
-                color: AppTheme.primaryNavy,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            _field('Total score', _controllers[15]),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 12,
-              runSpacing: 10,
-              children: IdpEntry.successionPriorityOptions
-                  .map(
-                    (v) => ChoiceChip(
-                      label: Text(
-                        v == 'priority_2'
-                            ? 'Priority 2'
-                            : v == 'priority_3'
-                            ? 'Priority 3'
-                            : 'Priority',
-                      ),
-                      selected: _successionPriorityRating == v,
-                      onSelected: ro
-                          ? null
-                          : (_) =>
-                                setState(() => _successionPriorityRating = v),
-                    ),
-                  )
-                  .toList(),
-            ),
-            const SizedBox(height: rspFormSectionGap),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: Text(
-                    'Development plan (objectives, L&D program, requirements, time frame)',
-                    style: TextStyle(
-                      color: AppTheme.primaryNavy,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _field('NAME', _controllers[0]),
+                      _field('POSITION', _controllers[1]),
+                      _field('CATEGORY', _controllers[2]),
+                      _field('DIVISION', _controllers[3]),
+                      _field('DEPARTMENT', _controllers[4]),
+                    ],
                   ),
                 ),
-                if (!ro) ...[
-                  const SizedBox(width: 8),
-                  TextButton.icon(
-                    onPressed: _addPlanRow,
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Add row'),
+                const SizedBox(width: 24),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'QUALIFICATIONS',
+                        style: TextStyle(
+                          color: AppTheme.primaryNavy,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      _field('EDUCATION', _controllers[5]),
+                      _field('EXPERIENCE', _controllers[6]),
+                      _field('TRAINING', _controllers[7]),
+                      _field('ELIGIBILITY', _controllers[8]),
+                    ],
                   ),
-                ],
+                ),
               ],
             ),
-            const SizedBox(height: 14),
-            ...List.generate(_planRows.length, (i) {
-              final r = _planRows[i];
-              return Padding(
-                padding: const EdgeInsets.only(bottom: rspFormFieldVerticalGap),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: TextFormField(
-                        controller: r['objectives'],
-                        readOnly: ro,
-                        decoration: rspUnderlinedField('Objectives'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: TextFormField(
-                        controller: r['ld_program'],
-                        readOnly: ro,
-                        decoration: rspUnderlinedField('L&D program'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: TextFormField(
-                        controller: r['requirements'],
-                        readOnly: ro,
-                        decoration: rspUnderlinedField('Requirements'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: TextFormField(
-                        controller: r['time_frame'],
-                        readOnly: ro,
-                        decoration: rspUnderlinedField('Time frame'),
-                      ),
-                    ),
-                    if (!ro)
-                      IconButton(
-                        icon: const Icon(Icons.remove_circle_outline),
-                        onPressed: _planRows.length > 1
-                            ? () => _removePlanRow(i)
-                            : null,
-                      ),
-                  ],
-                ),
-              );
-            }),
             const SizedBox(height: rspFormSectionGap),
             Text(
-              'Signatures (optional)',
+              'SIGNIFICANT ACCOMPLISHMENTS:',
               style: TextStyle(
                 color: AppTheme.primaryNavy,
-                fontSize: 16,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            _field('Significant accomplishments', _controllers[9]),
+            const SizedBox(height: 8),
+            Text(
+              'SUCCESSION ANALYSIS (RESULTS OF THE COMPETENCY-BASED SUCCESSION PRIORITY MATRIX)',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 12,
                 fontWeight: FontWeight.w600,
               ),
             ),
             const SizedBox(height: 12),
-            _field('Prepared by', _controllers[16]),
-            _field('Reviewed by', _controllers[17]),
-            _field('Noted by', _controllers[18]),
-            _field('Approved by', _controllers[19]),
+            _field('Target position 1', _controllers[10]),
+            _field('Target position 2', _controllers[11]),
+            const SizedBox(height: 8),
+            Text(
+              'Required qualifications (reference on printed form)',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Performance, average 2 latest previous SPMS-IPCR Rating',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(child: _field('OPCR', _controllers[13])),
+                const SizedBox(width: 12),
+                Expanded(child: _field('IPCR', _controllers[14])),
+                const SizedBox(width: 12),
+                Expanded(child: _field('Average rating', _controllers[12])),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: IdpEntry.performanceRatingOptions.map((v) {
+                final label = switch (v) {
+                  'very_satisfactory' => 'Very Satisfactory',
+                  _ => v[0].toUpperCase() + v.substring(1),
+                };
+                return ChoiceChip(
+                  label: Text(label),
+                  selected: _performanceRating == v,
+                  onSelected: ro ? null : (_) => setState(() => _performanceRating = v),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 12),
+            _field('Competency', _controllers[15]),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: IdpEntry.competenceRatingOptions.map((v) {
+                final label = switch (v) {
+                  'immediate' => 'Immediate',
+                  _ => v[0].toUpperCase() + v.substring(1),
+                };
+                return ChoiceChip(
+                  label: Text(label),
+                  selected: _competenceRating == v,
+                  onSelected: ro ? null : (_) => setState(() => _competenceRating = v),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 12),
+            _field('Succession priority total score', _controllers[16]),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: IdpEntry.successionPriorityOptions.map((v) {
+                final label = switch (v) {
+                  'priority_2' => 'Priority 2',
+                  'priority_3' => 'Priority 3',
+                  _ => 'Priority',
+                };
+                return ChoiceChip(
+                  label: Text(label),
+                  selected: _successionPriorityRating == v,
+                  onSelected: ro
+                      ? null
+                      : (_) => setState(() => _successionPriorityRating = v),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: rspFormSectionGap),
+            Text(
+              'Development plan — Short Term (6 months)',
+              style: TextStyle(
+                color: AppTheme.primaryNavy,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 10),
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(
+                    width: 88,
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.black54),
+                    ),
+                    child: const Text(
+                      'Short Term\n(6 months)',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                    ),
+                  ),
+                  Expanded(
+                    child: Table(
+                      border: TableBorder.all(color: Colors.black54),
+                      columnWidths: const {
+                        0: FlexColumnWidth(1.4),
+                        1: FlexColumnWidth(1.2),
+                        2: FlexColumnWidth(1.2),
+                        3: FlexColumnWidth(0.9),
+                      },
+                      children: [
+                        TableRow(
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                          ),
+                          children: const [
+                            Padding(
+                              padding: EdgeInsets.all(8),
+                              child: Text(
+                                'OBJECTIVES',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                              ),
+                            ),
+                            Padding(
+                              padding: EdgeInsets.all(8),
+                              child: Text(
+                                'L & D PROGRAM',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                              ),
+                            ),
+                            Padding(
+                              padding: EdgeInsets.all(8),
+                              child: Text(
+                                'REQUIREMENTS',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                              ),
+                            ),
+                            Padding(
+                              padding: EdgeInsets.all(8),
+                              child: Text(
+                                'TIME FRAME',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                              ),
+                            ),
+                          ],
+                        ),
+                        ...List.generate(_planRows.length, (i) {
+                          final r = _planRows[i];
+                          return TableRow(
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.all(6),
+                                child: TextFormField(
+                                  controller: r['objectives'],
+                                  readOnly: ro,
+                                  decoration: rspUnderlinedField(''),
+                                  maxLines: 2,
+                                ),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.all(6),
+                                child: TextFormField(
+                                  controller: r['ld_program'],
+                                  readOnly: ro,
+                                  decoration: rspUnderlinedField(''),
+                                  maxLines: 2,
+                                ),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.all(6),
+                                child: TextFormField(
+                                  controller: r['requirements'],
+                                  readOnly: ro,
+                                  decoration: rspUnderlinedField(''),
+                                  maxLines: 2,
+                                ),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.all(6),
+                                child: TextFormField(
+                                  controller: r['time_frame'],
+                                  readOnly: ro,
+                                  decoration: rspUnderlinedField(''),
+                                ),
+                              ),
+                            ],
+                          );
+                        }),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: rspFormSectionGap),
+            Text(
+              'Signatures',
+              style: TextStyle(
+                color: AppTheme.primaryNavy,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _field('Prepared by (Employee)', _controllers[17]),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _field('Reviewed by (Department Head)', _controllers[18]),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _field('Noted by', _controllers[19]),
+                      Text(
+                        IdpEntry.defaultNotedByName,
+                        style: TextStyle(fontSize: 10, color: AppTheme.textSecondary),
+                      ),
+                      Text(
+                        IdpEntry.defaultNotedByTitle,
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _field('Approved by', _controllers[20]),
+                      Text(
+                        IdpEntry.defaultApprovedByName,
+                        style: TextStyle(fontSize: 10, color: AppTheme.textSecondary),
+                      ),
+                      Text(
+                        IdpEntry.defaultApprovedByTitle,
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 24),
             const RspFormFooter(),
             const SizedBox(height: 24),
@@ -3305,20 +3603,18 @@ class _RspApplicantsProfileSectionState
 
   Future<void> _printProfile(ApplicantsProfileEntry entry) async {
     try {
-      final doc = await FormPdf.buildApplicantsProfilePdf(entry);
-      await FormPdf.printDocument(doc, name: 'Applicants_Profile.pdf');
+      await FormPdf.printForm(
+        context: context,
+        buildDocument: () => FormPdf.buildApplicantsProfilePdf(entry),
+        filename: 'Applicants_Profile.pdf',
+        format: FormPdf.pageLongLandscape,
+      );
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
-      }
-    }
+    } catch (_) {}
   }
 
   Future<void> _downloadProfile(ApplicantsProfileEntry entry) async {
@@ -4055,20 +4351,18 @@ class _RspComparativeAssessmentSectionState
 
   Future<void> _printCa(ComparativeAssessmentEntry entry) async {
     try {
-      final doc = await FormPdf.buildComparativeAssessmentPdf(entry);
-      await FormPdf.printDocument(doc, name: 'Comparative_Assessment.pdf');
+      await FormPdf.printForm(
+        context: context,
+        buildDocument: () => FormPdf.buildComparativeAssessmentPdf(entry),
+        filename: 'Comparative_Assessment.pdf',
+        format: FormPdf.pageLongLandscape,
+      );
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
-      }
-    }
+    } catch (_) {}
   }
 
   Future<void> _downloadCa(ComparativeAssessmentEntry entry) async {
@@ -5169,20 +5463,17 @@ class _RspPromotionCertificationSectionState
 
   Future<void> _printPc(PromotionCertificationEntry entry) async {
     try {
-      final doc = await FormPdf.buildPromotionCertificationPdf(entry);
-      await FormPdf.printDocument(doc, name: 'Promotion_Certification.pdf');
+      await FormPdf.printForm(
+        context: context,
+        buildDocument: () => FormPdf.buildPromotionCertificationPdf(entry),
+        filename: 'Promotion_Certification.pdf',
+      );
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
-      }
-    }
+    } catch (_) {}
   }
 
   Future<void> _downloadPc(PromotionCertificationEntry entry) async {
@@ -6022,20 +6313,18 @@ class _RspSelectionLineupSectionState
 
   Future<void> _printSl(SelectionLineupEntry entry) async {
     try {
-      final doc = await FormPdf.buildSelectionLineupPdf(entry);
-      await FormPdf.printDocument(doc, name: 'Selection_Lineup.pdf');
+      await FormPdf.printForm(
+        context: context,
+        buildDocument: () => FormPdf.buildSelectionLineupPdf(entry),
+        filename: 'Selection_Lineup.pdf',
+        format: FormPdf.pageLetterLandscape,
+      );
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
-      }
-    }
+    } catch (_) {}
   }
 
   Future<void> _downloadSl(SelectionLineupEntry entry) async {
@@ -6711,20 +7000,18 @@ class _RspTurnAroundTimeSectionState extends State<_RspTurnAroundTimeSection> {
 
   Future<void> _printTat(TurnAroundTimeEntry entry) async {
     try {
-      final doc = await FormPdf.buildTurnAroundTimePdf(entry);
-      await FormPdf.printDocument(doc, name: 'Turn_Around_Time.pdf');
+      await FormPdf.printForm(
+        context: context,
+        buildDocument: () => FormPdf.buildTurnAroundTimePdf(entry),
+        filename: 'Turn_Around_Time.pdf',
+        format: FormPdf.pageLongLandscape,
+      );
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
-      }
-    }
+    } catch (_) {}
   }
 
   Future<void> _downloadTat(TurnAroundTimeEntry entry) async {
@@ -7773,9 +8060,11 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
                   color: AppTheme.primaryNavy.withValues(alpha: 0.2),
                 ),
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.work_outline_rounded,
-                color: AppTheme.primaryNavy,
+                color: AppTheme.dashIsDark(context)
+                    ? AppTheme.primaryNavyLight
+                    : AppTheme.primaryNavy,
                 size: 26,
               ),
             ),
@@ -7933,7 +8222,12 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
                                                 fontWeight: FontWeight.w800,
                                                 letterSpacing: 0.3,
                                                 color: _hasVacancies
-                                                    ? AppTheme.primaryNavy
+                                                    ? (AppTheme.dashIsDark(
+                                                            context,
+                                                          )
+                                                          ? AppTheme
+                                                              .primaryNavyLight
+                                                          : AppTheme.primaryNavy)
                                                     : AppTheme.dashTextSecondaryOf(
                                                         context,
                                                       ),
@@ -8015,8 +8309,10 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
                                     ),
                                     child: Text(
                                       '${_vacancies.length}',
-                                      style: const TextStyle(
-                                        color: AppTheme.primaryNavy,
+                                      style: TextStyle(
+                                        color: AppTheme.dashIsDark(context)
+                                            ? AppTheme.primaryNavyLight
+                                            : AppTheme.primaryNavy,
                                         fontSize: 12,
                                         fontWeight: FontWeight.w800,
                                       ),
@@ -8246,8 +8542,15 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
                                                   ),
                                                   tooltip: 'Delete',
                                                   style: IconButton.styleFrom(
-                                                    backgroundColor: Colors.red
-                                                        .shade50,
+                                                    backgroundColor:
+                                                        AppTheme.dashIsDark(
+                                                              context,
+                                                            )
+                                                            ? Colors.red.shade900
+                                                                .withValues(
+                                                              alpha: 0.35,
+                                                            )
+                                                            : Colors.red.shade50,
                                                     shape: RoundedRectangleBorder(
                                                       borderRadius:
                                                           BorderRadius.circular(
@@ -8616,7 +8919,8 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   static const Color _kFailFg = Color(0xFFB71C1C);
   static const Color _kFailBorder = Color(0xFFE57373);
 
-  static TextStyle _scoreBreakdownScoreStyle({
+  static TextStyle _scoreBreakdownScoreStyle(
+    BuildContext context, {
     required bool isNA,
     double? value,
   }) {
@@ -8625,47 +8929,61 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
       return TextStyle(
         fontSize: 13,
         fontFeatures: tabular,
-        color: AppTheme.textSecondary.withValues(alpha: 0.85),
+        color: AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.85),
         fontStyle: FontStyle.italic,
       );
     }
     final passSection = value != null && value >= 60;
+    final dark = AppTheme.dashIsDark(context);
+    final passFg = dark ? const Color(0xFF81C784) : _kPassFg;
+    final failFg = dark ? const Color(0xFFEF9A9A) : _kFailFg;
     return TextStyle(
       fontSize: 14,
       fontWeight: FontWeight.w700,
       fontFeatures: tabular,
-      color: passSection ? _kPassFg : _kFailFg,
+      color: passSection ? passFg : failFg,
     );
   }
 
-  static Widget _scoreBreakdownStatusPill({
+  static Widget _scoreBreakdownStatusPill(
+    BuildContext context, {
     required RecruitmentExamResult? exam,
   }) {
     if (exam == null) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: AppTheme.lightGray,
+          color: AppTheme.dashMutedSurfaceOf(context),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+          border: Border.all(color: AppTheme.dashHairlineOf(context)),
         ),
         child: Text(
           'No exam',
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w600,
-            color: AppTheme.textSecondary.withValues(alpha: 0.9),
+            color: AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.9),
           ),
         ),
       );
     }
     final pass = exam.passed;
+    final dark = AppTheme.dashIsDark(context);
+    final passBg = dark ? const Color(0xFF1E3A24) : _kPassBg;
+    final failBg = dark ? const Color(0xFF3A2020) : _kFailBg;
+    final passFg = dark ? const Color(0xFF81C784) : _kPassFg;
+    final failFg = dark ? const Color(0xFFEF9A9A) : _kFailFg;
+    final passBorder = dark ? const Color(0xFF81C784) : _kPassBorder;
+    final failBorder = dark ? const Color(0xFFEF9A9A) : _kFailBorder;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: pass ? _kPassBg : _kFailBg,
+        color: pass ? passBg : failBg,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: pass ? _kPassBorder : _kFailBorder, width: 1),
+        border: Border.all(
+          color: pass ? passBorder : failBorder,
+          width: 1,
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -8673,7 +8991,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
           Icon(
             pass ? Icons.check_circle_rounded : Icons.cancel_rounded,
             size: 16,
-            color: pass ? _kPassFg : _kFailFg,
+            color: pass ? passFg : failFg,
           ),
           const SizedBox(width: 6),
           Text(
@@ -8681,7 +8999,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w800,
-              color: pass ? _kPassFg : _kFailFg,
+              color: pass ? passFg : failFg,
               letterSpacing: 0.2,
             ),
           ),
@@ -8691,6 +9009,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   }
 
   Widget _scoreBreakdownHeaderCell(
+    BuildContext context,
     String label, {
     TextAlign align = TextAlign.start,
   }) {
@@ -8701,8 +9020,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
         textAlign: align,
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(
-          color: AppTheme.letterheadNavy,
+        style: TextStyle(
+          color: AppTheme.dashIsDark(context)
+              ? AppTheme.primaryNavyLight
+              : AppTheme.letterheadNavy,
           fontWeight: FontWeight.w800,
           fontSize: 11.5,
           letterSpacing: 0.45,
@@ -8726,6 +9047,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   Widget _buildScoreBreakdownDataTable(BuildContext dialogContext) {
     final borderColor = AppTheme.dashHairlineOf(dialogContext);
     final headerBg = AppTheme.primaryNavy.withValues(alpha: 0.09);
+    final bodyText = AppTheme.dashTextPrimaryOf(dialogContext);
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -8751,14 +9073,14 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
           TableRow(
             decoration: BoxDecoration(color: headerBg),
             children: [
-              _scoreBreakdownHeaderCell('Applicant'),
-              _scoreBreakdownHeaderCell('Position'),
-              _scoreBreakdownHeaderCell('General', align: TextAlign.end),
-              _scoreBreakdownHeaderCell('Math', align: TextAlign.end),
-              _scoreBreakdownHeaderCell(genInfoLabel, align: TextAlign.end),
-              _scoreBreakdownHeaderCell('BEI', align: TextAlign.end),
-              _scoreBreakdownHeaderCell('Grade', align: TextAlign.center),
-              _scoreBreakdownHeaderCell('Result', align: TextAlign.center),
+              _scoreBreakdownHeaderCell(dialogContext, 'Applicant'),
+              _scoreBreakdownHeaderCell(dialogContext, 'Position'),
+              _scoreBreakdownHeaderCell(dialogContext, 'General', align: TextAlign.end),
+              _scoreBreakdownHeaderCell(dialogContext, 'Math', align: TextAlign.end),
+              _scoreBreakdownHeaderCell(dialogContext, genInfoLabel, align: TextAlign.end),
+              _scoreBreakdownHeaderCell(dialogContext, 'BEI', align: TextAlign.end),
+              _scoreBreakdownHeaderCell(dialogContext, 'Grade', align: TextAlign.center),
+              _scoreBreakdownHeaderCell(dialogContext, 'Result', align: TextAlign.center),
             ],
           ),
           ..._applications.asMap().entries.map((entry) {
@@ -8789,6 +9111,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                   scoreLabel(value),
                   textAlign: TextAlign.end,
                   style: _scoreBreakdownScoreStyle(
+                    dialogContext,
                     isNA: value == null,
                     value: value,
                   ),
@@ -8803,9 +9126,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
                     softWrap: true,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 13,
+                      color: bodyText,
                     ),
                   ),
                   background: rowBg,
@@ -8822,7 +9146,8 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                     style: TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w500,
-                      color: AppTheme.textSecondary.withValues(alpha: 0.95),
+                      color: AppTheme.dashTextSecondaryOf(dialogContext)
+                          .withValues(alpha: 0.95),
                     ),
                   ),
                   background: rowBg,
@@ -8839,7 +9164,11 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                             style: IconButton.styleFrom(
                               backgroundColor: AppTheme.primaryNavy
                                   .withValues(alpha: 0.14),
-                              foregroundColor: AppTheme.primaryNavy,
+                              foregroundColor: AppTheme.dashIsDark(
+                                    dialogContext,
+                                  )
+                                  ? AppTheme.primaryNavyLight
+                                  : AppTheme.primaryNavy,
                               padding: const EdgeInsets.all(8),
                               minimumSize: const Size(40, 40),
                               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -8866,7 +9195,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                             child: Icon(
                               Icons.remove_rounded,
                               size: 18,
-                              color: AppTheme.textSecondary
+                              color: AppTheme.dashTextSecondaryOf(dialogContext)
                                   .withValues(alpha: 0.35),
                             ),
                           ),
@@ -8877,7 +9206,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                 _scoreBreakdownBodyCell(
                   Align(
                     alignment: Alignment.center,
-                    child: _scoreBreakdownStatusPill(exam: exam),
+                    child: _scoreBreakdownStatusPill(
+                      dialogContext,
+                      exam: exam,
+                    ),
                   ),
                   background: rowBg,
                   padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
@@ -8957,10 +9289,12 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                     color: AppTheme.primaryNavy.withValues(alpha: 0.22),
                   ),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.analytics_outlined,
                   size: 26,
-                  color: AppTheme.primaryNavy,
+                  color: AppTheme.dashIsDark(ctx)
+                      ? AppTheme.primaryNavyLight
+                      : AppTheme.primaryNavy,
                 ),
               ),
               const SizedBox(width: 16),
@@ -9062,7 +9396,9 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 14,
-                        color: AppTheme.textSecondary.withValues(alpha: 0.9),
+                        color: AppTheme.dashTextSecondaryOf(ctx).withValues(
+                          alpha: 0.9,
+                        ),
                       ),
                     ),
                   ),
@@ -9300,9 +9636,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   }
 
   /// Readable status pill with color by outcome (tooltip shows raw value).
-  Widget _applicationStatusBadge(String status) {
+  Widget _applicationStatusBadge(BuildContext context, String status) {
     final raw = status.trim();
     final s = raw.toLowerCase();
+    final dark = AppTheme.dashIsDark(context);
     late Color bg;
     late Color fg;
     late IconData icon;
@@ -9310,25 +9647,29 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
         s == 'registered' ||
         s.contains('approved') ||
         s.contains('hire')) {
-      bg = const Color(0xFFE8F5E9);
-      fg = const Color(0xFF2E7D32);
+      bg = dark
+          ? const Color(0xFF1E3A24)
+          : const Color(0xFFE8F5E9);
+      fg = dark ? const Color(0xFF81C784) : const Color(0xFF2E7D32);
       icon = Icons.check_circle_outline_rounded;
     } else if (s.contains('declined') ||
         s.contains('failed') ||
         s.contains('reject')) {
-      bg = const Color(0xFFFFEBEE);
-      fg = const Color(0xFFC62828);
+      bg = dark
+          ? const Color(0xFF3A2020)
+          : const Color(0xFFFFEBEE);
+      fg = dark ? const Color(0xFFEF9A9A) : const Color(0xFFC62828);
       icon = Icons.cancel_outlined;
     } else if (s.contains('pending') ||
         s.contains('submitted') ||
         s.contains('review') ||
         s.contains('exam')) {
-      bg = AppTheme.primaryNavy.withValues(alpha: 0.12);
-      fg = AppTheme.primaryNavyDark;
+      bg = AppTheme.primaryNavy.withValues(alpha: dark ? 0.22 : 0.12);
+      fg = dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavyDark;
       icon = Icons.schedule_rounded;
     } else {
-      bg = AppTheme.sectionAlt;
-      fg = AppTheme.textSecondary;
+      bg = AppTheme.dashMutedSurfaceOf(context);
+      fg = AppTheme.dashTextSecondaryOf(context);
       icon = Icons.label_outline_rounded;
     }
     final display = raw.isEmpty ? _kNa : raw.replaceAll('_', ' ');
@@ -9378,9 +9719,14 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     );
   }
 
-  Widget _examOutcomeChip(bool passed) {
-    final fg = passed ? const Color(0xFF2E7D32) : const Color(0xFFC62828);
-    final bg = passed ? const Color(0xFFE8F5E9) : const Color(0xFFFFEBEE);
+  Widget _examOutcomeChip(BuildContext context, bool passed) {
+    final dark = AppTheme.dashIsDark(context);
+    final fg = passed
+        ? (dark ? const Color(0xFF81C784) : const Color(0xFF2E7D32))
+        : (dark ? const Color(0xFFEF9A9A) : const Color(0xFFC62828));
+    final bg = passed
+        ? (dark ? const Color(0xFF1E3A24) : const Color(0xFFE8F5E9))
+        : (dark ? const Color(0xFF3A2020) : const Color(0xFFFFEBEE));
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
@@ -9402,6 +9748,16 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     final hairline = AppTheme.dashHairlineOf(context);
     final panel = AppTheme.dashPanelOf(context);
     final muted = AppTheme.dashMutedSurfaceOf(context);
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final tableHeaderStyle = TextStyle(
+      fontWeight: FontWeight.w800,
+      fontSize: 11.5,
+      letterSpacing: 0.35,
+      color: AppTheme.dashIsDark(context)
+          ? AppTheme.primaryNavyLight
+          : AppTheme.letterheadNavy,
+    );
 
     final viewScoreBtn = Tooltip(
       message:
@@ -9439,7 +9795,9 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
           _syncing ? 'Syncing...' : 'Sync attachments from storage',
         ),
         style: TextButton.styleFrom(
-          foregroundColor: AppTheme.primaryNavy,
+          foregroundColor: AppTheme.dashIsDark(context)
+              ? AppTheme.primaryNavyLight
+              : AppTheme.primaryNavy,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         ),
       ),
@@ -9468,10 +9826,12 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                   color: AppTheme.primaryNavy.withValues(alpha: 0.2),
                 ),
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.assignment_outlined,
                 size: 26,
-                color: AppTheme.primaryNavy,
+                color: AppTheme.dashIsDark(context)
+                    ? AppTheme.primaryNavyLight
+                    : AppTheme.primaryNavy,
               ),
             ),
             const SizedBox(width: 16),
@@ -9504,7 +9864,9 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                           onPressed: _loading ? null : _load,
                           tooltip: 'Refresh',
                           style: IconButton.styleFrom(
-                            foregroundColor: AppTheme.primaryNavy,
+                            foregroundColor: AppTheme.dashIsDark(context)
+                                ? AppTheme.primaryNavyLight
+                                : AppTheme.primaryNavy,
                           ),
                         ),
                       ),
@@ -9601,7 +9963,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                     child: Text(
                       'No applications yet. Applicants will appear here after they submit Step 1 from the recruitment flow.',
                       style: TextStyle(
-                        color: AppTheme.textSecondary.withValues(alpha: 0.92),
+                        color: secondary.withValues(alpha: 0.92),
                         fontSize: 14,
                         height: 1.45,
                       ),
@@ -9664,9 +10026,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                 defaultVerticalAlignment:
                                     TableCellVerticalAlignment.middle,
                                 border: TableBorder.symmetric(
-                                  inside: BorderSide(
-                                    color: Colors.black.withValues(alpha: 0.07),
-                                  ),
+                                  inside: BorderSide(color: hairline),
                                 ),
                                 children: [
                                   TableRow(
@@ -9684,207 +10044,83 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                     children: [
                                       _tableCell(
                                         140,
-                                        Text(
-                                          'First name',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 11.5,
-                                            letterSpacing: 0.35,
-                                            color: AppTheme.letterheadNavy,
-                                          ),
-                                        ),
+                                        Text('First name', style: tableHeaderStyle),
                                       ),
                                       _tableCell(
                                         140,
-                                        const Text(
-                                          'Middle name',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 11.5,
-                                            letterSpacing: 0.35,
-                                            color: AppTheme.letterheadNavy,
-                                          ),
-                                        ),
+                                        Text('Middle name', style: tableHeaderStyle),
                                       ),
                                       _tableCell(
                                         140,
-                                        const Text(
-                                          'Last name',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 11.5,
-                                            letterSpacing: 0.35,
-                                            color: AppTheme.letterheadNavy,
-                                          ),
-                                        ),
+                                        Text('Last name', style: tableHeaderStyle),
                                       ),
                                       _tableCell(
                                         90,
-                                        const Text(
-                                          'Suffix',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 11.5,
-                                            letterSpacing: 0.35,
-                                            color: AppTheme.letterheadNavy,
-                                          ),
-                                        ),
+                                        Text('Suffix', style: tableHeaderStyle),
                                       ),
                                       _tableCell(
                                         90,
-                                        const Text(
-                                          'Gender',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 11.5,
-                                            letterSpacing: 0.35,
-                                            color: AppTheme.letterheadNavy,
-                                          ),
-                                        ),
+                                        Text('Gender', style: tableHeaderStyle),
                                       ),
                                       _tableCell(
                                         260,
-                                        const Text(
-                                          'Email',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 11.5,
-                                            letterSpacing: 0.35,
-                                            color: AppTheme.letterheadNavy,
-                                          ),
-                                        ),
+                                        Text('Email', style: tableHeaderStyle),
                                       ),
                                       _tableCell(
                                         140,
-                                        const Text(
-                                          'Phone',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 11.5,
-                                            letterSpacing: 0.35,
-                                            color: AppTheme.letterheadNavy,
-                                          ),
-                                        ),
+                                        Text('Phone', style: tableHeaderStyle),
                                       ),
                                       _tableCell(
                                         200,
-                                        const Text(
+                                        Text(
                                           'Position applied',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 11.5,
-                                            letterSpacing: 0.35,
-                                            color: AppTheme.letterheadNavy,
-                                          ),
+                                          style: tableHeaderStyle,
                                         ),
                                       ),
                                       _tableCell(
                                         170,
-                                        const Text(
-                                          'Status',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 11.5,
-                                            letterSpacing: 0.35,
-                                            color: AppTheme.letterheadNavy,
-                                          ),
-                                        ),
+                                        Text('Status', style: tableHeaderStyle),
                                       ),
                                       _tableCell(
                                         100,
-                                        const Text(
-                                          'Exam',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 11.5,
-                                            letterSpacing: 0.35,
-                                            color: AppTheme.letterheadNavy,
-                                          ),
-                                        ),
+                                        Text('Exam', style: tableHeaderStyle),
                                       ),
                                       _tableCell(
                                         108,
-                                        Text(
-                                          'Exam score',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 11.5,
-                                            letterSpacing: 0.35,
-                                            color: AppTheme.letterheadNavy,
-                                          ),
-                                        ),
+                                        Text('Exam score', style: tableHeaderStyle),
                                       ),
                                       _tableCell(
                                         188,
                                         Text(
                                           'Application letter',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 11.5,
-                                            letterSpacing: 0.35,
-                                            color: AppTheme.letterheadNavy,
-                                          ),
+                                          style: tableHeaderStyle,
                                         ),
                                       ),
                                       _tableCell(
                                         188,
-                                        const Text(
-                                          'Resume',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 11.5,
-                                            letterSpacing: 0.35,
-                                            color: AppTheme.letterheadNavy,
-                                          ),
-                                        ),
+                                        Text('Resume', style: tableHeaderStyle),
                                       ),
                                       _tableCell(
                                         188,
-                                        const Text(
-                                          'TOR',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 11.5,
-                                            letterSpacing: 0.35,
-                                            color: AppTheme.letterheadNavy,
-                                          ),
-                                        ),
+                                        Text('TOR', style: tableHeaderStyle),
                                       ),
                                       _tableCell(
                                         200,
                                         Text(
                                           'Eligibility / trainings (prelim.)',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 11.5,
-                                            letterSpacing: 0.35,
-                                            color: AppTheme.letterheadNavy,
-                                          ),
+                                          style: tableHeaderStyle,
                                         ),
                                       ),
                                       _tableCell(
                                         248,
-                                        const Text(
+                                        Text(
                                           'Document review',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 11.5,
-                                            letterSpacing: 0.35,
-                                            color: AppTheme.letterheadNavy,
-                                          ),
+                                          style: tableHeaderStyle,
                                         ),
                                       ),
                                       _tableCell(
                                         108,
-                                        const Text(
-                                          'Actions',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 11.5,
-                                            letterSpacing: 0.35,
-                                            color: AppTheme.letterheadNavy,
-                                          ),
-                                        ),
+                                        Text('Actions', style: tableHeaderStyle),
                                       ),
                                     ],
                                   ),
@@ -9894,7 +10130,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         _examResults[app.id.toLowerCase()];
                                     final textStyle = TextStyle(
                                       fontSize: 13,
-                                      color: AppTheme.textPrimary,
+                                      color: primary,
                                       fontWeight: FontWeight.w500,
                                     );
                                     String? beiSummaryLine;
@@ -9934,8 +10170,9 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                     return TableRow(
                                       decoration: ri.isOdd
                                           ? BoxDecoration(
-                                              color: AppTheme.sectionAlt
-                                                  .withValues(alpha: 0.4),
+                                              color: AppTheme.sectionAltOf(
+                                                context,
+                                              ).withValues(alpha: 0.45),
                                             )
                                           : null,
                                       children: [
@@ -10038,7 +10275,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         ),
                                         _tableCell(
                                           170,
-                                          _applicationStatusBadge(app.status),
+                                          _applicationStatusBadge(
+                                            context,
+                                            app.status,
+                                          ),
                                         ),
                                         _tableCell(
                                           100,
@@ -10046,8 +10286,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                               ? Text(
                                                   _kNa,
                                                   style: textStyle.copyWith(
-                                                    color:
-                                                        AppTheme.textSecondary,
+                                                    color: secondary,
                                                     fontWeight: FontWeight.w600,
                                                   ),
                                                 )
@@ -10055,6 +10294,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                                   alignment:
                                                       Alignment.centerLeft,
                                                   child: _examOutcomeChip(
+                                                    context,
                                                     exam.passed,
                                                   ),
                                                 ),
@@ -10088,8 +10328,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                                             fontSize: 11,
                                                             fontWeight:
                                                                 FontWeight.w600,
-                                                            color: AppTheme
-                                                                .textSecondary
+                                                            color: secondary
                                                                 .withValues(
                                                                   alpha: 0.9,
                                                                 ),
@@ -10200,7 +10439,12 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                                     'Edit name, email, phone',
                                                 style: IconButton.styleFrom(
                                                   foregroundColor:
-                                                      AppTheme.primaryNavy,
+                                                      AppTheme.dashIsDark(
+                                                            context,
+                                                          )
+                                                          ? AppTheme
+                                                              .primaryNavyLight
+                                                          : AppTheme.primaryNavy,
                                                   padding: const EdgeInsets.all(
                                                     6,
                                                   ),
@@ -10630,6 +10874,9 @@ class _DocumentReviewCell extends StatelessWidget {
       );
     }
     if (app.status == 'document_approved') {
+      final dark = AppTheme.dashIsDark(context);
+      final approvedFg =
+          dark ? const Color(0xFF81C784) : Colors.green.shade700;
       return Wrap(
         spacing: 8,
         runSpacing: 6,
@@ -10638,14 +10885,14 @@ class _DocumentReviewCell extends StatelessWidget {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.check_circle, size: 20, color: Colors.green.shade700),
+              Icon(Icons.check_circle, size: 20, color: approvedFg),
               const SizedBox(width: 6),
               Text(
                 'Approved',
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: Colors.green.shade700,
+                  color: approvedFg,
                 ),
               ),
             ],
@@ -10665,6 +10912,8 @@ class _DocumentReviewCell extends StatelessWidget {
       );
     }
     if (app.status == 'document_declined') {
+      final dark = AppTheme.dashIsDark(context);
+      final declinedFg = dark ? const Color(0xFFEF9A9A) : Colors.red.shade700;
       return Wrap(
         spacing: 8,
         runSpacing: 6,
@@ -10673,14 +10922,14 @@ class _DocumentReviewCell extends StatelessWidget {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.cancel, size: 20, color: Colors.red.shade700),
+              Icon(Icons.cancel, size: 20, color: declinedFg),
               const SizedBox(width: 6),
               Text(
                 'Declined',
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: Colors.red.shade700,
+                  color: declinedFg,
                 ),
               ),
             ],
@@ -10699,7 +10948,13 @@ class _DocumentReviewCell extends StatelessWidget {
         ],
       );
     }
-    return Text(app.status);
+    return Text(
+      app.status,
+      style: TextStyle(
+        fontSize: 13,
+        color: AppTheme.dashTextSecondaryOf(context),
+      ),
+    );
   }
 }
 
@@ -10760,6 +11015,9 @@ class _AttachmentActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final linkColor = AppTheme.dashIsDark(context)
+        ? AppTheme.primaryNavyLight
+        : AppTheme.primaryNavy;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -10775,11 +11033,14 @@ class _AttachmentActions extends StatelessWidget {
                   fileName,
                   overflow: TextOverflow.ellipsis,
                   maxLines: 1,
-                  style: const TextStyle(fontSize: 13),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.dashTextPrimaryOf(context),
+                  ),
                 ),
               ),
               style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
+                foregroundColor: linkColor,
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 alignment: Alignment.centerLeft,
               ),
@@ -10791,7 +11052,7 @@ class _AttachmentActions extends StatelessWidget {
           onPressed: () => _download(context),
           icon: const Icon(Icons.download_rounded, size: 20),
           style: IconButton.styleFrom(
-            foregroundColor: AppTheme.primaryNavy,
+            foregroundColor: linkColor,
             padding: const EdgeInsets.all(4),
             minimumSize: const Size(32, 32),
           ),

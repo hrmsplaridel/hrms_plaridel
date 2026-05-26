@@ -1,7 +1,10 @@
 -- HRMS Plaridel Schema v2
--- Core HR + DTR Module (Improved)
+-- Core HR + DTR + L&D + RSP + DocuTracker modules
 -- PostgreSQL
 -- Run: psql -d hrms_plaridel -f scripts/init-schema.sql
+--
+-- DocuTracker tables, constraints, functions, and seeds are included below.
+-- For existing databases that predate this file, use backend/scripts/docutracker-install-*.sql instead.
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
@@ -772,6 +775,889 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 
 -- =========================================
+-- L&D — RSP SAVED FORMS
+-- =========================================
+CREATE TABLE IF NOT EXISTS bi_form_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  applicant_name TEXT NOT NULL,
+  applicant_department TEXT,
+  applicant_position TEXT,
+  position_applied_for TEXT,
+  respondent_name TEXT NOT NULL,
+  respondent_position TEXT,
+  respondent_relationship TEXT NOT NULL DEFAULT 'supervisor'
+    CHECK (respondent_relationship IN ('supervisor', 'peer', 'subordinate')),
+  rating_1 INT,
+  rating_2 INT,
+  rating_3 INT,
+  rating_4 INT,
+  rating_5 INT,
+  rating_6 INT,
+  rating_7 INT,
+  rating_8 INT,
+  rating_9 INT,
+  functional_areas JSONB DEFAULT '[]'::JSONB,
+  other_functional_area TEXT,
+  performance_3_years TEXT,
+  challenges_coping TEXT,
+  compliance_attendance TEXT,
+  other_relevant_information TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS performance_evaluation_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  applicant_name TEXT,
+  functional_areas JSONB DEFAULT '[]'::JSONB,
+  other_functional_area TEXT,
+  performance_3_years TEXT,
+  challenges_coping TEXT,
+  compliance_attendance TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS training_need_analysis_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  cy_year TEXT,
+  department TEXT,
+  rows JSONB DEFAULT '[]'::JSONB,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS action_brainstorming_coaching_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  department TEXT,
+  date TEXT,
+  rows JSONB DEFAULT '[]'::JSONB,
+  certified_by TEXT,
+  certification_date TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS turn_around_time_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  position TEXT,
+  office TEXT,
+  no_of_vacant_position TEXT,
+  date_of_publication TEXT,
+  end_search TEXT,
+  qs TEXT,
+  applicants JSONB DEFAULT '[]'::JSONB,
+  prepared_by_name TEXT,
+  prepared_by_title TEXT,
+  noted_by_name TEXT,
+  noted_by_title TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS idp_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name TEXT,
+  position TEXT,
+  category TEXT,
+  division TEXT,
+  department TEXT,
+  education TEXT,
+  experience TEXT,
+  training TEXT,
+  eligibility TEXT,
+  significant_accomplishments TEXT,
+  target_position_1 TEXT,
+  target_position_2 TEXT,
+  avg_rating TEXT,
+  opcr TEXT,
+  ipcr TEXT,
+  performance_rating TEXT,
+  competency_description TEXT,
+  competence_rating TEXT,
+  succession_priority_score TEXT,
+  succession_priority_rating TEXT,
+  development_plan_rows JSONB DEFAULT '[]'::JSONB,
+  prepared_by TEXT,
+  reviewed_by TEXT,
+  noted_by TEXT,
+  approved_by TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- =========================================
+-- L&D — TRAINING DAILY REPORTS
+-- =========================================
+CREATE TABLE IF NOT EXISTS training_daily_reports (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  description TEXT,
+  attachment_path TEXT,
+  attachment_name TEXT,
+  attachment_type TEXT,
+  submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  status TEXT NOT NULL DEFAULT 'submitted'
+    CHECK (status IN ('submitted', 'seen', 'reviewed', 'approved', 'needs_revision')),
+  seen_by_admin UUID REFERENCES users(id) ON DELETE SET NULL,
+  seen_at TIMESTAMPTZ,
+  reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS training_report_attachments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  report_id UUID NOT NULL REFERENCES training_daily_reports(id) ON DELETE CASCADE,
+  file_path TEXT NOT NULL,
+  file_name TEXT,
+  mime_type TEXT,
+  uploaded_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- =========================================
+-- RSP — RECRUITMENT
+-- =========================================
+CREATE TABLE IF NOT EXISTS recruitment_applications (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  first_name TEXT,
+  middle_name TEXT,
+  last_name TEXT,
+  suffix TEXT,
+  sex TEXT,
+  full_name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  phone TEXT,
+  resume_notes TEXT,
+  position_applied_for TEXT,
+  attachment_path TEXT,
+  attachment_name TEXT,
+  doc_application_letter_path TEXT,
+  doc_application_letter_name TEXT,
+  doc_resume_path TEXT,
+  doc_resume_name TEXT,
+  doc_tor_path TEXT,
+  doc_tor_name TEXT,
+  doc_eligibility_trainings_path TEXT,
+  doc_eligibility_trainings_name TEXT,
+  status TEXT NOT NULL DEFAULT 'submitted'
+    CHECK (
+      status IN (
+        'submitted',
+        'document_approved',
+        'document_declined',
+        'exam_taken',
+        'passed',
+        'failed',
+        'registered'
+      )
+    ),
+  final_interview_at TIMESTAMPTZ,
+  final_interview_passed BOOLEAN,
+  hired_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  hr_account_setup_done BOOLEAN NOT NULL DEFAULT FALSE,
+  hire_credentials_email_sent_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS recruitment_exam_results (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  application_id UUID NOT NULL REFERENCES recruitment_applications(id) ON DELETE CASCADE,
+  score_percent NUMERIC(5,2) NOT NULL,
+  passed BOOLEAN NOT NULL,
+  answers_json JSONB,
+  submitted_at TIMESTAMPTZ DEFAULT now(),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS recruitment_exam_questions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  exam_type TEXT NOT NULL,
+  sort_order INT NOT NULL,
+  question_text TEXT NOT NULL,
+  options_json JSONB,
+  correct_index INT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS job_vacancy_announcement (
+  id TEXT PRIMARY KEY DEFAULT 'default',
+  has_vacancies BOOLEAN DEFAULT true,
+  headline TEXT,
+  body TEXT,
+  vacancies JSONB DEFAULT '[]'::JSONB,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+INSERT INTO job_vacancy_announcement (id, has_vacancies, headline, body)
+VALUES ('default', true, NULL, NULL)
+ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS selection_lineup_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  date TEXT,
+  name_of_agency_office TEXT,
+  vacant_position TEXT,
+  item_no TEXT,
+  applicants JSONB DEFAULT '[]',
+  prepared_by_name TEXT,
+  prepared_by_title TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS applicants_profile_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  position_applied_for TEXT,
+  minimum_requirements TEXT,
+  date_of_posting TEXT,
+  closing_date TEXT,
+  applicants JSONB DEFAULT '[]',
+  prepared_by TEXT,
+  checked_by TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS comparative_assessment_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  position_to_be_filled TEXT,
+  min_req_education TEXT,
+  min_req_experience TEXT,
+  min_req_eligibility TEXT,
+  min_req_training TEXT,
+  candidates JSONB DEFAULT '[]',
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS promotion_certification_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  position_for_promotion TEXT,
+  candidates JSONB DEFAULT '[]',
+  date_day TEXT,
+  date_month TEXT,
+  date_year TEXT,
+  signatory_name TEXT,
+  signatory_title TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS recruitment_exam_time_limits (
+  exam_type TEXT PRIMARY KEY,
+  time_limit_seconds INT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+INSERT INTO recruitment_exam_time_limits (exam_type, time_limit_seconds)
+VALUES
+  ('general', 2700),
+  ('math', 2700),
+  ('general_info', 600)
+ON CONFLICT (exam_type) DO NOTHING;
+
+-- One exam result row per application (idempotent for existing DBs).
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'uq_recruitment_exam_results_application'
+  ) THEN
+    ALTER TABLE recruitment_exam_results
+      ADD CONSTRAINT uq_recruitment_exam_results_application
+      UNIQUE (application_id);
+  END IF;
+END $$;
+
+-- =========================================
+-- DOCUTRACKER
+-- =========================================
+CREATE TABLE IF NOT EXISTS docutracker_roles (
+  role_id TEXT PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+INSERT INTO docutracker_roles(role_id)
+VALUES ('admin'), ('hr'), ('supervisor'), ('employee')
+ON CONFLICT (role_id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS docutracker_role_aliases (
+  alias TEXT PRIMARY KEY,
+  role_id TEXT NOT NULL REFERENCES docutracker_roles(role_id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+INSERT INTO docutracker_role_aliases(alias, role_id)
+VALUES ('hr_staff', 'hr'), ('dept_head', 'supervisor')
+ON CONFLICT (alias) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS docutracker_documents (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  document_number TEXT UNIQUE,
+  document_type TEXT NOT NULL DEFAULT 'memo',
+  title TEXT NOT NULL,
+  description TEXT,
+  source_module TEXT,
+  source_table TEXT,
+  source_record_id UUID,
+  source_title TEXT,
+  file_path TEXT,
+  file_name TEXT,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  current_holder_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  current_step INT DEFAULT 1,
+  workflow_version INT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  sent_time TIMESTAMPTZ,
+  deadline_time TIMESTAMPTZ,
+  reviewed_time TIMESTAMPTZ,
+  escalation_level INT NOT NULL DEFAULT 0,
+  needs_admin_intervention BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT docutracker_documents_status_check_prod_v2
+    CHECK (status IN (
+      'pending', 'in_review', 'approved', 'rejected', 'returned',
+      'overdue', 'escalated', 'cancelled'
+    )),
+  CONSTRAINT docutracker_documents_current_step_check_prod_v1
+    CHECK (current_step IS NULL OR current_step >= 1),
+  CONSTRAINT docutracker_documents_escalation_level_check_prod_v1
+    CHECK (escalation_level >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS docutracker_routing_configs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  document_type TEXT NOT NULL UNIQUE,
+  steps JSONB NOT NULL DEFAULT '[]',
+  review_deadline_hours INT NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT docutracker_routing_configs_steps_is_array_check_prod_v1
+    CHECK (jsonb_typeof(steps) = 'array'),
+  CONSTRAINT docutracker_routing_configs_review_deadline_hours_check_prod_v1
+    CHECK (review_deadline_hours > 0)
+);
+
+CREATE TABLE IF NOT EXISTS docutracker_routing_config_versions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  document_type TEXT NOT NULL,
+  version INT NOT NULL,
+  steps JSONB NOT NULL,
+  review_deadline_hours INT NOT NULL DEFAULT 1,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (document_type, version)
+);
+
+CREATE TABLE IF NOT EXISTS docutracker_workflow_steps (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  document_type TEXT NOT NULL,
+  workflow_version INT NOT NULL DEFAULT 1,
+  step_order INT NOT NULL CHECK (step_order > 0),
+  department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+  label TEXT,
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (document_type, workflow_version, step_order)
+);
+
+CREATE TABLE IF NOT EXISTS docutracker_workflow_step_assignees (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  step_id UUID NOT NULL REFERENCES docutracker_workflow_steps(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  is_primary BOOLEAN NOT NULL DEFAULT false,
+  backup_rank INT NULL CHECK (backup_rank IS NULL OR backup_rank > 0),
+  is_enabled BOOLEAN NOT NULL DEFAULT true,
+  allowed_actions TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (step_id, user_id),
+  CHECK (NOT is_primary OR backup_rank IS NULL),
+  CHECK (is_primary OR backup_rank IS NOT NULL),
+  UNIQUE (step_id, backup_rank),
+  CHECK (allowed_actions <@ ARRAY['approve','forward','reject','return']::TEXT[])
+);
+
+CREATE TABLE IF NOT EXISTS docutracker_document_history (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  document_id UUID NOT NULL REFERENCES docutracker_documents(id) ON DELETE CASCADE,
+  action TEXT,
+  actor_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  actor_name TEXT,
+  from_step INT,
+  to_step INT,
+  from_status TEXT,
+  to_status TEXT,
+  remarks TEXT,
+  is_overdue_log BOOLEAN DEFAULT false,
+  is_escalation_log BOOLEAN DEFAULT false,
+  escalation_level INT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS docutracker_routing_records (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  document_id UUID NOT NULL REFERENCES docutracker_documents(id) ON DELETE CASCADE,
+  step_order INT NOT NULL,
+  assignee_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  sent_time TIMESTAMPTZ,
+  deadline_time TIMESTAMPTZ,
+  reviewed_time TIMESTAMPTZ,
+  status TEXT NOT NULL DEFAULT 'pending',
+  remarks TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT docutracker_routing_records_status_check_prod_v2
+    CHECK (status IN (
+      'pending', 'in_review', 'approved', 'rejected', 'returned',
+      'overdue', 'escalated', 'cancelled'
+    )),
+  CONSTRAINT docutracker_routing_records_step_order_check_prod_v1
+    CHECK (step_order >= 1)
+);
+
+CREATE TABLE IF NOT EXISTS docutracker_routing_record_assignees (
+  routing_record_id UUID NOT NULL REFERENCES docutracker_routing_records(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (routing_record_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS docutracker_notifications (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  document_id UUID NOT NULL REFERENCES docutracker_documents(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL
+    CHECK (type IN ('assigned', 'deadline_near', 'overdue', 'escalated', 'returned', 'rejected')),
+  title TEXT,
+  body TEXT,
+  read BOOLEAN DEFAULT false,
+  event_key TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS docutracker_permissions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  role_id TEXT REFERENCES docutracker_roles(role_id) ON DELETE CASCADE,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  document_type TEXT NOT NULL DEFAULT '*',
+  action TEXT NOT NULL,
+  granted BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT docutracker_permissions_scope_check_v1
+    CHECK ((user_id IS NOT NULL) <> (role_id IS NOT NULL)),
+  CONSTRAINT docutracker_permissions_action_check_prod_v1
+    CHECK (action IN (
+      'view', 'create', 'create_draft', 'submit', 'download', 'edit', 'delete',
+      'forward', 'approve', 'reject', 'return'
+    ))
+);
+
+CREATE TABLE IF NOT EXISTS docutracker_escalation_configs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  document_type TEXT NOT NULL,
+  department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+  escalation_target_role TEXT,
+  escalation_delay_minutes INT NOT NULL DEFAULT 60,
+  max_escalation_level INT NOT NULL DEFAULT 3,
+  notify_original_sender BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT docutracker_escalation_configs_escalation_delay_minutes_check
+    CHECK (escalation_delay_minutes > 0),
+  CONSTRAINT docutracker_escalation_configs_max_escalation_level_check
+    CHECK (max_escalation_level >= 1)
+);
+
+CREATE TABLE IF NOT EXISTS docutracker_transition_requests (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  document_id UUID NOT NULL REFERENCES docutracker_documents(id) ON DELETE CASCADE,
+  action TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  actor_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  response_payload JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (document_id, action, idempotency_key)
+);
+
+CREATE TABLE IF NOT EXISTS docutracker_document_number_seq (
+  year INT PRIMARY KEY,
+  last_value BIGINT NOT NULL DEFAULT 0
+);
+
+-- DocuTracker indexes
+CREATE INDEX IF NOT EXISTS idx_docutracker_documents_created_by ON docutracker_documents(created_by);
+CREATE INDEX IF NOT EXISTS idx_docutracker_documents_current_holder ON docutracker_documents(current_holder_id);
+CREATE INDEX IF NOT EXISTS idx_docutracker_documents_status ON docutracker_documents(status);
+CREATE INDEX IF NOT EXISTS idx_docutracker_documents_doc_type ON docutracker_documents(document_type);
+CREATE INDEX IF NOT EXISTS idx_docutracker_documents_type_status_created
+  ON docutracker_documents(document_type, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_docutracker_documents_holder_status_deadline
+  ON docutracker_documents(current_holder_id, status, deadline_time);
+CREATE INDEX IF NOT EXISTS idx_docutracker_documents_deadline_active
+  ON docutracker_documents(deadline_time)
+  WHERE status IN ('pending', 'in_review', 'escalated', 'overdue');
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_routing_config_versions_type_version_desc
+  ON docutracker_routing_config_versions(document_type, version DESC);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_workflow_steps_type_version
+  ON docutracker_workflow_steps(document_type, workflow_version);
+CREATE INDEX IF NOT EXISTS idx_docutracker_workflow_steps_department
+  ON docutracker_workflow_steps(department_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_docutracker_step_assignees_one_primary_per_step
+  ON docutracker_workflow_step_assignees(step_id)
+  WHERE is_primary = true;
+CREATE INDEX IF NOT EXISTS idx_docutracker_step_assignees_user
+  ON docutracker_workflow_step_assignees(user_id);
+CREATE INDEX IF NOT EXISTS idx_docutracker_step_assignees_step_enabled
+  ON docutracker_workflow_step_assignees(step_id)
+  WHERE is_enabled = true;
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_history_document_id ON docutracker_document_history(document_id);
+CREATE INDEX IF NOT EXISTS idx_docutracker_history_document_created_desc
+  ON docutracker_document_history(document_id, created_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_docutracker_routing_records_unique_step
+  ON docutracker_routing_records(document_id, step_order);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_docutracker_routing_records_one_active_per_doc
+  ON docutracker_routing_records(document_id)
+  WHERE status IN ('pending', 'in_review', 'escalated', 'overdue');
+CREATE INDEX IF NOT EXISTS idx_docutracker_routing_records_assignee_status_deadline
+  ON docutracker_routing_records(assignee_id, status, deadline_time);
+CREATE INDEX IF NOT EXISTS idx_docutracker_routing_records_document_step
+  ON docutracker_routing_records(document_id, step_order);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_routing_record_assignees_user
+  ON docutracker_routing_record_assignees(user_id);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_notifications_user_id ON docutracker_notifications(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_docutracker_notifications_event_key_unique
+  ON docutracker_notifications(document_id, user_id, type, event_key)
+  WHERE event_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_docutracker_notifications_user_read_created
+  ON docutracker_notifications(user_id, read, created_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_docutracker_permissions_user_unique
+  ON docutracker_permissions(user_id, document_type, action)
+  WHERE user_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_docutracker_permissions_role_unique
+  ON docutracker_permissions(role_id, document_type, action)
+  WHERE role_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_docutracker_permissions_user_lookup
+  ON docutracker_permissions(user_id, document_type, action)
+  WHERE user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_docutracker_permissions_role_lookup
+  ON docutracker_permissions(role_id, document_type, action)
+  WHERE role_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_transition_requests_lookup
+  ON docutracker_transition_requests(document_id, action, idempotency_key);
+
+-- DocuTracker functions
+CREATE OR REPLACE FUNCTION docutracker_normalize_role(p_role_id TEXT)
+RETURNS TEXT
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT CASE lower(btrim(coalesce(p_role_id, '')))
+    WHEN '' THEN ''
+    WHEN 'hr_staff' THEN 'hr'
+    WHEN 'dept_head' THEN 'supervisor'
+    ELSE lower(btrim(coalesce(p_role_id, '')))
+  END
+$$;
+
+CREATE OR REPLACE FUNCTION docutracker_has_permission(
+  p_user_id UUID,
+  p_role_id TEXT,
+  p_document_type TEXT,
+  p_action TEXT
+)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+AS $$
+WITH args AS (
+  SELECT
+    p_user_id AS user_id,
+    docutracker_normalize_role(p_role_id) AS role_id,
+    p_document_type AS document_type,
+    p_action AS action
+),
+candidates AS (
+  SELECT 1 AS prio, p.granted
+  FROM docutracker_permissions p, args a
+  WHERE p.user_id = a.user_id
+    AND p.role_id IS NULL
+    AND p.document_type = a.document_type
+    AND p.action = a.action
+
+  UNION ALL
+  SELECT 2 AS prio, p.granted
+  FROM docutracker_permissions p, args a
+  WHERE p.user_id = a.user_id
+    AND p.role_id IS NULL
+    AND p.document_type = '*'
+    AND p.action = a.action
+
+  UNION ALL
+  SELECT 3 AS prio, p.granted
+  FROM docutracker_permissions p, args a
+  WHERE p.user_id IS NULL
+    AND p.role_id = a.role_id
+    AND p.document_type = a.document_type
+    AND p.action = a.action
+
+  UNION ALL
+  SELECT 4 AS prio, p.granted
+  FROM docutracker_permissions p, args a
+  WHERE p.user_id IS NULL
+    AND p.role_id = a.role_id
+    AND p.document_type = '*'
+    AND p.action = a.action
+)
+SELECT COALESCE(
+  (SELECT granted FROM candidates ORDER BY prio LIMIT 1),
+  false
+);
+$$;
+
+CREATE OR REPLACE FUNCTION docutracker_permission_explain(
+  p_user_id UUID,
+  p_role_id TEXT,
+  p_document_type TEXT,
+  p_action TEXT
+)
+RETURNS TABLE (
+  granted BOOLEAN,
+  source TEXT,
+  matched_document_type TEXT
+)
+LANGUAGE sql
+STABLE
+AS $$
+WITH args AS (
+  SELECT
+    p_user_id AS user_id,
+    docutracker_normalize_role(p_role_id) AS role_id,
+    p_document_type AS document_type,
+    p_action AS action
+),
+matches AS (
+  SELECT 1 AS prio, p.granted, 'user_override'::text AS source, p.document_type AS matched_document_type
+  FROM docutracker_permissions p, args a
+  WHERE p.user_id = a.user_id
+    AND p.role_id IS NULL
+    AND p.document_type = a.document_type
+    AND p.action = a.action
+
+  UNION ALL
+  SELECT 2 AS prio, p.granted, 'user_override'::text AS source, p.document_type AS matched_document_type
+  FROM docutracker_permissions p, args a
+  WHERE p.user_id = a.user_id
+    AND p.role_id IS NULL
+    AND p.document_type = '*'
+    AND p.action = a.action
+
+  UNION ALL
+  SELECT 3 AS prio, p.granted, 'role_baseline'::text AS source, p.document_type AS matched_document_type
+  FROM docutracker_permissions p, args a
+  WHERE p.user_id IS NULL
+    AND p.role_id = a.role_id
+    AND p.document_type = a.document_type
+    AND p.action = a.action
+
+  UNION ALL
+  SELECT 4 AS prio, p.granted, 'role_baseline'::text AS source, p.document_type AS matched_document_type
+  FROM docutracker_permissions p, args a
+  WHERE p.user_id IS NULL
+    AND p.role_id = a.role_id
+    AND p.document_type = '*'
+    AND p.action = a.action
+)
+SELECT
+  COALESCE(m.granted, false) AS granted,
+  COALESCE(m.source, 'default_deny') AS source,
+  m.matched_document_type
+FROM (SELECT * FROM matches ORDER BY prio LIMIT 1) m;
+$$;
+
+CREATE OR REPLACE FUNCTION docutracker_next_document_number()
+RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE
+  y INT := EXTRACT(YEAR FROM now())::INT;
+  v BIGINT;
+BEGIN
+  INSERT INTO docutracker_document_number_seq(year, last_value)
+  VALUES (y, 0)
+  ON CONFLICT (year) DO NOTHING;
+
+  UPDATE docutracker_document_number_seq
+  SET last_value = last_value + 1
+  WHERE year = y
+  RETURNING last_value INTO v;
+
+  RETURN format('DOC-%s-%s', y, lpad(v::TEXT, 6, '0'));
+END $$;
+
+CREATE OR REPLACE FUNCTION docutracker_documents_set_doc_number()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.document_number IS NULL OR btrim(NEW.document_number) = '' THEN
+    NEW.document_number := docutracker_next_document_number();
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE OR REPLACE FUNCTION docutracker_set_updated_at()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END $$;
+
+CREATE OR REPLACE FUNCTION docutracker_enforce_step_assignees_invariants()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  sid uuid;
+  enabled_count int;
+  enabled_primary_count int;
+BEGIN
+  sid := COALESCE(NEW.step_id, OLD.step_id);
+  IF sid IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM docutracker_workflow_steps WHERE id = sid) THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT
+    COUNT(*) FILTER (WHERE a.is_enabled = true),
+    COUNT(*) FILTER (WHERE a.is_enabled = true AND a.is_primary = true)
+  INTO enabled_count, enabled_primary_count
+  FROM docutracker_workflow_step_assignees a
+  WHERE a.step_id = sid;
+
+  IF enabled_count < 1 THEN
+    RAISE EXCEPTION 'Workflow step % must have at least one enabled assignee', sid
+      USING ERRCODE = '23514';
+  END IF;
+
+  IF enabled_primary_count <> 1 THEN
+    RAISE EXCEPTION 'Workflow step % must have exactly one enabled primary assignee', sid
+      USING ERRCODE = '23514';
+  END IF;
+
+  RETURN NULL;
+END;
+$$;
+
+-- DocuTracker triggers
+DROP TRIGGER IF EXISTS trg_docutracker_documents_doc_number ON docutracker_documents;
+CREATE TRIGGER trg_docutracker_documents_doc_number
+BEFORE INSERT ON docutracker_documents
+FOR EACH ROW EXECUTE PROCEDURE docutracker_documents_set_doc_number();
+
+DROP TRIGGER IF EXISTS trg_docutracker_documents_updated_at ON docutracker_documents;
+CREATE TRIGGER trg_docutracker_documents_updated_at
+BEFORE UPDATE ON docutracker_documents
+FOR EACH ROW EXECUTE PROCEDURE docutracker_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_docutracker_routing_configs_updated_at ON docutracker_routing_configs;
+CREATE TRIGGER trg_docutracker_routing_configs_updated_at
+BEFORE UPDATE ON docutracker_routing_configs
+FOR EACH ROW EXECUTE PROCEDURE docutracker_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_docutracker_routing_records_updated_at ON docutracker_routing_records;
+CREATE TRIGGER trg_docutracker_routing_records_updated_at
+BEFORE UPDATE ON docutracker_routing_records
+FOR EACH ROW EXECUTE PROCEDURE docutracker_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_docutracker_permissions_updated_at ON docutracker_permissions;
+CREATE TRIGGER trg_docutracker_permissions_updated_at
+BEFORE UPDATE ON docutracker_permissions
+FOR EACH ROW EXECUTE PROCEDURE docutracker_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_docutracker_escalation_configs_updated_at ON docutracker_escalation_configs;
+CREATE TRIGGER trg_docutracker_escalation_configs_updated_at
+BEFORE UPDATE ON docutracker_escalation_configs
+FOR EACH ROW EXECUTE PROCEDURE docutracker_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_docutracker_step_assignees_invariants ON docutracker_workflow_step_assignees;
+CREATE CONSTRAINT TRIGGER trg_docutracker_step_assignees_invariants
+AFTER INSERT OR UPDATE OR DELETE
+ON docutracker_workflow_step_assignees
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW
+EXECUTE PROCEDURE docutracker_enforce_step_assignees_invariants();
+
+-- DocuTracker permission baseline (role defaults)
+WITH baseline(role_id, document_type, action, granted) AS (
+  VALUES
+    ('employee',  '*', 'view',     true),
+    ('employee',  '*', 'create',   true),
+    ('employee',  '*', 'submit',   true),
+    ('employee',  '*', 'download', true),
+    ('employee',  '*', 'edit',     false),
+    ('employee',  '*', 'delete',   false),
+    ('employee',  '*', 'forward',  false),
+    ('employee',  '*', 'approve',  false),
+    ('employee',  '*', 'reject',   false),
+    ('employee',  '*', 'return',   false),
+    ('hr',        '*', 'view',     true),
+    ('hr',        '*', 'create',   true),
+    ('hr',        '*', 'submit',   true),
+    ('hr',        '*', 'download', true),
+    ('hr',        '*', 'edit',     true),
+    ('hr',        '*', 'delete',   false),
+    ('hr',        '*', 'forward',  true),
+    ('hr',        '*', 'approve',  true),
+    ('hr',        '*', 'reject',   true),
+    ('hr',        '*', 'return',   true),
+    ('supervisor','*', 'view',     true),
+    ('supervisor','*', 'create',   true),
+    ('supervisor','*', 'submit',   true),
+    ('supervisor','*', 'download', true),
+    ('supervisor','*', 'edit',     true),
+    ('supervisor','*', 'delete',   false),
+    ('supervisor','*', 'forward',  true),
+    ('supervisor','*', 'approve',  true),
+    ('supervisor','*', 'reject',   true),
+    ('supervisor','*', 'return',   true),
+    ('admin',     '*', 'view',     true),
+    ('admin',     '*', 'create',   true),
+    ('admin',     '*', 'submit',   true),
+    ('admin',     '*', 'download', true),
+    ('admin',     '*', 'edit',     true),
+    ('admin',     '*', 'delete',   true),
+    ('admin',     '*', 'forward',  true),
+    ('admin',     '*', 'approve',  true),
+    ('admin',     '*', 'reject',   true),
+    ('admin',     '*', 'return',   true)
+)
+INSERT INTO docutracker_permissions(role_id, user_id, document_type, action, granted)
+SELECT b.role_id, NULL::uuid, b.document_type, b.action, b.granted
+FROM baseline b
+ON CONFLICT (role_id, document_type, action)
+WHERE role_id IS NOT NULL
+DO UPDATE SET
+  granted = EXCLUDED.granted,
+  updated_at = now();
+
+-- =========================================
 -- INDEXES
 -- =========================================
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
@@ -849,6 +1735,44 @@ CREATE INDEX IF NOT EXISTS idx_overtime_requests_ot_date ON overtime_requests(ot
 CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_entity_type ON audit_logs(entity_type);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
+
+CREATE INDEX IF NOT EXISTS idx_bi_form_entries_created
+  ON bi_form_entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_performance_evaluation_entries_created
+  ON performance_evaluation_entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_training_need_analysis_entries_created
+  ON training_need_analysis_entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_action_brainstorming_coaching_entries_created
+  ON action_brainstorming_coaching_entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_turn_around_time_entries_created
+  ON turn_around_time_entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_idp_entries_created
+  ON idp_entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_training_daily_reports_employee_submitted
+  ON training_daily_reports(employee_id, submitted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_training_daily_reports_status
+  ON training_daily_reports(status);
+CREATE INDEX IF NOT EXISTS idx_training_report_attachments_report
+  ON training_report_attachments(report_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_recruitment_applications_status
+  ON recruitment_applications(status);
+CREATE INDEX IF NOT EXISTS idx_recruitment_applications_created
+  ON recruitment_applications(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_recruitment_exam_results_application
+  ON recruitment_exam_results(application_id);
+CREATE INDEX IF NOT EXISTS idx_recruitment_exam_questions_type
+  ON recruitment_exam_questions(exam_type);
+CREATE INDEX IF NOT EXISTS idx_job_vacancy_announcement_updated
+  ON job_vacancy_announcement(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_selection_lineup_entries_created
+  ON selection_lineup_entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_applicants_profile_entries_created
+  ON applicants_profile_entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_comparative_assessment_entries_created
+  ON comparative_assessment_entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_promotion_certification_entries_created
+  ON promotion_certification_entries(created_at DESC);
 
 -- =========================================
 -- updated_at TRIGGERS
@@ -940,5 +1864,11 @@ EXECUTE PROCEDURE set_updated_at();
 DROP TRIGGER IF EXISTS trg_leave_balances_updated_at ON leave_balances;
 CREATE TRIGGER trg_leave_balances_updated_at
 BEFORE UPDATE ON leave_balances
+FOR EACH ROW
+EXECUTE PROCEDURE set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_training_daily_reports_updated_at ON training_daily_reports;
+CREATE TRIGGER trg_training_daily_reports_updated_at
+BEFORE UPDATE ON training_daily_reports
 FOR EACH ROW
 EXECUTE PROCEDURE set_updated_at();

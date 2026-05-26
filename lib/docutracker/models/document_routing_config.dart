@@ -27,8 +27,12 @@ class DocumentRoutingConfig {
       documentType: documentTypeFromString(json['document_type']?.toString()),
       steps: stepsRaw is List
           ? (stepsRaw)
-              .map((e) => WorkflowStep.fromJson(Map<String, dynamic>.from(e as Map)))
-              .toList()
+                .map(
+                  (e) => WorkflowStep.fromJson(
+                    Map<String, dynamic>.from(e as Map),
+                  ),
+                )
+                .toList()
           : [],
       reviewDeadlineHours:
           (json['review_deadline_hours'] as num?)?.toInt() ?? 1,
@@ -37,60 +41,60 @@ class DocumentRoutingConfig {
   }
 
   Map<String, dynamic> toJson() => {
-        'document_type': documentType.value,
-        'steps': steps.map((s) => s.toJson()).toList(),
-        'review_deadline_hours': reviewDeadlineHours,
-        'version': version,
-      };
+    'document_type': documentType.value,
+    'steps': steps.map((s) => s.toJson()).toList(),
+    'review_deadline_hours': reviewDeadlineHours,
+    'version': version,
+  };
 
   /// Default configs for built-in document types.
   static List<DocumentRoutingConfig> get defaults => [
-        DocumentRoutingConfig(
-          documentType: DocumentType.memo,
-          steps: [
-            const WorkflowStep(
-              stepOrder: 1,
-              assigneeType: 'user',
-              label: 'HR Staff',
-            ),
-            const WorkflowStep(
-              stepOrder: 2,
-              assigneeType: 'user',
-              label: 'Department Head',
-            ),
-            const WorkflowStep(
-              stepOrder: 3,
-              assigneeType: 'user',
-              label: 'Selected Employees',
-            ),
-          ],
-          reviewDeadlineHours: 1,
+    DocumentRoutingConfig(
+      documentType: DocumentType.memo,
+      steps: [
+        const WorkflowStep(
+          stepOrder: 1,
+          assigneeType: 'user',
+          label: 'HR Staff',
         ),
-        DocumentRoutingConfig(
-          documentType: DocumentType.purchaseRequest,
-          steps: [
-            const WorkflowStep(
-              stepOrder: 1,
-              assigneeType: 'user',
-              label: 'Requesting Department',
-            ),
-            const WorkflowStep(
-              stepOrder: 2,
-              assigneeType: 'user',
-              label: 'Procurement',
-            ),
-            const WorkflowStep(
-              stepOrder: 3,
-              assigneeType: 'user',
-              label: 'Accounting',
-            ),
-            const WorkflowStep(
-              stepOrder: 4,
-              assigneeType: 'user',
-              label: 'Approving Officer',
-            ),
-          ],
-          reviewDeadlineHours: 1,
+        const WorkflowStep(
+          stepOrder: 2,
+          assigneeType: 'user',
+          label: 'Department Head',
         ),
-      ];
+        const WorkflowStep(
+          stepOrder: 3,
+          assigneeType: 'user',
+          label: 'Selected Employees',
+        ),
+      ],
+      reviewDeadlineHours: 1,
+    ),
+    DocumentRoutingConfig(
+      documentType: DocumentType.purchaseRequest,
+      steps: [
+        const WorkflowStep(
+          stepOrder: 1,
+          assigneeType: 'user',
+          label: 'Requesting Department',
+        ),
+        const WorkflowStep(
+          stepOrder: 2,
+          assigneeType: 'user',
+          label: 'Procurement',
+        ),
+        const WorkflowStep(
+          stepOrder: 3,
+          assigneeType: 'user',
+          label: 'Accounting',
+        ),
+        const WorkflowStep(
+          stepOrder: 4,
+          assigneeType: 'user',
+          label: 'Approving Officer',
+        ),
+      ],
+      reviewDeadlineHours: 1,
+    ),
+  ];
 }

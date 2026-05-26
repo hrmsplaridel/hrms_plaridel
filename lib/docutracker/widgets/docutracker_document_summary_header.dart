@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../docutracker_styles.dart';
+import '../theme/docutracker_tokens.dart';
 import '../models/document.dart';
 import 'docutracker_status_badge.dart';
 
@@ -68,24 +69,30 @@ class DocuTrackerDocumentSummaryHeader extends StatelessWidget {
                       const SizedBox(height: 8),
                       Container(
                         width: double.infinity,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                         decoration: BoxDecoration(
-                          color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                          color: DocuTrackerTokens.brand.withValues(alpha: 0.08),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                            color: AppTheme.primaryNavy.withValues(alpha: 0.25),
+                            color: DocuTrackerTokens.brand.withValues(alpha: 0.25),
                           ),
                         ),
                         child: Row(
                           children: [
-                            Icon(Icons.info_outline_rounded,
-                                size: 18, color: AppTheme.primaryNavy),
+                            Icon(
+                              Icons.info_outline_rounded,
+                              size: 18,
+                              color: DocuTrackerTokens.brand,
+                            ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 'Your action is required on this document.',
                                 style: TextStyle(
-                                  color: AppTheme.primaryNavy,
+                                  color: DocuTrackerTokens.brand,
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -106,7 +113,10 @@ class DocuTrackerDocumentSummaryHeader extends StatelessWidget {
                   if (document.needsAdminIntervention) ...[
                     const SizedBox(height: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.orange.shade50,
                         borderRadius: BorderRadius.circular(8),

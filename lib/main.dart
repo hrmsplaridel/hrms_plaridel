@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
@@ -14,6 +16,7 @@ import 'providers/theme_mode_provider.dart';
 import 'providers/recruitment_hire_prefill.dart';
 import 'dtr/dtr_provider.dart';
 import 'docutracker/docutracker_provider.dart';
+import 'docutracker/services/docutracker_access_policy.dart';
 import 'leave/leave_provider.dart';
 import 'leave/api_leave_repository.dart';
 import 'data/philippine_psgc_loader.dart';
@@ -22,6 +25,7 @@ import 'realtime/app_realtime_bridge.dart';
 import 'realtime/app_realtime_provider.dart';
 import 'admin/screens/admin_dashboard.dart';
 import 'employee/screens/employee_dashboard.dart';
+import 'utils/form_pdf.dart';
 
 /// Key for persisting last login role (Admin vs Employee) across sessions.
 const String kLoginAsKey = 'hrms_login_as';
@@ -30,7 +34,7 @@ const String kLoginAsKey = 'hrms_login_as';
 final RouteObserver<ModalRoute<void>> routeObserver =
     RouteObserver<ModalRoute<void>>();
 
-/// Chooses the initial screen based on platform and auth state.
+/// Chooses the initial screen based on platform anCD d auth state.
 /// If user has a restored session (API), go to the appropriate dashboard
 /// based on the user's role from the API (not user choice).
 /// Otherwise: web → LandingPage, mobile → LoginPage.
@@ -55,6 +59,7 @@ Widget _initialHome(AuthProvider auth, String storedLoginAs) {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  unawaited(FormPdf.warmupPrintAssets());
 
   if (kIsWeb) {
     webview_platform_init.registerWebViewPlatform();
@@ -101,7 +106,59 @@ class _HrmsMaterialApp extends StatelessWidget {
       themeAnimationDuration: const Duration(milliseconds: 420),
       themeAnimationCurve: Curves.easeInOutCubic,
       navigatorObservers: [routeObserver],
+      onGenerateRoute: (settings) {
+        final view = WidgetsBinding.instance.platformDispatcher.views.first;
+        final logicalWidth = view.physicalSize.width / view.devicePixelRatio;
+        final isMobile = DocuTrackerAccessPolicy.isMobileWidth(logicalWidth);
+        if (isMobile &&
+            DocuTrackerAccessPolicy.isRouteRestrictedOnMobile(settings.name)) {
+          return MaterialPageRoute<void>(
+            settings: settings,
+            builder: (_) => _RestrictedMobileRouteScreen(
+              attemptedRoute: settings.name ?? '',
+            ),
+          );
+        }
+        return null;
+      },
       home: _initialHome(auth, storedLoginAs),
+    );
+  }
+}
+
+class _RestrictedMobileRouteScreen extends StatelessWidget {
+  const _RestrictedMobileRouteScreen({required this.attemptedRoute});
+
+  final String attemptedRoute;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Unavailable on Mobile')),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.lock_outline_rounded, size: 36),
+              const SizedBox(height: 10),
+              const Text(
+                'This page is desktop-only.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                attemptedRoute.isEmpty
+                    ? 'Admin features are disabled on mobile.'
+                    : 'Route blocked: $attemptedRoute',
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -127,7 +184,8 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProxyProvider<AuthProvider, AppRealtimeProvider>(
           create: (_) => AppRealtimeProvider(),
           update: (_, auth, realtime) =>
-              (realtime ?? AppRealtimeProvider())..setCurrentUser(auth.user?.id),
+              (realtime ?? AppRealtimeProvider())
+                ..setCurrentUser(auth.user?.id),
         ),
         ChangeNotifierProvider(create: (_) => DtrProvider()),
         ChangeNotifierProvider(create: (_) => DocuTrackerProvider()),

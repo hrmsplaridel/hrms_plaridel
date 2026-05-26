@@ -1,0 +1,85 @@
+// DocuTracker ERD — PART 0: OVERVIEW (simplest — use for manuscript Figure 5)
+// https://dbdiagram.io — import this file alone for a clean one-page diagram
+
+Project DocuTracker_Overview {
+  database_type: 'PostgreSQL'
+  Note: 'High-level ERD. See parts 1–3 for full column detail.'
+}
+
+Table users {
+  id uuid [pk]
+  full_name varchar
+  role varchar
+}
+
+Table departments {
+  id uuid [pk]
+  name varchar
+}
+
+Table docutracker_documents {
+  id uuid [pk]
+  document_number varchar [unique]
+  document_type varchar
+  title varchar
+  status varchar
+  current_step int
+  workflow_version int
+  created_by uuid [ref: > users.id]
+  current_holder_id uuid [ref: > users.id]
+}
+
+Table docutracker_routing_records {
+  id uuid [pk]
+  document_id uuid [ref: > docutracker_documents.id]
+  step_order int
+  assignee_id uuid [ref: > users.id]
+  status varchar
+}
+
+Table docutracker_document_history {
+  id uuid [pk]
+  document_id uuid [ref: > docutracker_documents.id]
+  actor_id uuid [ref: > users.id]
+  action varchar
+}
+
+Table docutracker_notifications {
+  id uuid [pk]
+  document_id uuid [ref: > docutracker_documents.id]
+  user_id uuid [ref: > users.id]
+  type varchar
+}
+
+Table docutracker_workflow_steps {
+  id uuid [pk]
+  document_type varchar
+  workflow_version int
+  step_order int
+  label varchar
+}
+
+Table docutracker_workflow_step_assignees {
+  id uuid [pk]
+  step_id uuid [ref: > docutracker_workflow_steps.id]
+  user_id uuid [ref: > users.id]
+  is_primary boolean
+}
+
+Table docutracker_permissions {
+  id uuid [pk]
+  role_id varchar
+  user_id uuid [ref: > users.id]
+  document_type varchar
+  action varchar
+  granted boolean
+}
+
+Table docutracker_escalation_configs {
+  id uuid [pk]
+  document_type varchar
+  department_id uuid [ref: > departments.id]
+  escalation_target_role varchar
+}
+
+// Logical (no FK line): documents.workflow_version + document_type → workflow_steps / config versions

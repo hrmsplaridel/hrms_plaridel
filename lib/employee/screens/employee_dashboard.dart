@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
@@ -10,7 +10,6 @@ import '../../../data/time_record.dart';
 import '../../../dtr/widgets/attendance_display.dart';
 import '../../../dtr/widgets/attendance_source_badge.dart';
 import '../../../docutracker/docutracker_main.dart';
-import '../../../docutracker/docutracker_notification_sheet.dart';
 import '../../../docutracker/docutracker_provider.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
@@ -32,7 +31,6 @@ import '../../shared/utils/time_greeting.dart';
 import '../../shared/widgets/collapsible_dashboard_sidebar.dart';
 import '../../shared/widgets/dashboard_mobile_bottom_nav.dart';
 import '../../shared/widgets/portal_sidebar_brand.dart';
-import '../../../widgets/user_avatar.dart';
 
 /// Main scroll padding: comfortable insets on phones (narrower gutters still breathe).
 EdgeInsets _employeeMainScrollPadding(BuildContext context, {bool mobileNav = false}) {

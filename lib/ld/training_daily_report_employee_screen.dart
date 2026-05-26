@@ -25,6 +25,36 @@ class _TrainingDailyReportEmployeeScreenState
   bool _loading = false;
   PlatformFile? _selectedFile;
   List<TrainingDailyReport> _reports = [];
+  /// Calendar day (local) to filter by; `null` shows all reports.
+  DateTime? _filterByDate;
+
+  static DateTime _toLocalDate(DateTime d) {
+    final l = d.toLocal();
+    return DateTime(l.year, l.month, l.day);
+  }
+
+  static String _formatDateOnly(DateTime d) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${d.year}-${two(d.month)}-${two(d.day)}';
+  }
+
+  List<DateTime> get _datesWithReports {
+    final days = <DateTime>{};
+    for (final r in _reports) {
+      days.add(_toLocalDate(r.submittedAt));
+    }
+    return days.toList()..sort((a, b) => b.compareTo(a));
+  }
+
+  List<TrainingDailyReport> get _visibleReports {
+    final sorted = List<TrainingDailyReport>.from(_reports)
+      ..sort((a, b) => b.submittedAt.compareTo(a.submittedAt));
+    if (_filterByDate == null) return sorted;
+    final day = _filterByDate!;
+    return sorted
+        .where((r) => _toLocalDate(r.submittedAt) == day)
+        .toList();
+  }
 
   static String _formatSubmittedAt(DateTime d) {
     final l = d.toLocal();
@@ -70,6 +100,12 @@ class _TrainingDailyReportEmployeeScreenState
         setState(() {
           _reports = list;
           _loading = false;
+          if (list.isNotEmpty && _filterByDate == null) {
+            final newest = list.reduce(
+              (a, b) => a.submittedAt.isAfter(b.submittedAt) ? a : b,
+            );
+            _filterByDate = _toLocalDate(newest.submittedAt);
+          }
         });
       }
     } catch (_) {
@@ -77,6 +113,52 @@ class _TrainingDailyReportEmployeeScreenState
         setState(() => _loading = false);
       }
     }
+  }
+
+  Future<void> _pickFilterDate() async {
+    if (!mounted) return;
+    final now = DateTime.now();
+    final today = _toLocalDate(now);
+    final dates = _datesWithReports;
+    // Allow browsing any day in range — not only days that already have reports.
+    // (Using oldest report as firstDate locked the calendar to one day when only
+    // one report existed.)
+    final oneYearAgo = DateTime(today.year - 1, today.month, today.day);
+    final DateTime firstDate;
+    if (dates.isEmpty) {
+      firstDate = oneYearAgo;
+    } else {
+      final oldestReportDay = dates.last;
+      firstDate = oldestReportDay.isBefore(oneYearAgo)
+          ? oldestReportDay
+          : oneYearAgo;
+    }
+    var initial = _filterByDate ?? dates.firstOrNull ?? today;
+    if (initial.isBefore(firstDate)) initial = firstDate;
+    if (initial.isAfter(today)) initial = today;
+
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: firstDate,
+      lastDate: today,
+      helpText: 'Browse reports by date',
+      cancelText: 'Cancel',
+      confirmText: 'Select',
+    );
+    if (picked != null && mounted) {
+      setState(() => _filterByDate = _toLocalDate(picked));
+    }
+  }
+
+  void _shiftFilterDay(int delta) {
+    final base = _filterByDate ?? _toLocalDate(DateTime.now());
+    setState(() => _filterByDate = base.add(Duration(days: delta)));
+  }
+
+  void _clearDateFilter() {
+    if (_filterByDate == null) return;
+    setState(() => _filterByDate = null);
   }
 
   Future<void> _pickFile() async {
@@ -118,7 +200,10 @@ class _TrainingDailyReportEmployeeScreenState
       if (!mounted) return;
       _titleController.clear();
       _descriptionController.clear();
-      setState(() => _selectedFile = null);
+      setState(() {
+        _selectedFile = null;
+        _filterByDate = _toLocalDate(DateTime.now());
+      });
       await _loadReports();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Daily training report submitted.')),
@@ -482,6 +567,203 @@ class _TrainingDailyReportEmployeeScreenState
     );
   }
 
+  static const Color _datePillAccent = Color(0xFFF0671A);
+
+  /// Tappable date pill — opens the calendar to browse by day.
+  Widget _buildSelectableDatePill(BuildContext context) {
+    final filtering = _filterByDate != null;
+    final label = filtering
+        ? _formatDateOnly(_filterByDate!)
+        : 'Tap to select date';
+
+    return Semantics(
+      button: true,
+      label: 'Selected date $label. Double tap to open calendar.',
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: _pickFilterDate,
+            borderRadius: BorderRadius.circular(20),
+            child: Ink(
+              decoration: BoxDecoration(
+                color: AppTheme.dashPanelOf(context),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: _datePillAccent.withValues(alpha: 0.55),
+                  width: 1.2,
+                ),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.calendar_today_rounded,
+                    size: 18,
+                    color: _datePillAccent,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: _datePillAccent,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Icon(
+                    Icons.arrow_drop_down_rounded,
+                    size: 22,
+                    color: _datePillAccent.withValues(alpha: 0.9),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDateFilterBar(BuildContext context) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final dates = _datesWithReports;
+    final filtering = _filterByDate != null;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+      decoration: EmployeeDashUi.elevatedPanel(context),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.calendar_month_rounded,
+                size: 20,
+                color: AppTheme.primaryNavy.withValues(alpha: 0.85),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Browse by date',
+                  style: TextStyle(
+                    color: primary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+              if (filtering)
+                TextButton(
+                  onPressed: _clearDateFilter,
+                  style: EmployeeDashUi.ghostAction(context),
+                  child: const Text('Show all'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Tap the date to open the calendar, or use the arrows to move day by day.',
+            style: TextStyle(
+              color: secondary,
+              fontSize: 12.5,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              IconButton(
+                tooltip: 'Previous day',
+                onPressed: () => _shiftFilterDay(-1),
+                icon: const Icon(Icons.chevron_left_rounded),
+                style: IconButton.styleFrom(
+                  backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.center,
+                  child: _buildSelectableDatePill(context),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                tooltip: 'Next day',
+                onPressed: () {
+                  final next = (_filterByDate ?? _toLocalDate(DateTime.now()))
+                      .add(const Duration(days: 1));
+                  if (next.isAfter(_toLocalDate(DateTime.now()))) return;
+                  setState(() => _filterByDate = next);
+                },
+                icon: const Icon(Icons.chevron_right_rounded),
+                style: IconButton.styleFrom(
+                  backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                ),
+              ),
+            ],
+          ),
+          if (dates.length > 1) ...[
+            const SizedBox(height: 14),
+            Text(
+              'Days with reports',
+              style: EmployeeDashUi.metricLabel(context),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 36,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: dates.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final day = dates[index];
+                  final selected =
+                      filtering && _filterByDate == day;
+                  final count = _reports
+                      .where((r) => _toLocalDate(r.submittedAt) == day)
+                      .length;
+                  return InputChip(
+                    label: Text(
+                      '${_formatDateOnly(day)} ($count)',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight:
+                            selected ? FontWeight.w700 : FontWeight.w500,
+                        color: selected ? _datePillAccent : primary,
+                      ),
+                    ),
+                    avatar: Icon(
+                      Icons.calendar_today_rounded,
+                      size: 16,
+                      color: selected
+                          ? _datePillAccent
+                          : AppTheme.primaryNavy.withValues(alpha: 0.7),
+                    ),
+                    onPressed: () => setState(() => _filterByDate = day),
+                    backgroundColor: selected
+                        ? _datePillAccent.withValues(alpha: 0.12)
+                        : AppTheme.dashMutedSurfaceOf(context),
+                    side: BorderSide(
+                      color: selected
+                          ? _datePillAccent.withValues(alpha: 0.55)
+                          : AppTheme.dashHairlineOf(context),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildReportsList(BuildContext context) {
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
@@ -542,8 +824,65 @@ class _TrainingDailyReportEmployeeScreenState
       );
     }
 
+    final visible = _visibleReports;
+    if (visible.isEmpty) {
+      final dayLabel = _filterByDate != null
+          ? _formatDateOnly(_filterByDate!)
+          : '';
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 28),
+        decoration: EmployeeDashUi.elevatedPanel(context),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+              ),
+              child: Icon(
+                Icons.event_busy_rounded,
+                color: AppTheme.primaryNavy.withValues(alpha: 0.7),
+                size: 28,
+              ),
+            ),
+            const SizedBox(width: 18),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'No reports on $dayLabel',
+                    style: TextStyle(
+                      color: primary,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Try another date using the calendar, arrows, or the day chips above.',
+                    style: TextStyle(
+                      color: secondary,
+                      fontSize: 13.5,
+                      height: 1.45,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: _clearDateFilter,
+                    child: const Text('Show all reports'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Column(
-      children: _reports
+      children: visible
           .map(
             (r) => Padding(
               padding: const EdgeInsets.only(bottom: 12),
@@ -660,8 +999,16 @@ class _TrainingDailyReportEmployeeScreenState
 
   @override
   Widget build(BuildContext context) {
-    final countLabel =
-        !_loading && _reports.isNotEmpty ? ' (${_reports.length})' : '';
+    final visibleCount = _visibleReports.length;
+    final totalCount = _reports.length;
+    String countLabel = '';
+    if (!_loading && totalCount > 0) {
+      if (_filterByDate != null) {
+        countLabel = ' ($visibleCount of $totalCount)';
+      } else {
+        countLabel = ' ($totalCount)';
+      }
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -673,8 +1020,14 @@ class _TrainingDailyReportEmployeeScreenState
         EmployeeSectionHeader(
           title: 'My previous reports$countLabel',
           icon: Icons.history_rounded,
-          subtitle: 'Open any row to see the full entry you submitted.',
+          subtitle: _filterByDate != null
+              ? 'Showing reports submitted on ${_formatDateOnly(_filterByDate!)}.'
+              : 'Pick a date below or open any row to see the full entry you submitted.',
         ),
+        if (!_loading && _reports.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          _buildDateFilterBar(context),
+        ],
         const SizedBox(height: 14),
         _buildReportsList(context),
       ],

@@ -58,14 +58,14 @@ class WorkflowStep {
   }
 
   Map<String, dynamic> toJson() => {
-        'step_order': stepOrder,
-        'assignee_type': assigneeType,
-        if (roleId != null) 'role_id': roleId,
-        if (departmentId != null) 'department_id': departmentId,
-        if (officeId != null) 'office_id': officeId,
-        if (userIds != null) 'user_ids': userIds,
-        if (label != null) 'label': label,
-        'enabled': enabled,
-        if (deadlineHours != null) 'deadline_hours': deadlineHours,
-      };
+    'step_order': stepOrder,
+    'assignee_type': assigneeType,
+    if (roleId != null) 'role_id': roleId,
+    if (departmentId != null) 'department_id': departmentId,
+    if (officeId != null) 'office_id': officeId,
+    if (userIds != null) 'user_ids': userIds,
+    if (label != null) 'label': label,
+    'enabled': enabled,
+    if (deadlineHours != null) 'deadline_hours': deadlineHours,
+  };
 }

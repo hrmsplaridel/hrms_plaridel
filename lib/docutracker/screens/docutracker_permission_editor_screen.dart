@@ -3,12 +3,15 @@ import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../docutracker_repository.dart';
 import '../docutracker_styles.dart';
+import '../theme/docutracker_tokens.dart';
 import '../models/document_action.dart';
 import '../models/document_permission.dart';
 import '../models/document_type.dart';
 import '../security/docutracker_roles.dart';
 import '../services/docutracker_permission_service.dart';
 import '../services/employee_directory_lookup.dart';
+import '../widgets/docutracker_error_banner.dart';
+import '../widgets/docutracker_permission_governance_ui.dart';
 import '../widgets/docutracker_responsive_body.dart';
 
 String _permissionExplanationChipTooltip(DocuTrackerPermissionExplanation e) {
@@ -120,6 +123,7 @@ class _DocuTrackerPermissionEditorScreenState
     DocumentAction.createDraft,
     DocumentAction.download,
     DocumentAction.submit,
+    DocumentAction.delete,
   ];
 
   static const _draftOwnerActions = <DocumentAction>[
@@ -143,11 +147,17 @@ class _DocuTrackerPermissionEditorScreenState
       vsync: this,
       initialIndex: widget.initialTabIsUserOverride ? 1 : 0,
     );
+    _tabs.addListener(_onTabChanged);
     _init();
+  }
+
+  void _onTabChanged() {
+    if (!_tabs.indexIsChanging && mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _tabs.removeListener(_onTabChanged);
     _tabs.dispose();
     super.dispose();
   }
@@ -284,7 +294,9 @@ class _DocuTrackerPermissionEditorScreenState
 
   Future<void> _loadUserRoleBaseline() async {
     if (_userId == null || _userRoleId == null) {
-      _userRoleBaselineGranted = {for (final a in _editableActions) a.name: false};
+      _userRoleBaselineGranted = {
+        for (final a in _editableActions) a.name: false,
+      };
       return;
     }
     final label = DocuTrackerRoles.normalize(_userRoleId);
@@ -299,17 +311,24 @@ class _DocuTrackerPermissionEditorScreenState
       byAction[p.action.name] = p;
     }
     _userRoleBaselineGranted = {
-      for (final a in _editableActions) a.name: (byAction[a.name]?.granted ?? false),
+      for (final a in _editableActions)
+        a.name: (byAction[a.name]?.granted ?? false),
     };
   }
 
   Future<void> _loadOverrides() async {
     if (_userId == null) {
       _overrideSpecificByAction = const {};
-      _overrideSpecificDraft = {for (final a in _editableActions) a.name: false};
+      _overrideSpecificDraft = {
+        for (final a in _editableActions) a.name: false,
+      };
       _overrideWildcardByAction = const {};
-      _overrideWildcardDraft = {for (final a in _editableActions) a.name: false};
-      _userRoleBaselineGranted = {for (final a in _editableActions) a.name: false};
+      _overrideWildcardDraft = {
+        for (final a in _editableActions) a.name: false,
+      };
+      _userRoleBaselineGranted = {
+        for (final a in _editableActions) a.name: false,
+      };
       return;
     }
 
@@ -333,7 +352,9 @@ class _DocuTrackerPermissionEditorScreenState
           draft[a.name] = byAction[a.name]!.granted;
         } else {
           // Default to baseline if no explicit override exists
-          draft[a.name] = isWildcard ? false : (_userRoleBaselineGranted[a.name] ?? false);
+          draft[a.name] = isWildcard
+              ? false
+              : (_userRoleBaselineGranted[a.name] ?? false);
         }
       }
       return (byAction, draft);
@@ -748,100 +769,114 @@ class _DocuTrackerPermissionEditorScreenState
     };
   }
 
-  Widget _buildFilterCard() {
-    return Material(
-      elevation: 0,
-      color: AppTheme.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: Colors.black.withValues(alpha: 0.08)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-        child: Column(
+  String _roleDescription(String canonicalRole) {
+    return switch (DocuTrackerRoles.normalize(canonicalRole)) {
+      DocuTrackerRoles.admin => 'System wide unrestricted access.',
+      DocuTrackerRoles.hr => 'Confidential personnel document management.',
+      DocuTrackerRoles.supervisor => 'Departmental approval & reporting.',
+      DocuTrackerRoles.employee => 'General submission & own record access.',
+      _ => 'Role-based document access.',
+    };
+  }
+
+  Color _roleAccentColor(String canonicalRole) {
+    return switch (DocuTrackerRoles.normalize(canonicalRole)) {
+      DocuTrackerRoles.admin => DocuTrackerTokens.brand,
+      DocuTrackerRoles.hr => DocuTrackerTokens.escalatedBlue,
+      DocuTrackerRoles.supervisor => const Color(0xFF5B9BD5),
+      DocuTrackerRoles.employee => DocuTrackerTokens.textMuted,
+      _ => DocuTrackerTokens.borderStrong,
+    };
+  }
+
+  List<({String value, String label})> _documentTypeFilterOptions() {
+    return [
+      (value: '*', label: 'All Documents'),
+      for (final t in DocumentType.values)
+        (value: t.value, label: t.displayName),
+    ];
+  }
+
+  int _countPendingBaselineChanges() {
+    var count = 0;
+    for (final role in _baselineRoleIds) {
+      final label = DocuTrackerRoles.normalize(role);
+      count += _diffChanges(
+        scopeLabel: 'Role baseline ($label)',
+        documentType: _documentType,
+        desiredByAction: _baselineSpecificMatrixDraft[label] ?? {},
+        existingByAction: _baselineSpecificMatrixExisting[label] ?? {},
+      ).length;
+      if (_editWildcardToo && _documentType != '*') {
+        count += _diffChanges(
+          scopeLabel: 'Role baseline ($label)',
+          documentType: '*',
+          desiredByAction: _baselineWildcardMatrixDraft[label] ?? {},
+          existingByAction: _baselineWildcardMatrixExisting[label] ?? {},
+        ).length;
+      }
+    }
+    return count;
+  }
+
+  int _countPendingOverrideChanges() {
+    if (_userId == null) return 0;
+    var count = _diffChanges(
+      scopeLabel: 'User override',
+      documentType: _documentType,
+      desiredByAction: _overrideSpecificDraft,
+      existingByAction: _overrideSpecificByAction,
+    ).length;
+    if (_editWildcardToo && _documentType != '*') {
+      count += _diffChanges(
+        scopeLabel: 'User override',
+        documentType: '*',
+        desiredByAction: _overrideWildcardDraft,
+        existingByAction: _overrideWildcardByAction,
+      ).length;
+    }
+    return count;
+  }
+
+  Widget _buildGovernanceSidebar() {
+    return DocuTrackerPermissionGovernanceSidebar(
+      onViewAuditLog: () {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Audit log export will be available soon.'),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildGovernanceBodyWithSidebar({required Widget main}) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 900;
+        final scrollableMain = SingleChildScrollView(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: main,
+        );
+        if (!wide) {
+          return ListView(
+            padding: const EdgeInsets.only(bottom: 12),
+            children: [
+              main,
+              const SizedBox(height: 16),
+              _buildGovernanceSidebar(),
+            ],
+          );
+        }
+        return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Document type',
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.3,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                ChoiceChip(
-                  label: const Text('All types (*)'),
-                  selected: _documentType == '*',
-                  onSelected: _loading
-                      ? null
-                      : (sel) async {
-                          if (!sel) return;
-                          setState(() => _documentType = '*');
-                          await _refresh();
-                        },
-                ),
-                for (final t in DocumentType.values)
-                  ChoiceChip(
-                    label: Text(t.displayName),
-                    selected: _documentType == t.value,
-                    onSelected: _loading
-                        ? null
-                        : (sel) async {
-                            if (!sel) return;
-                            setState(() => _documentType = t.value);
-                            await _refresh();
-                          },
-                  ),
-              ],
-            ),
-            if (_documentType != '*') ...[
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 10,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 420),
-                    child: Text(
-                      'Also edit wildcard (*) rows in this tab when saving',
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  Switch(
-                    value: _editWildcardToo,
-                    onChanged: _loading
-                        ? null
-                        : (v) => setState(() => _editWildcardToo = v),
-                    activeTrackColor: AppTheme.primaryNavy.withValues(
-                      alpha: 0.55,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerRight,
-              child: OutlinedButton.icon(
-                onPressed: _loading ? null : _refresh,
-                icon: const Icon(Icons.refresh_rounded, size: 18),
-                label: const Text('Reload'),
-              ),
-            ),
+            Expanded(flex: 3, child: scrollableMain),
+            const SizedBox(width: 16),
+            SizedBox(width: 300, child: _buildGovernanceSidebar()),
           ],
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -849,6 +884,7 @@ class _DocuTrackerPermissionEditorScreenState
     required String title,
     required String subtitle,
     required bool wildcard,
+    bool showFooter = true,
   }) {
     final draft = wildcard
         ? _baselineWildcardMatrixDraft
@@ -858,33 +894,37 @@ class _DocuTrackerPermissionEditorScreenState
       children: [
         Text(
           title,
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 14,
+          style: const TextStyle(
+            color: DocuTrackerTokens.textPrimary,
+            fontSize: 15,
             fontWeight: FontWeight.w800,
           ),
         ),
         const SizedBox(height: 4),
-        Text(
-          subtitle,
-          style: TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: 12,
-            height: 1.25,
-          ),
-        ),
-        const SizedBox(height: 10),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: _PermissionRoleMatrix(
-            roleIds: _baselineRoleIds.map(DocuTrackerRoles.normalize).toList(),
-            roleTitle: _roleRowTitle,
-            actions: _editableActions,
-            draftByRole: draft,
-            enabled: !_loading,
-            onToggle: (roleLabel, action, v) =>
-                _setBaselineCell(roleLabel, action, v, wildcard: wildcard),
-          ),
+        Text(subtitle, style: DocuTrackerTokens.subtitleStyle()),
+        const SizedBox(height: 12),
+        DocuTrackerPermissionGovernanceMatrix(
+          roleIds: _baselineRoleIds.map(DocuTrackerRoles.normalize).toList(),
+          roleTitle: _roleRowTitle,
+          roleDescription: _roleDescription,
+          roleAccentColor: _roleAccentColor,
+          actions: _editableActions,
+          draftByRole: draft,
+          enabled: !_loading,
+          onToggle: (roleLabel, action, v) =>
+              _setBaselineCell(roleLabel, action, v, wildcard: wildcard),
+          footerText: showFooter && !wildcard
+              ? 'Showing ${_baselineRoleIds.length} major enterprise roles'
+              : null,
+          onAddRole: showFooter && !wildcard
+              ? () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Custom roles will be available soon.'),
+                    ),
+                  );
+                }
+              : null,
         ),
       ],
     );
@@ -1020,7 +1060,9 @@ class _DocuTrackerPermissionEditorScreenState
                     waitDuration: const Duration(milliseconds: 400),
                     child: Chip(
                       avatar: Icon(
-                        r.explanation.granted ? Icons.check_circle : Icons.cancel,
+                        r.explanation.granted
+                            ? Icons.check_circle
+                            : Icons.cancel,
                         size: 16,
                         color: r.explanation.granted
                             ? Colors.green.shade800
@@ -1030,8 +1072,8 @@ class _DocuTrackerPermissionEditorScreenState
                         r.action == DocumentAction.edit
                             ? 'Edit Own Draft'
                             : r.action == DocumentAction.delete
-                                ? 'Delete Own Draft'
-                                : r.action.displayName,
+                            ? 'Delete Own Draft'
+                            : r.action.displayName,
                         style: const TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
@@ -1061,7 +1103,7 @@ class _DocuTrackerPermissionEditorScreenState
                 Icon(
                   Icons.visibility_rounded,
                   size: 18,
-                  color: AppTheme.primaryNavy,
+                  color: DocuTrackerTokens.brand,
                 ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -1088,265 +1130,259 @@ class _DocuTrackerPermissionEditorScreenState
 
   @override
   Widget build(BuildContext context) {
+    final pendingChanges = switch (_tabs.index) {
+      0 => _countPendingBaselineChanges(),
+      1 => _countPendingOverrideChanges(),
+      _ => 0,
+    };
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('DocuTracker permissions'),
-        bottom: TabBar(
-          controller: _tabs,
-          tabs: const [
-            Tab(text: 'Role baseline'),
-            Tab(text: 'User override'),
-            Tab(text: 'Effective preview'),
-          ],
-        ),
-      ),
+      backgroundColor: DocuTrackerTokens.canvas,
       body: DocuTrackerResponsiveBody(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              'Role baseline applies to everyone in that role. User overrides win for that person only.',
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 13,
-                height: 1.35,
-              ),
+            DocuTrackerPermissionGovernanceHeader(
+              onBack: () => Navigator.of(context).pop(),
+              selectedTab: _tabs.index,
+              onTabSelected: (i) => _tabs.animateTo(i),
             ),
-            const SizedBox(height: 12),
-            _buildFilterCard(),
-            const SizedBox(height: 12),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(_error!, style: const TextStyle(color: Colors.red)),
+            const SizedBox(height: 16),
+            DocuTrackerPermissionGovernanceTypeFilter(
+              selectedType: _documentType,
+              typeLabels: _documentTypeFilterOptions(),
+              loading: _loading,
+              onTypeSelected: (v) async {
+                setState(() => _documentType = v);
+                await _refresh();
+              },
+              onReload: _refresh,
+            ),
+            if (_documentType != '*') ...[
+              const SizedBox(height: 8),
+              Material(
+                color: DocuTrackerTokens.surface,
+                borderRadius: BorderRadius.circular(12),
+                child: SwitchListTile(
+                  dense: true,
+                  title: Text(
+                    'Also edit wildcard (*) rows when saving',
+                    style: DocuTrackerTokens.subtitleStyle().copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  value: _editWildcardToo,
+                  onChanged: _loading
+                      ? null
+                      : (v) => setState(() => _editWildcardToo = v),
+                  activeTrackColor: DocuTrackerTokens.brand.withValues(
+                    alpha: 0.55,
+                  ),
+                ),
               ),
+            ],
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              DocuTrackerErrorBanner(
+                message: _error!,
+                onDismiss: () => setState(() => _error = null),
+              ),
+            ],
+            const SizedBox(height: 12),
             Expanded(
               child: TabBarView(
                 controller: _tabs,
                 children: [
-                  // Role baseline matrix
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(
-                        child: ListView(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          children: [
-                            const _PermissionInfoCard(
-                              title: 'Permission groups in this editor',
-                              body:
-                                  'General Access: View, Create Draft, Download.\n'
-                                  'Draft / WIP: Submit.\n'
-                                  'Workflow actions (Forward/Approve/Reject/Return) are runtime rules based on step assignment and allowed_actions.',
-                            ),
-                            const SizedBox(height: 12),
-                            if (_editWildcardToo && _documentType != '*')
-                              _buildRoleMatrixSection(
-                                title: 'Wildcard (*) — all document types',
-                                subtitle:
-                                    'Same roles as below; these rows apply when no more specific type rule exists.',
-                                wildcard: true,
-                              ),
-                            if (_editWildcardToo && _documentType != '*')
-                              const SizedBox(height: 20),
-                            _buildRoleMatrixSection(
-                              title:
-                                  'Type-specific: ${_docTypeLabel(_documentType)}',
-                              subtitle:
-                                  'Check = allow for every user in that role for this document type (or all types when filter is *).',
-                              wildcard: false,
-                            ),
-                          ],
-                        ),
-                      ),
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 8,
-                        children: [
-                          OutlinedButton.icon(
-                            onPressed: _loading ? null : _resetBaseline,
-                            icon: const Icon(Icons.restart_alt_rounded),
-                            label: const Text('Reset'),
-                          ),
-                          FilledButton.icon(
-                            onPressed: _loading ? null : _saveBaseline,
-                            icon: const Icon(Icons.save_rounded),
-                            label: const Text('Save changes'),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: _loading
-                                ? null
-                                : () => Navigator.of(context).pop(),
-                            icon: const Icon(Icons.close_rounded),
-                            label: const Text('Cancel'),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  // User override
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const _PermissionInfoCard(
-                        title: 'Override behavior',
-                        body:
-                            'This panel edits user-specific overrides. Any explicit user override beats role baseline. '
-                            'If no override exists, effective permission inherits from role baseline; otherwise it defaults to deny.',
-                      ),
-                      const SizedBox(height: 8),
-                      if (_employeesLoading)
-                        const Padding(
-                          padding: EdgeInsets.all(24),
-                          child: Center(child: CircularProgressIndicator()),
-                        )
-                      else ...[
-                        TextField(
-                          enabled: !_loading,
-                          decoration: const InputDecoration(
-                            labelText: 'Search user (name, department, id)',
-                            prefixIcon: Icon(Icons.search_rounded),
-                          ),
-                          onChanged: (value) {
-                            setState(() => _userSearchQuery = value);
-                          },
-                        ),
-                        const SizedBox(height: 8),
-                        DropdownButtonFormField<String?>(
-                          key: ValueKey(_userId ?? ''),
-                          initialValue:
-                              _userId != null &&
-                                  _employees.any((e) => e.id == _userId)
-                              ? _userId
-                              : null,
-                          decoration: DocuTrackerStyles.dropdownDecoration(
-context,                             'Employee',
-                          ),
-                          items: () {
-                            final rows = _filteredEmployees();
-                            final selected = _userId;
-                            if (selected != null &&
-                                selected.isNotEmpty &&
-                                rows.every((e) => e.id != selected)) {
-                              final fromAll = _employees.where((e) => e.id == selected);
-                              if (fromAll.isNotEmpty) {
-                                return [
-                                  ...fromAll,
-                                  ...rows,
-                                ].map((e) {
-                                  final line =
-                                      _employeeDirectory[e.id]?.nameAndDepartment ??
-                                          e.fullName;
-                                  return DropdownMenuItem<String?>(
-                                    value: e.id,
-                                    child: Text(
-                                      line,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  );
-                                }).toList();
-                              }
-                            }
-                            return rows.map((e) {
-                              final line =
-                                  _employeeDirectory[e.id]?.nameAndDepartment ??
-                                      e.fullName;
-                              return DropdownMenuItem<String?>(
-                                value: e.id,
-                                child: Text(
-                                  line,
-                                  overflow: TextOverflow.ellipsis,
+                  _buildGovernanceBodyWithSidebar(
+                    main: _loading
+                        ? const Center(child: CircularProgressIndicator())
+                        : Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              if (_editWildcardToo && _documentType != '*')
+                                _buildRoleMatrixSection(
+                                  title: 'Wildcard (*) — all document types',
+                                  subtitle:
+                                      'Applies when no more specific type rule exists.',
+                                  wildcard: true,
+                                  showFooter: false,
                                 ),
-                              );
-                            }).toList();
-                          }(),
-                          onChanged: _loading
-                              ? null
-                              : (v) async {
-                                  if (v == null) return;
-                                  final pick = _employees.firstWhere(
-                                    (e) => e.id == v,
-                                  );
-                                  setState(() {
-                                    _userId = pick.id;
-                                    _userRoleId = pick.roleId;
-                                  });
-                                  await _employeeDirectory.ensureIds({pick.id});
-                                  await _loadOverrides();
-                                  await _loadEffectiveRows();
-                                },
+                              if (_editWildcardToo && _documentType != '*')
+                                const SizedBox(height: 16),
+                              _buildRoleMatrixSection(
+                                title:
+                                    'Type-specific: ${_docTypeLabel(_documentType)}',
+                                subtitle:
+                                    'Toggle ALLOW/DENY for every user in that role.',
+                                wildcard: false,
+                              ),
+                            ],
+                          ),
+                  ),
+                  _buildGovernanceBodyWithSidebar(
+                    main: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: DocuTrackerTokens.cardDecoration(),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'User override',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w800,
+                                  color: DocuTrackerTokens.textPrimary,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Overrides beat role baseline for the selected employee only.',
+                                style: DocuTrackerTokens.subtitleStyle(),
+                              ),
+                              const SizedBox(height: 12),
+                              if (_employeesLoading)
+                                const Padding(
+                                  padding: EdgeInsets.all(16),
+                                  child: Center(
+                                    child: CircularProgressIndicator(),
+                                  ),
+                                )
+                              else ...[
+                                TextField(
+                                  enabled: !_loading,
+                                  decoration: DocuTrackerTokens.warmSearchDecoration(
+                                    'Search user (name, department, id)',
+                                  ),
+                                  onChanged: (value) {
+                                    setState(() => _userSearchQuery = value);
+                                  },
+                                ),
+                                const SizedBox(height: 10),
+                                DropdownButtonFormField<String?>(
+                                  key: ValueKey(_userId ?? ''),
+                                  initialValue:
+                                      _userId != null &&
+                                          _employees.any((e) => e.id == _userId)
+                                      ? _userId
+                                      : null,
+                                  decoration:
+                                      DocuTrackerStyles.dropdownDecoration(
+                                        context,
+                                        'Employee',
+                                      ),
+                                  items: () {
+                                    final rows = _filteredEmployees();
+                                    final selected = _userId;
+                                    if (selected != null &&
+                                        selected.isNotEmpty &&
+                                        rows.every((e) => e.id != selected)) {
+                                      final fromAll = _employees.where(
+                                        (e) => e.id == selected,
+                                      );
+                                      if (fromAll.isNotEmpty) {
+                                        return [...fromAll, ...rows].map((e) {
+                                          final line =
+                                              _employeeDirectory[e.id]
+                                                  ?.nameAndDepartment ??
+                                              e.fullName;
+                                          return DropdownMenuItem<String?>(
+                                            value: e.id,
+                                            child: Text(
+                                              line,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          );
+                                        }).toList();
+                                      }
+                                    }
+                                    return rows.map((e) {
+                                      final line =
+                                          _employeeDirectory[e.id]
+                                              ?.nameAndDepartment ??
+                                          e.fullName;
+                                      return DropdownMenuItem<String?>(
+                                        value: e.id,
+                                        child: Text(
+                                          line,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      );
+                                    }).toList();
+                                  }(),
+                                  onChanged: _loading
+                                      ? null
+                                      : (v) async {
+                                          if (v == null) return;
+                                          final pick = _employees.firstWhere(
+                                            (e) => e.id == v,
+                                          );
+                                          setState(() {
+                                            _userId = pick.id;
+                                            _userRoleId = pick.roleId;
+                                          });
+                                          await _employeeDirectory.ensureIds({
+                                            pick.id,
+                                          });
+                                          await _loadOverrides();
+                                          await _loadEffectiveRows();
+                                        },
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        if (_loading)
+                          const Padding(
+                            padding: EdgeInsets.all(24),
+                            child: Center(child: CircularProgressIndicator()),
+                          )
+                        else ...[
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: _buildUserCompareMatrix(),
+                          ),
+                          _buildUserWildcardRow(),
+                        ],
+                      ],
+                    ),
+                  ),
+                  _buildGovernanceBodyWithSidebar(
+                    main: ListView(
+                      children: [
+                        _buildEffectivePreview(),
+                        const SizedBox(height: 12),
+                        const _PermissionInfoCard(
+                          title: 'Rules reference',
+                          body:
+                              'User-specific override wins over role baseline. '
+                              'Role baseline wins over default deny. '
+                              'Workflow actions are enforced by step assignment and allowed_actions.',
                         ),
                       ],
-                      const SizedBox(height: 8),
-                      Text(
-                        'Top row = inherited role baseline (read-only). Bottom row = this user’s overrides (editable).',
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 12,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Expanded(
-                        child: ListView(
-                          children: [
-                            _buildUserCompareMatrix(),
-                            _buildUserWildcardRow(),
-                          ],
-                        ),
-                      ),
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 8,
-                        children: [
-                          OutlinedButton.icon(
-                            onPressed: (_loading || _userId == null)
-                                ? null
-                                : _resetOverrides,
-                            icon: const Icon(Icons.restart_alt_rounded),
-                            label: const Text('Reset'),
-                          ),
-                          FilledButton.icon(
-                            onPressed: (_loading || _userId == null)
-                                ? null
-                                : _saveOverrides,
-                            icon: const Icon(Icons.save_rounded),
-                            label: const Text('Save changes'),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: _loading
-                                ? null
-                                : () => Navigator.of(context).pop(),
-                            icon: const Icon(Icons.close_rounded),
-                            label: const Text('Cancel'),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  // Effective preview
-                  ListView(
-                    children: [
-                      _buildEffectivePreview(),
-                      const SizedBox(height: 12),
-                      _PermissionInfoCard(
-                        title: 'Rules reference',
-                        body:
-                            'User-specific override wins over role baseline. '
-                            'Role baseline wins over default deny. '
-                            'Workflow actions (approve/forward/reject/return) are enforced by current holder and assigned primary/backup assignees with allowed_actions.',
-                      ),
-                      const SizedBox(height: 8),
-                      _PermissionInfoCard(
-                        title: 'Draft behavior',
-                        body:
-                            'Create Draft creates WIP only. Submit starts official routing. '
-                            'Edit Own Draft and Delete Own Draft apply to the document creator while still in draft/WIP.',
-                      ),
-                    ],
+                    ),
                   ),
                 ],
               ),
+            ),
+            DocuTrackerPermissionGovernanceFooter(
+              pendingChanges: pendingChanges,
+              lastSavedLabel: 'Last saved: Today at 09:42 AM',
+              loading: _loading,
+              onReset: switch (_tabs.index) {
+                0 => _loading ? null : _resetBaseline,
+                1 => (_loading || _userId == null) ? null : _resetOverrides,
+                _ => null,
+              },
+              onSave: switch (_tabs.index) {
+                0 => _loading ? null : _saveBaseline,
+                1 => (_loading || _userId == null) ? null : _saveOverrides,
+                _ => null,
+              },
             ),
           ],
         ),
@@ -1354,116 +1390,6 @@ context,                             'Employee',
     );
   }
 }
-
-/// Roles × actions matrix with sticky-style first column via DataTable.
-class _PermissionRoleMatrix extends StatelessWidget {
-  const _PermissionRoleMatrix({
-    required this.roleIds,
-    required this.roleTitle,
-    required this.actions,
-    required this.draftByRole,
-    required this.enabled,
-    required this.onToggle,
-  });
-
-  final List<String> roleIds;
-  final String Function(String canonicalRole) roleTitle;
-  final List<DocumentAction> actions;
-  final Map<String, Map<String, bool>> draftByRole;
-  final bool enabled;
-  final void Function(String roleLabel, DocumentAction action, bool value)
-  onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    return DataTable(
-      headingRowHeight: 44,
-      dataRowMinHeight: 64, // Increased to fit switch + label
-      dataRowMaxHeight: 72,
-      horizontalMargin: 12,
-      columnSpacing: 8,
-      columns: [
-        const DataColumn(
-          label: Text('Role', style: TextStyle(fontWeight: FontWeight.w800)),
-        ),
-        ...actions.map(
-          (a) => DataColumn(
-            label: Text(
-              a.displayName,
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
-              textAlign: TextAlign.center,
-            ),
-          ),
-        ),
-      ],
-      rows: [
-        for (final role in roleIds)
-          DataRow(
-            cells: [
-              DataCell(
-                SizedBox(
-                  width: 108,
-                  child: Text(
-                    roleTitle(role),
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-              ),
-              ...actions.map((a) {
-                final v = draftByRole[role]?[a.name] ?? false;
-                return DataCell(
-                  Center(
-                    child: _LabeledSwitch(
-                      value: v,
-                      onChanged: enabled
-                          ? (nv) => onToggle(role, a, nv)
-                          : null,
-                    ),
-                  ),
-                );
-              }),
-            ],
-          ),
-      ],
-    );
-  }
-}
-
-class _LabeledSwitch extends StatelessWidget {
-  const _LabeledSwitch({required this.value, required this.onChanged});
-  final bool value;
-  final ValueChanged<bool>? onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Switch(
-          value: value,
-          onChanged: onChanged,
-          activeThumbColor: Colors.white,
-          activeTrackColor: Colors.green.shade600,
-          inactiveThumbColor: Colors.white,
-          inactiveTrackColor: Colors.red.shade600,
-          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        ),
-        Text(
-          value ? 'Allow' : 'Deny',
-          style: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w800,
-            color: value ? Colors.green.shade700 : Colors.red.shade700,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 
 /// Two logical rows: baseline (icons) vs override (checkboxes).
 class _UserBaselineOverrideMatrix extends StatelessWidget {
@@ -1491,10 +1417,14 @@ class _UserBaselineOverrideMatrix extends StatelessWidget {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: granted ? Colors.green.withValues(alpha: 0.1) : Colors.red.withValues(alpha: 0.1),
+          color: granted
+              ? Colors.green.withValues(alpha: 0.1)
+              : Colors.red.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(6),
           border: Border.all(
-            color: granted ? Colors.green.withValues(alpha: 0.3) : Colors.red.withValues(alpha: 0.3),
+            color: granted
+                ? Colors.green.withValues(alpha: 0.3)
+                : Colors.red.withValues(alpha: 0.3),
           ),
         ),
         child: Row(
@@ -1602,11 +1532,9 @@ class _UserBaselineOverrideMatrix extends StatelessWidget {
             ...actions.map(
               (a) => DataCell(
                 Center(
-                  child: _LabeledSwitch(
+                  child: DocuTrackerPermissionGovernanceToggle(
                     value: overrideDraft[a.name] ?? false,
-                    onChanged: enabled
-                        ? (v) => onOverrideToggle(a, v)
-                        : null,
+                    onChanged: enabled ? (v) => onOverrideToggle(a, v) : null,
                   ),
                 ),
               ),
@@ -1615,7 +1543,7 @@ class _UserBaselineOverrideMatrix extends StatelessWidget {
         ),
         DataRow(
           color: WidgetStateProperty.all(
-            AppTheme.primaryNavy.withValues(alpha: 0.05),
+            DocuTrackerTokens.brand.withValues(alpha: 0.05),
           ),
           cells: [
             DataCell(
@@ -1627,7 +1555,7 @@ class _UserBaselineOverrideMatrix extends StatelessWidget {
                     'Effective result',
                     style: TextStyle(
                       fontWeight: FontWeight.w800,
-                      color: AppTheme.primaryNavy,
+                      color: DocuTrackerTokens.brand,
                     ),
                   ),
                   Text(
@@ -1642,9 +1570,7 @@ class _UserBaselineOverrideMatrix extends StatelessWidget {
             ),
             ...actions.map((a) {
               final effective = overrideDraft[a.name] ?? false;
-              return DataCell(
-                Center(child: cellLabel(effective)),
-              );
+              return DataCell(Center(child: cellLabel(effective)));
             }),
           ],
         ),

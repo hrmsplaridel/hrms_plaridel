@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../../dtr/widgets/real_time_clock.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../shared/utils/time_greeting.dart';
+
+/// Dashboard accent colors (aligned with admin home welcome banner).
+class _EmployeeDashColors {
+  static const Color accentOrange = Color(0xFFE85D04);
+}
 
 /// Shared visual primitives for the employee portal dashboard home.
 class EmployeeDashUi {
@@ -31,11 +37,11 @@ class EmployeeDashUi {
       border: Border.all(
         color: dark
             ? AppTheme.dashHairlineOf(context)
-            : AppTheme.primaryNavy.withValues(alpha: 0.14),
+            : _EmployeeDashColors.accentOrange.withValues(alpha: 0.14),
       ),
       boxShadow: [
         BoxShadow(
-          color: AppTheme.primaryNavy.withValues(
+          color: _EmployeeDashColors.accentOrange.withValues(
             alpha: dark ? 0.12 : 0.08,
           ),
           blurRadius: 28,
@@ -61,7 +67,7 @@ class EmployeeDashUi {
           offset: const Offset(0, 6),
         ),
         BoxShadow(
-          color: AppTheme.primaryNavy.withValues(
+          color: _EmployeeDashColors.accentOrange.withValues(
             alpha: dark ? 0.06 : 0.03,
           ),
           blurRadius: 24,
@@ -136,6 +142,55 @@ class EmployeeWelcomeBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
+    final greeting = personalizedTimeGreeting(displayName);
+
+    final copy = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: _EmployeeDashColors.accentOrange.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: _EmployeeDashColors.accentOrange.withValues(alpha: 0.22),
+            ),
+          ),
+          child: const Text(
+            'Employee Portal',
+            style: TextStyle(
+              color: _EmployeeDashColors.accentOrange,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.4,
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          greeting,
+          style: TextStyle(
+            color: primary,
+            fontSize: isNarrow ? 22 : 28,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.6,
+            height: 1.15,
+          ),
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          "Here's your latest overview of your HR activities.",
+          style: TextStyle(
+            color: secondary,
+            fontSize: isNarrow ? 14 : 15,
+            height: 1.45,
+          ),
+        ),
+      ],
+    );
 
     return Container(
       padding: EdgeInsets.all(isNarrow ? 20 : 26),
@@ -144,16 +199,16 @@ class EmployeeWelcomeBanner extends StatelessWidget {
         clipBehavior: Clip.none,
         children: [
           Positioned(
-            right: isNarrow ? -24 : -12,
-            top: isNarrow ? -32 : -20,
+            right: isNarrow ? -28 : -16,
+            top: isNarrow ? -36 : -24,
             child: Container(
-              width: isNarrow ? 110 : 140,
-              height: isNarrow ? 110 : 140,
+              width: isNarrow ? 120 : 160,
+              height: isNarrow ? 120 : 160,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: RadialGradient(
                   colors: [
-                    AppTheme.primaryNavy.withValues(alpha: 0.12),
+                    _EmployeeDashColors.accentOrange.withValues(alpha: 0.12),
                     Colors.transparent,
                   ],
                 ),
@@ -161,11 +216,11 @@ class EmployeeWelcomeBanner extends StatelessWidget {
             ),
           ),
           Positioned(
-            left: isNarrow ? -16 : -4,
-            bottom: isNarrow ? -20 : -12,
+            left: isNarrow ? -20 : -8,
+            bottom: isNarrow ? -24 : -16,
             child: Container(
-              width: isNarrow ? 72 : 96,
-              height: isNarrow ? 72 : 96,
+              width: isNarrow ? 80 : 100,
+              height: isNarrow ? 80 : 100,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: RadialGradient(
@@ -177,52 +232,31 @@ class EmployeeWelcomeBanner extends StatelessWidget {
               ),
             ),
           ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: AppTheme.primaryNavy.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.15),
+          if (isNarrow)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Align(
+                  alignment: Alignment.centerRight,
+                  child: RealTimeClock(
+                    accentColor: _EmployeeDashColors.accentOrange,
                   ),
                 ),
-                child: const Text(
-                  'Employee Portal',
-                  style: TextStyle(
-                    color: AppTheme.primaryNavy,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.4,
-                  ),
+                const SizedBox(height: 16),
+                copy,
+              ],
+            )
+          else
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: copy),
+                const SizedBox(width: 20),
+                const RealTimeClock(
+                  accentColor: _EmployeeDashColors.accentOrange,
                 ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                personalizedTimeGreeting(displayName),
-                style: TextStyle(
-                  color: primary,
-                  fontSize: isNarrow ? 22 : 28,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.6,
-                  height: 1.15,
-                ),
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                "Here's your latest information and updates.",
-                style: TextStyle(
-                  color: secondary,
-                  fontSize: isNarrow ? 14 : 15,
-                  height: 1.45,
-                ),
-              ),
-            ],
-          ),
+              ],
+            ),
         ],
       ),
     );

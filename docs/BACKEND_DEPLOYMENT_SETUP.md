@@ -71,18 +71,19 @@ createdb hrms_plaridel
 psql -U postgres -c "CREATE DATABASE hrms_plaridel;"
 ```
 
-Apply the main schema:
+Apply the main schema (includes core HR/DTR, **L&D**, and **RSP** tables):
 
 ```bash
 psql -d hrms_plaridel -f scripts/init-schema.sql
 ```
 
-If you use other modules (e.g. leave balances, docutracker), run their scripts as needed:
+Optional add-ons:
 
-- `scripts/init-schema-leave-balances.sql`
-- `scripts/init-schema-docutracker.sql`
-- `scripts/init-schema-ld.sql`
-- `scripts/init-schema-rsp.sql`
+- `scripts/rsp-storage-attachment-policy.sql` — RSP attachment security (recommended)
+- `scripts/init-schema-docutracker.sql` — DocuTracker module
+- `scripts/init-schema-leave-balances.sql` — only if not already covered by `init-schema.sql`
+
+`init-schema-ld.sql` and `init-schema-rsp.sql` are deprecated; their tables live in `init-schema.sql`.
 
 ---
 

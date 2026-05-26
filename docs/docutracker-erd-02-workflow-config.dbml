@@ -1,0 +1,77 @@
+// DocuTracker ERD — PART 2: WORKFLOW CONFIGURATION
+// How admins define routes, steps, and reviewers
+
+Project DocuTracker_Part2_Workflow {
+  database_type: 'PostgreSQL'
+  Note: 'Part 2 of 3 — workflow template tables'
+}
+
+Table users {
+  id uuid [pk, note: 'HRMS shared']
+  full_name varchar [not null]
+  role varchar [not null]
+}
+
+Table departments {
+  id uuid [pk, note: 'HRMS shared']
+  name varchar [unique, not null]
+}
+
+Table docutracker_routing_configs {
+  id uuid [pk]
+  document_type varchar [unique, not null, note: 'Legacy cache — latest config per type']
+  steps json [not null]
+  review_deadline_hours int [default: 1]
+  created_at timestamptz
+  updated_at timestamptz
+}
+
+Table docutracker_routing_config_versions {
+  id uuid [pk]
+  document_type varchar [not null]
+  version int [not null]
+  steps json [not null]
+  review_deadline_hours int [not null, default: 1]
+  created_by uuid [ref: > users.id]
+  created_at timestamptz [not null]
+
+  indexes {
+    (document_type, version) [unique]
+  }
+}
+
+Table docutracker_workflow_steps {
+  id uuid [pk]
+  document_type varchar [not null]
+  workflow_version int [not null]
+  step_order int [not null]
+  department_id uuid [ref: > departments.id]
+  label varchar
+  enabled boolean [not null, default: true]
+  created_at timestamptz
+  updated_at timestamptz
+
+  indexes {
+    (document_type, workflow_version, step_order) [unique]
+  }
+}
+
+Table docutracker_workflow_step_assignees {
+  id uuid [pk]
+  step_id uuid [not null, ref: > docutracker_workflow_steps.id]
+  user_id uuid [not null, ref: > users.id]
+  is_primary boolean [not null, default: false]
+  backup_rank int
+  is_enabled boolean [not null, default: true]
+  allowed_actions varchar [note: 'approve | forward | reject | return']
+  created_at timestamptz
+  updated_at timestamptz
+
+  indexes {
+    (step_id, user_id) [unique]
+  }
+}
+
+// Logical link (same document_type + workflow_version):
+// routing_config_versions → workflow_steps
+// documents.workflow_version in Part 1 pins to a version row here

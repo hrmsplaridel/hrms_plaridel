@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
-import '../../landingpage/constants/app_theme.dart';
+import '../docutracker_styles.dart';
 import '../theme/docutracker_tokens.dart';
 
-/// Summary card for DocuTracker dashboard, matching admin summary cards.
-/// Layout: icon at top in rounded square, then title, value, subtitle.
+/// Summary metric card for the DocuTracker dashboard (mockup-style).
 class DocuTrackerSummaryCard extends StatelessWidget {
   const DocuTrackerSummaryCard({
     super.key,
@@ -13,6 +12,9 @@ class DocuTrackerSummaryCard extends StatelessWidget {
     required this.icon,
     required this.backgroundColor,
     required this.iconColor,
+    this.badge,
+    this.badgeColor,
+    this.padValue = false,
   });
 
   final String title;
@@ -21,20 +23,27 @@ class DocuTrackerSummaryCard extends StatelessWidget {
   final IconData icon;
   final Color backgroundColor;
   final Color iconColor;
+  final String? badge;
+  final Color? badgeColor;
+  final bool padValue;
 
   @override
   Widget build(BuildContext context) {
+    final displayValue = padValue && value.length < 2
+        ? value.padLeft(2, '0')
+        : value;
+
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
       decoration: BoxDecoration(
         color: backgroundColor,
         borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusLg),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
+        border: Border.all(color: DocuTrackerTokens.borderSubtle),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
+            blurRadius: 12,
+            offset: const Offset(0, 3),
           ),
         ],
       ),
@@ -44,7 +53,7 @@ class DocuTrackerSummaryCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: iconColor.withValues(alpha: 0.22),
+              color: iconColor.withValues(alpha: 0.18),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(icon, size: 22, color: iconColor),
@@ -52,29 +61,52 @@ class DocuTrackerSummaryCard extends StatelessWidget {
           const SizedBox(height: 14),
           Text(
             title,
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 11.5,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.2,
+            style: DocuTrackerStyles.cardLabelStyle(
+              color: DocuTrackerTokens.textPrimary,
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 24,
-              fontWeight: FontWeight.w800,
-            ),
+          const SizedBox(height: 6),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                displayValue,
+                style: DocuTrackerStyles.cardValueStyle(
+                  color: DocuTrackerTokens.textPrimary,
+                ).copyWith(fontSize: 28),
+              ),
+              if (badge != null) ...[
+                const SizedBox(width: 8),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: (badgeColor ?? DocuTrackerTokens.alertOrange)
+                          .withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      badge!,
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        color: badgeColor ?? DocuTrackerTokens.alertOrange,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
-          const SizedBox(height: 2),
+          const SizedBox(height: 6),
           Text(
             subtitle,
-            style: TextStyle(
-              color: AppTheme.textSecondary.withValues(alpha: 0.95),
-              fontSize: 11.5,
-              height: 1.25,
+            style: DocuTrackerStyles.cardMetaStyle(
+              color: DocuTrackerTokens.textMuted,
             ),
           ),
         ],

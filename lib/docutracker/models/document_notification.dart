@@ -15,6 +15,7 @@ class DocumentNotification {
   final String? id;
   final String documentId;
   final String userId;
+
   /// assigned | deadline_near | overdue | escalated | returned | rejected
   final String type;
   final String? title;
@@ -47,24 +48,24 @@ class DocumentNotification {
   }
 
   Map<String, dynamic> toJson() => {
-        if (id != null) 'id': id,
-        'document_id': documentId,
-        'user_id': userId,
-        'type': type,
-        if (title != null) 'title': title,
-        if (body != null) 'body': body,
-        'read': read,
-      };
+    if (id != null) 'id': id,
+    'document_id': documentId,
+    'user_id': userId,
+    'type': type,
+    if (title != null) 'title': title,
+    if (body != null) 'body': body,
+    'read': read,
+  };
 
   String get displayType => switch (type) {
-        typeAssigned => 'New document assigned',
-        typeDeadlineNear => 'Deadline approaching',
-        typeOverdue => 'Document overdue',
-        typeEscalated => 'Document escalated',
-        typeReturned => 'Document returned',
-        typeRejected => 'Document rejected',
-        _ => type,
-      };
+    typeAssigned => 'New document assigned',
+    typeDeadlineNear => 'Deadline approaching',
+    typeOverdue => 'Document overdue',
+    typeEscalated => 'Document escalated',
+    typeReturned => 'Document returned',
+    typeRejected => 'Document rejected',
+    _ => type,
+  };
 
   DocumentNotification copyWith({
     String? id,

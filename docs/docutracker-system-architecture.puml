@@ -1,0 +1,64 @@
+@startuml
+title Figure 8. DocuTracker System Architecture
+
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam componentStyle rectangle
+skinparam packageStyle rectangle
+skinparam linetype ortho
+
+skinparam rectangle {
+  BorderColor #666666
+  FontColor #222222
+}
+skinparam package {
+  BorderColor #888888
+  FontColor #222222
+}
+skinparam database {
+  BorderColor #A67C00
+  BackgroundColor #FFF3CD
+}
+skinparam cloud {
+  BorderColor #7A5FA3
+  BackgroundColor #EFE7FA
+}
+
+left to right direction
+
+package "Actors" #F8F9FA {
+  actor Employee
+  actor Reviewer
+  actor Administrator
+}
+
+package "Client Layer (Flutter)" #EAF2FF {
+  [DocuTracker App UI\n- Dashboard / Documents / Admin\n- Provider state management\n- Repository API client] as FlutterApp
+}
+
+package "Server Layer (Node.js + Express)" #EDF8EA {
+  [DocuTracker API\n/api/docutracker routes] as Api
+  [Workflow Engine\n- transitions\n- assignee resolution\n- permission checks] as Workflow
+  [Escalation Worker\n- deadline scan\n- overdue escalation] as Worker
+}
+
+package "Data & Integration" #F6F1FA {
+  database "PostgreSQL\nDocuTracker + HRMS tables" as Postgres
+  rectangle "Attachment Storage\nuploads/docutracker-attachments" as Storage #FDECEC
+  cloud "HRMS Source Modules\nLD / DTR / RSP (optional links)" as Sources
+}
+
+Employee --> FlutterApp : create / submit
+Reviewer --> FlutterApp : review / approve
+Administrator --> FlutterApp : configure
+
+FlutterApp --> Api : REST + JWT
+Api --> Workflow : route requests
+Worker --> Workflow : escalate events
+
+Workflow --> Postgres : read/write data
+Workflow --> Storage : store / fetch files
+Workflow --> Sources : source-linked docs (optional)
+
+@enduml
+
