@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../landingpage/constants/app_theme.dart';
+
 /// Compact badge showing attendance source: Manual (Fallback), Biometric, or Adjusted.
 /// Returns [SizedBox.shrink()] when [source] is null or empty.
 class AttendanceSourceBadge extends StatelessWidget {
@@ -27,19 +29,24 @@ class AttendanceSourceBadge extends StatelessWidget {
   }
 
   /// Color for the badge. manual → blue, system → green, adjusted → orange.
-  static (Color text, Color bg) getColors(String? source) {
+  static (Color text, Color bg) getColors(String? source, {bool dark = false}) {
+    (Color fg, Color lightBg) pair(Color f, Color b) =>
+        dark ? (f.withValues(alpha: 0.92), f.withValues(alpha: 0.24)) : (f, b);
+
     if (source == null || source.isEmpty) {
-      return (Colors.grey, Colors.grey.withOpacity(0.2));
+      return dark
+          ? (Colors.grey.shade300, Colors.grey.withValues(alpha: 0.24))
+          : (Colors.grey, Colors.grey.withValues(alpha: 0.2));
     }
     switch (source.toLowerCase()) {
       case 'manual':
-        return (Colors.blue.shade800, Colors.blue.shade50);
+        return pair(Colors.blue.shade800, Colors.blue.shade50);
       case 'system':
-        return (Colors.green.shade800, Colors.green.shade50);
+        return pair(Colors.green.shade800, Colors.green.shade50);
       case 'adjusted':
-        return (Colors.orange.shade800, Colors.orange.shade50);
+        return pair(Colors.orange.shade800, Colors.orange.shade50);
       default:
-        return (Colors.grey.shade700, Colors.grey.shade200);
+        return pair(Colors.grey.shade700, Colors.grey.shade200);
     }
   }
 
@@ -48,7 +55,8 @@ class AttendanceSourceBadge extends StatelessWidget {
     final label = getLabel(source);
     if (label.isEmpty) return const SizedBox.shrink();
 
-    final (textColor, bgColor) = getColors(source);
+    final dark = AppTheme.dashIsDark(context);
+    final (textColor, bgColor) = getColors(source, dark: dark);
     final padding = compact
         ? const EdgeInsets.symmetric(horizontal: 6, vertical: 2)
         : const EdgeInsets.symmetric(horizontal: 8, vertical: 4);
@@ -59,7 +67,7 @@ class AttendanceSourceBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: bgColor,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: textColor.withOpacity(0.4), width: 1),
+        border: Border.all(color: textColor.withValues(alpha: 0.4), width: 1),
       ),
       child: Text(
         label,

@@ -1,4 +1,5 @@
 const express = require('express');
+const trainingNotifications = require('../services/trainingNotifications');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
@@ -77,6 +78,21 @@ router.post('/', protect, async (req, res) => {
         ]
       );
       attachmentId = attachResult.rows[0].id;
+    }
+
+    try {
+      const nameRes = await pool.query(
+        `SELECT full_name, email FROM users WHERE id = $1`,
+        [req.user.id]
+      );
+      const u = nameRes.rows[0];
+      await trainingNotifications.notifyReportSubmitted(pool, {
+        reportId: row.id,
+        employeeName: u?.full_name || u?.email,
+        title: row.title,
+      });
+    } catch (notifyErr) {
+      console.error('[trainingDailyReports notify]', notifyErr?.message || notifyErr);
     }
 
     res.status(201).json({

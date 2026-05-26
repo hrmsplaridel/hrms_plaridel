@@ -99,16 +99,21 @@ class _Bone extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
     return Shimmer.fromColors(
-      baseColor: AppTheme.lightGray.withValues(alpha: 0.55),
-      highlightColor: AppTheme.white,
+      baseColor: dark
+          ? AppTheme.dashMutedSurfaceOf(context)
+          : AppTheme.lightGray.withValues(alpha: 0.55),
+      highlightColor: dark ? AppTheme.dashHairlineOf(context) : AppTheme.white,
       period: _kShimmerPeriod,
       child: SizedBox(
         width: width,
         height: height,
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: AppTheme.lightGray.withValues(alpha: 0.85),
+            color: dark
+                ? AppTheme.dashHairlineOf(context)
+                : AppTheme.lightGray.withValues(alpha: 0.85),
             borderRadius: BorderRadius.circular(borderRadius),
           ),
         ),
@@ -125,18 +130,7 @@ class _SummarySkeletonCard extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -174,18 +168,7 @@ class _SectionSkeleton extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -201,7 +184,7 @@ class _SectionSkeleton extends StatelessWidget {
                     Text(
                       title,
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         fontWeight: FontWeight.w700,
                         fontSize: 18,
                       ),
@@ -210,7 +193,7 @@ class _SectionSkeleton extends StatelessWidget {
                     Text(
                       subtitle,
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 13,
                       ),
                     ),
@@ -235,9 +218,9 @@ class _BalanceCardSkeleton extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppTheme.offWhite,
+        color: AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -268,16 +251,9 @@ class _RequestCardSkeleton extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppTheme.white,
+        color: AppTheme.dashPanelOf(context),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

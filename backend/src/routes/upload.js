@@ -37,8 +37,9 @@ const upload = multer({
   storage,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
   fileFilter: (_req, file, cb) => {
-    const allowed = /\.(jpg|jpeg|png|gif|webp)$/i.test(file.originalname);
-    cb(null, allowed);
+    const extOk = /\.(jpg|jpeg|png|gif|webp)$/i.test(file.originalname || '');
+    const mimeOk = /^image\/(jpeg|png|gif|webp)$/i.test(file.mimetype || '');
+    cb(null, extOk || mimeOk);
   },
 });
 

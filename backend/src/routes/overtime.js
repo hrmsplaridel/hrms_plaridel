@@ -2,6 +2,7 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin, requireAdminOrSupervisor } = require('../middleware/rbac');
+const overtimeNotifications = require('../services/overtimeNotifications');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -74,7 +75,22 @@ router.post('/', protect, async (req, res) => {
        RETURNING id, employee_id, ot_date, time_start, time_end, total_hours, reason, status, created_at`,
       [targetEmployeeId, ot_date, time_start, time_end, parseFloat(total_hours) || 0, reason?.trim() || null]
     );
-    res.status(201).json(result.rows[0]);
+    const row = result.rows[0];
+    try {
+      const nameRes = await pool.query(
+        `SELECT full_name FROM users WHERE id = $1`,
+        [targetEmployeeId]
+      );
+      await overtimeNotifications.notifyOvertimeSubmitted(pool, {
+        requestId: row.id,
+        employeeUserId: targetEmployeeId,
+        employeeName: nameRes.rows[0]?.full_name,
+        otDate: row.ot_date,
+      });
+    } catch (notifyErr) {
+      console.error('[overtime POST notify]', notifyErr?.message || notifyErr);
+    }
+    res.status(201).json(row);
   } catch (err) {
     console.error('[overtime POST]', err);
     res.status(500).json({ error: 'Failed to create overtime request' });
@@ -100,7 +116,19 @@ router.patch('/:id/review', protect, requireAdminOrSupervisor, async (req, res) 
     if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Overtime request not found or already reviewed' });
     }
-    res.json(result.rows[0]);
+    const row = result.rows[0];
+    try {
+      await overtimeNotifications.notifyOvertimeReviewed(pool, {
+        requestId: row.id,
+        employeeUserId: row.employee_id,
+        status: row.status,
+        otDate: row.ot_date,
+        reviewNotes: row.review_notes,
+      });
+    } catch (notifyErr) {
+      console.error('[overtime PATCH notify]', notifyErr?.message || notifyErr);
+    }
+    res.json(row);
   } catch (err) {
     console.error('[overtime PATCH review]', err);
     res.status(500).json({ error: 'Failed to review overtime request' });

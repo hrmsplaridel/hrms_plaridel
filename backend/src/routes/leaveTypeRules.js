@@ -12,6 +12,7 @@
  * - special_process_only: Not normal DTR leave; HR/admin process (e.g. monetization, terminal)
  * - special_process_purposes: For "others" type, purposes that are special-process-only
  * - affects_dtr_normally: When approved, marks DTR as on_leave (default true for employee-fileable)
+ * - sex_eligibility: any | female | male
  */
 
 const LEAVE_TYPE_RULES = {
@@ -22,6 +23,7 @@ const LEAVE_TYPE_RULES = {
     requires_attachment: false,
     max_days: null,
     affects_dtr_normally: true,
+    sex_eligibility: 'any',
   },
   mandatoryForcedLeave: {
     employee_can_file: false,
@@ -30,6 +32,7 @@ const LEAVE_TYPE_RULES = {
     requires_attachment: false,
     max_days: 5,
     affects_dtr_normally: true,
+    sex_eligibility: 'any',
   },
   sickLeave: {
     employee_can_file: true,
@@ -39,6 +42,7 @@ const LEAVE_TYPE_RULES = {
     requires_attachment_when_over_days: 5,
     max_days: null,
     affects_dtr_normally: true,
+    sex_eligibility: 'any',
   },
   maternityLeave: {
     employee_can_file: true,
@@ -47,6 +51,7 @@ const LEAVE_TYPE_RULES = {
     requires_attachment: true,
     max_days: 105,
     affects_dtr_normally: true,
+    sex_eligibility: 'female',
   },
   paternityLeave: {
     employee_can_file: true,
@@ -55,6 +60,7 @@ const LEAVE_TYPE_RULES = {
     requires_attachment: true,
     max_days: 7,
     affects_dtr_normally: true,
+    sex_eligibility: 'male',
   },
   specialPrivilegeLeave: {
     employee_can_file: true,
@@ -63,6 +69,7 @@ const LEAVE_TYPE_RULES = {
     requires_attachment: false,
     max_days: 3,
     affects_dtr_normally: true,
+    sex_eligibility: 'any',
   },
   soloParentLeave: {
     employee_can_file: true,
@@ -71,6 +78,7 @@ const LEAVE_TYPE_RULES = {
     requires_attachment: true,
     max_days: 7,
     affects_dtr_normally: true,
+    sex_eligibility: 'any',
   },
   studyLeave: {
     employee_can_file: true,
@@ -79,6 +87,7 @@ const LEAVE_TYPE_RULES = {
     requires_attachment: true,
     max_days: 180,
     affects_dtr_normally: true,
+    sex_eligibility: 'any',
   },
   tenDayVawcLeave: {
     employee_can_file: true,
@@ -87,6 +96,7 @@ const LEAVE_TYPE_RULES = {
     requires_attachment: true,
     max_days: 10,
     affects_dtr_normally: true,
+    sex_eligibility: 'female',
   },
   rehabilitationPrivilege: {
     employee_can_file: true,
@@ -95,6 +105,7 @@ const LEAVE_TYPE_RULES = {
     requires_attachment: true,
     max_days: 180,
     affects_dtr_normally: true,
+    sex_eligibility: 'any',
   },
   specialLeaveBenefitsForWomen: {
     employee_can_file: true,
@@ -103,6 +114,7 @@ const LEAVE_TYPE_RULES = {
     requires_attachment: true,
     max_days: 60,
     affects_dtr_normally: true,
+    sex_eligibility: 'female',
   },
   specialEmergencyCalamityLeave: {
     employee_can_file: true,
@@ -111,6 +123,7 @@ const LEAVE_TYPE_RULES = {
     requires_attachment: true,
     max_days: 5,
     affects_dtr_normally: true,
+    sex_eligibility: 'any',
     // TODO: If field exists, validate within 30 days from calamity occurrence
   },
   adoptionLeave: {
@@ -120,6 +133,7 @@ const LEAVE_TYPE_RULES = {
     requires_attachment: true,
     max_days: null,
     affects_dtr_normally: true,
+    sex_eligibility: 'any',
   },
   others: {
     employee_can_file: true,
@@ -128,6 +142,7 @@ const LEAVE_TYPE_RULES = {
     requires_attachment: true,
     max_days: null,
     affects_dtr_normally: true,
+    sex_eligibility: 'any',
     // Monetization and Terminal Leave are special HR processes, not normal employee filing
     special_process_purposes: ['monetizationOfLeaveCredits', 'terminalLeave'],
   },

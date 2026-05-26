@@ -265,6 +265,13 @@ class _DtrReportsState extends State<DtrReports> {
     return n;
   }
 
+  List<DateTime> _calendarDatesInSelectedMonth(DateTime end) {
+    return List<DateTime>.generate(
+      end.day,
+      (i) => DateTime(_selectedYear, _selectedMonth, i + 1),
+    );
+  }
+
   void _reset() {
     setState(() {
       _searchController.clear();
@@ -292,7 +299,9 @@ class _DtrReportsState extends State<DtrReports> {
   }) {
     if (timeValue != null) return _formatTime(timeValue);
     final segs = record.locatorSlipSegments ?? const <String>[];
-    if (segs.any((s) => s.toUpperCase() == segment)) return 'On Field';
+    if (segs.any((s) => s.toUpperCase() == segment)) {
+      return record.locatorSlipSlotLabel;
+    }
     return '—';
   }
 
@@ -327,6 +336,8 @@ class _DtrReportsState extends State<DtrReports> {
           return r.leaveTypeName ?? r.attendanceRemark ?? 'On Leave';
         case 'holiday':
           return r.holidayName ?? 'Holiday';
+        case 'on_field':
+          return r.locatorSlipDisplayLabel;
         default:
           return 'On Time';
       }
@@ -342,6 +353,28 @@ class _DtrReportsState extends State<DtrReports> {
     );
     if (local.isAfter(officeStart)) return 'Late';
     return 'On Time';
+  }
+
+  static String _getReportRowRemark({
+    required TimeRecord? record,
+    required bool isQuietPlaceholder,
+    required bool isMissingScheduledWorkDay,
+  }) {
+    if (isQuietPlaceholder) return '—';
+    if (isMissingScheduledWorkDay) return 'Absent';
+    final rec = record;
+    if (rec == null) return '';
+    final attendanceRemark = rec.attendanceRemark?.trim();
+    if (attendanceRemark != null && attendanceRemark.isNotEmpty) {
+      return _normalizeAttendanceRemark(attendanceRemark);
+    }
+    return _getRemarks(rec);
+  }
+
+  static String _normalizeAttendanceRemark(String remark) {
+    final value = remark.trim();
+    if (value.toLowerCase().startsWith('work from home')) return 'WFH';
+    return value;
   }
 
   Future<void> _generateDtr(
@@ -538,9 +571,15 @@ class _DtrReportsState extends State<DtrReports> {
       recordsByDate[key] = r;
     }
     final reportRecordsByDate = _filterRecordsForTardinessReport(recordsByDate);
-    // Dates to show: same as tardiness-relevant records (excludes irrelevant holiday-only rows).
-    final sortedDates = reportRecordsByDate.keys.toList()
-      ..sort((a, b) => a.compareTo(b)); // ordered by date ascending
+    // Display the full calendar month in the report. Non-working days without
+    // records are quiet placeholders only; they are not saved or counted.
+    final hasAssignment = _assignmentEffectiveFrom != null;
+    final shouldShowCalendarRows =
+        _selectedEmployeeId != null &&
+        (hasAssignment || reportRecordsByDate.isNotEmpty);
+    final sortedDates = shouldShowCalendarRows
+        ? _calendarDatesInSelectedMonth(end)
+        : <DateTime>[];
 
     // Compute summary from real API records, using shift + assignment window when available.
     // Only count days up to today (elapsed) — future days in the month are not "absent" yet.
@@ -568,7 +607,7 @@ class _DtrReportsState extends State<DtrReports> {
     }
     // Show summary whenever this month has any report rows — not only days with punches.
     // (Absent / undertime-only days have no timeIn/breakIn but must still roll up to totals.)
-    final hasRecords = reportRecordsByDate.isNotEmpty;
+    final hasRecords = reportRecordsByDate.isNotEmpty || hasAssignment;
     final workingDays = hasRecords ? totalWeekdays - holidaysCount : 0;
     final displayLateCount = hasRecords ? lateCount : 0;
     final displayAbsentCount = hasRecords ? absentCount : 0;
@@ -611,16 +650,17 @@ class _DtrReportsState extends State<DtrReports> {
                 Text(
                   'Tardiness Report',
                   style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.dashTextPrimaryOf(context),
                     fontSize: isMobile ? 20 : 24,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
                 const SizedBox(height: 16),
-                _buildFilters(isMobile),
+                _buildFilters(context, isMobile),
                 const SizedBox(height: 24),
                 isMobile
                     ? _buildMobileLayout(
+                        context: context,
                         employees: employees,
                         end: end,
                         recordsByDate: reportRecordsByDate,
@@ -658,7 +698,7 @@ class _DtrReportsState extends State<DtrReports> {
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            _buildEmployeeList(employees),
+                            _buildEmployeeList(context, employees),
                             const SizedBox(width: 16),
                             Expanded(
                               child: LayoutBuilder(
@@ -671,6 +711,7 @@ class _DtrReportsState extends State<DtrReports> {
                                     children: [
                                       Expanded(
                                         child: _buildDtrTable(
+                                          context,
                                           end: end,
                                           recordsByDate: reportRecordsByDate,
                                           sortedDates: sortedDates,
@@ -710,7 +751,8 @@ class _DtrReportsState extends State<DtrReports> {
     );
   }
 
-  Widget _buildFilters(bool isMobile) {
+  Widget _buildFilters(BuildContext context, bool isMobile) {
+    final dark = AppTheme.dashIsDark(context);
     return Wrap(
       spacing: 12,
       runSpacing: 12,
@@ -721,34 +763,44 @@ class _DtrReportsState extends State<DtrReports> {
           child: TextField(
             controller: _searchController,
             onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(
+            style: AppTheme.dashFieldTextStyle(context),
+            decoration: AppTheme.dashInputDecoration(
+              context,
               hintText: 'Search name...',
               prefixIcon: const Icon(Icons.search_rounded, size: 20),
-              isDense: true,
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 12,
                 vertical: 10,
               ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-              filled: true,
-              fillColor: AppTheme.white,
+              radius: 8,
             ),
           ),
         ),
         if (!isMobile) ...[
           DropdownButton<String?>(
             value: _selectedDepartmentId,
-            hint: const Text('All departments'),
+            dropdownColor: AppTheme.dashPanelOf(context),
+            style: AppTheme.dashFieldTextStyle(context),
+            hint: Text(
+              'All departments',
+              style: AppTheme.dashFieldHintStyle(context),
+            ),
             items: [
-              const DropdownMenuItem<String?>(
+              DropdownMenuItem<String?>(
                 value: null,
-                child: Text('All departments'),
+                child: Text(
+                  'All departments',
+                  style: AppTheme.dashFieldTextStyle(context),
+                ),
               ),
               ...context.read<DtrProvider>().departments.map(
-                (d) =>
-                    DropdownMenuItem<String?>(value: d.id, child: Text(d.name)),
+                (d) => DropdownMenuItem<String?>(
+                  value: d.id,
+                  child: Text(
+                    d.name,
+                    style: AppTheme.dashFieldTextStyle(context),
+                  ),
+                ),
               ),
             ],
             onChanged: (v) {
@@ -758,10 +810,17 @@ class _DtrReportsState extends State<DtrReports> {
           ),
           DropdownButton<int>(
             value: _selectedMonth,
+            dropdownColor: AppTheme.dashPanelOf(context),
+            style: AppTheme.dashFieldTextStyle(context),
             items: List.generate(12, (i) => i + 1)
                 .map(
-                  (m) =>
-                      DropdownMenuItem(value: m, child: Text(_months[m - 1])),
+                  (m) => DropdownMenuItem(
+                    value: m,
+                    child: Text(
+                      _months[m - 1],
+                      style: AppTheme.dashFieldTextStyle(context),
+                    ),
+                  ),
                 )
                 .toList(),
             onChanged: (v) {
@@ -771,8 +830,18 @@ class _DtrReportsState extends State<DtrReports> {
           ),
           DropdownButton<int>(
             value: _selectedYear,
+            dropdownColor: AppTheme.dashPanelOf(context),
+            style: AppTheme.dashFieldTextStyle(context),
             items: List.generate(11, (i) => DateTime.now().year - 5 + i)
-                .map((y) => DropdownMenuItem(value: y, child: Text('$y')))
+                .map(
+                  (y) => DropdownMenuItem(
+                    value: y,
+                    child: Text(
+                      '$y',
+                      style: AppTheme.dashFieldTextStyle(context),
+                    ),
+                  ),
+                )
                 .toList(),
             onChanged: (v) {
               if (v != null) setState(() => _selectedYear = v);
@@ -784,28 +853,36 @@ class _DtrReportsState extends State<DtrReports> {
             width: 140,
             child: DropdownButtonFormField<String?>(
               initialValue: _selectedDepartmentId,
-              decoration: InputDecoration(
-                isDense: true,
+              dropdownColor: AppTheme.dashPanelOf(context),
+              style: AppTheme.dashFieldTextStyle(context),
+              decoration: AppTheme.dashInputDecoration(
+                context,
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 12,
                   vertical: 8,
                 ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                filled: true,
-                fillColor: AppTheme.white,
+                radius: 8,
               ),
-              hint: const Text('All departments'),
+              hint: Text(
+                'All departments',
+                style: AppTheme.dashFieldHintStyle(context),
+              ),
               items: [
-                const DropdownMenuItem<String?>(
+                DropdownMenuItem<String?>(
                   value: null,
-                  child: Text('All departments'),
+                  child: Text(
+                    'All departments',
+                    style: AppTheme.dashFieldTextStyle(context),
+                  ),
                 ),
                 ...context.read<DtrProvider>().departments.map(
                   (d) => DropdownMenuItem<String?>(
                     value: d.id,
-                    child: Text(d.name, overflow: TextOverflow.ellipsis),
+                    child: Text(
+                      d.name,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTheme.dashFieldTextStyle(context),
+                    ),
                   ),
                 ),
               ],
@@ -823,17 +900,15 @@ class _DtrReportsState extends State<DtrReports> {
                 width: 130,
                 child: DropdownButtonFormField<int>(
                   initialValue: _selectedMonth,
-                  decoration: InputDecoration(
-                    isDense: true,
+                  dropdownColor: AppTheme.dashPanelOf(context),
+                  style: AppTheme.dashFieldTextStyle(context),
+                  decoration: AppTheme.dashInputDecoration(
+                    context,
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 12,
                       vertical: 8,
                     ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    filled: true,
-                    fillColor: AppTheme.white,
+                    radius: 8,
                   ),
                   items: List.generate(12, (i) => i + 1)
                       .map(
@@ -842,6 +917,7 @@ class _DtrReportsState extends State<DtrReports> {
                           child: Text(
                             _months[m - 1],
                             overflow: TextOverflow.ellipsis,
+                            style: AppTheme.dashFieldTextStyle(context),
                           ),
                         ),
                       )
@@ -857,20 +933,26 @@ class _DtrReportsState extends State<DtrReports> {
                 width: 90,
                 child: DropdownButtonFormField<int>(
                   initialValue: _selectedYear,
-                  decoration: InputDecoration(
-                    isDense: true,
+                  dropdownColor: AppTheme.dashPanelOf(context),
+                  style: AppTheme.dashFieldTextStyle(context),
+                  decoration: AppTheme.dashInputDecoration(
+                    context,
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 12,
                       vertical: 8,
                     ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    filled: true,
-                    fillColor: AppTheme.white,
+                    radius: 8,
                   ),
                   items: List.generate(11, (i) => DateTime.now().year - 5 + i)
-                      .map((y) => DropdownMenuItem(value: y, child: Text('$y')))
+                      .map(
+                        (y) => DropdownMenuItem(
+                          value: y,
+                          child: Text(
+                            '$y',
+                            style: AppTheme.dashFieldTextStyle(context),
+                          ),
+                        ),
+                      )
                       .toList(),
                   onChanged: (v) {
                     if (v != null) setState(() => _selectedYear = v);
@@ -884,9 +966,15 @@ class _DtrReportsState extends State<DtrReports> {
         OutlinedButton(
           onPressed: _reset,
           style: OutlinedButton.styleFrom(
-            backgroundColor: const Color(0xFFE8F5E9),
-            foregroundColor: const Color(0xFF2E7D32),
-            side: const BorderSide(color: Color(0xFF81C784)),
+            backgroundColor: dark
+                ? Colors.green.shade900.withValues(alpha: 0.4)
+                : const Color(0xFFE8F5E9),
+            foregroundColor: dark
+                ? Colors.green.shade300
+                : const Color(0xFF2E7D32),
+            side: BorderSide(
+              color: dark ? Colors.green.shade700 : const Color(0xFF81C784),
+            ),
           ),
           child: const Text('RESET'),
         ),
@@ -895,6 +983,7 @@ class _DtrReportsState extends State<DtrReports> {
   }
 
   Widget _buildMobileLayout({
+    required BuildContext context,
     required List<dynamic> employees,
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
@@ -916,20 +1005,29 @@ class _DtrReportsState extends State<DtrReports> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: AppTheme.white,
+            color: AppTheme.dashPanelOf(context),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+            border: Border.all(color: AppTheme.dashHairlineOf(context)),
           ),
           child: DropdownButtonHideUnderline(
             child: DropdownButton<String>(
               value: _selectedEmployeeId,
               isExpanded: true,
-              hint: const Text('Select employee'),
+              dropdownColor: AppTheme.dashPanelOf(context),
+              style: AppTheme.dashFieldTextStyle(context),
+              hint: Text(
+                'Select employee',
+                style: AppTheme.dashFieldHintStyle(context),
+              ),
               items: employees
                   .map(
                     (e) => DropdownMenuItem<String>(
                       value: e.id.toString(),
-                      child: Text(e.fullName, overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        e.fullName,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTheme.dashFieldTextStyle(context),
+                      ),
                     ),
                   )
                   .toList(),
@@ -946,6 +1044,7 @@ class _DtrReportsState extends State<DtrReports> {
         SizedBox(
           height: 320,
           child: _buildDtrTable(
+            context,
             end: end,
             recordsByDate: recordsByDate,
             sortedDates: sortedDates,
@@ -973,24 +1072,27 @@ class _DtrReportsState extends State<DtrReports> {
     );
   }
 
-  Widget _buildEmployeeList(List<EmployeeOption> employees) {
+  Widget _buildEmployeeList(
+    BuildContext context,
+    List<EmployeeOption> employees,
+  ) {
+    final dark = AppTheme.dashIsDark(context);
     return Container(
       width: 220,
       constraints: const BoxConstraints(maxWidth: 220),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: AppTheme.lightGray.withValues(alpha: 0.5),
+              color: AppTheme.dashMutedSurfaceOf(context),
               borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(12),
+              ),
+              border: Border(
+                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
               ),
             ),
             child: Row(
@@ -1002,7 +1104,7 @@ class _DtrReportsState extends State<DtrReports> {
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 12,
-                      color: AppTheme.textPrimary,
+                      color: AppTheme.dashTextPrimaryOf(context),
                     ),
                   ),
                 ),
@@ -1012,7 +1114,7 @@ class _DtrReportsState extends State<DtrReports> {
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 12,
-                      color: AppTheme.textPrimary,
+                      color: AppTheme.dashTextPrimaryOf(context),
                     ),
                   ),
                 ),
@@ -1022,7 +1124,7 @@ class _DtrReportsState extends State<DtrReports> {
           Expanded(
             child: ListView.builder(
               itemCount: employees.length,
-              itemBuilder: (context, i) {
+              itemBuilder: (ctx, i) {
                 final e = employees[i];
                 final isSelected = e.id == _selectedEmployeeId;
                 return InkWell(
@@ -1034,7 +1136,9 @@ class _DtrReportsState extends State<DtrReports> {
                   },
                   child: Container(
                     color: isSelected
-                        ? AppTheme.primaryNavy.withValues(alpha: 0.08)
+                        ? (dark
+                              ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                              : AppTheme.primaryNavy.withValues(alpha: 0.08))
                         : null,
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
@@ -1048,7 +1152,7 @@ class _DtrReportsState extends State<DtrReports> {
                             e.displayEmployeeNo,
                             style: TextStyle(
                               fontSize: 12,
-                              color: AppTheme.textPrimary,
+                              color: AppTheme.dashTextPrimaryOf(ctx),
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -1058,7 +1162,7 @@ class _DtrReportsState extends State<DtrReports> {
                             e.fullName,
                             style: TextStyle(
                               fontSize: 13,
-                              color: AppTheme.textPrimary,
+                              color: AppTheme.dashTextPrimaryOf(ctx),
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -1075,7 +1179,8 @@ class _DtrReportsState extends State<DtrReports> {
     );
   }
 
-  Widget _buildDtrTable({
+  Widget _buildDtrTable(
+    BuildContext context, {
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
     required List<DateTime> sortedDates,
@@ -1093,16 +1198,23 @@ class _DtrReportsState extends State<DtrReports> {
     final tableWidth = availableWidth != null
         ? availableWidth.clamp(minTableWidth, double.infinity)
         : minTableWidth;
+    final dark = AppTheme.dashIsDark(context);
+    final cellStyle = TextStyle(
+      fontSize: 12,
+      color: AppTheme.dashTextPrimaryOf(context),
+    );
+    final headerStyle = TextStyle(
+      fontWeight: FontWeight.w700,
+      fontSize: compactColumns ? 11 : 12,
+      color: AppTheme.dashTextPrimaryOf(context),
+    );
+    final statsEnd = _tardinessStatsInclusiveEnd();
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: SizedBox(
         width: tableWidth,
         child: Container(
-          decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
-          ),
+          decoration: AppTheme.dashSurfaceCard(context, radius: 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
@@ -1113,100 +1225,45 @@ class _DtrReportsState extends State<DtrReports> {
                   vertical: 10,
                 ),
                 decoration: BoxDecoration(
-                  color: AppTheme.lightGray.withValues(alpha: 0.5),
+                  color: AppTheme.dashMutedSurfaceOf(context),
                   borderRadius: const BorderRadius.vertical(
                     top: Radius.circular(12),
+                  ),
+                  border: Border(
+                    bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
                   ),
                 ),
                 child: Row(
                   children: [
                     SizedBox(
                       width: colDate,
-                      child: Text(
-                        'Date',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: compactColumns ? 11 : 12,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
+                      child: Text('Date', style: headerStyle),
                     ),
                     SizedBox(
                       width: colTime,
-                      child: Text(
-                        'AM IN',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: compactColumns ? 11 : 12,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
+                      child: Text('AM IN', style: headerStyle),
                     ),
                     SizedBox(
                       width: colTime,
-                      child: Text(
-                        'AM OUT',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: compactColumns ? 11 : 12,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
+                      child: Text('AM OUT', style: headerStyle),
                     ),
                     SizedBox(
                       width: colTime,
-                      child: Text(
-                        'PM IN',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: compactColumns ? 11 : 12,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
+                      child: Text('PM IN', style: headerStyle),
                     ),
                     SizedBox(
                       width: colTime,
-                      child: Text(
-                        'PM OUT',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: compactColumns ? 11 : 12,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
+                      child: Text('PM OUT', style: headerStyle),
                     ),
                     SizedBox(
                       width: colLate,
-                      child: Text(
-                        'Late',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: compactColumns ? 11 : 12,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
+                      child: Text('Late', style: headerStyle),
                     ),
                     SizedBox(
                       width: colUndertime,
-                      child: Text(
-                        'Undertime',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: compactColumns ? 11 : 12,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
+                      child: Text('Undertime', style: headerStyle),
                     ),
-                    Expanded(
-                      child: Text(
-                        'Remarks',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
-                    ),
+                    Expanded(child: Text('Remarks', style: headerStyle)),
                   ],
                 ),
               ),
@@ -1221,7 +1278,7 @@ class _DtrReportsState extends State<DtrReports> {
                             'No DTR records for this period',
                             style: TextStyle(
                               fontSize: 14,
-                              color: AppTheme.textSecondary,
+                              color: AppTheme.dashTextSecondaryOf(context),
                             ),
                           ),
                         ),
@@ -1230,7 +1287,15 @@ class _DtrReportsState extends State<DtrReports> {
                         itemCount: sortedDates.length,
                         itemBuilder: (context, i) {
                           final dt = sortedDates[i];
-                          final rec = recordsByDate[dt]!;
+                          final rec = recordsByDate[dt];
+                          final isScheduled =
+                              _assignmentEffectiveFrom != null &&
+                              _isScheduledWorkDay(dt);
+                          final isQuietPlaceholder =
+                              rec == null &&
+                              (!isScheduled || dt.isAfter(statsEnd));
+                          final isMissingScheduledWorkDay =
+                              rec == null && !isQuietPlaceholder;
                           return Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 12,
@@ -1238,8 +1303,17 @@ class _DtrReportsState extends State<DtrReports> {
                             ),
                             decoration: BoxDecoration(
                               color: i % 2 == 0
-                                  ? AppTheme.white
-                                  : AppTheme.lightGray.withValues(alpha: 0.3),
+                                  ? AppTheme.dashPanelOf(context)
+                                  : AppTheme.dashMutedSurfaceOf(
+                                      context,
+                                    ).withValues(alpha: dark ? 0.65 : 1),
+                              border: Border(
+                                bottom: BorderSide(
+                                  color: AppTheme.dashHairlineOf(
+                                    context,
+                                  ).withValues(alpha: 0.6),
+                                ),
+                              ),
                             ),
                             child: Row(
                               children: [
@@ -1247,108 +1321,109 @@ class _DtrReportsState extends State<DtrReports> {
                                   width: colDate,
                                   child: Text(
                                     _formatDate(dt),
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: AppTheme.textPrimary,
-                                    ),
+                                    style: cellStyle,
                                   ),
                                 ),
                                 SizedBox(
                                   width: colTime,
                                   child: Text(
-                                    _cellDisplayForSegment(
-                                      record: rec,
-                                      timeValue: rec.timeIn,
-                                      segment: 'AM IN',
-                                    ),
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: AppTheme.textPrimary,
-                                    ),
+                                    rec == null
+                                        ? '—'
+                                        : _cellDisplayForSegment(
+                                            record: rec,
+                                            timeValue: rec.timeIn,
+                                            segment: 'AM IN',
+                                          ),
+                                    style: cellStyle,
                                   ),
                                 ),
                                 SizedBox(
                                   width: colTime,
                                   child: Text(
-                                    _cellDisplayForSegment(
-                                      record: rec,
-                                      timeValue: rec.breakOut,
-                                      segment: 'AM OUT',
-                                    ),
-                                    style: TextStyle(
-                                      fontSize: compactColumns ? 11 : 12,
-                                      color: AppTheme.textPrimary,
-                                    ),
+                                    rec == null
+                                        ? '—'
+                                        : _cellDisplayForSegment(
+                                            record: rec,
+                                            timeValue: rec.breakOut,
+                                            segment: 'AM OUT',
+                                          ),
+                                    style: cellStyle,
                                   ),
                                 ),
                                 SizedBox(
                                   width: colTime,
                                   child: Text(
-                                    _cellDisplayForSegment(
-                                      record: rec,
-                                      timeValue: rec.breakIn,
-                                      segment: 'PM IN',
-                                    ),
-                                    style: TextStyle(
-                                      fontSize: compactColumns ? 11 : 12,
-                                      color: AppTheme.textPrimary,
-                                    ),
+                                    rec == null
+                                        ? '—'
+                                        : _cellDisplayForSegment(
+                                            record: rec,
+                                            timeValue: rec.breakIn,
+                                            segment: 'PM IN',
+                                          ),
+                                    style: cellStyle,
                                   ),
                                 ),
                                 SizedBox(
                                   width: colTime,
                                   child: Text(
-                                    _cellDisplayForSegment(
-                                      record: rec,
-                                      timeValue: rec.timeOut,
-                                      segment: 'PM OUT',
-                                    ),
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: AppTheme.textPrimary,
-                                    ),
+                                    rec == null
+                                        ? '—'
+                                        : _cellDisplayForSegment(
+                                            record: rec,
+                                            timeValue: rec.timeOut,
+                                            segment: 'PM OUT',
+                                          ),
+                                    style: cellStyle,
                                   ),
                                 ),
                                 SizedBox(
                                   width: colLate,
                                   child: Text(
-                                    _formatMinutes(rec.lateMinutes),
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: (rec.lateMinutes ?? 0) > 0
-                                          ? Colors.red.shade700
-                                          : AppTheme.textPrimary,
+                                    rec == null
+                                        ? '—'
+                                        : _formatMinutes(rec.lateMinutes),
+                                    style: cellStyle.copyWith(
+                                      color: (rec?.lateMinutes ?? 0) > 0
+                                          ? (dark
+                                                ? Colors.red.shade300
+                                                : Colors.red.shade700)
+                                          : AppTheme.dashTextPrimaryOf(context),
                                     ),
                                   ),
                                 ),
                                 SizedBox(
                                   width: colUndertime,
                                   child: Text(
-                                    _formatMinutes(rec.undertimeMinutes),
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: (rec.undertimeMinutes ?? 0) > 0
-                                          ? Colors.orange.shade700
-                                          : AppTheme.textPrimary,
+                                    rec == null
+                                        ? '—'
+                                        : _formatMinutes(rec.undertimeMinutes),
+                                    style: cellStyle.copyWith(
+                                      color: (rec?.undertimeMinutes ?? 0) > 0
+                                          ? (dark
+                                                ? Colors.orange.shade300
+                                                : Colors.orange.shade700)
+                                          : AppTheme.dashTextPrimaryOf(context),
                                     ),
                                   ),
                                 ),
                                 Expanded(
                                   child: Builder(
-                                    builder: (context) {
-                                      final remark =
-                                          rec.attendanceRemark != null &&
-                                              rec.attendanceRemark!.isNotEmpty
-                                          ? rec.attendanceRemark!
-                                          : _getRemarks(rec);
+                                    builder: (rowCtx) {
+                                      final remark = _getReportRowRemark(
+                                        record: rec,
+                                        isQuietPlaceholder: isQuietPlaceholder,
+                                        isMissingScheduledWorkDay:
+                                            isMissingScheduledWorkDay,
+                                      );
                                       final isHoliday =
-                                          rec.status == 'holiday' ||
-                                          rec.holidayId != null;
+                                          rec?.status == 'holiday' ||
+                                          rec?.holidayId != null;
                                       return Text(
                                         remark,
                                         style: TextStyle(
                                           fontSize: 12,
                                           color: colorForRemarkText(
+                                            rowCtx,
                                             remark,
                                             isHoliday: isHoliday,
                                           ),
@@ -1394,15 +1469,18 @@ class _DtrReportsState extends State<DtrReports> {
     required Map<DateTime, TimeRecord> recordsByDate,
     required DateTime end,
   }) {
+    final dark = AppTheme.dashIsDark(context);
     return Container(
       width: fullWidth ? null : 200,
       constraints: fullWidth
           ? const BoxConstraints(maxHeight: 600)
           : const BoxConstraints(maxWidth: 200, maxHeight: 600),
       decoration: BoxDecoration(
-        color: AppTheme.lightGray.withValues(alpha: 0.5),
+        color: dark
+            ? AppTheme.dashMutedSurfaceOf(context)
+            : AppTheme.lightGray.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -1412,11 +1490,13 @@ class _DtrReportsState extends State<DtrReports> {
           children: [
             CircleAvatar(
               radius: 32,
-              backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.2),
+              backgroundColor: AppTheme.primaryNavy.withValues(
+                alpha: dark ? 0.35 : 0.2,
+              ),
               child: Icon(
                 Icons.person_rounded,
                 size: 32,
-                color: AppTheme.primaryNavy,
+                color: dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy,
               ),
             ),
             const SizedBox(height: 12),
@@ -1425,14 +1505,17 @@ class _DtrReportsState extends State<DtrReports> {
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
-                color: AppTheme.textPrimary,
+                color: AppTheme.dashTextPrimaryOf(context),
               ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 4),
             Text(
               '${_months[_selectedMonth - 1]}, $_selectedYear',
-              style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+              style: TextStyle(
+                fontSize: 12,
+                color: AppTheme.dashTextSecondaryOf(context),
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
@@ -1446,7 +1529,7 @@ class _DtrReportsState extends State<DtrReports> {
                       'Show time as:',
                       style: TextStyle(
                         fontSize: 11,
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -1576,7 +1659,7 @@ class _DtrReportsState extends State<DtrReports> {
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w800,
-                color: AppTheme.textPrimary,
+                color: AppTheme.dashTextPrimaryOf(context),
               ),
               textAlign: TextAlign.center,
             ),
@@ -1599,12 +1682,12 @@ class _DtrReportsState extends State<DtrReports> {
               ),
             ),
             const SizedBox(height: 12),
-            const Text(
+            Text(
               'Generate DTR',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color: AppTheme.textSecondary,
+                color: AppTheme.dashTextSecondaryOf(context),
               ),
             ),
             const SizedBox(height: 8),
@@ -1614,6 +1697,7 @@ class _DtrReportsState extends State<DtrReports> {
                 onPressed: () {
                   showModalBottomSheet<void>(
                     context: context,
+                    backgroundColor: AppTheme.dashPanelOf(context),
                     builder: (ctx) => SafeArea(
                       child: Padding(
                         padding: const EdgeInsets.all(24),
@@ -1621,11 +1705,12 @@ class _DtrReportsState extends State<DtrReports> {
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            const Text(
+                            Text(
                               'Export DTR as',
                               style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w700,
+                                color: AppTheme.dashTextPrimaryOf(ctx),
                               ),
                             ),
                             const SizedBox(height: 16),
@@ -1634,7 +1719,12 @@ class _DtrReportsState extends State<DtrReports> {
                                 Icons.picture_as_pdf,
                                 color: Colors.red,
                               ),
-                              title: const Text('PDF'),
+                              title: Text(
+                                'PDF',
+                                style: TextStyle(
+                                  color: AppTheme.dashTextPrimaryOf(ctx),
+                                ),
+                              ),
                               onTap: () {
                                 Navigator.pop(ctx);
                                 _generateDtr(
@@ -1651,7 +1741,12 @@ class _DtrReportsState extends State<DtrReports> {
                                 Icons.description,
                                 color: Colors.blue,
                               ),
-                              title: const Text('Word (.doc)'),
+                              title: Text(
+                                'Word (.doc)',
+                                style: TextStyle(
+                                  color: AppTheme.dashTextPrimaryOf(ctx),
+                                ),
+                              ),
                               onTap: () {
                                 Navigator.pop(ctx);
                                 _generateDtr(
@@ -1668,7 +1763,12 @@ class _DtrReportsState extends State<DtrReports> {
                                 Icons.table_chart,
                                 color: Colors.green,
                               ),
-                              title: const Text('Excel (.xlsx)'),
+                              title: Text(
+                                'Excel (.xlsx)',
+                                style: TextStyle(
+                                  color: AppTheme.dashTextPrimaryOf(ctx),
+                                ),
+                              ),
                               onTap: () {
                                 Navigator.pop(ctx);
                                 _generateDtr(
@@ -1687,9 +1787,17 @@ class _DtrReportsState extends State<DtrReports> {
                   );
                 },
                 style: OutlinedButton.styleFrom(
-                  backgroundColor: const Color(0xFFE8F5E9),
-                  foregroundColor: const Color(0xFF2E7D32),
-                  side: const BorderSide(color: Color(0xFF81C784)),
+                  backgroundColor: dark
+                      ? Colors.green.shade900.withValues(alpha: 0.4)
+                      : const Color(0xFFE8F5E9),
+                  foregroundColor: dark
+                      ? Colors.green.shade300
+                      : const Color(0xFF2E7D32),
+                  side: BorderSide(
+                    color: dark
+                        ? Colors.green.shade700
+                        : const Color(0xFF81C784),
+                  ),
                 ),
                 child: const Text('GENERATE'),
               ),
@@ -1724,11 +1832,15 @@ class _DtrReportsState extends State<DtrReports> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SizedBox(height: 200, child: _buildEmployeeListCompact(employees)),
+            SizedBox(
+              height: 200,
+              child: _buildEmployeeListCompact(context, employees),
+            ),
             const SizedBox(height: 16),
             SizedBox(
               height: 350,
               child: _buildDtrTable(
+                context,
                 end: end,
                 recordsByDate: recordsByDate,
                 sortedDates: sortedDates,
@@ -1758,13 +1870,13 @@ class _DtrReportsState extends State<DtrReports> {
     );
   }
 
-  Widget _buildEmployeeListCompact(List<EmployeeOption> employees) {
+  Widget _buildEmployeeListCompact(
+    BuildContext context,
+    List<EmployeeOption> employees,
+  ) {
+    final dark = AppTheme.dashIsDark(context);
     return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
@@ -1772,9 +1884,12 @@ class _DtrReportsState extends State<DtrReports> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: AppTheme.lightGray.withValues(alpha: 0.5),
+              color: AppTheme.dashMutedSurfaceOf(context),
               borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(12),
+              ),
+              border: Border(
+                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
               ),
             ),
             child: Row(
@@ -1786,7 +1901,7 @@ class _DtrReportsState extends State<DtrReports> {
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 12,
-                      color: AppTheme.textPrimary,
+                      color: AppTheme.dashTextPrimaryOf(context),
                     ),
                   ),
                 ),
@@ -1796,7 +1911,7 @@ class _DtrReportsState extends State<DtrReports> {
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 12,
-                      color: AppTheme.textPrimary,
+                      color: AppTheme.dashTextPrimaryOf(context),
                     ),
                   ),
                 ),
@@ -1806,7 +1921,7 @@ class _DtrReportsState extends State<DtrReports> {
           Expanded(
             child: ListView.builder(
               itemCount: employees.length,
-              itemBuilder: (context, i) {
+              itemBuilder: (ctx, i) {
                 final e = employees[i];
                 final isSelected = e.id == _selectedEmployeeId;
                 return InkWell(
@@ -1816,7 +1931,9 @@ class _DtrReportsState extends State<DtrReports> {
                   },
                   child: Container(
                     color: isSelected
-                        ? AppTheme.primaryNavy.withValues(alpha: 0.08)
+                        ? (dark
+                              ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                              : AppTheme.primaryNavy.withValues(alpha: 0.08))
                         : null,
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
@@ -1830,7 +1947,7 @@ class _DtrReportsState extends State<DtrReports> {
                             e.displayEmployeeNo,
                             style: TextStyle(
                               fontSize: 12,
-                              color: AppTheme.textPrimary,
+                              color: AppTheme.dashTextPrimaryOf(ctx),
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -1840,7 +1957,7 @@ class _DtrReportsState extends State<DtrReports> {
                             e.fullName,
                             style: TextStyle(
                               fontSize: 13,
-                              color: AppTheme.textPrimary,
+                              color: AppTheme.dashTextPrimaryOf(ctx),
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -1876,7 +1993,7 @@ class _SummaryStat extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: AppTheme.white,
+        color: AppTheme.dashPanelOf(context),
         borderRadius: BorderRadius.circular(8),
         border: hasBorder ? Border.all(color: borderColor, width: 1) : null,
       ),
@@ -1885,7 +2002,10 @@ class _SummaryStat extends StatelessWidget {
         children: [
           Text(
             label,
-            style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+            style: TextStyle(
+              fontSize: 11,
+              color: AppTheme.dashTextSecondaryOf(context),
+            ),
           ),
           const SizedBox(height: 2),
           Text(
@@ -1893,7 +2013,7 @@ class _SummaryStat extends StatelessWidget {
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w800,
-              color: AppTheme.textPrimary,
+              color: AppTheme.dashTextPrimaryOf(context),
             ),
           ),
         ],

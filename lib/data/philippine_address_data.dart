@@ -1,7 +1,5 @@
-import 'mis_occ_barangays_loader.dart';
-
 // Philippine address helpers for cascading Province → City/Municipality → Barangay + Street.
-// Misamis Occidental barangays ship in assets/data/mis_occ_barangays.json (see MisOccBarangaysData).
+// Nationwide PSGC dropdown data: assets/data/ph_psgc/ (see philippine_psgc_loader.dart).
 
 /// Province name used for Misamis Occidental (must match dropdown value).
 const String kProvinceMisamisOccidental = 'Misamis Occidental';
@@ -112,11 +110,6 @@ const List<String> misamisOccidentalCities = [
   'Tangub City',
   'Tudela',
 ];
-
-/// Returns barangay list for dropdown when [MisOccBarangaysData] is loaded; otherwise `null`.
-List<String>? barangaysForMisOccCity(String? city) {
-  return MisOccBarangaysData.lookup(city);
-}
 
 /// Encodes structured parts into one DB string (pipe-separated).
 String encodeStructuredAddress({

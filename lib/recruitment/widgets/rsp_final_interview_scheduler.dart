@@ -1,11 +1,10 @@
-import 'dart:math' show min;
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/recruitment_application.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../providers/recruitment_hire_prefill.dart';
+import 'rsp_hire_email_dialog.dart';
 
 /// Admin: applicants who passed the screening exam — schedule final interview,
 /// record pass/fail, then open Create Account (sidebar) using the shared form.
@@ -165,9 +164,10 @@ class _RspFinalInterviewSchedulerState
   }
 
   String _formatSchedule(DateTime d, BuildContext context) {
+    final local = d.toLocal();
     final loc = MaterialLocalizations.of(context);
-    final dateStr = loc.formatFullDate(d);
-    final t = TimeOfDay.fromDateTime(d);
+    final dateStr = loc.formatFullDate(local);
+    final t = TimeOfDay.fromDateTime(local);
     return '$dateStr · ${t.format(context)}';
   }
 
@@ -192,7 +192,8 @@ class _RspFinalInterviewSchedulerState
 
   Future<void> _pickDateTime(RecruitmentApplication app) async {
     final now = DateTime.now();
-    final initial = app.finalInterviewAt ?? now.add(const Duration(days: 7));
+    final initial =
+        app.finalInterviewAt?.toLocal() ?? now.add(const Duration(days: 7));
     final day = await showDatePicker(
       context: context,
       initialDate: DateTime(initial.year, initial.month, initial.day),
@@ -278,7 +279,7 @@ class _RspFinalInterviewSchedulerState
     final sent = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => _HireApplicantEmailDialog(
+      builder: (ctx) => RspHireApplicantEmailDialog(
         applicantEmail: to,
         applicantName: app.fullName.trim().isEmpty
             ? 'Applicant'
@@ -288,6 +289,8 @@ class _RspFinalInterviewSchedulerState
       ),
     );
     if (sent == true && mounted) {
+      await _load();
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Email sent to the applicant.')),
       );
@@ -504,37 +507,105 @@ class _RspFinalInterviewSchedulerState
     required RecruitmentApplication app,
     required bool busy,
     required bool canNavigate,
+    required bool accountLinked,
   }) {
     final navy = AppTheme.primaryNavy;
     final monitoringDone = app.hrAccountSetupDone;
+    final emailSent = app.hireCredentialsEmailSent;
     return LayoutBuilder(
       builder: (context, c) {
         final wide = c.maxWidth >= 560;
         final openBtn = FilledButton.icon(
-          onPressed: !canNavigate || busy
+          onPressed: !canNavigate || busy || accountLinked
               ? null
               : () => _goToCreateAccountFor(app),
-          icon: const Icon(Icons.open_in_new_rounded, size: 20),
-          label: const Text('Open Create Account'),
+          icon: Icon(
+            accountLinked ? Icons.link_rounded : Icons.open_in_new_rounded,
+            size: 20,
+          ),
+          label: Text(accountLinked ? 'Account linked' : 'Open Create Account'),
           style: FilledButton.styleFrom(
             backgroundColor: navy,
+            disabledBackgroundColor: navy.withValues(alpha: 0.25),
             foregroundColor: Colors.white,
+            disabledForegroundColor: Colors.white.withValues(alpha: 0.7),
             padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
           ),
         );
         final emailBtn = OutlinedButton.icon(
-          onPressed: busy ? null : () => _openHireEmailForm(app),
-          icon: const Icon(Icons.mark_email_read_outlined, size: 20),
-          label: const Text('Email applicant'),
+          onPressed: busy || emailSent ? null : () => _openHireEmailForm(app),
+          icon: Icon(
+            emailSent
+                ? Icons.mark_email_read_rounded
+                : Icons.mark_email_read_outlined,
+            size: 20,
+          ),
+          label: Text(emailSent ? 'Email sent' : 'Email applicant'),
           style: OutlinedButton.styleFrom(
-            foregroundColor: navy,
-            side: BorderSide(color: navy.withValues(alpha: 0.55)),
+            foregroundColor: emailSent
+                ? AppTheme.textSecondary
+                : navy,
+            disabledForegroundColor: AppTheme.textSecondary,
+            side: BorderSide(
+              color: emailSent
+                  ? AppTheme.textSecondary.withValues(alpha: 0.35)
+                  : navy.withValues(alpha: 0.55),
+            ),
+            backgroundColor:
+                emailSent ? AppTheme.offWhite.withValues(alpha: 0.6) : null,
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
           ),
         );
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (accountLinked) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8F5E9).withValues(alpha: 0.7),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: const Color(0xFF2E7D32).withValues(alpha: 0.35),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.check_circle_rounded,
+                      size: 22,
+                      color: Colors.green.shade800,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Employee account is linked to this application.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.green.shade900,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (emailSent) ...[
+              Text(
+                'Credentials email was sent${app.hireCredentialsEmailSentAt != null ? ' on ${_formatSchedule(app.hireCredentialsEmailSentAt!, context)}' : ''}. The button stays disabled so HR can see this step is complete.',
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.4,
+                  color: AppTheme.textSecondary,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
             Text(
               'Email applicant sends from the HRMS server to ${app.email.trim().isEmpty ? '—' : app.email.trim()} (congratulations + hired + login details). SMTP must be set in the API .env.',
               style: TextStyle(
@@ -866,14 +937,20 @@ class _RspFinalInterviewSchedulerState
               final outcome = app.finalInterviewPassed;
               final canNavigate = widget.onGoToCreateAccount != null;
               final actions = _outcomeActions(app, outcome, registered, busy);
-              final showStep3 = outcome == true && !registered;
+              final showStep3 = outcome == true;
               final step1Summary = scheduled == null
                   ? 'No date scheduled'
                   : _formatSchedule(scheduled, context);
               final step2Summary = outcome == null
                   ? 'Pending — record result'
                   : (outcome == true ? 'Passed' : 'Not passed');
-              const step3Summary = 'Employee login & Step 8 applicant message';
+              final step3Summary = app.hireCredentialsEmailSent
+                  ? (registered
+                      ? 'Account linked · credentials email sent'
+                      : 'Credentials email sent')
+                  : (registered
+                      ? 'Account linked · send credentials email'
+                      : 'Create account & email login details');
               final expandStep1 = scheduled == null;
               final expandStep2 = !expandStep1 && outcome == null;
               final expandStep3 = showStep3 && !expandStep1 && !expandStep2;
@@ -1412,20 +1489,22 @@ class _RspFinalInterviewSchedulerState
                               ],
                             ),
                           ),
-                          if (outcome == true && !registered) ...[
+                          if (outcome == true) ...[
                             SizedBox(height: _kSectionGap + 4),
                             _CollapsibleWorkflowStep(
                               key: ValueKey('${app.id}-wf3'),
                               number: 3,
                               title: 'Employee account',
-                              subtitle:
-                                  'Create their login from the sidebar, then update what they see on Step 8.',
+                              subtitle: registered
+                                  ? 'Account linked. Send or confirm credentials email and Step 8 applicant message.'
+                                  : 'Create their login from the sidebar, then email credentials.',
                               collapsedSummary: step3Summary,
                               initiallyExpanded: expandStep3,
                               child: _accountSetupStep(
                                 app: app,
                                 busy: busy,
                                 canNavigate: canNavigate,
+                                accountLinked: registered,
                               ),
                             ),
                             if (!canNavigate)
@@ -1621,432 +1700,6 @@ class _CollapsibleWorkflowStepState extends State<_CollapsibleWorkflowStep> {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// Admin enters HRMS username/password; [sendHireEmail] runs on the API (SMTP).
-class _HireApplicantEmailDialog extends StatefulWidget {
-  const _HireApplicantEmailDialog({
-    required this.applicantEmail,
-    required this.applicantName,
-    required this.sendHireEmail,
-  });
-
-  final String applicantEmail;
-  final String applicantName;
-  final Future<void> Function(String username, String password) sendHireEmail;
-
-  @override
-  State<_HireApplicantEmailDialog> createState() =>
-      _HireApplicantEmailDialogState();
-}
-
-class _HireApplicantEmailDialogState extends State<_HireApplicantEmailDialog> {
-  final _userCtrl = TextEditingController();
-  final _passCtrl = TextEditingController();
-  final _formKey = GlobalKey<FormState>();
-  bool _obscurePass = true;
-  bool _sending = false;
-
-  @override
-  void dispose() {
-    _userCtrl.dispose();
-    _passCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _submit() async {
-    if (!(_formKey.currentState?.validate() ?? false)) return;
-    setState(() => _sending = true);
-    try {
-      await widget.sendHireEmail(_userCtrl.text.trim(), _passCtrl.text);
-      if (!mounted) return;
-      Navigator.of(context).pop(true);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
-      setState(() => _sending = false);
-    }
-  }
-
-  InputDecoration _credentialFieldDecoration({
-    required String hint,
-    required Color accent,
-    Widget? suffixIcon,
-  }) {
-    final base = OutlineInputBorder(
-      borderRadius: BorderRadius.circular(14),
-      borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.08)),
-    );
-    return InputDecoration(
-      hintText: hint,
-      hintStyle: TextStyle(
-        color: AppTheme.textSecondary.withValues(alpha: 0.65),
-        fontWeight: FontWeight.w500,
-      ),
-      filled: true,
-      fillColor: AppTheme.lightGray.withValues(alpha: 0.55),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      border: base,
-      enabledBorder: base,
-      focusedBorder: base.copyWith(
-        borderSide: BorderSide(color: accent, width: 2),
-      ),
-      errorBorder: base.copyWith(
-        borderSide: BorderSide(color: Theme.of(context).colorScheme.error),
-      ),
-      focusedErrorBorder: base.copyWith(
-        borderSide: BorderSide(
-          color: Theme.of(context).colorScheme.error,
-          width: 2,
-        ),
-      ),
-      suffixIcon: suffixIcon,
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = AppTheme.primaryNavy;
-    final mq = MediaQuery.sizeOf(context);
-    final maxW = min(mq.width - 40, 448.0);
-    final maxH = mq.height - 40;
-
-    return Dialog(
-      backgroundColor: AppTheme.white,
-      surfaceTintColor: Colors.transparent,
-      elevation: 14,
-      shadowColor: Colors.black.withValues(alpha: 0.16),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: maxW, maxHeight: maxH),
-        child: Column(
-          children: [
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(28, 28, 28, 8),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Center(
-                        child: Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: accent.withValues(alpha: 0.1),
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: accent.withValues(alpha: 0.45),
-                              width: 1.5,
-                            ),
-                          ),
-                          child: Icon(
-                            Icons.mark_email_read_outlined,
-                            color: accent,
-                            size: 30,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      Text(
-                        'Email applicant',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 21,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.4,
-                          height: 1.2,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        'Hired — credentials go to the applicant by email.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 13,
-                          height: 1.45,
-                          color: AppTheme.textSecondary.withValues(alpha: 0.92),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: AppTheme.sectionAlt,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: Colors.black.withValues(alpha: 0.05),
-                          ),
-                          boxShadow: AppTheme.cardShadow,
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(
-                                    Icons.alternate_email_rounded,
-                                    size: 18,
-                                    color: accent,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'RECIPIENT',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: 1.15,
-                                      color: AppTheme.textSecondary,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              SelectableText(
-                                widget.applicantEmail,
-                                style: const TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700,
-                                  height: 1.35,
-                                  color: AppTheme.textPrimary,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
-                        child: IntrinsicHeight(
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Container(
-                                width: 5,
-                                color: accent,
-                              ),
-                              Expanded(
-                                child: ColoredBox(
-                                  color: accent.withValues(alpha: 0.07),
-                                  child: Padding(
-                                    padding: const EdgeInsets.fromLTRB(
-                                      16,
-                                      14,
-                                      16,
-                                      14,
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          'MESSAGE PREVIEW',
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w800,
-                                            letterSpacing: 1.05,
-                                            color: AppTheme.textSecondary,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 10),
-                                        Text(
-                                          'Dear ${widget.applicantName}, …',
-                                          style: TextStyle(
-                                            fontSize: 14,
-                                            height: 1.5,
-                                            fontStyle: FontStyle.italic,
-                                            color: AppTheme.textPrimary
-                                                .withValues(alpha: 0.88),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 26),
-                      Text(
-                        'Login details',
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.2,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _userCtrl,
-                        textInputAction: TextInputAction.next,
-                        autofillHints: const [AutofillHints.username],
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 15,
-                        ),
-                        decoration: _credentialFieldDecoration(
-                          hint: 'Username',
-                          accent: accent,
-                        ),
-                        validator: (v) {
-                          if (v == null || v.trim().isEmpty) {
-                            return 'Enter the username';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _passCtrl,
-                        obscureText: _obscurePass,
-                        autofillHints: const [AutofillHints.password],
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 15,
-                        ),
-                        decoration: _credentialFieldDecoration(
-                          hint: 'Password',
-                          accent: accent,
-                          suffixIcon: IconButton(
-                            tooltip: _obscurePass
-                                ? 'Show password'
-                                : 'Hide password',
-                            onPressed: () =>
-                                setState(() => _obscurePass = !_obscurePass),
-                            icon: Icon(
-                              _obscurePass
-                                  ? Icons.visibility_outlined
-                                  : Icons.visibility_off_outlined,
-                              color: AppTheme.textSecondary,
-                            ),
-                          ),
-                        ),
-                        validator: (v) {
-                          if (v == null || v.isEmpty) {
-                            return 'Enter the password';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 20),
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFFF8E6),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: accent.withValues(alpha: 0.35),
-                          ),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Icon(
-                                Icons.shield_outlined,
-                                size: 24,
-                                color: accent,
-                              ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Text(
-                                  'Standard email is not encrypted. Send only '
-                                  'credentials you intend them to use. Ask them '
-                                  'to change the password after first login if '
-                                  'your system allows it.',
-                                  style: TextStyle(
-                                    fontSize: 12.5,
-                                    height: 1.55,
-                                    color: AppTheme.textPrimary
-                                        .withValues(alpha: 0.9),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            Divider(
-              height: 1,
-              thickness: 1,
-              color: Colors.black.withValues(alpha: 0.06),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 20, 18),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed:
-                        _sending ? null : () => Navigator.of(context).pop(),
-                    style: TextButton.styleFrom(
-                      foregroundColor: accent,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                    ),
-                    child: const Text(
-                      'Cancel',
-                      style: TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  FilledButton(
-                    onPressed: _sending ? null : _submit,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: accent,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 22,
-                        vertical: 14,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      elevation: 0,
-                    ),
-                    child: _sending
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.send_rounded, size: 20),
-                              SizedBox(width: 8),
-                              Text(
-                                'Send email',
-                                style: TextStyle(fontWeight: FontWeight.w700),
-                              ),
-                            ],
-                          ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -22,9 +24,12 @@ import '../../widgets/read_only_saved_entry_dialog.dart';
 import '../../widgets/rsp_form_header_footer.dart';
 import '../../widgets/rsp_ld_saved_records_browser.dart';
 import '../widgets/rsp_bei_grading_dialog.dart';
+import '../widgets/rsp_exam_editor_ui.dart';
 import '../widgets/rsp_final_interview_scheduler.dart';
 import '../../api/user_facing_api_error.dart';
 import '../widgets/rsp_iframe_preview.dart';
+import '../widgets/rsp_records_list_table.dart';
+import '../../widgets/rsp_ld_record_actions.dart';
 
 /// RSP module: hub with buttons for each RSP feature (Job Vacancies, Applications & Exam Results).
 class RspAdminContent extends StatefulWidget {
@@ -52,9 +57,9 @@ class _RspAdminContentState extends State<RspAdminContent> {
             onPressed: () => setState(() => _rspSectionIndex = 0),
             icon: const Icon(Icons.arrow_back_rounded, size: 20),
             label: const Text('Back to RSP'),
-            style: TextButton.styleFrom(foregroundColor: AppTheme.primaryNavy),
+            style: RspExamEditorUi.ghostAction(context),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
         ],
         if (_rspSectionIndex == 0) ...[
           Text(
@@ -226,7 +231,7 @@ class _RspAdminContentState extends State<RspAdminContent> {
 const _defaultBeiQuestions = [
   'Tell me about a time when you had to collaborate with a co-worker that you had a hard time getting along with?',
   'Describe for me a time when you were under a significant amount of pressure at work. How did you deal with it?',
-  'Tell me about a time when you were ask to work on a task that you had never done before.',
+  'Tell me about a time when you were asked to work on a task that you had never done before.',
   'Tell me about a time when you had to cultivate a relationship with a new client. What did you do?',
   'Describe a time when you disagreed with your boss. What did you do?',
   'Describe your greatest challenge.',
@@ -332,93 +337,32 @@ class _RspBeiQuestionsEditorState extends State<_RspBeiQuestionsEditor> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          '8 Behavioral Event Interview (BEI) Questions',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
+        const RspExamPageHeader(
+          icon: Icons.psychology_rounded,
+          title: '8 Behavioral Event Interview (BEI) Questions',
+          subtitle:
+              'For New Applicant/s and Promotion/s. Edit the questions below; applicants will see these when they take the exam.',
         ),
-        const SizedBox(height: 6),
-        Text(
-          'For New Applicant/s and Promotion/s. Edit the questions below; applicants will see these when they take the exam.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-        ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 22),
         Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
+          padding: const EdgeInsets.all(22),
+          decoration: RspExamEditorUi.elevatedPanel(context),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               ...List.generate(_controllers.length, (i) {
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 20),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '${i + 1}.',
-                              style: TextStyle(
-                                color: AppTheme.textPrimary,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            TextField(
-                              controller: _controllers[i],
-                              onChanged: (_) => setState(() {}),
-                              maxLines: 2,
-                              decoration: InputDecoration(
-                                hintText: 'Question text...',
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                filled: true,
-                                fillColor: AppTheme.offWhite,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 12,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: _controllers.length > 1
-                            ? () {
-                                _controllers[i].dispose();
-                                _controllers.removeAt(i);
-                                setState(() {});
-                              }
-                            : null,
-                        icon: const Icon(Icons.remove_circle_outline),
-                        tooltip: 'Remove question',
-                        color: Colors.red.shade700,
-                      ),
-                    ],
-                  ),
+                return RspBeiQuestionRow(
+                  index: i,
+                  controller: _controllers[i],
+                  onChanged: () => setState(() {}),
+                  canRemove: _controllers.length > 1,
+                  onRemove: () {
+                    _controllers[i].dispose();
+                    _controllers.removeAt(i);
+                    setState(() {});
+                  },
                 );
               }),
-              const SizedBox(height: 8),
               TextButton.icon(
                 onPressed: () {
                   _controllers.add(TextEditingController());
@@ -426,32 +370,13 @@ class _RspBeiQuestionsEditorState extends State<_RspBeiQuestionsEditor> {
                 },
                 icon: const Icon(Icons.add_rounded, size: 20),
                 label: const Text('Add question'),
-                style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.primaryNavy,
-                ),
+                style: RspExamEditorUi.ghostAction(context),
               ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _saving ? null : _save,
-                  icon: _saving
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.save_rounded, size: 20),
-                  label: Text(_saving ? 'Saving...' : 'Save BEI questions'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primaryNavy,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
+              const SizedBox(height: 20),
+              RspExamSaveButton(
+                label: 'Save BEI questions',
+                saving: _saving,
+                onPressed: _saving ? null : _save,
               ),
             ],
           ),
@@ -552,89 +477,107 @@ class _RspExamTimeLimitEditorState extends State<_RspExamTimeLimitEditor> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return const Padding(
-        padding: EdgeInsets.only(bottom: 16),
-        child: LinearProgressIndicator(minHeight: 2),
-      );
-    }
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 20),
-      child: Material(
-        color: AppTheme.primaryNavy.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(Icons.timer_outlined, color: AppTheme.primaryNavy, size: 22),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Applicant time limit',
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Minutes allowed for this exam (0 = no countdown). Applicants see a timer during the exam.',
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 12,
-                        height: 1.35,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        SizedBox(
-                          width: 88,
-                          child: TextField(
-                            controller: _minutesController,
-                            keyboardType: TextInputType.number,
-                            decoration: InputDecoration(
-                              labelText: 'Minutes',
-                              isDense: true,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              filled: true,
-                              fillColor: AppTheme.white,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        FilledButton.tonal(
-                          onPressed: _saving ? null : _save,
-                          child: _saving
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Text('Save limit'),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return RspExamTimeLimitPanel(
+      minutesController: _minutesController,
+      saving: _saving,
+      loading: _loading,
+      onSave: _save,
     );
   }
+}
+
+/// Shared MCQ question list UI for General / Math / General Information editors.
+Widget _rspMcqQuestionsPanel({
+  required BuildContext context,
+  required List<_GeneralExamItem> items,
+  required VoidCallback onRefresh,
+  required _GeneralExamItem Function() onCreateItem,
+}) {
+  final secondary = AppTheme.dashTextSecondaryOf(context);
+
+  return Container(
+    padding: const EdgeInsets.all(22),
+    decoration: RspExamEditorUi.elevatedPanel(context),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ...List.generate(items.length, (i) {
+          final item = items[i];
+          final optCount = item.optionControllers.length;
+          return RspMcqQuestionCard(
+            index: i,
+            onRemove: items.length > 1
+                ? () {
+                    final removed = items.removeAt(i);
+                    removed.questionController.dispose();
+                    for (final c in removed.optionControllers) {
+                      c.dispose();
+                    }
+                    onRefresh();
+                  }
+                : null,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextField(
+                  controller: item.questionController,
+                  onChanged: (_) => onRefresh(),
+                  maxLines: 3,
+                  style: AppTheme.dashFieldTextStyle(context),
+                  decoration: RspExamEditorUi.inputDecoration(
+                    context,
+                    hintText: 'Question text…',
+                  ).copyWith(labelText: null),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'OPTIONS (SELECT CORRECT ONE)',
+                  style: TextStyle(
+                    color: secondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ...List.generate(optCount, (j) {
+                  return RspMcqOptionRow(
+                    index: j,
+                    groupValue: item.correctIndex,
+                    controller: item.optionControllers[j],
+                    onSelected: (v) {
+                      item.correctIndex = v ?? 0;
+                      onRefresh();
+                    },
+                    onChanged: onRefresh,
+                  );
+                }),
+                if (optCount < 6)
+                  TextButton.icon(
+                    onPressed: () {
+                      item.optionControllers.add(TextEditingController());
+                      onRefresh();
+                    },
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add option'),
+                    style: RspExamEditorUi.ghostAction(context),
+                  ),
+              ],
+            ),
+          );
+        }),
+        TextButton.icon(
+          onPressed: () {
+            items.add(onCreateItem());
+            onRefresh();
+          },
+          icon: const Icon(Icons.add_rounded, size: 20),
+          label: const Text('Add question'),
+          style: RspExamEditorUi.ghostAction(context),
+        ),
+      ],
+    ),
+  );
 }
 
 class _RspGeneralExamEditor extends StatefulWidget {
@@ -778,203 +721,25 @@ class _RspGeneralExamEditorState extends State<_RspGeneralExamEditor> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'General Exam for LGU-Plaridel Applicants',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
+        const RspExamPageHeader(
+          icon: Icons.assignment_turned_in_rounded,
+          title: 'General Exam for LGU-Plaridel Applicants',
+          subtitle:
+              'Multiple-choice questions. Edit below; set the correct option per question. Applicants will see these after the BEI.',
         ),
-        const SizedBox(height: 6),
-        Text(
-          'Multiple-choice questions. Edit below; set the correct option per question. Applicants will see these after the BEI.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-        ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 22),
         const _RspExamTimeLimitEditor(examType: 'general'),
-        const SizedBox(height: 24),
-        Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ...List.generate(_items.length, (i) {
-                final item = _items[i];
-                final optCount = item.optionControllers.length;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '${i + 1}. Question',
-                                  style: TextStyle(
-                                    color: AppTheme.textPrimary,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                TextField(
-                                  controller: item.questionController,
-                                  onChanged: (_) => setState(() {}),
-                                  maxLines: 2,
-                                  decoration: InputDecoration(
-                                    hintText: 'Question text...',
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    filled: true,
-                                    fillColor: AppTheme.offWhite,
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 12,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  'Options (select correct one)',
-                                  style: TextStyle(
-                                    color: AppTheme.textSecondary,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                ...List.generate(optCount, (j) {
-                                  return Padding(
-                                    padding: const EdgeInsets.only(bottom: 8),
-                                    child: Row(
-                                      children: [
-                                        Radio<int>(
-                                          value: j,
-                                          groupValue: item.correctIndex,
-                                          onChanged: (v) => setState(
-                                            () => item.correctIndex = v ?? 0,
-                                          ),
-                                        ),
-                                        Expanded(
-                                          child: TextField(
-                                            controller:
-                                                item.optionControllers[j],
-                                            onChanged: (_) => setState(() {}),
-                                            decoration: InputDecoration(
-                                              hintText:
-                                                  'Option ${String.fromCharCode(97 + j)}',
-                                              border: OutlineInputBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(8),
-                                              ),
-                                              filled: true,
-                                              fillColor: AppTheme.offWhite,
-                                              contentPadding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 12,
-                                                    vertical: 10,
-                                                  ),
-                                              isDense: true,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                }),
-                                if (optCount < 6)
-                                  TextButton.icon(
-                                    onPressed: () {
-                                      item.optionControllers.add(
-                                        TextEditingController(),
-                                      );
-                                      setState(() {});
-                                    },
-                                    icon: const Icon(Icons.add, size: 18),
-                                    label: const Text('Add option'),
-                                    style: TextButton.styleFrom(
-                                      foregroundColor: AppTheme.primaryNavy,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                          if (_items.length > 1)
-                            IconButton(
-                              onPressed: () {
-                                final removed = _items.removeAt(i);
-                                removed.questionController.dispose();
-                                for (final c in removed.optionControllers) {
-                                  c.dispose();
-                                }
-                                setState(() {});
-                              },
-                              icon: const Icon(Icons.remove_circle_outline),
-                              tooltip: 'Remove question',
-                              color: Colors.red.shade700,
-                            ),
-                        ],
-                      ),
-                    ],
-                  ),
-                );
-              }),
-              TextButton.icon(
-                onPressed: () {
-                  _items.add(_makeItem('', <String>['', '', '', ''], 0));
-                  setState(() {});
-                },
-                icon: const Icon(Icons.add_rounded, size: 20),
-                label: const Text('Add question'),
-                style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.primaryNavy,
-                ),
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _saving ? null : _save,
-                  icon: _saving
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.save_rounded, size: 20),
-                  label: Text(
-                    _saving ? 'Saving...' : 'Save General Exam questions',
-                  ),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primaryNavy,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
+        _rspMcqQuestionsPanel(
+          context: context,
+          items: _items,
+          onRefresh: () => setState(() {}),
+          onCreateItem: () => _makeItem('', <String>['', '', '', ''], 0),
+        ),
+        const SizedBox(height: 20),
+        RspExamSaveButton(
+          label: 'Save General Exam questions',
+          saving: _saving,
+          onPressed: _saving ? null : _save,
         ),
       ],
     );
@@ -1123,197 +888,25 @@ class _RspMathExamEditorState extends State<_RspMathExamEditor> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Mathematics Exam',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
+        const RspExamPageHeader(
+          icon: Icons.calculate_rounded,
+          title: 'Mathematics Exam',
+          subtitle:
+              'Multiple-choice mathematics questions. Edit below; set the correct option per question. Applicants will see these after the General Exam.',
         ),
-        const SizedBox(height: 6),
-        Text(
-          'Multiple-choice mathematics questions. Edit below; set the correct option per question. Applicants will see these after the General Exam.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-        ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 22),
         const _RspExamTimeLimitEditor(examType: 'math'),
-        const SizedBox(height: 24),
-        Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ...List.generate(_items.length, (i) {
-                final item = _items[i];
-                final optCount = item.optionControllers.length;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 24),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '${i + 1}. Question',
-                              style: TextStyle(
-                                color: AppTheme.textPrimary,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            TextField(
-                              controller: item.questionController,
-                              onChanged: (_) => setState(() {}),
-                              maxLines: 2,
-                              decoration: InputDecoration(
-                                hintText: 'Question text...',
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                filled: true,
-                                fillColor: AppTheme.offWhite,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 12,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              'Options (select correct one)',
-                              style: TextStyle(
-                                color: AppTheme.textSecondary,
-                                fontSize: 13,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            ...List.generate(optCount, (j) {
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: Row(
-                                  children: [
-                                    Radio<int>(
-                                      value: j,
-                                      groupValue: item.correctIndex,
-                                      onChanged: (v) => setState(
-                                        () => item.correctIndex = v ?? 0,
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: TextField(
-                                        controller: item.optionControllers[j],
-                                        onChanged: (_) => setState(() {}),
-                                        decoration: InputDecoration(
-                                          hintText:
-                                              'Option ${String.fromCharCode(97 + j)}',
-                                          border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              8,
-                                            ),
-                                          ),
-                                          filled: true,
-                                          fillColor: AppTheme.offWhite,
-                                          contentPadding:
-                                              const EdgeInsets.symmetric(
-                                                horizontal: 12,
-                                                vertical: 12,
-                                              ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }),
-                            if (optCount < 6)
-                              TextButton.icon(
-                                onPressed: () {
-                                  item.optionControllers.add(
-                                    TextEditingController(),
-                                  );
-                                  setState(() {});
-                                },
-                                icon: const Icon(Icons.add, size: 18),
-                                label: const Text('Add option'),
-                                style: TextButton.styleFrom(
-                                  foregroundColor: AppTheme.primaryNavy,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                      if (_items.length > 1)
-                        IconButton(
-                          onPressed: () {
-                            final removed = _items.removeAt(i);
-                            removed.questionController.dispose();
-                            for (final c in removed.optionControllers) {
-                              c.dispose();
-                            }
-                            setState(() {});
-                          },
-                          icon: const Icon(Icons.remove_circle_outline),
-                          tooltip: 'Remove question',
-                          color: Colors.red.shade700,
-                        ),
-                    ],
-                  ),
-                );
-              }),
-              TextButton.icon(
-                onPressed: () {
-                  _items.add(_makeItem('', <String>['', '', '', ''], 0));
-                  setState(() {});
-                },
-                icon: const Icon(Icons.add_rounded, size: 20),
-                label: const Text('Add question'),
-                style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.primaryNavy,
-                ),
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _saving ? null : _save,
-                  icon: _saving
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.save_rounded, size: 20),
-                  label: Text(
-                    _saving ? 'Saving...' : 'Save Mathematics Exam questions',
-                  ),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primaryNavy,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
+        _rspMcqQuestionsPanel(
+          context: context,
+          items: _items,
+          onRefresh: () => setState(() {}),
+          onCreateItem: () => _makeItem('', <String>['', '', '', ''], 0),
+        ),
+        const SizedBox(height: 20),
+        RspExamSaveButton(
+          label: 'Save Mathematics Exam questions',
+          saving: _saving,
+          onPressed: _saving ? null : _save,
         ),
       ],
     );
@@ -1465,199 +1058,25 @@ class _RspGeneralInfoExamEditorState extends State<_RspGeneralInfoExamEditor> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'General Information Exam',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
+        const RspExamPageHeader(
+          icon: Icons.info_outline_rounded,
+          title: 'General Information Exam',
+          subtitle:
+              'Multiple-choice questions on general information (e.g. constitution, labor). Edit below; set the correct option per question.',
         ),
-        const SizedBox(height: 6),
-        Text(
-          'Multiple-choice questions on general information (e.g. constitution, labor). Edit below; set the correct option per question.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-        ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 22),
         const _RspExamTimeLimitEditor(examType: 'general_info'),
-        const SizedBox(height: 24),
-        Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.06)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ...List.generate(_items.length, (i) {
-                final item = _items[i];
-                final optCount = item.optionControllers.length;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 24),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '${i + 1}. Question',
-                              style: TextStyle(
-                                color: AppTheme.textPrimary,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            TextField(
-                              controller: item.questionController,
-                              onChanged: (_) => setState(() {}),
-                              maxLines: 2,
-                              decoration: InputDecoration(
-                                hintText: 'Question text...',
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                filled: true,
-                                fillColor: AppTheme.offWhite,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 12,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              'Options (select correct one)',
-                              style: TextStyle(
-                                color: AppTheme.textSecondary,
-                                fontSize: 13,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            ...List.generate(optCount, (j) {
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: Row(
-                                  children: [
-                                    Radio<int>(
-                                      value: j,
-                                      groupValue: item.correctIndex,
-                                      onChanged: (v) => setState(
-                                        () => item.correctIndex = v ?? 0,
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: TextField(
-                                        controller: item.optionControllers[j],
-                                        onChanged: (_) => setState(() {}),
-                                        decoration: InputDecoration(
-                                          hintText:
-                                              'Option ${String.fromCharCode(97 + j)}',
-                                          border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              8,
-                                            ),
-                                          ),
-                                          filled: true,
-                                          fillColor: AppTheme.offWhite,
-                                          contentPadding:
-                                              const EdgeInsets.symmetric(
-                                                horizontal: 12,
-                                                vertical: 12,
-                                              ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }),
-                            if (optCount < 6)
-                              TextButton.icon(
-                                onPressed: () {
-                                  item.optionControllers.add(
-                                    TextEditingController(),
-                                  );
-                                  setState(() {});
-                                },
-                                icon: const Icon(Icons.add, size: 18),
-                                label: const Text('Add option'),
-                                style: TextButton.styleFrom(
-                                  foregroundColor: AppTheme.primaryNavy,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                      if (_items.length > 1)
-                        IconButton(
-                          onPressed: () {
-                            final removed = _items.removeAt(i);
-                            removed.questionController.dispose();
-                            for (final c in removed.optionControllers) {
-                              c.dispose();
-                            }
-                            setState(() {});
-                          },
-                          icon: const Icon(Icons.remove_circle_outline),
-                          tooltip: 'Remove question',
-                          color: Colors.red.shade700,
-                        ),
-                    ],
-                  ),
-                );
-              }),
-              TextButton.icon(
-                onPressed: () {
-                  _items.add(_makeItem('', <String>['', '', '', ''], 0));
-                  setState(() {});
-                },
-                icon: const Icon(Icons.add_rounded, size: 20),
-                label: const Text('Add question'),
-                style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.primaryNavy,
-                ),
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _saving ? null : _save,
-                  icon: _saving
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.save_rounded, size: 20),
-                  label: Text(
-                    _saving
-                        ? 'Saving...'
-                        : 'Save General Information Exam questions',
-                  ),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primaryNavy,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
+        _rspMcqQuestionsPanel(
+          context: context,
+          items: _items,
+          onRefresh: () => setState(() {}),
+          onCreateItem: () => _makeItem('', <String>['', '', '', ''], 0),
+        ),
+        const SizedBox(height: 20),
+        RspExamSaveButton(
+          label: 'Save General Information Exam questions',
+          saving: _saving,
+          onPressed: _saving ? null : _save,
         ),
       ],
     );
@@ -1815,12 +1234,9 @@ class _RspBiFormSectionState extends State<_RspBiFormSection> {
             child: Center(child: CircularProgressIndicator()),
           )
         else if (_entries.isEmpty)
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text(
-              'No BI entries yet. Tap "Add BI entry" to add one.',
-              style: TextStyle(color: AppTheme.textSecondary),
-            ),
+          const RspFormEmptyState(
+            message: 'No BI entries yet. Tap "Add BI entry" to add one.',
+            icon: Icons.fact_check_outlined,
           )
         else
           _BiFormList(
@@ -2367,91 +1783,48 @@ class _BiFormList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('Applicant')),
-          DataColumn(label: Text('Respondent')),
-          DataColumn(label: Text('Relationship')),
-          DataColumn(label: Text('Actions')),
-        ],
-        rows: entries.map((e) {
-          return DataRow(
-            cells: [
-              DataCell(Text(e.applicantName)),
-              DataCell(Text(e.respondentName)),
-              DataCell(Text(e.respondentRelationship)),
-              DataCell(
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextButton(
-                      onPressed: () => showReadOnlySavedEntryDialog(
-                        context,
-                        title: 'Saved BI form',
-                        previewBuilder: () => _BiFormEditor(
-                          readOnly: true,
-                          entry: e,
-                          onSave: (_) {},
-                          onCancel: () {},
-                          onPrint: (_) async {},
-                          onDownloadPdf: (_) async {},
-                        ),
-                        contentWidth: 920,
-                      ),
-                      child: const Text('View'),
-                    ),
-                    TextButton(
-                      onPressed: () => onEdit(e),
-                      child: const Text('Edit'),
-                    ),
-                    IconButton(
-                      onPressed: () => onPrint(e),
-                      icon: const Icon(Icons.print_rounded, size: 20),
-                      tooltip: 'Print',
-                    ),
-                    IconButton(
-                      onPressed: () => onDownloadPdf(e),
-                      icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
-                      tooltip: 'Download PDF',
-                    ),
-                    TextButton(
-                      onPressed: () async {
-                        final ok = await showDialog<bool>(
-                          context: context,
-                          builder: (ctx) => AlertDialog(
-                            title: const Text('Delete BI entry?'),
-                            content: const Text('This cannot be undone.'),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.of(ctx).pop(false),
-                                child: const Text('Cancel'),
-                              ),
-                              FilledButton(
-                                onPressed: () => Navigator.of(ctx).pop(true),
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: Colors.red,
-                                ),
-                                child: const Text('Delete'),
-                              ),
-                            ],
-                          ),
-                        );
-                        if (ok == true && e.id != null) onDelete(e.id!);
-                      },
-                      child: const Text(
-                        'Delete',
-                        style: TextStyle(color: Colors.red),
-                      ),
-                    ),
-                  ],
+    const columns = [
+      RspRecordsColumn('Applicant', flex: 2.2),
+      RspRecordsColumn('Respondent', flex: 2.2),
+      RspRecordsColumn('Relationship', flex: 1.4),
+      RspRecordsColumn('Actions', flex: 2.4, align: TextAlign.center),
+    ];
+    return RspRecordsListTable(
+      columns: columns,
+      rows: entries
+          .map(
+            (e) => [
+              rspRecordsTextCell(e.applicantName, bold: true),
+              rspRecordsTextCell(e.respondentName, bold: true),
+              rspRecordsTextCell(e.respondentRelationship),
+              RspRecordsCrudActions(
+                onView: () => showReadOnlySavedEntryDialog(
+                  context,
+                  title: 'BI form — ${e.applicantName}',
+                  subtitle:
+                      '${e.respondentName} · ${e.respondentRelationship}',
+                  previewBuilder: () => _BiFormEditor(
+                    readOnly: true,
+                    entry: e,
+                    onSave: (_) {},
+                    onCancel: () {},
+                    onPrint: (_) async {},
+                    onDownloadPdf: (_) async {},
+                  ),
+                  contentWidth: 920,
+                  onPrint: () => onPrint(e),
                 ),
+                onEdit: () => onEdit(e),
+                onPrint: () => onPrint(e),
+                onDownloadPdf: () => onDownloadPdf(e),
+                onDelete: () async {
+                  if (e.id != null) onDelete(e.id!);
+                },
+                deleteDialogTitle: 'Delete BI entry?',
               ),
             ],
-          );
-        }).toList(),
-      ),
+          )
+          .toList(),
     );
   }
 }
@@ -2605,12 +1978,9 @@ class _RspPerformanceEvaluationSectionState
             child: Center(child: CircularProgressIndicator()),
           )
         else if (_entries.isEmpty)
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text(
-              'No evaluations yet. Tap "Add evaluation" to add one.',
-              style: TextStyle(color: AppTheme.textSecondary),
-            ),
+          const RspFormEmptyState(
+            message: 'No evaluations yet. Tap "Add evaluation" to add one.',
+            icon: Icons.assessment_outlined,
           )
         else
           _PerformanceFormList(
@@ -3004,95 +2374,49 @@ class _PerformanceFormList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('Applicant')),
-          DataColumn(label: Text('Functional areas')),
-          DataColumn(label: Text('Actions')),
-        ],
-        rows: entries.map((e) {
-          return DataRow(
-            cells: [
-              DataCell(Text(e.applicantName ?? 'â€”')),
-              DataCell(
-                Text(
-                  e.functionalAreas.isEmpty
-                      ? 'â€”'
-                      : e.functionalAreas.join(', '),
-                ),
+    const columns = [
+      RspRecordsColumn('Applicant', flex: 2),
+      RspRecordsColumn('Functional areas', flex: 3.2),
+      RspRecordsColumn('Actions', flex: 2.4, align: TextAlign.center),
+    ];
+    return RspRecordsListTable(
+      columns: columns,
+      rows: entries
+          .map(
+            (e) => [
+              rspRecordsTextCell(e.applicantName ?? '', bold: true),
+              rspRecordsTextCell(
+                e.functionalAreas.isEmpty
+                    ? ''
+                    : e.functionalAreas.join(', '),
               ),
-              DataCell(
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextButton(
-                      onPressed: () => showReadOnlySavedEntryDialog(
-                        context,
-                        title: 'Saved performance evaluation',
-                        previewBuilder: () => _PerformanceFormEditor(
-                          readOnly: true,
-                          entry: e,
-                          onSave: (_) {},
-                          onCancel: () {},
-                          onPrint: (_) async {},
-                          onDownloadPdf: (_) async {},
-                        ),
-                        contentWidth: 880,
-                      ),
-                      child: const Text('View'),
-                    ),
-                    TextButton(
-                      onPressed: () => onEdit(e),
-                      child: const Text('Edit'),
-                    ),
-                    IconButton(
-                      onPressed: () => onPrint(e),
-                      icon: const Icon(Icons.print_rounded, size: 20),
-                      tooltip: 'Print',
-                    ),
-                    IconButton(
-                      onPressed: () => onDownloadPdf(e),
-                      icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
-                      tooltip: 'Download PDF',
-                    ),
-                    TextButton(
-                      onPressed: () async {
-                        final ok = await showDialog<bool>(
-                          context: context,
-                          builder: (ctx) => AlertDialog(
-                            title: const Text('Delete evaluation?'),
-                            content: const Text('This cannot be undone.'),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.of(ctx).pop(false),
-                                child: const Text('Cancel'),
-                              ),
-                              FilledButton(
-                                onPressed: () => Navigator.of(ctx).pop(true),
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: Colors.red,
-                                ),
-                                child: const Text('Delete'),
-                              ),
-                            ],
-                          ),
-                        );
-                        if (ok == true && e.id != null) onDelete(e.id!);
-                      },
-                      child: const Text(
-                        'Delete',
-                        style: TextStyle(color: Colors.red),
-                      ),
-                    ),
-                  ],
+              RspRecordsCrudActions(
+                onView: () => showReadOnlySavedEntryDialog(
+                  context,
+                  title: 'Performance evaluation',
+                  subtitle: e.applicantName ?? '',
+                  previewBuilder: () => _PerformanceFormEditor(
+                    readOnly: true,
+                    entry: e,
+                    onSave: (_) {},
+                    onCancel: () {},
+                    onPrint: (_) async {},
+                    onDownloadPdf: (_) async {},
+                  ),
+                  contentWidth: 880,
+                  onPrint: () => onPrint(e),
                 ),
+                onEdit: () => onEdit(e),
+                onPrint: () => onPrint(e),
+                onDownloadPdf: () => onDownloadPdf(e),
+                onDelete: () async {
+                  if (e.id != null) onDelete(e.id!);
+                },
+                deleteDialogTitle: 'Delete evaluation?',
               ),
             ],
-          );
-        }).toList(),
-      ),
+          )
+          .toList(),
     );
   }
 }
@@ -3311,12 +2635,9 @@ class _RspIdpSectionState extends State<_RspIdpSection> {
             child: Center(child: CircularProgressIndicator()),
           )
         else if (_entries.isEmpty)
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text(
-              'No IDP entries yet. Tap "Add IDP" to add one.',
-              style: TextStyle(color: AppTheme.textSecondary),
-            ),
+          const RspFormEmptyState(
+            message: 'No IDP entries yet. Tap "Add IDP" to add one.',
+            icon: Icons.school_outlined,
           )
         else
           _IdpList(
@@ -3851,98 +3172,47 @@ class _IdpList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('Name')),
-          DataColumn(label: Text('Position')),
-          DataColumn(label: Text('Department')),
-          DataColumn(label: Text('Actions')),
-        ],
-        rows: entries
-            .map(
-              (e) => DataRow(
-                cells: [
-                  DataCell(Text(e.name ?? 'â€”')),
-                  DataCell(Text(e.position ?? 'â€”')),
-                  DataCell(Text(e.department ?? 'â€”')),
-                  DataCell(
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        TextButton(
-                          onPressed: () => showReadOnlySavedEntryDialog(
-                            context,
-                            title: 'Saved IDP',
-                            previewBuilder: () => _IdpFormEditor(
-                              readOnly: true,
-                              entry: e,
-                              onSave: (_) {},
-                              onCancel: () {},
-                              onPrint: (_) async {},
-                              onDownloadPdf: (_) async {},
-                            ),
-                            contentWidth: 920,
-                          ),
-                          child: const Text('View'),
-                        ),
-                        TextButton(
-                          onPressed: () => onEdit(e),
-                          child: const Text('Edit'),
-                        ),
-                        IconButton(
-                          onPressed: () => onPrint(e),
-                          icon: const Icon(Icons.print_rounded, size: 20),
-                          tooltip: 'Print',
-                        ),
-                        IconButton(
-                          onPressed: () => onDownloadPdf(e),
-                          icon: const Icon(
-                            Icons.picture_as_pdf_rounded,
-                            size: 20,
-                          ),
-                          tooltip: 'Download PDF',
-                        ),
-                        TextButton(
-                          onPressed: () async {
-                            final ok = await showDialog<bool>(
-                              context: context,
-                              builder: (ctx) => AlertDialog(
-                                title: const Text('Delete IDP?'),
-                                content: const Text('This cannot be undone.'),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () =>
-                                        Navigator.of(ctx).pop(false),
-                                    child: const Text('Cancel'),
-                                  ),
-                                  FilledButton(
-                                    onPressed: () =>
-                                        Navigator.of(ctx).pop(true),
-                                    style: FilledButton.styleFrom(
-                                      backgroundColor: Colors.red,
-                                    ),
-                                    child: const Text('Delete'),
-                                  ),
-                                ],
-                              ),
-                            );
-                            if (ok == true && e.id != null) onDelete(e.id!);
-                          },
-                          child: const Text(
-                            'Delete',
-                            style: TextStyle(color: Colors.red),
-                          ),
-                        ),
-                      ],
-                    ),
+    const columns = [
+      RspRecordsColumn('Name', flex: 2),
+      RspRecordsColumn('Position', flex: 2.2),
+      RspRecordsColumn('Department', flex: 1.8),
+      RspRecordsColumn('Actions', flex: 2.4, align: TextAlign.center),
+    ];
+    return RspRecordsListTable(
+      columns: columns,
+      rows: entries
+          .map(
+            (e) => [
+              rspRecordsTextCell(e.name ?? '', bold: true),
+              rspRecordsTextCell(e.position ?? ''),
+              rspRecordsTextCell(e.department ?? ''),
+              RspRecordsCrudActions(
+                onView: () => showReadOnlySavedEntryDialog(
+                  context,
+                  title: 'Individual development plan',
+                  subtitle: '${e.name} · ${e.position ?? ''}',
+                  previewBuilder: () => _IdpFormEditor(
+                    readOnly: true,
+                    entry: e,
+                    onSave: (_) {},
+                    onCancel: () {},
+                    onPrint: (_) async {},
+                    onDownloadPdf: (_) async {},
                   ),
-                ],
+                  contentWidth: 920,
+                  onPrint: () => onPrint(e),
+                ),
+                onEdit: () => onEdit(e),
+                onPrint: () => onPrint(e),
+                onDownloadPdf: () => onDownloadPdf(e),
+                onDelete: () async {
+                  if (e.id != null) onDelete(e.id!);
+                },
+                deleteDialogTitle: 'Delete IDP?',
               ),
-            )
-            .toList(),
-      ),
+            ],
+          )
+          .toList(),
     );
   }
 }
@@ -4163,12 +3433,9 @@ class _RspApplicantsProfileSectionState
             child: Center(child: CircularProgressIndicator()),
           )
         else if (_entries.isEmpty)
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text(
-              'No applicants profiles yet. Tap "Add profile" to add one.',
-              style: TextStyle(color: AppTheme.textSecondary),
-            ),
+          const RspFormEmptyState(
+            message: 'No applicants profiles yet. Tap "Add profile" to add one.',
+            icon: Icons.people_outline,
           )
         else
           _ApplicantsProfileList(
@@ -4650,82 +3917,51 @@ class _ApplicantsProfileList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('Position applied for')),
-          DataColumn(label: Text('Posting date')),
-          DataColumn(label: Text('Applicants')),
-          DataColumn(label: Text('Actions')),
-        ],
-        rows: entries
-            .map(
-              (e) => DataRow(
-                cells: [
-                  DataCell(Text(e.positionAppliedFor ?? 'â€”')),
-                  DataCell(Text(e.dateOfPosting ?? 'â€”')),
-                  DataCell(Text('${e.applicants.length}')),
-                  DataCell(
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        TextButton(
-                          onPressed: () => onEdit(e),
-                          child: const Text('Edit'),
-                        ),
-                        IconButton(
-                          onPressed: () => onPrint(e),
-                          icon: const Icon(Icons.print_rounded, size: 20),
-                          tooltip: 'Print',
-                        ),
-                        IconButton(
-                          onPressed: () => onDownloadPdf(e),
-                          icon: const Icon(
-                            Icons.picture_as_pdf_rounded,
-                            size: 20,
-                          ),
-                          tooltip: 'Download PDF',
-                        ),
-                        TextButton(
-                          onPressed: () async {
-                            final ok = await showDialog<bool>(
-                              context: context,
-                              builder: (ctx) => AlertDialog(
-                                title: const Text('Delete applicants profile?'),
-                                content: const Text('This cannot be undone.'),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () =>
-                                        Navigator.of(ctx).pop(false),
-                                    child: const Text('Cancel'),
-                                  ),
-                                  FilledButton(
-                                    onPressed: () =>
-                                        Navigator.of(ctx).pop(true),
-                                    style: FilledButton.styleFrom(
-                                      backgroundColor: Colors.red,
-                                    ),
-                                    child: const Text('Delete'),
-                                  ),
-                                ],
-                              ),
-                            );
-                            if (ok == true && e.id != null) onDelete(e.id!);
-                          },
-                          child: const Text(
-                            'Delete',
-                            style: TextStyle(color: Colors.red),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+    const columns = [
+      RspRecordsColumn('Position applied for', flex: 2.8),
+      RspRecordsColumn('Posting date', flex: 1.4),
+      RspRecordsColumn('Applicants', flex: 1, align: TextAlign.center),
+      RspRecordsColumn('Actions', flex: 2.4, align: TextAlign.center),
+    ];
+    return RspRecordsListTable(
+      columns: columns,
+      rows: entries
+          .map(
+            (e) => [
+              rspRecordsTextCell(e.positionAppliedFor ?? '', bold: true),
+              rspRecordsTextCell(e.dateOfPosting ?? ''),
+              rspRecordsTextCell(
+                '${e.applicants.length}',
+                align: TextAlign.center,
+                bold: true,
               ),
-            )
-            .toList(),
-      ),
+              RspRecordsCrudActions(
+                onView: () => showReadOnlySavedEntryDialog(
+                  context,
+                  title: 'Applicants profile',
+                  subtitle: e.positionAppliedFor ?? '',
+                  previewBuilder: () => _ApplicantsProfileFormEditor(
+                    readOnly: true,
+                    entry: e,
+                    onSave: (_) {},
+                    onCancel: () {},
+                    onPrint: (_) async {},
+                    onDownloadPdf: (_) async {},
+                  ),
+                  contentWidth: 1000,
+                  onPrint: () => onPrint(e),
+                ),
+                onEdit: () => onEdit(e),
+                onPrint: () => onPrint(e),
+                onDownloadPdf: () => onDownloadPdf(e),
+                onDelete: () async {
+                  if (e.id != null) onDelete(e.id!);
+                },
+                deleteDialogTitle: 'Delete applicants profile?',
+              ),
+            ],
+          )
+          .toList(),
     );
   }
 }
@@ -4946,12 +4182,9 @@ class _RspComparativeAssessmentSectionState
             child: Center(child: CircularProgressIndicator()),
           )
         else if (_entries.isEmpty)
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text(
-              'No assessments yet. Tap "Add assessment" to add one.',
-              style: TextStyle(color: AppTheme.textSecondary),
-            ),
+          const RspFormEmptyState(
+            message: 'No assessments yet. Tap "Add assessment" to add one.',
+            icon: Icons.compare_arrows_rounded,
           )
         else
           _ComparativeAssessmentList(
@@ -5403,96 +4636,49 @@ class _ComparativeAssessmentList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('Position')),
-          DataColumn(label: Text('Candidates')),
-          DataColumn(label: Text('Actions')),
-        ],
-        rows: entries
-            .map(
-              (e) => DataRow(
-                cells: [
-                  DataCell(Text(e.positionToBeFilled ?? 'â€”')),
-                  DataCell(Text('${e.candidates.length}')),
-                  DataCell(
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        TextButton(
-                          onPressed: () => showReadOnlySavedEntryDialog(
-                            context,
-                            title: 'Saved comparative assessment',
-                            previewBuilder: () => _ComparativeAssessmentEditor(
-                              readOnly: true,
-                              entry: e,
-                              onSave: (_) {},
-                              onCancel: () {},
-                              onPrint: (_) async {},
-                              onDownloadPdf: (_) async {},
-                            ),
-                            contentWidth: 960,
-                          ),
-                          child: const Text('View'),
-                        ),
-                        TextButton(
-                          onPressed: () => onEdit(e),
-                          child: const Text('Edit'),
-                        ),
-                        IconButton(
-                          onPressed: () => onPrint(e),
-                          icon: const Icon(Icons.print_rounded, size: 20),
-                          tooltip: 'Print',
-                        ),
-                        IconButton(
-                          onPressed: () => onDownloadPdf(e),
-                          icon: const Icon(
-                            Icons.picture_as_pdf_rounded,
-                            size: 20,
-                          ),
-                          tooltip: 'Download PDF',
-                        ),
-                        TextButton(
-                          onPressed: () async {
-                            final ok = await showDialog<bool>(
-                              context: context,
-                              builder: (ctx) => AlertDialog(
-                                title: const Text('Delete?'),
-                                content: const Text('This cannot be undone.'),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () =>
-                                        Navigator.of(ctx).pop(false),
-                                    child: const Text('Cancel'),
-                                  ),
-                                  FilledButton(
-                                    onPressed: () =>
-                                        Navigator.of(ctx).pop(true),
-                                    style: FilledButton.styleFrom(
-                                      backgroundColor: Colors.red,
-                                    ),
-                                    child: const Text('Delete'),
-                                  ),
-                                ],
-                              ),
-                            );
-                            if (ok == true && e.id != null) onDelete(e.id!);
-                          },
-                          child: const Text(
-                            'Delete',
-                            style: TextStyle(color: Colors.red),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+    const columns = [
+      RspRecordsColumn('Position', flex: 3),
+      RspRecordsColumn('Candidates', flex: 1, align: TextAlign.center),
+      RspRecordsColumn('Actions', flex: 2.4, align: TextAlign.center),
+    ];
+    return RspRecordsListTable(
+      columns: columns,
+      rows: entries
+          .map(
+            (e) => [
+              rspRecordsTextCell(e.positionToBeFilled ?? '', bold: true),
+              rspRecordsTextCell(
+                '${e.candidates.length}',
+                align: TextAlign.center,
+                bold: true,
               ),
-            )
-            .toList(),
-      ),
+              RspRecordsCrudActions(
+                onView: () => showReadOnlySavedEntryDialog(
+                  context,
+                  title: 'Comparative assessment',
+                  subtitle: e.positionToBeFilled ?? '',
+                  previewBuilder: () => _ComparativeAssessmentEditor(
+                    readOnly: true,
+                    entry: e,
+                    onSave: (_) {},
+                    onCancel: () {},
+                    onPrint: (_) async {},
+                    onDownloadPdf: (_) async {},
+                  ),
+                  contentWidth: 960,
+                  onPrint: () => onPrint(e),
+                ),
+                onEdit: () => onEdit(e),
+                onPrint: () => onPrint(e),
+                onDownloadPdf: () => onDownloadPdf(e),
+                onDelete: () async {
+                  if (e.id != null) onDelete(e.id!);
+                },
+                deleteDialogTitle: 'Delete assessment?',
+              ),
+            ],
+          )
+          .toList(),
     );
   }
 }
@@ -5703,7 +4889,6 @@ class _RspSavedEntryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hairline = AppTheme.dashHairlineOf(context);
-    final muted = AppTheme.dashMutedSurfaceOf(context);
     final panel = AppTheme.dashPanelOf(context);
 
     return Container(
@@ -5802,8 +4987,8 @@ class _RspSavedEntryCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+                      spacing: kRspLdRecordActionGap,
+                      runSpacing: kRspLdRecordActionGap,
                       children: [
                         OutlinedButton.icon(
                           onPressed: onView,
@@ -5849,17 +5034,14 @@ class _RspSavedEntryCard extends StatelessWidget {
                     ),
                     const Spacer(),
                     Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+                      spacing: kRspLdRecordActionGap,
+                      runSpacing: kRspLdRecordActionGap,
                       children: [
                         IconButton(
                           onPressed: () => onPrint(),
                           icon: const Icon(Icons.print_rounded, size: 20),
                           tooltip: 'Print',
-                          style: IconButton.styleFrom(
-                            backgroundColor: muted,
-                            foregroundColor: AppTheme.primaryNavy,
-                          ),
+                          style: rspLdRecordIconButtonStyle(),
                         ),
                         IconButton(
                           onPressed: () => onDownloadPdf(),
@@ -5868,10 +5050,7 @@ class _RspSavedEntryCard extends StatelessWidget {
                             size: 20,
                           ),
                           tooltip: 'Download PDF',
-                          style: IconButton.styleFrom(
-                            backgroundColor: muted,
-                            foregroundColor: AppTheme.primaryNavy,
-                          ),
+                          style: rspLdRecordIconButtonStyle(),
                         ),
                         TextButton.icon(
                           onPressed: onDelete,
@@ -6732,7 +5911,8 @@ class _PromotionCertificationList extends StatelessWidget {
               '${e.candidates.length} candidate${e.candidates.length == 1 ? '' : 's'}',
           onView: () => showReadOnlySavedEntryDialog(
             context,
-            title: 'Saved promotion certification',
+            title: 'Promotion certification',
+            subtitle: e.positionForPromotion ?? '',
             previewBuilder: () => _PromotionCertificationEditor(
               readOnly: true,
               entry: e,
@@ -6742,6 +5922,7 @@ class _PromotionCertificationList extends StatelessWidget {
               onDownloadPdf: (_) async {},
             ),
             contentWidth: 960,
+            onPrint: () => onPrint(e),
           ),
           onEdit: () => onEdit(e),
           onPrint: () => onPrint(e),
@@ -6968,12 +6149,9 @@ class _RspSelectionLineupSectionState
             child: Center(child: CircularProgressIndicator()),
           )
         else if (_entries.isEmpty)
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text(
-              'No selection line-ups yet. Tap "Add line-up" to add one.',
-              style: TextStyle(color: AppTheme.textSecondary),
-            ),
+          const RspFormEmptyState(
+            message: 'No selection line-ups yet. Tap "Add line-up" to add one.',
+            icon: Icons.list_alt_rounded,
           )
         else
           _SelectionLineupList(
@@ -7397,98 +6575,51 @@ class _SelectionLineupList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('Vacant position')),
-          DataColumn(label: Text('Date')),
-          DataColumn(label: Text('Applicants')),
-          DataColumn(label: Text('Actions')),
-        ],
-        rows: entries
-            .map(
-              (e) => DataRow(
-                cells: [
-                  DataCell(Text(e.vacantPosition ?? 'â€”')),
-                  DataCell(Text(e.date ?? 'â€”')),
-                  DataCell(Text('${e.applicants.length}')),
-                  DataCell(
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        TextButton(
-                          onPressed: () => showReadOnlySavedEntryDialog(
-                            context,
-                            title: 'Saved selection line-up',
-                            previewBuilder: () => _SelectionLineupEditor(
-                              readOnly: true,
-                              entry: e,
-                              onSave: (_) {},
-                              onCancel: () {},
-                              onPrint: (_) async {},
-                              onDownloadPdf: (_) async {},
-                            ),
-                            contentWidth: 1000,
-                          ),
-                          child: const Text('View'),
-                        ),
-                        TextButton(
-                          onPressed: () => onEdit(e),
-                          child: const Text('Edit'),
-                        ),
-                        IconButton(
-                          onPressed: () => onPrint(e),
-                          icon: const Icon(Icons.print_rounded, size: 20),
-                          tooltip: 'Print',
-                        ),
-                        IconButton(
-                          onPressed: () => onDownloadPdf(e),
-                          icon: const Icon(
-                            Icons.picture_as_pdf_rounded,
-                            size: 20,
-                          ),
-                          tooltip: 'Download PDF',
-                        ),
-                        TextButton(
-                          onPressed: () async {
-                            final ok = await showDialog<bool>(
-                              context: context,
-                              builder: (ctx) => AlertDialog(
-                                title: const Text('Delete?'),
-                                content: const Text('This cannot be undone.'),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () =>
-                                        Navigator.of(ctx).pop(false),
-                                    child: const Text('Cancel'),
-                                  ),
-                                  FilledButton(
-                                    onPressed: () =>
-                                        Navigator.of(ctx).pop(true),
-                                    style: FilledButton.styleFrom(
-                                      backgroundColor: Colors.red,
-                                    ),
-                                    child: const Text('Delete'),
-                                  ),
-                                ],
-                              ),
-                            );
-                            if (ok == true && e.id != null) onDelete(e.id!);
-                          },
-                          child: const Text(
-                            'Delete',
-                            style: TextStyle(color: Colors.red),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+    const columns = [
+      RspRecordsColumn('Vacant position', flex: 2.6),
+      RspRecordsColumn('Date', flex: 1.4),
+      RspRecordsColumn('Applicants', flex: 1, align: TextAlign.center),
+      RspRecordsColumn('Actions', flex: 2.4, align: TextAlign.center),
+    ];
+    return RspRecordsListTable(
+      columns: columns,
+      rows: entries
+          .map(
+            (e) => [
+              rspRecordsTextCell(e.vacantPosition ?? '', bold: true),
+              rspRecordsTextCell(e.date ?? ''),
+              rspRecordsTextCell(
+                '${e.applicants.length}',
+                align: TextAlign.center,
+                bold: true,
               ),
-            )
-            .toList(),
-      ),
+              RspRecordsCrudActions(
+                onView: () => showReadOnlySavedEntryDialog(
+                  context,
+                  title: 'Selection line-up',
+                  subtitle: e.vacantPosition ?? '',
+                  previewBuilder: () => _SelectionLineupEditor(
+                    readOnly: true,
+                    entry: e,
+                    onSave: (_) {},
+                    onCancel: () {},
+                    onPrint: (_) async {},
+                    onDownloadPdf: (_) async {},
+                  ),
+                  contentWidth: 1000,
+                  onPrint: () => onPrint(e),
+                ),
+                onEdit: () => onEdit(e),
+                onPrint: () => onPrint(e),
+                onDownloadPdf: () => onDownloadPdf(e),
+                onDelete: () async {
+                  if (e.id != null) onDelete(e.id!);
+                },
+                deleteDialogTitle: 'Delete line-up?',
+              ),
+            ],
+          )
+          .toList(),
     );
   }
 }
@@ -7707,12 +6838,10 @@ class _RspTurnAroundTimeSectionState extends State<_RspTurnAroundTimeSection> {
             child: Center(child: CircularProgressIndicator()),
           )
         else if (_entries.isEmpty)
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text(
-              'No turn-around time entries yet. Tap "Add turn-around time" to add one.',
-              style: TextStyle(color: AppTheme.textSecondary),
-            ),
+          const RspFormEmptyState(
+            message:
+                'No turn-around time entries yet. Tap "Add turn-around time" to add one.',
+            icon: Icons.schedule_rounded,
           )
         else
           _TurnAroundTimeList(
@@ -8248,98 +7377,51 @@ class _TurnAroundTimeList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('Position')),
-          DataColumn(label: Text('Office')),
-          DataColumn(label: Text('Applicants')),
-          DataColumn(label: Text('Actions')),
-        ],
-        rows: entries
-            .map(
-              (e) => DataRow(
-                cells: [
-                  DataCell(Text(e.position ?? 'â€”')),
-                  DataCell(Text(e.office ?? 'â€”')),
-                  DataCell(Text('${e.applicants.length}')),
-                  DataCell(
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        TextButton(
-                          onPressed: () => showReadOnlySavedEntryDialog(
-                            context,
-                            title: 'Saved turn-around time',
-                            previewBuilder: () => _TurnAroundTimeEditor(
-                              readOnly: true,
-                              entry: e,
-                              onSave: (_) {},
-                              onCancel: () {},
-                              onPrint: (_) async {},
-                              onDownloadPdf: (_) async {},
-                            ),
-                            contentWidth: 1200,
-                          ),
-                          child: const Text('View'),
-                        ),
-                        TextButton(
-                          onPressed: () => onEdit(e),
-                          child: const Text('Edit'),
-                        ),
-                        IconButton(
-                          onPressed: () => onPrint(e),
-                          icon: const Icon(Icons.print_rounded, size: 20),
-                          tooltip: 'Print',
-                        ),
-                        IconButton(
-                          onPressed: () => onDownloadPdf(e),
-                          icon: const Icon(
-                            Icons.picture_as_pdf_rounded,
-                            size: 20,
-                          ),
-                          tooltip: 'Download PDF',
-                        ),
-                        TextButton(
-                          onPressed: () async {
-                            final ok = await showDialog<bool>(
-                              context: context,
-                              builder: (ctx) => AlertDialog(
-                                title: const Text('Delete?'),
-                                content: const Text('This cannot be undone.'),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () =>
-                                        Navigator.of(ctx).pop(false),
-                                    child: const Text('Cancel'),
-                                  ),
-                                  FilledButton(
-                                    onPressed: () =>
-                                        Navigator.of(ctx).pop(true),
-                                    style: FilledButton.styleFrom(
-                                      backgroundColor: Colors.red,
-                                    ),
-                                    child: const Text('Delete'),
-                                  ),
-                                ],
-                              ),
-                            );
-                            if (ok == true && e.id != null) onDelete(e.id!);
-                          },
-                          child: const Text(
-                            'Delete',
-                            style: TextStyle(color: Colors.red),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+    const columns = [
+      RspRecordsColumn('Position', flex: 2.4),
+      RspRecordsColumn('Office', flex: 2),
+      RspRecordsColumn('Applicants', flex: 1, align: TextAlign.center),
+      RspRecordsColumn('Actions', flex: 2.4, align: TextAlign.center),
+    ];
+    return RspRecordsListTable(
+      columns: columns,
+      rows: entries
+          .map(
+            (e) => [
+              rspRecordsTextCell(e.position ?? '', bold: true),
+              rspRecordsTextCell(e.office ?? ''),
+              rspRecordsTextCell(
+                '${e.applicants.length}',
+                align: TextAlign.center,
+                bold: true,
               ),
-            )
-            .toList(),
-      ),
+              RspRecordsCrudActions(
+                onView: () => showReadOnlySavedEntryDialog(
+                  context,
+                  title: 'Turn-around time',
+                  subtitle: '${e.position ?? ''} · ${e.office ?? ''}',
+                  previewBuilder: () => _TurnAroundTimeEditor(
+                    readOnly: true,
+                    entry: e,
+                    onSave: (_) {},
+                    onCancel: () {},
+                    onPrint: (_) async {},
+                    onDownloadPdf: (_) async {},
+                  ),
+                  contentWidth: 1200,
+                  onPrint: () => onPrint(e),
+                ),
+                onEdit: () => onEdit(e),
+                onPrint: () => onPrint(e),
+                onDownloadPdf: () => onDownloadPdf(e),
+                onDelete: () async {
+                  if (e.id != null) onDelete(e.id!);
+                },
+                deleteDialogTitle: 'Delete entry?',
+              ),
+            ],
+          )
+          .toList(),
     );
   }
 }
@@ -8385,6 +7467,67 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
   /// Parallel to [_vacancies]: when false, only the header row is shown.
   final List<bool> _vacancyExpanded = [];
   bool _saving = false;
+  bool _savingToggle = false;
+
+  /// Fingerprint of vacancy entries last saved to the server (not including hiring toggle).
+  String _savedVacanciesFingerprint = '';
+
+  List<Map<String, String?>> _vacancyMapsFromForm() {
+    return _vacancies.map((v) {
+      return <String, String?>{
+        'headline': v.headline.text.trim(),
+        'education': v.education.text.trim(),
+        'experience': v.experience.text.trim(),
+        'training': v.training.text.trim(),
+        'closing_date': v.closingDate.text.trim(),
+        'max_applicants': v.maxApplicants.text.trim(),
+      };
+    }).toList();
+  }
+
+  String _fingerprintVacancyMaps(List<Map<String, String?>> maps) {
+    return jsonEncode(maps);
+  }
+
+  bool get _vacanciesDirty =>
+      !_loading &&
+      _fingerprintVacancyMaps(_vacancyMapsFromForm()) !=
+          _savedVacanciesFingerprint;
+
+  Future<void> _onHasVacanciesChanged(bool value) async {
+    if (_savingToggle) return;
+    final previous = _hasVacancies;
+    setState(() {
+      _hasVacancies = value;
+      _savingToggle = true;
+    });
+    try {
+      await JobVacancyAnnouncementRepo.instance.updateHasVacancies(value);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            value
+                ? 'Landing page is now open for hiring.'
+                : 'Landing page now shows no vacancies.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() => _hasVacancies = previous);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not update hiring status. ${userFacingApiError(e)}',
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingToggle = false);
+    }
+  }
 
   String _vacancyEntrySummary(_VacancyFormItem v) {
     final h = v.headline.text.trim();
@@ -8453,6 +7596,8 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
             ..addAll(List<bool>.filled(_vacancies.length, true));
           _loading = false;
           _hasVacancies = a.hasVacancies;
+          _savedVacanciesFingerprint =
+              _fingerprintVacancyMaps(_vacancyMapsFromForm());
         });
       }
     });
@@ -8493,7 +7638,7 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
       builder: (ctx) => AlertDialog(
         title: const Text('Delete vacancy?'),
         content: Text(
-          'Remove "$title" from the list? Use this when the job hiring is done. You can add it again later if needed. Changes are saved when you tap "Save and display on landing page".',
+          'Remove "$title" from the list? Use this when the job hiring is done. You can add it again later if needed. Tap "Save vacancy entries" below to publish this change on the landing page.',
         ),
         actions: [
           TextButton(
@@ -8547,10 +7692,14 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
       );
       await JobVacancyAnnouncementRepo.instance.update(a);
       if (mounted) {
+        setState(() {
+          _savedVacanciesFingerprint =
+              _fingerprintVacancyMaps(_vacancyMapsFromForm());
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Job vacancy announcement saved. Landing page will show this.',
+              'Vacancy entries saved. Landing page will show the updated positions.',
             ),
           ),
         );
@@ -8795,7 +7944,7 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
                                       ),
                                       const SizedBox(height: 8),
                                       Text(
-                                        'When ON, the landing page shows that you are hiring. When OFF, it shows no vacancies.',
+                                        'When ON, the landing page shows that you are hiring. When OFF, it shows no vacancies. This saves immediately.',
                                         style: TextStyle(
                                           color: AppTheme.dashTextSecondaryOf(
                                             context,
@@ -8809,10 +7958,22 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
                                   ),
                                 ),
                                 const SizedBox(width: 8),
+                                if (_savingToggle)
+                                  const Padding(
+                                    padding: EdgeInsets.only(right: 4),
+                                    child: SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    ),
+                                  ),
                                 Switch(
                                   value: _hasVacancies,
-                                  onChanged: (v) =>
-                                      setState(() => _hasVacancies = v),
+                                  onChanged: _savingToggle
+                                      ? null
+                                      : _onHasVacanciesChanged,
                                   activeTrackColor: AppTheme.primaryNavy
                                       .withValues(alpha: 0.45),
                                   activeThumbColor: AppTheme.primaryNavy,
@@ -9270,7 +8431,7 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
                                                     'Max applicants',
                                                   ),
                                                   Text(
-                                                    'Counts only applicants still in process. Document declined, exam failed, final interview failed, or hired (registered) frees a slot.',
+                                                    'Landing page shows slots in use (pipeline only). Hired (registered), declined documents, failed exam, or failed final interview do not count toward the limit.',
                                                     style: TextStyle(
                                                       color: AppTheme
                                                           .dashTextSecondaryOf(
@@ -9310,29 +8471,51 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
                           const SizedBox(height: 8),
                           Divider(height: 1, color: hairline),
                           const SizedBox(height: 20),
+                          if (!_vacanciesDirty && !_saving) ...[
+                            Text(
+                              'Hiring on/off saves automatically. Use the button below only after you change positions, add vacancies, or edit vacancy details.',
+                              style: TextStyle(
+                                color: AppTheme.dashTextSecondaryOf(context),
+                                fontSize: 13,
+                                height: 1.45,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                          ],
                           DecoratedBox(
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(14),
-                              gradient: const LinearGradient(
-                                colors: [
-                                  AppTheme.primaryNavy,
-                                  AppTheme.primaryNavyLight,
-                                ],
+                              gradient: LinearGradient(
+                                colors: _vacanciesDirty
+                                    ? const [
+                                        AppTheme.primaryNavy,
+                                        AppTheme.primaryNavyLight,
+                                      ]
+                                    : [
+                                        AppTheme.dashTextSecondaryOf(context)
+                                            .withValues(alpha: 0.35),
+                                        AppTheme.dashTextSecondaryOf(context)
+                                            .withValues(alpha: 0.25),
+                                      ],
                               ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: AppTheme.primaryNavy.withValues(
-                                    alpha: 0.28,
-                                  ),
-                                  blurRadius: 16,
-                                  offset: const Offset(0, 6),
-                                ),
-                              ],
+                              boxShadow: _vacanciesDirty
+                                  ? [
+                                      BoxShadow(
+                                        color: AppTheme.primaryNavy.withValues(
+                                          alpha: 0.28,
+                                        ),
+                                        blurRadius: 16,
+                                        offset: const Offset(0, 6),
+                                      ),
+                                    ]
+                                  : null,
                             ),
                             child: SizedBox(
                               width: double.infinity,
                               child: FilledButton.icon(
-                                onPressed: _saving ? null : _save,
+                                onPressed: (_saving || !_vacanciesDirty)
+                                    ? null
+                                    : _save,
                                 icon: _saving
                                     ? const SizedBox(
                                         width: 20,
@@ -9346,7 +8529,9 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
                                 label: Text(
                                   _saving
                                       ? 'Saving...'
-                                      : 'Save and display on landing page',
+                                      : _vacanciesDirty
+                                          ? 'Save vacancy entries on landing page'
+                                          : 'No vacancy changes to save',
                                   style: const TextStyle(
                                     fontWeight: FontWeight.w700,
                                     fontSize: 15,
@@ -9505,265 +8690,229 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     );
   }
 
+  Widget _scoreBreakdownHeaderCell(
+    String label, {
+    TextAlign align = TextAlign.start,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 14),
+      child: Text(
+        label,
+        textAlign: align,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          color: AppTheme.letterheadNavy,
+          fontWeight: FontWeight.w800,
+          fontSize: 11.5,
+          letterSpacing: 0.45,
+          height: 1.2,
+        ),
+      ),
+    );
+  }
+
+  Widget _scoreBreakdownBodyCell(
+    Widget child, {
+    Color? background,
+    EdgeInsets padding = const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
+  }) {
+    return ColoredBox(
+      color: background ?? Colors.transparent,
+      child: Padding(padding: padding, child: child),
+    );
+  }
+
   Widget _buildScoreBreakdownDataTable(BuildContext dialogContext) {
     final borderColor = AppTheme.dashHairlineOf(dialogContext);
     final headerBg = AppTheme.primaryNavy.withValues(alpha: 0.09);
-    return SizedBox.expand(
-      child: Scrollbar(
-        thickness: 8,
-        radius: const Radius.circular(8),
-        thumbVisibility: true,
-        interactive: true,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.vertical,
-          primary: false,
-          child: Scrollbar(
-            controller: _horizontalScrollController,
-            thickness: 8,
-            radius: const Radius.circular(8),
-            thumbVisibility: true,
-            interactive: true,
-            notificationPredicate: (n) => n.metrics.axis == Axis.horizontal,
-            child: ScrollConfiguration(
-              behavior: ScrollConfiguration.of(dialogContext).copyWith(
-                dragDevices: const {
-                  PointerDeviceKind.touch,
-                  PointerDeviceKind.mouse,
-                  PointerDeviceKind.trackpad,
-                  PointerDeviceKind.stylus,
-                },
-              ),
-              child: SingleChildScrollView(
-                controller: _horizontalScrollController,
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.fromLTRB(6, 10, 14, 14),
-                child: DataTable(
-                  columnSpacing: 34,
-                  horizontalMargin: 24,
-                  headingRowHeight: 56,
-                  dataRowMinHeight: 62,
-                  dataRowMaxHeight: 100,
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tableWidth = constraints.maxWidth;
+        final narrow = tableWidth < 720;
+        final gradeW = narrow ? 64.0 : 72.0;
+        final resultW = narrow ? 96.0 : 108.0;
+        final genInfoLabel = narrow ? 'Gen.' : 'Gen. info';
+
+        // Flex columns expand to fill width; Grade/Result stay fixed.
+        final columnWidths = <int, TableColumnWidth>{
+          0: const FlexColumnWidth(2.1),
+          1: const FlexColumnWidth(2.6),
+          2: const FlexColumnWidth(1.05),
+          3: const FlexColumnWidth(1.05),
+          4: const FlexColumnWidth(1.15),
+          5: const FlexColumnWidth(1.05),
+          6: FixedColumnWidth(gradeW),
+          7: FixedColumnWidth(resultW),
+        };
+
+        final rows = <TableRow>[
+          TableRow(
+            decoration: BoxDecoration(color: headerBg),
+            children: [
+              _scoreBreakdownHeaderCell('Applicant'),
+              _scoreBreakdownHeaderCell('Position'),
+              _scoreBreakdownHeaderCell('General', align: TextAlign.end),
+              _scoreBreakdownHeaderCell('Math', align: TextAlign.end),
+              _scoreBreakdownHeaderCell(genInfoLabel, align: TextAlign.end),
+              _scoreBreakdownHeaderCell('BEI', align: TextAlign.end),
+              _scoreBreakdownHeaderCell('Grade', align: TextAlign.center),
+              _scoreBreakdownHeaderCell('Result', align: TextAlign.center),
+            ],
+          ),
+          ..._applications.asMap().entries.map((entry) {
+            final index = entry.key;
+            final app = entry.value;
+            final exam = _examResults[app.id.toLowerCase()];
+            double? generalScore;
+            double? mathScore;
+            double? infoScore;
+            double? beiScore;
+            final answersJson = exam?.answersJson;
+            if (answersJson != null) {
+              generalScore = _sectionScorePercent(answersJson, 'general');
+              mathScore = _sectionScorePercent(answersJson, 'math');
+              infoScore = _sectionScorePercent(answersJson, 'general_info');
+              beiScore = _beiSectionScorePercent(answersJson);
+            }
+
+            String scoreLabel(double? v) =>
+                v == null ? '—' : '${v.toStringAsFixed(0)}%';
+
+            final canGradeBei = exam != null && _hasBeiAnswers(exam);
+            final rowBg = index.isOdd
+                ? AppTheme.dashMutedSurfaceOf(dialogContext)
+                : AppTheme.dashPanelOf(dialogContext);
+
+            Widget scoreCell(double? value) => Text(
+                  scoreLabel(value),
+                  textAlign: TextAlign.end,
+                  style: _scoreBreakdownScoreStyle(
+                    isNA: value == null,
+                    value: value,
+                  ),
+                );
+
+            return TableRow(
+              decoration: BoxDecoration(color: rowBg),
+              children: [
+                _scoreBreakdownBodyCell(
+                  Text(
+                    app.fullName,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    softWrap: true,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                  background: rowBg,
+                ),
+                _scoreBreakdownBodyCell(
+                  Text(
+                    (app.positionAppliedFor != null &&
+                            app.positionAppliedFor!.trim().isNotEmpty)
+                        ? app.positionAppliedFor!.trim()
+                        : '—',
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    softWrap: true,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                      color: AppTheme.textSecondary.withValues(alpha: 0.95),
+                    ),
+                  ),
+                  background: rowBg,
+                ),
+                _scoreBreakdownBodyCell(scoreCell(generalScore), background: rowBg),
+                _scoreBreakdownBodyCell(scoreCell(mathScore), background: rowBg),
+                _scoreBreakdownBodyCell(scoreCell(infoScore), background: rowBg),
+                _scoreBreakdownBodyCell(scoreCell(beiScore), background: rowBg),
+                _scoreBreakdownBodyCell(
+                  Center(
+                    child: canGradeBei
+                        ? IconButton.filled(
+                            tooltip: 'Grade BEI',
+                            style: IconButton.styleFrom(
+                              backgroundColor: AppTheme.primaryNavy
+                                  .withValues(alpha: 0.14),
+                              foregroundColor: AppTheme.primaryNavy,
+                              padding: const EdgeInsets.all(8),
+                              minimumSize: const Size(40, 40),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                side: BorderSide(
+                                  color: AppTheme.primaryNavy
+                                      .withValues(alpha: 0.35),
+                                ),
+                              ),
+                            ),
+                            icon: const Icon(Icons.rate_review_rounded, size: 20),
+                            onPressed: () {
+                              showRspBeiGradingDialog(
+                                context: dialogContext,
+                                applicant: app,
+                                exam: exam,
+                                onSaved: _load,
+                              );
+                            },
+                          )
+                        : Tooltip(
+                            message: 'No BEI answers on file',
+                            child: Icon(
+                              Icons.remove_rounded,
+                              size: 18,
+                              color: AppTheme.textSecondary
+                                  .withValues(alpha: 0.35),
+                            ),
+                          ),
+                  ),
+                  background: rowBg,
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                ),
+                _scoreBreakdownBodyCell(
+                  Align(
+                    alignment: Alignment.center,
+                    child: _scoreBreakdownStatusPill(exam: exam),
+                  ),
+                  background: rowBg,
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                ),
+              ],
+            );
+          }),
+        ];
+
+        return Scrollbar(
+          thickness: 8,
+          radius: const Radius.circular(8),
+          thumbVisibility: true,
+          interactive: true,
+          child: SingleChildScrollView(
+            primary: false,
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: SizedBox(
+                width: tableWidth,
+                child: Table(
+                  columnWidths: columnWidths,
+                  defaultVerticalAlignment: TableCellVerticalAlignment.middle,
                   border: TableBorder(
                     horizontalInside: BorderSide(color: borderColor),
                     verticalInside: BorderSide.none,
                   ),
-                  dividerThickness: 0,
-                  headingRowColor: WidgetStateProperty.all(headerBg),
-                  headingTextStyle: TextStyle(
-                    color: AppTheme.letterheadNavy,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 11.5,
-                    letterSpacing: 0.55,
-                    height: 1.25,
-                  ),
-                  dataTextStyle: TextStyle(
-                    color: AppTheme.dashTextPrimaryOf(dialogContext),
-                    fontSize: 13.5,
-                    height: 1.3,
-                    fontWeight: FontWeight.w500,
-                  ),
-                  columns: const [
-                    DataColumn(
-                      label: SizedBox(width: 220, child: Text('Applicant')),
-                    ),
-                    DataColumn(
-                      label: SizedBox(width: 200, child: Text('Position')),
-                    ),
-                    DataColumn(
-                      label: SizedBox(width: 84, child: Text('General')),
-                      numeric: true,
-                    ),
-                    DataColumn(
-                      label: SizedBox(width: 84, child: Text('Math')),
-                      numeric: true,
-                    ),
-                    DataColumn(
-                      label: SizedBox(width: 92, child: Text('Gen. info')),
-                      numeric: true,
-                    ),
-                    DataColumn(
-                      label: SizedBox(width: 74, child: Text('BEI')),
-                      numeric: true,
-                    ),
-                    DataColumn(
-                      label: SizedBox(width: 96, child: Text('Grade')),
-                    ),
-                    DataColumn(
-                      label: SizedBox(width: 120, child: Text('Result')),
-                    ),
-                  ],
-                  rows: _applications.asMap().entries.map((entry) {
-                    final index = entry.key;
-                    final app = entry.value;
-                    final exam = _examResults[app.id.toLowerCase()];
-                    double? generalScore;
-                    double? mathScore;
-                    double? infoScore;
-                    double? beiScore;
-                    final answersJson = exam?.answersJson;
-                    if (answersJson != null) {
-                      generalScore = _sectionScorePercent(
-                        answersJson,
-                        'general',
-                      );
-                      mathScore = _sectionScorePercent(answersJson, 'math');
-                      infoScore = _sectionScorePercent(
-                        answersJson,
-                        'general_info',
-                      );
-                      beiScore = _beiSectionScorePercent(answersJson);
-                    }
-
-                    String scoreLabel(double? v) =>
-                        v == null ? '—' : '${v.toStringAsFixed(0)}%';
-
-                    final canGradeBei = exam != null && _hasBeiAnswers(exam);
-
-                    return DataRow(
-                      color: WidgetStateProperty.resolveWith((states) {
-                        if (index.isOdd) {
-                          return AppTheme.dashMutedSurfaceOf(dialogContext);
-                        }
-                        return AppTheme.dashPanelOf(dialogContext);
-                      }),
-                      cells: [
-                        DataCell(
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(
-                              minWidth: 220,
-                              maxWidth: 300,
-                            ),
-                            child: Text(
-                              app.fullName,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              softWrap: true,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 13.5,
-                              ),
-                            ),
-                          ),
-                        ),
-                        DataCell(
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(
-                              minWidth: 200,
-                              maxWidth: 280,
-                            ),
-                            child: Text(
-                              (app.positionAppliedFor != null &&
-                                      app.positionAppliedFor!.trim().isNotEmpty)
-                                  ? app.positionAppliedFor!.trim()
-                                  : '—',
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              softWrap: true,
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                                color: AppTheme.textSecondary.withValues(
-                                  alpha: 0.95,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        DataCell(
-                          Text(
-                            scoreLabel(generalScore),
-                            textAlign: TextAlign.end,
-                            style: _scoreBreakdownScoreStyle(
-                              isNA: generalScore == null,
-                              value: generalScore,
-                            ),
-                          ),
-                        ),
-                        DataCell(
-                          Text(
-                            scoreLabel(mathScore),
-                            textAlign: TextAlign.end,
-                            style: _scoreBreakdownScoreStyle(
-                              isNA: mathScore == null,
-                              value: mathScore,
-                            ),
-                          ),
-                        ),
-                        DataCell(
-                          Text(
-                            scoreLabel(infoScore),
-                            textAlign: TextAlign.end,
-                            style: _scoreBreakdownScoreStyle(
-                              isNA: infoScore == null,
-                              value: infoScore,
-                            ),
-                          ),
-                        ),
-                        DataCell(
-                          Text(
-                            scoreLabel(beiScore),
-                            textAlign: TextAlign.end,
-                            style: _scoreBreakdownScoreStyle(
-                              isNA: beiScore == null,
-                              value: beiScore,
-                            ),
-                          ),
-                        ),
-                        DataCell(
-                          Center(
-                            child: canGradeBei
-                                ? IconButton.filled(
-                                    tooltip: 'Grade BEI',
-                                    style: IconButton.styleFrom(
-                                      backgroundColor: AppTheme.primaryNavy
-                                          .withValues(alpha: 0.14),
-                                      foregroundColor: AppTheme.primaryNavy,
-                                      padding: const EdgeInsets.all(10),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                        side: BorderSide(
-                                          color: AppTheme.primaryNavy
-                                              .withValues(alpha: 0.35),
-                                        ),
-                                      ),
-                                    ),
-                                    icon: const Icon(
-                                      Icons.rate_review_rounded,
-                                      size: 22,
-                                    ),
-                                    onPressed: () {
-                                      showRspBeiGradingDialog(
-                                        context: dialogContext,
-                                        applicant: app,
-                                        exam: exam,
-                                        onSaved: _load,
-                                      );
-                                    },
-                                  )
-                                : Tooltip(
-                                    message: 'No BEI answers on file',
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(8),
-                                      child: Icon(
-                                        Icons.remove_rounded,
-                                        size: 20,
-                                        color: AppTheme.textSecondary
-                                            .withValues(alpha: 0.35),
-                                      ),
-                                    ),
-                                  ),
-                          ),
-                        ),
-                        DataCell(_scoreBreakdownStatusPill(exam: exam)),
-                      ],
-                    );
-                  }).toList(),
+                  children: rows,
                 ),
               ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -9848,7 +8997,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
               ? Builder(
                   builder: (_) {
                     final mq = MediaQuery.sizeOf(ctx);
-                    final contentWidth = (mq.width - 36).clamp(300.0, 1080.0);
+                    final contentWidth = (mq.width * 0.94 - 24).clamp(
+                      560.0,
+                      1100.0,
+                    );
                     final contentHeight = (mq.height * 0.68).clamp(
                       360.0,
                       720.0,

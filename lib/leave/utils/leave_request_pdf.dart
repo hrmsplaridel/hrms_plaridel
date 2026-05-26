@@ -298,12 +298,12 @@ class LeaveRequestPdf {
 
     final leaveType = request.leaveType;
     final wdCert = computedWorkingDays ?? 0.0;
-    final vlDeduction = (leaveType == LeaveType.vacationLeave ||
+    final vlDeduction =
+        (leaveType == LeaveType.vacationLeave ||
             leaveType == LeaveType.mandatoryForcedLeave)
         ? wdCert
         : 0.0;
-    final slDeduction =
-        leaveType == LeaveType.sickLeave ? wdCert : 0.0;
+    final slDeduction = leaveType == LeaveType.sickLeave ? wdCert : 0.0;
 
     String formatDays(double d) => d == 0 ? '—' : d.toStringAsFixed(3);
 
@@ -598,6 +598,28 @@ class LeaveRequestPdf {
                             ),
                             pw.SizedBox(height: 4),
                             _fieldLine(_s(request.sickIllnessDetails)),
+                            pw.SizedBox(height: 8),
+
+                            pw.Text(
+                              'In case of Maternity Leave:',
+                              style: pw.TextStyle(
+                                fontSize: 10.2,
+                                fontWeight: pw.FontWeight.bold,
+                                height: 1.2,
+                              ),
+                            ),
+                            _rowCheck(
+                              'Normal Delivery (Non-CS)',
+                              checked:
+                                  request.maternityDeliveryType ==
+                                  MaternityDeliveryType.normalDelivery,
+                            ),
+                            _rowCheck(
+                              'Caesarean Section (CS)',
+                              checked:
+                                  request.maternityDeliveryType ==
+                                  MaternityDeliveryType.caesareanSection,
+                            ),
                             pw.SizedBox(height: 8),
 
                             pw.Text(
@@ -1556,7 +1578,8 @@ class _LeaveRequestPdfFixedEngine {
         ? _s(request.reviewerTitle)
         : _s(request.reviewerRole);
 
-    final vlDed = (request.leaveType == LeaveType.vacationLeave ||
+    final vlDed =
+        (request.leaveType == LeaveType.vacationLeave ||
             request.leaveType == LeaveType.mandatoryForcedLeave)
         ? (wd ?? 0.0)
         : 0.0;
@@ -1950,6 +1973,25 @@ class _LeaveRequestPdfFixedEngine {
                                     ),
                                     _underlineValue(
                                       _s(request.sickIllnessDetails),
+                                    ),
+                                    pw.SizedBox(height: 3),
+                                    pw.Text(
+                                      'In case of Maternity Leave:',
+                                      style: pw.TextStyle(
+                                        fontSize: _small,
+                                        fontWeight: pw.FontWeight.bold,
+                                      ),
+                                    ),
+                                    _checkLine(
+                                      'Normal Delivery (Non-CS)',
+                                      request.maternityDeliveryType ==
+                                          MaternityDeliveryType.normalDelivery,
+                                    ),
+                                    _checkLine(
+                                      'Caesarean Section (CS)',
+                                      request.maternityDeliveryType ==
+                                          MaternityDeliveryType
+                                              .caesareanSection,
                                     ),
                                     pw.SizedBox(height: 3),
                                     pw.Text(

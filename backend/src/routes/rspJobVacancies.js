@@ -186,5 +186,43 @@ router.put('/', protect, requireAdminOrSupervisor, async (req, res) => {
   }
 });
 
+// PATCH /api/rsp/job-vacancies/accepting
+// Updates only has_vacancies (landing hiring on/off) without touching vacancy entries.
+router.patch('/accepting', protect, requireAdminOrSupervisor, async (req, res) => {
+  try {
+    const { has_vacancies } = req.body || {};
+    if (has_vacancies === undefined) {
+      return res.status(400).json({ error: 'has_vacancies is required' });
+    }
+
+    await ensureTable();
+    const hasVacanciesValue = !!has_vacancies;
+
+    const updated = await pool.query(
+      `UPDATE public.job_vacancy_announcement
+       SET has_vacancies = $1, updated_at = now()
+       WHERE id = 'default'
+       RETURNING has_vacancies`,
+      [hasVacanciesValue]
+    );
+
+    if (updated.rowCount === 0) {
+      await pool.query(
+        `INSERT INTO public.job_vacancy_announcement (id, has_vacancies, headline, body, vacancies)
+         VALUES ('default', $1, NULL, NULL, '[]'::jsonb)`,
+        [hasVacanciesValue]
+      );
+    }
+
+    res.json({ ok: true, has_vacancies: hasVacanciesValue });
+  } catch (err) {
+    console.error('[rspJobVacancies PATCH accepting]', err);
+    res.status(500).json({
+      error: 'Failed to update hiring status',
+      details: err?.message ? String(err.message) : String(err),
+    });
+  }
+});
+
 module.exports = router;
 

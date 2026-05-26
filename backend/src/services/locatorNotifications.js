@@ -18,6 +18,17 @@ function fmtSegmentLabel({ amIn, amOut, pmIn, pmOut }) {
   return parts.join(', ');
 }
 
+function requestTypeLabel(value) {
+  switch ((value || 'locator').toString().trim().toLowerCase()) {
+    case 'pass_slip':
+      return 'pass slip';
+    case 'work_from_home':
+      return 'work-from-home request';
+    default:
+      return 'locator request';
+  }
+}
+
 async function notifyAfterSubmit(
   pool,
   {
@@ -30,20 +41,22 @@ async function notifyAfterSubmit(
     amOut,
     pmIn,
     pmOut,
+    requestType,
     departmentHeadUserId,
   }
 ) {
   const dateLabel = fmtDate(slipDate);
   const segmentLabel = fmtSegmentLabel({ amIn, amOut, pmIn, pmOut });
   const who = employeeName || 'An employee';
-  const bodyBase = `${who} filed a locator slip for ${dateLabel}${segmentLabel ? ` (${segmentLabel})` : ''}.`;
+  const requestLabel = requestTypeLabel(requestType);
+  const bodyBase = `${who} filed a ${requestLabel} for ${dateLabel}${segmentLabel ? ` (${segmentLabel})` : ''}.`;
 
   if (status === 'pending_department_head' && departmentHeadUserId) {
     await insertNotification(pool, {
       userId: departmentHeadUserId,
       category: 'locator',
       type: 'locator_pending_department_head',
-      title: 'Locator slip needs your review',
+      title: 'Locator request needs your review',
       body: bodyBase,
       referenceType: 'locator_slip',
       referenceId: slipId,
@@ -58,7 +71,7 @@ async function notifyAfterSubmit(
     await insertNotificationForUsers(pool, targets, {
       category: 'locator',
       type: 'locator_pending_hr',
-      title: 'New locator slip for HR review',
+      title: 'New locator request for HR review',
       body: bodyBase,
       referenceType: 'locator_slip',
       referenceId: slipId,
@@ -69,19 +82,40 @@ async function notifyAfterSubmit(
 
 async function notifyDepartmentHeadApprovedForHr(
   pool,
-  { slipId, employeeName, slipDate }
+  { slipId, employeeName, slipDate, requestType }
 ) {
+  const requestLabel = requestTypeLabel(requestType);
   const hrIds = await getHrAdminUserIds(pool);
   await insertNotificationForUsers(pool, hrIds, {
     category: 'locator',
     type: 'locator_forwarded_to_hr',
-    title: 'Locator slip ready for HR approval',
-    body: `${employeeName || 'An employee'} locator slip (${fmtDate(
+    title: 'Locator request ready for HR approval',
+    body: `${employeeName || 'An employee'} ${requestLabel} (${fmtDate(
       slipDate
     )}) was endorsed by the department head.`,
     referenceType: 'locator_slip',
     referenceId: slipId,
     metadata: null,
+  });
+}
+
+async function notifyDepartmentHeadApprovedForEmployee(
+  pool,
+  { slipId, employeeUserId, slipDate, requestType, metadata = null }
+) {
+  if (!employeeUserId) return;
+  const requestLabel = requestTypeLabel(requestType);
+  await insertNotification(pool, {
+    userId: employeeUserId,
+    category: 'locator',
+    type: 'locator_approved_department_head',
+    title: 'Locator request endorsed',
+    body: `Your ${requestLabel} for ${fmtDate(
+      slipDate
+    )} was endorsed by your department head and forwarded to HR.`,
+    referenceType: 'locator_slip',
+    referenceId: slipId,
+    metadata,
   });
 }
 
@@ -105,5 +139,6 @@ async function notifyEmployee(
 module.exports = {
   notifyAfterSubmit,
   notifyDepartmentHeadApprovedForHr,
+  notifyDepartmentHeadApprovedForEmployee,
   notifyEmployee,
 };

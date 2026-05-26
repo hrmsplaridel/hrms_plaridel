@@ -1,9 +1,11 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../api/client.dart';
+import '../../data/locator_request_type.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../realtime/app_realtime_provider.dart';
@@ -54,6 +56,14 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
   String? _selectedApprovalSlipId;
   StreamSubscription<AppRealtimeEvent>? _locatorRealtimeSub;
 
+  bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
+
+  Color _headingColor(BuildContext context) =>
+      AppTheme.dashTextPrimaryOf(context);
+
+  Color _mutedColor(BuildContext context) =>
+      AppTheme.dashTextSecondaryOf(context);
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -86,7 +96,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
       if (_searchQuery.trim().isNotEmpty) {
         final q = _searchQuery.trim().toLowerCase();
         final searchable =
-            '${item.employeeName} ${item.office} ${item.remarks} ${item.status.label}'
+            '${item.employeeName} ${item.requestType.label} ${item.office} ${item.remarks} ${item.status.label}'
                 .toLowerCase();
         if (!searchable.contains(q)) return false;
       }
@@ -201,12 +211,13 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
         break;
       }
     }
+    final canCancelSelected = _canCancelSlip(selectedSlip);
     final useScrollableList = visibleSlips.length > 3;
 
     return _SectionCard(
-      title: 'My Locator Slip Requests',
+      title: 'My Locator Requests',
       subtitle:
-          'Use filters to quickly find slips by status, date, office, or reason.',
+          'Use filters to quickly find requests by status, date, type, office, or reason.',
       icon: Icons.receipt_long_rounded,
       headerTrailing: SectionHeaderActions(
         children: [
@@ -223,6 +234,14 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
                 ? null
                 : () => _showSlipHistory(context, selectedSlip!),
             label: 'View History',
+          ),
+          SectionHeaderActionButton.outlined(
+            context: context,
+            onPressed: !canCancelSelected
+                ? null
+                : () => _cancelSlip(selectedSlip!),
+            icon: Icons.close_rounded,
+            label: 'Cancel',
           ),
         ],
       ),
@@ -252,54 +271,20 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
               child: _ErrorState(message: _error!),
             ),
           _loadingMy
-              ? const _CenteredLoading(message: 'Loading locator slips...')
+              ? const _CenteredLoading(message: 'Loading locator requests...')
               : _slips.isEmpty
               ? const _EmptyState(
                   message:
-                      'No locator slip requests yet. Click "File Locator Slip" to create one.',
+                      'No locator requests yet. Click "File Request" to create one.',
                 )
               : _filteredSlips.isEmpty
               ? const _EmptyState(
-                  message: 'No locator slips match the current filters.',
+                  message: 'No locator requests match the current filters.',
                 )
-              : !useScrollableList
-              ? Column(
-                  children: List.generate(visibleSlips.length, (index) {
-                    final item = visibleSlips[index];
-                    return Padding(
-                      padding: EdgeInsets.only(
-                        bottom: index == visibleSlips.length - 1 ? 0 : 10,
-                      ),
-                      child: _LocatorSlipCard(
-                        item: item,
-                        isSelected: item.id == _selectedSlipId,
-                        onTap: () => _toggleSlipSelection(item),
-                      ),
-                    );
-                  }),
-                )
-              : ConstrainedBox(
-                  constraints: BoxConstraints(maxHeight: maxListHeight),
-                  child: Scrollbar(
-                    thumbVisibility: true,
-                    child: ListView.separated(
-                      primary: false,
-                      physics: const BouncingScrollPhysics(
-                        parent: AlwaysScrollableScrollPhysics(),
-                      ),
-                      itemCount: visibleSlips.length,
-                      itemBuilder: (context, index) {
-                        final item = visibleSlips[index];
-                        return _LocatorSlipCard(
-                          item: item,
-                          isSelected:
-                              _slipSelectionKey(item) == _selectedSlipId,
-                          onTap: () => _toggleSlipSelection(item),
-                        );
-                      },
-                      separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    ),
-                  ),
+              : _myRequestsTable(
+                  items: visibleSlips,
+                  maxHeight: maxListHeight,
+                  useScrollableList: useScrollableList,
                 ),
         ],
       ),
@@ -315,7 +300,14 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
 
   String _slipSelectionKey(_LocatorSlipDraft item) {
     return item.id ??
-        '${item.date.toIso8601String()}-${item.office}-${item.employeeName}-${item.remarks}';
+        '${item.date.toIso8601String()}-${item.requestType.code}-${item.office}-${item.employeeName}-${item.remarks}';
+  }
+
+  bool _canCancelSlip(_LocatorSlipDraft? item) {
+    final id = item?.id?.trim();
+    if (item == null || id == null || id.isEmpty) return false;
+    return item.status == _LocatorSlipStatus.pendingDepartmentHead ||
+        item.status == _LocatorSlipStatus.pendingHr;
   }
 
   void _showSlipDetails(BuildContext context, _LocatorSlipDraft item) {
@@ -405,8 +397,8 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
 
     showDialog<void>(
       context: context,
-      builder: (_) => Dialog(
-        backgroundColor: Colors.white,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: AppTheme.dashPanelOf(dialogContext),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 880),
@@ -419,22 +411,25 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
                   children: [
                     Expanded(
                       child: Text(
-                        'Locator Slip History',
+                        'Locator Request History',
                         style: TextStyle(
-                          color: AppTheme.textPrimary,
+                          color: _headingColor(dialogContext),
                           fontSize: 40 * 0.5,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
                     ),
                     IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: Icon(Icons.close, color: AppTheme.textSecondary),
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      icon: Icon(
+                        Icons.close,
+                        color: _mutedColor(dialogContext),
+                      ),
                     ),
                   ],
                 ),
               ),
-              Divider(height: 1, color: AppTheme.lightGray),
+              Divider(height: 1, color: AppTheme.dashHairlineOf(dialogContext)),
               Flexible(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
@@ -503,7 +498,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
                                     Text(
                                       step.title,
                                       style: TextStyle(
-                                        color: AppTheme.textPrimary,
+                                        color: _headingColor(dialogContext),
                                         fontSize: 18,
                                         fontWeight: FontWeight.w700,
                                       ),
@@ -512,7 +507,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
                                     Text(
                                       subtitle,
                                       style: TextStyle(
-                                        color: AppTheme.textSecondary,
+                                        color: _mutedColor(dialogContext),
                                         fontSize: 14,
                                         fontWeight: FontWeight.w600,
                                       ),
@@ -523,7 +518,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
                                         child: Text(
                                           step.remarks!.trim(),
                                           style: TextStyle(
-                                            color: AppTheme.textSecondary,
+                                            color: _mutedColor(dialogContext),
                                             fontSize: 13,
                                             height: 1.35,
                                           ),
@@ -540,14 +535,14 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
                   ),
                 ),
               ),
-              Divider(height: 1, color: AppTheme.lightGray),
+              Divider(height: 1, color: AppTheme.dashHairlineOf(dialogContext)),
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 12, 20, 16),
                 child: Row(
                   children: [
                     const Spacer(),
                     FilledButton(
-                      onPressed: () => Navigator.of(context).pop(),
+                      onPressed: () => Navigator.of(dialogContext).pop(),
                       style: FilledButton.styleFrom(
                         backgroundColor: accent.withValues(alpha: 0.15),
                         foregroundColor: accent,
@@ -585,9 +580,9 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
         selectedApproval?.status == _LocatorSlipStatus.pendingDepartmentHead;
 
     return _SectionCard(
-      title: 'Locator Slip Requests & History',
+      title: 'Locator Requests & History',
       subtitle:
-          'Review pending locator slips and revisit items you forwarded or rejected.',
+          'Review pending locator, pass slip, and work-from-home requests.',
       icon: Icons.fact_check_rounded,
       headerTrailing: SectionHeaderActions(
         children: [
@@ -652,11 +647,11 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
                   ),
                 if (_deptHeadQueue.isEmpty)
                   const _EmptyState(
-                    message: 'No locator slip requests or history yet.',
+                    message: 'No locator requests or history yet.',
                   )
                 else if (visibleItems.isEmpty)
                   const _EmptyState(
-                    message: 'No locator slips match the current filter.',
+                    message: 'No locator requests match the current filter.',
                   )
                 else
                   _approvalItemsTable(
@@ -669,31 +664,30 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
     );
   }
 
-  Widget _approvalItemsTable({
+  Widget _myRequestsTable({
     required List<_LocatorSlipDraft> items,
     required double maxHeight,
     required bool useScrollableList,
   }) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final tableWidth = constraints.maxWidth < 920
-            ? 920.0
+        final tableWidth = constraints.maxWidth < 900
+            ? 900.0
             : constraints.maxWidth;
-        final purposeWidth = tableWidth - 580;
+        final purposeWidth = tableWidth - 500;
         final content = SizedBox(
           width: tableWidth,
           child: Column(
             children: [
-              _approvalTableHeader(purposeWidth),
+              _myRequestsTableHeader(context, purposeWidth),
               for (var index = 0; index < items.length; index++)
-                _approvalTableRow(
+                _myRequestsTableRow(
+                  context,
                   items[index],
                   purposeWidth: purposeWidth,
                   isLast: index == items.length - 1,
-                  isSelected:
-                      _slipSelectionKey(items[index]) ==
-                      _selectedApprovalSlipId,
-                  onTap: () => _toggleApprovalSelection(items[index]),
+                  isSelected: _slipSelectionKey(items[index]) == _selectedSlipId,
+                  onTap: () => _toggleSlipSelection(items[index]),
                 ),
             ],
           ),
@@ -703,7 +697,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
           borderRadius: BorderRadius.circular(12),
           child: DecoratedBox(
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+              border: Border.all(color: AppTheme.dashHairlineOf(context)),
               borderRadius: BorderRadius.circular(12),
             ),
             child: SingleChildScrollView(
@@ -732,32 +726,201 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
     );
   }
 
-  Widget _approvalTableHeader(double purposeWidth) {
+  Widget _myRequestsTableHeader(BuildContext context, double purposeWidth) {
     return Container(
       height: 44,
-      color: AppTheme.offWhite,
+      color: AppTheme.dashMutedSurfaceOf(context),
       child: Row(
         children: [
-          _approvalHeaderCell('Employee', width: 190),
-          _approvalHeaderCell('Date', width: 120),
-          _approvalHeaderCell('Purpose / Location', width: purposeWidth),
-          _approvalHeaderCell('Time', width: 120),
-          _approvalHeaderCell('Status', width: 150),
+          _approvalHeaderCell(context, 'Date', width: 120),
+          _approvalHeaderCell(context, 'Type', width: 110),
+          _approvalHeaderCell(context, 'Location / Purpose', width: purposeWidth),
+          _approvalHeaderCell(context, 'Time', width: 120),
+          _approvalHeaderCell(context, 'Status', width: 150),
         ],
       ),
     );
   }
 
-  Widget _approvalTableRow(
+  Widget _myRequestsTableRow(
+    BuildContext context,
     _LocatorSlipDraft item, {
     required double purposeWidth,
     required bool isLast,
     required bool isSelected,
     required VoidCallback onTap,
   }) {
-    final borderColor = Colors.black.withValues(alpha: 0.06);
+    final dark = _isDark(context);
+    final borderColor = AppTheme.dashHairlineOf(context);
     final rowColor = isSelected
-        ? AppTheme.primaryNavy.withValues(alpha: 0.08)
+        ? (dark
+              ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+              : AppTheme.primaryNavy.withValues(alpha: 0.08))
+        : Colors.transparent;
+    final leftBorderColor = isSelected
+        ? AppTheme.primaryNavy
+        : Colors.transparent;
+
+    return Material(
+      color: rowColor,
+      child: InkWell(
+        onTap: onTap,
+        hoverColor: AppTheme.primaryNavy.withValues(alpha: 0.04),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 60),
+          decoration: BoxDecoration(
+            border: Border(
+              left: BorderSide(color: leftBorderColor, width: 4),
+              bottom: isLast ? BorderSide.none : BorderSide(color: borderColor),
+            ),
+          ),
+          child: Row(
+            children: [
+              _approvalBodyCell(
+                width: 116,
+                child: _approvalCellText(
+                  context,
+                  _formatDate(item.date),
+                  strong: true,
+                ),
+              ),
+              _approvalBodyCell(
+                width: 110,
+                child: _approvalCellText(
+                  context,
+                  item.requestType.shortLabel,
+                  strong: true,
+                ),
+              ),
+              _approvalBodyCell(
+                width: purposeWidth,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _approvalCellText(context, item.office, strong: true),
+                    if (item.remarks.trim().isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      _approvalCellText(
+                        context,
+                        item.remarks,
+                        color: _mutedColor(context),
+                        fontSize: 12,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              _approvalBodyCell(
+                width: 120,
+                child: _approvalCellText(context, _approvalSegmentsText(item)),
+              ),
+              _approvalBodyCell(width: 150, child: _myRequestStatusPill(item)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _approvalItemsTable({
+    required List<_LocatorSlipDraft> items,
+    required double maxHeight,
+    required bool useScrollableList,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tableWidth = constraints.maxWidth < 920
+            ? 920.0
+            : constraints.maxWidth;
+        final purposeWidth = tableWidth - 580;
+        final content = SizedBox(
+          width: tableWidth,
+          child: Column(
+            children: [
+              _approvalTableHeader(context, purposeWidth),
+              for (var index = 0; index < items.length; index++)
+                _approvalTableRow(
+                  context,
+                  items[index],
+                  purposeWidth: purposeWidth,
+                  isLast: index == items.length - 1,
+                  isSelected:
+                      _slipSelectionKey(items[index]) ==
+                      _selectedApprovalSlipId,
+                  onTap: () => _toggleApprovalSelection(items[index]),
+                ),
+            ],
+          ),
+        );
+
+        final table = ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border.all(color: AppTheme.dashHairlineOf(context)),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: content,
+            ),
+          ),
+        );
+
+        if (!useScrollableList) return table;
+
+        return ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxHeight),
+          child: Scrollbar(
+            thumbVisibility: true,
+            child: SingleChildScrollView(
+              primary: false,
+              physics: const BouncingScrollPhysics(
+                parent: AlwaysScrollableScrollPhysics(),
+              ),
+              child: table,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _approvalTableHeader(BuildContext context, double purposeWidth) {
+    return Container(
+      height: 44,
+      color: AppTheme.dashMutedSurfaceOf(context),
+      child: Row(
+        children: [
+          _approvalHeaderCell(context, 'Employee', width: 190),
+          _approvalHeaderCell(context, 'Date', width: 120),
+          _approvalHeaderCell(
+            context,
+            'Purpose / Location',
+            width: purposeWidth,
+          ),
+          _approvalHeaderCell(context, 'Time', width: 120),
+          _approvalHeaderCell(context, 'Status', width: 150),
+        ],
+      ),
+    );
+  }
+
+  Widget _approvalTableRow(
+    BuildContext context,
+    _LocatorSlipDraft item, {
+    required double purposeWidth,
+    required bool isLast,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    final dark = _isDark(context);
+    final borderColor = AppTheme.dashHairlineOf(context);
+    final rowColor = isSelected
+        ? (dark
+              ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+              : AppTheme.primaryNavy.withValues(alpha: 0.08))
         : Colors.transparent;
     final leftBorderColor = isSelected
         ? AppTheme.primaryNavy
@@ -780,11 +943,15 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
             children: [
               _approvalBodyCell(
                 width: 186,
-                child: _approvalCellText(item.employeeName, strong: true),
+                child: _approvalCellText(
+                  context,
+                  item.employeeName,
+                  strong: true,
+                ),
               ),
               _approvalBodyCell(
                 width: 120,
-                child: _approvalCellText(_formatDate(item.date)),
+                child: _approvalCellText(context, _formatDate(item.date)),
               ),
               _approvalBodyCell(
                 width: purposeWidth,
@@ -792,12 +959,17 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _approvalCellText(item.office, strong: true),
+                    _approvalCellText(
+                      context,
+                      '${item.requestType.shortLabel} · ${item.office}',
+                      strong: true,
+                    ),
                     if (item.remarks.trim().isNotEmpty) ...[
                       const SizedBox(height: 3),
                       _approvalCellText(
+                        context,
                         item.remarks,
-                        color: AppTheme.textSecondary,
+                        color: _mutedColor(context),
                         fontSize: 12,
                       ),
                     ],
@@ -806,7 +978,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
               ),
               _approvalBodyCell(
                 width: 120,
-                child: _approvalCellText(_approvalSegmentsText(item)),
+                child: _approvalCellText(context, _approvalSegmentsText(item)),
               ),
               _approvalBodyCell(width: 150, child: _approvalStatusPill(item)),
             ],
@@ -816,7 +988,11 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
     );
   }
 
-  Widget _approvalHeaderCell(String label, {required double width}) {
+  Widget _approvalHeaderCell(
+    BuildContext context,
+    String label, {
+    required double width,
+  }) {
     return SizedBox(
       width: width,
       child: Padding(
@@ -828,7 +1004,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: AppTheme.textSecondary,
+              color: _mutedColor(context),
               fontSize: 12,
               fontWeight: FontWeight.w700,
             ),
@@ -849,6 +1025,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
   }
 
   Widget _approvalCellText(
+    BuildContext context,
     String text, {
     bool strong = false,
     Color? color,
@@ -859,7 +1036,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       style: TextStyle(
-        color: color ?? AppTheme.textPrimary,
+        color: color ?? _headingColor(context),
         fontSize: fontSize,
         fontWeight: strong ? FontWeight.w700 : FontWeight.w500,
       ),
@@ -877,6 +1054,28 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
       ),
       child: Text(
         _departmentHeadStatusLabel(item),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: textColor,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  Widget _myRequestStatusPill(_LocatorSlipDraft item) {
+    final (bg, border, textColor) = _statusColors(item.status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: border),
+      ),
+      child: Text(
+        item.status.label,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
@@ -926,10 +1125,24 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
           'am_out': created.amOut,
           'pm_in': created.pmIn,
           'pm_out': created.pmOut,
+          'request_type': created.requestType.code,
           'office': created.office,
           'reason': created.remarks,
         },
+        options: Options(
+          validateStatus: (status) => status != null && status < 500,
+        ),
       );
+      if ((res.statusCode ?? 500) >= 400) {
+        if (!mounted) return;
+        final message = _apiResponseMessage(
+          res.data,
+          fallback: 'Failed to submit request.',
+        );
+        setState(() => _loadingMy = false);
+        await _showLocatorErrorDialog(message);
+        return;
+      }
       final data = res.data;
       _LocatorSlipDraft? inserted;
       if (data != null) {
@@ -939,13 +1152,79 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
       if (!mounted) return;
       final msg = inserted != null
           ? (inserted.status == _LocatorSlipStatus.pendingHr
-                ? 'Locator slip submitted. Awaiting HR approval.'
-                : 'Locator slip submitted. Awaiting department head approval.')
-          : 'Locator slip submitted successfully.';
+                ? 'Request submitted. Awaiting HR approval.'
+                : 'Request submitted. Awaiting department head approval.')
+          : 'Request submitted successfully.';
       _showLocatorSnack(msg);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Failed to submit locator slip: $e');
+      final message = _apiErrorMessage(
+        e,
+        fallback: 'Failed to submit request.',
+      );
+      setState(() => _loadingMy = false);
+      await _showLocatorErrorDialog(message);
+    } finally {
+      if (mounted) setState(() => _loadingMy = false);
+    }
+  }
+
+  Future<void> _cancelSlip(_LocatorSlipDraft item) async {
+    if (!_canCancelSlip(item)) return;
+    final id = item.id!.trim();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cancel locator request?'),
+        content: const Text(
+          'This will cancel the request. You can file a new request anytime.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('No'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Yes, cancel'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    setState(() {
+      _error = null;
+      _loadingMy = true;
+    });
+    try {
+      final res = await ApiClient.instance.patch<Map<String, dynamic>>(
+        '/api/locator-slips/$id/cancel',
+        data: const {},
+      );
+      final data = res.data;
+      if (!mounted) return;
+      setState(() {
+        _selectedSlipId = null;
+        if (data != null) {
+          final updated = _LocatorSlipDraft.fromApi(data);
+          final index = _slips.indexWhere((slip) => slip.id == updated.id);
+          if (index >= 0) {
+            _slips[index] = updated;
+          }
+        }
+      });
+      await _loadMyRequests();
+      if (!mounted) return;
+      _showLocatorSnack('Request cancelled.');
+    } catch (e) {
+      if (!mounted) return;
+      setState(
+        () => _error = _apiErrorMessage(
+          e,
+          fallback: 'Failed to cancel request.',
+        ),
+      );
     } finally {
       if (mounted) setState(() => _loadingMy = false);
     }
@@ -987,7 +1266,12 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Failed to load locator slips: $e');
+      setState(
+        () => _error = _apiErrorMessage(
+          e,
+          fallback: 'Failed to load locator requests.',
+        ),
+      );
     } finally {
       if (mounted) setState(() => _loadingMy = false);
     }
@@ -1032,7 +1316,9 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
       _showLocatorSnack('Approved and sent to HR for final approval.');
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Approve failed: $e');
+      setState(
+        () => _error = _apiErrorMessage(e, fallback: 'Approve failed.'),
+      );
     }
   }
 
@@ -1046,10 +1332,12 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
       await _loadDepartmentHeadRequests();
       await _loadMyRequests();
       if (!mounted) return;
-      _showLocatorSnack('Locator slip rejected.');
+      _showLocatorSnack('Request rejected.');
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Reject failed: $e');
+      setState(
+        () => _error = _apiErrorMessage(e, fallback: 'Reject failed.'),
+      );
     }
   }
 
@@ -1109,6 +1397,23 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
       ),
     );
   }
+
+  Future<void> _showLocatorErrorDialog(String message) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Request not allowed'),
+        content: Text(message),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// Locator slip details — layout/positioning (theme borders and typography only).
@@ -1143,7 +1448,12 @@ class _LocatorSlipDetailsDialog extends StatelessWidget {
           ),
           Divider(height: 1, thickness: 1, color: borderColor),
           _LocatorDetailLabeledBlock(
-            label: 'Office/Destination',
+            label: 'Type',
+            value: item.requestType.label,
+          ),
+          Divider(height: 1, thickness: 1, color: borderColor),
+          _LocatorDetailLabeledBlock(
+            label: item.requestType.locationLabel,
             value: item.office,
           ),
           Divider(height: 1, thickness: 1, color: borderColor),
@@ -1201,7 +1511,7 @@ class _LocatorSlipDetailsDialog extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      'Locator Slip Details',
+                      'Request Details',
                       style: theme.textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.w700,
                       ),
@@ -1271,6 +1581,8 @@ class _LocatorSlipDetailsDialog extends StatelessWidget {
                         id: item.id,
                         employeeName: item.employeeName,
                         dateText: _formatDate(item.date),
+                        requestTypeLabel: item.requestType.label,
+                        locationLabel: item.requestType.locationLabel,
                         office: item.office,
                         remarks: item.remarks,
                         amIn: item.amIn,
@@ -1414,18 +1726,18 @@ class _LocatorHeader extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Locator Slip',
+                  'Locator Slips',
                   style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.dashTextPrimaryOf(context),
                     fontSize: 24,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'File your movement log when you will be away from your workstation during office hours, $employeeName.',
+                  'File locator, pass slip, or work-from-home requests for DTR coverage, $employeeName.',
                   style: TextStyle(
-                    color: AppTheme.textSecondary,
+                    color: AppTheme.dashTextSecondaryOf(context),
                     fontSize: 14,
                     height: 1.45,
                   ),
@@ -1436,12 +1748,21 @@ class _LocatorHeader extends StatelessWidget {
           FilledButton.icon(
             onPressed: onCreatePressed,
             icon: const Icon(Icons.add_rounded),
-            label: const Text('File Locator Slip'),
+            label: const Text('File Request'),
           ),
         ],
       ),
     );
   }
+}
+
+enum _WfhCoverage {
+  wholeDay('Whole day'),
+  amOnly('AM only'),
+  pmOnly('PM only');
+
+  const _WfhCoverage(this.label);
+  final String label;
 }
 
 class _LocatorSlipFormDialog extends StatefulWidget {
@@ -1456,6 +1777,8 @@ class _LocatorSlipFormDialog extends StatefulWidget {
 class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   final _formKey = GlobalKey<FormState>();
   DateTime _date = DateTime.now();
+  LocatorRequestType _requestType = LocatorRequestType.locator;
+  _WfhCoverage _wfhCoverage = _WfhCoverage.wholeDay;
   final _officeController = TextEditingController();
   final _remarksController = TextEditingController();
 
@@ -1463,6 +1786,61 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   bool _amOut = false;
   bool _pmIn = false;
   bool _pmOut = false;
+  bool _savedAmInBeforeWfh = false;
+  bool _savedAmOutBeforeWfh = false;
+  bool _savedPmInBeforeWfh = false;
+  bool _savedPmOutBeforeWfh = false;
+  bool _hasSavedSegmentsBeforeWfh = false;
+
+  bool get _isWfhRequest => _requestType == LocatorRequestType.workFromHome;
+
+  void _applyWfhCoverage(_WfhCoverage coverage) {
+    _amIn =
+        coverage == _WfhCoverage.wholeDay || coverage == _WfhCoverage.amOnly;
+    _amOut =
+        coverage == _WfhCoverage.wholeDay || coverage == _WfhCoverage.amOnly;
+    _pmIn =
+        coverage == _WfhCoverage.wholeDay || coverage == _WfhCoverage.pmOnly;
+    _pmOut =
+        coverage == _WfhCoverage.wholeDay || coverage == _WfhCoverage.pmOnly;
+  }
+
+  void _setRequestType(LocatorRequestType type) {
+    if (type == _requestType) return;
+    setState(() {
+      final enteringWfh =
+          _requestType != LocatorRequestType.workFromHome &&
+          type == LocatorRequestType.workFromHome;
+      final leavingWfh =
+          _requestType == LocatorRequestType.workFromHome &&
+          type != LocatorRequestType.workFromHome;
+
+      if (enteringWfh) {
+        _savedAmInBeforeWfh = _amIn;
+        _savedAmOutBeforeWfh = _amOut;
+        _savedPmInBeforeWfh = _pmIn;
+        _savedPmOutBeforeWfh = _pmOut;
+        _hasSavedSegmentsBeforeWfh = true;
+        _wfhCoverage = _WfhCoverage.wholeDay;
+        _applyWfhCoverage(_wfhCoverage);
+      } else if (leavingWfh && _hasSavedSegmentsBeforeWfh) {
+        _amIn = _savedAmInBeforeWfh;
+        _amOut = _savedAmOutBeforeWfh;
+        _pmIn = _savedPmInBeforeWfh;
+        _pmOut = _savedPmOutBeforeWfh;
+      }
+
+      _requestType = type;
+    });
+  }
+
+  void _setWfhCoverage(_WfhCoverage coverage) {
+    if (coverage == _wfhCoverage) return;
+    setState(() {
+      _wfhCoverage = coverage;
+      _applyWfhCoverage(coverage);
+    });
+  }
 
   @override
   void dispose() {
@@ -1475,16 +1853,16 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   Widget build(BuildContext context) {
     const accent = Color(0xFFF57C00);
     return AlertDialog(
-      backgroundColor: const Color(0xFFFFFDF7),
+      backgroundColor: AppTheme.dashPanelOf(context),
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
       contentPadding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
       actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-      title: const Text(
-        'File Locator Slip',
+      title: Text(
+        'File Request',
         style: TextStyle(
-          color: Color(0xFF111111),
+          color: AppTheme.dashTextPrimaryOf(context),
           fontSize: 17,
           fontWeight: FontWeight.w700,
         ),
@@ -1499,6 +1877,12 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
               children: [
                 _datePicker(),
                 const SizedBox(height: 14),
+                _requestTypeDropdown(),
+                if (_isWfhRequest) ...[
+                  const SizedBox(height: 14),
+                  _wfhCoverageDropdown(),
+                ],
+                const SizedBox(height: 14),
                 _segmentSelector(),
                 const SizedBox(height: 14),
                 _fieldLabel('Name'),
@@ -1510,12 +1894,14 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                _fieldLabel('Office'),
+                _fieldLabel(_requestType.locationLabel),
                 TextFormField(
                   controller: _officeController,
-                  decoration: _inputDecoration(),
+                  decoration: _inputDecoration().copyWith(
+                    hintText: _requestType.locationHint,
+                  ),
                   validator: (v) => (v == null || v.trim().isEmpty)
-                      ? 'Office is required'
+                      ? '${_requestType.locationLabel} is required'
                       : null,
                 ),
                 const SizedBox(height: 12),
@@ -1605,10 +1991,63 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
     );
   }
 
+  Widget _requestTypeDropdown() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _fieldLabel('Request Type'),
+        DropdownButtonFormField<LocatorRequestType>(
+          value: _requestType,
+          decoration: _inputDecoration(),
+          isExpanded: true,
+          items: LocatorRequestType.values
+              .map(
+                (type) => DropdownMenuItem<LocatorRequestType>(
+                  value: type,
+                  child: Text(type.label),
+                ),
+              )
+              .toList(),
+          onChanged: (type) {
+            if (type == null) return;
+            _setRequestType(type);
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _wfhCoverageDropdown() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _fieldLabel('WFH Coverage'),
+        DropdownButtonFormField<_WfhCoverage>(
+          value: _wfhCoverage,
+          decoration: _inputDecoration(),
+          isExpanded: true,
+          items: _WfhCoverage.values
+              .map(
+                (coverage) => DropdownMenuItem<_WfhCoverage>(
+                  value: coverage,
+                  child: Text(coverage.label),
+                ),
+              )
+              .toList(),
+          onChanged: (coverage) {
+            if (coverage == null) return;
+            _setWfhCoverage(coverage);
+          },
+        ),
+      ],
+    );
+  }
+
   Widget _segmentSelector() {
     const accent = Color(0xFFF57C00);
     const border = Color(0xFFBEBEBE);
     const divider = Color(0xFFC9C9C9);
+    final locked = _isWfhRequest;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1616,6 +2055,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
         const SizedBox(height: 8),
         Container(
           height: 42,
+          clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: border),
@@ -1625,28 +2065,28 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
               _segmentCell(
                 label: 'AM IN',
                 selected: _amIn,
-                onTap: () => setState(() => _amIn = !_amIn),
+                onTap: locked ? null : () => setState(() => _amIn = !_amIn),
                 accent: accent,
               ),
               _segmentDivider(divider),
               _segmentCell(
                 label: 'AM OUT',
                 selected: _amOut,
-                onTap: () => setState(() => _amOut = !_amOut),
+                onTap: locked ? null : () => setState(() => _amOut = !_amOut),
                 accent: accent,
               ),
               _segmentDivider(divider),
               _segmentCell(
                 label: 'PM IN',
                 selected: _pmIn,
-                onTap: () => setState(() => _pmIn = !_pmIn),
+                onTap: locked ? null : () => setState(() => _pmIn = !_pmIn),
                 accent: accent,
               ),
               _segmentDivider(divider),
               _segmentCell(
                 label: 'PM OUT',
                 selected: _pmOut,
-                onTap: () => setState(() => _pmOut = !_pmOut),
+                onTap: locked ? null : () => setState(() => _pmOut = !_pmOut),
                 accent: accent,
               ),
             ],
@@ -1661,7 +2101,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   Widget _segmentCell({
     required String label,
     required bool selected,
-    required VoidCallback onTap,
+    required VoidCallback? onTap,
     required Color accent,
   }) {
     return Expanded(
@@ -1689,28 +2129,25 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
       padding: const EdgeInsets.only(bottom: 6),
       child: Text(
         text,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w600,
-          color: Color(0xFF1F1F1F),
+          color: AppTheme.dashTextSecondaryOf(context),
         ),
       ),
     );
   }
 
   InputDecoration _inputDecoration() {
-    return InputDecoration(
+    return AppTheme.dashInputDecoration(
+      context,
+      radius: 10,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+    ).copyWith(
       isDense: true,
-      hintStyle: const TextStyle(color: Color(0xFFA7A7A7), fontSize: 14),
-      filled: true,
-      fillColor: Colors.white,
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: const BorderSide(color: Color(0xFFCFCFCF), width: 1.2),
-      ),
       disabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
-        borderSide: const BorderSide(color: Color(0xFFCFCFCF), width: 1.2),
+        borderSide: BorderSide(color: AppTheme.dashInputBorderOf(context)),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
@@ -1744,6 +2181,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
       _LocatorSlipDraft(
         date: _date,
         employeeName: widget.employeeName,
+        requestType: _requestType,
         office: _officeController.text.trim(),
         remarks: _remarksController.text.trim(),
         amIn: _amIn,
@@ -1761,6 +2199,7 @@ class _LocatorSlipDraft {
     this.id,
     required this.date,
     required this.employeeName,
+    this.requestType = LocatorRequestType.locator,
     required this.office,
     required this.remarks,
     this.rawStatus,
@@ -1782,6 +2221,7 @@ class _LocatorSlipDraft {
   final String? id;
   final DateTime date;
   final String employeeName;
+  final LocatorRequestType requestType;
   final String office;
   final String remarks;
   final String? rawStatus;
@@ -1803,6 +2243,7 @@ class _LocatorSlipDraft {
     String? id,
     DateTime? date,
     String? employeeName,
+    LocatorRequestType? requestType,
     String? office,
     String? remarks,
     String? rawStatus,
@@ -1824,6 +2265,7 @@ class _LocatorSlipDraft {
       id: id ?? this.id,
       date: date ?? this.date,
       employeeName: employeeName ?? this.employeeName,
+      requestType: requestType ?? this.requestType,
       office: office ?? this.office,
       remarks: remarks ?? this.remarks,
       rawStatus: rawStatus ?? this.rawStatus,
@@ -1846,8 +2288,6 @@ class _LocatorSlipDraft {
   }
 
   factory _LocatorSlipDraft.fromApi(Map<String, dynamic> json) {
-    final rawDate = (json['slip_date'] ?? '').toString();
-    final parsedDate = DateTime.tryParse(rawDate);
     String? readName(List<String> keys) {
       for (final key in keys) {
         final value = (json[key] ?? '').toString().trim();
@@ -1863,8 +2303,9 @@ class _LocatorSlipDraft {
     final genericReviewer = readName(['reviewer_name', 'approver_name']);
     return _LocatorSlipDraft(
       id: (json['id'] ?? '').toString(),
-      date: parsedDate ?? DateTime.now(),
+      date: _parseDateOnly(json['slip_date']) ?? DateTime(1970, 1, 1),
       employeeName: (json['employee_name'] ?? 'Employee').toString(),
+      requestType: LocatorRequestType.fromCode(json['request_type']),
       office: (json['office'] ?? '').toString(),
       remarks: (json['reason'] ?? '').toString(),
       rawStatus: rawStatus,
@@ -1938,129 +2379,6 @@ enum _LocatorSlipStatus {
 
 enum _LocatorSection { requests, approvals }
 
-class _LocatorSlipCard extends StatelessWidget {
-  const _LocatorSlipCard({
-    required this.item,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  final _LocatorSlipDraft item;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: isSelected
-                  ? AppTheme.primaryNavy.withValues(alpha: 0.25)
-                  : Colors.black.withValues(alpha: 0.08),
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    Icons.schedule_rounded,
-                    color: AppTheme.primaryNavy,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _formatDate(item.date),
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  _statusPill(item.status),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'Office: ${item.office}',
-                style: TextStyle(color: AppTheme.textSecondary),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  if (item.amIn) _timeChip('AM IN'),
-                  if (item.amOut) _timeChip('AM OUT'),
-                  if (item.pmIn) _timeChip('PM IN'),
-                  if (item.pmOut) _timeChip('PM OUT'),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Text(
-                item.remarks,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: AppTheme.textSecondary, height: 1.4),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _statusPill(_LocatorSlipStatus status) {
-    final (bg, border, textColor) = _statusColors(status);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: border),
-      ),
-      child: Text(
-        status.label,
-        style: TextStyle(
-          color: textColor,
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-
-  Widget _timeChip(String label) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppTheme.offWhite,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: AppTheme.textPrimary,
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-}
-
 class _LocatorSectionTabs extends StatelessWidget {
   const _LocatorSectionTabs({required this.current, required this.onChanged});
 
@@ -2074,12 +2392,14 @@ class _LocatorSectionTabs extends StatelessWidget {
       runSpacing: 8,
       children: [
         _tab(
+          context,
           label: 'My Requests',
           icon: Icons.event_note_rounded,
           selected: current == _LocatorSection.requests,
           onTap: () => onChanged(_LocatorSection.requests),
         ),
         _tab(
+          context,
           label: 'Approvals / History',
           icon: Icons.fact_check_rounded,
           selected: current == _LocatorSection.approvals,
@@ -2089,16 +2409,22 @@ class _LocatorSectionTabs extends StatelessWidget {
     );
   }
 
-  Widget _tab({
+  Widget _tab(
+    BuildContext context, {
     required String label,
     required IconData icon,
     required bool selected,
     required VoidCallback onTap,
   }) {
+    final dark = AppTheme.dashIsDark(context);
     return Material(
       color: selected
-          ? AppTheme.primaryNavy.withValues(alpha: 0.12)
-          : AppTheme.lightGray.withValues(alpha: 0.6),
+          ? (dark
+                ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                : AppTheme.primaryNavy.withValues(alpha: 0.12))
+          : (dark
+                ? AppTheme.dashMutedSurfaceOf(context)
+                : AppTheme.lightGray.withValues(alpha: 0.6)),
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
@@ -2111,13 +2437,17 @@ class _LocatorSectionTabs extends StatelessWidget {
               Icon(
                 icon,
                 size: 20,
-                color: selected ? AppTheme.primaryNavy : AppTheme.textSecondary,
+                color: selected
+                    ? AppTheme.primaryNavy
+                    : AppTheme.dashTextSecondaryOf(context),
               ),
               const SizedBox(width: 8),
               Text(
                 label,
                 style: TextStyle(
-                  color: selected ? AppTheme.primaryNavy : AppTheme.textPrimary,
+                  color: selected
+                      ? AppTheme.primaryNavy
+                      : AppTheme.dashTextPrimaryOf(context),
                   fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                 ),
               ),
@@ -2139,18 +2469,7 @@ class _InfoCard extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 16),
       child: child,
     );
   }
@@ -2193,7 +2512,7 @@ class _SectionCard extends StatelessWidget {
                     Text(
                       title,
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         fontWeight: FontWeight.w700,
                         fontSize: 18,
                       ),
@@ -2202,7 +2521,7 @@ class _SectionCard extends StatelessWidget {
                     Text(
                       subtitle,
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 13,
                       ),
                     ),
@@ -2300,14 +2619,17 @@ class _EmptyState extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 28),
       decoration: BoxDecoration(
-        color: AppTheme.offWhite,
+        color: AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Text(
         message,
         textAlign: TextAlign.center,
-        style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+        style: TextStyle(
+          color: AppTheme.dashTextSecondaryOf(context),
+          fontSize: 14,
+        ),
       ),
     );
   }
@@ -2338,11 +2660,49 @@ String _formatDateTime(DateTime value) {
   return '${_formatDate(value)} $hour:$minute $meridiem';
 }
 
+String _apiErrorMessage(Object error, {required String fallback}) {
+  if (error is DioException) {
+    final responseMessage = _apiResponseMessage(
+      error.response?.data,
+      fallback: '',
+    );
+    if (responseMessage.isNotEmpty) return responseMessage;
+    final message = error.message?.trim();
+    if (message != null && message.isNotEmpty) return '$fallback $message';
+  }
+  final text = error.toString().trim();
+  if (text.isEmpty) return fallback;
+  return '$fallback $text';
+}
+
+String _apiResponseMessage(dynamic data, {required String fallback}) {
+  if (data is Map) {
+    final message = data['error'] ?? data['message'];
+    final text = message?.toString().trim();
+    if (text != null && text.isNotEmpty) return text;
+  }
+  if (data is String && data.trim().isNotEmpty) return data.trim();
+  return fallback;
+}
+
 DateTime? _parseDateTime(dynamic value) {
   if (value == null) return null;
   final raw = value.toString().trim();
   if (raw.isEmpty || raw.toLowerCase() == 'null') return null;
   return DateTime.tryParse(raw);
+}
+
+DateTime? _parseDateOnly(dynamic value) {
+  if (value == null) return null;
+  final raw = value.toString().trim();
+  if (raw.isEmpty || raw.toLowerCase() == 'null') return null;
+  final match = RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(raw);
+  if (match == null) return null;
+  final year = int.tryParse(match.group(1)!);
+  final month = int.tryParse(match.group(2)!);
+  final day = int.tryParse(match.group(3)!);
+  if (year == null || month == null || day == null) return null;
+  return DateTime(year, month, day);
 }
 
 String _departmentHeadStatusLabel(_LocatorSlipDraft item) {

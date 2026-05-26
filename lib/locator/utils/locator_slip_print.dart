@@ -12,6 +12,8 @@ class LocatorSlipPrint {
     required String? id,
     required String employeeName,
     required String dateText,
+    required String requestTypeLabel,
+    required String locationLabel,
     required String office,
     required String remarks,
     required bool amIn,
@@ -216,10 +218,12 @@ class LocatorSlipPrint {
                 pw.SizedBox(height: 16),
                 lineField(label: 'Name', value: employeeName),
                 pw.SizedBox(height: 10),
-                lineField(label: 'Office', value: office),
+                lineField(label: 'Type', value: requestTypeLabel),
+                pw.SizedBox(height: 10),
+                lineField(label: locationLabel, value: office),
                 pw.SizedBox(height: 10),
                 lineField(label: 'Remarks/Reasons', value: remarks),
-                pw.SizedBox(height: 34),
+                pw.SizedBox(height: 20),
                 pw.Row(
                   children: [
                     pw.Expanded(

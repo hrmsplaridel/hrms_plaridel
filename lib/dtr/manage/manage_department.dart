@@ -40,6 +40,38 @@ class _ManageDepartmentState extends State<ManageDepartment> {
   List<_DepartmentRecord> _departments = [];
   bool _loading = false;
   _DepartmentRecord? _selectedDepartment;
+  StateSetter? _drawerSetState;
+
+  bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
+
+  Color _headingColor(BuildContext context) =>
+      AppTheme.dashTextPrimaryOf(context);
+
+  Color _mutedColor(BuildContext context) =>
+      AppTheme.dashTextSecondaryOf(context);
+
+  BoxDecoration _filterDecoration(BuildContext context) => BoxDecoration(
+    color: _isDark(context)
+        ? AppTheme.dashMutedSurfaceOf(context)
+        : AppTheme.lightGray.withValues(alpha: 0.5),
+    borderRadius: BorderRadius.circular(10),
+    border: Border.all(
+      color: _isDark(context)
+          ? AppTheme.dashHairlineOf(context)
+          : Colors.transparent,
+    ),
+  );
+
+  void _updateDepartmentFormState(VoidCallback update) {
+    if (mounted) setState(update);
+    final drawerSetState = _drawerSetState;
+    if (!mounted || drawerSetState == null) return;
+    try {
+      drawerSetState(() {});
+    } catch (_) {
+      _drawerSetState = null;
+    }
+  }
 
   @override
   void initState() {
@@ -87,7 +119,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
   }
 
   void _selectDepartment(_DepartmentRecord d) {
-    setState(() {
+    _updateDepartmentFormState(() {
       _selectedDepartment = d;
       _nameController.text = d.name;
       _descriptionController.text = d.description ?? '';
@@ -95,20 +127,20 @@ class _ManageDepartmentState extends State<ManageDepartment> {
   }
 
   void _clearForm() {
-    setState(() {
+    _updateDepartmentFormState(() {
       _selectedDepartment = null;
       _nameController.clear();
       _descriptionController.clear();
     });
   }
 
-  Future<void> _addDepartment() async {
+  Future<bool> _addDepartment() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a department name.')),
       );
-      return;
+      return false;
     }
     try {
       await ApiClient.instance.post(
@@ -128,6 +160,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
         _clearForm();
         _loadDepartments();
       }
+      return true;
     } on DioException catch (e) {
       if (mounted) {
         final msg =
@@ -138,29 +171,31 @@ class _ManageDepartmentState extends State<ManageDepartment> {
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to add: $msg')));
       }
+      return false;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to add: $e')));
       }
+      return false;
     }
   }
 
-  Future<void> _updateDepartment() async {
+  Future<bool> _updateDepartment() async {
     final d = _selectedDepartment;
     if (d == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select a department to update.')),
       );
-      return;
+      return false;
     }
     final name = _nameController.text.trim();
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a department name.')),
       );
-      return;
+      return false;
     }
     try {
       await ApiClient.instance.put(
@@ -179,6 +214,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
         _clearForm();
         _loadDepartments();
       }
+      return true;
     } on DioException catch (e) {
       if (mounted) {
         final msg =
@@ -189,22 +225,24 @@ class _ManageDepartmentState extends State<ManageDepartment> {
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to update: $msg')));
       }
+      return false;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
       }
+      return false;
     }
   }
 
-  Future<void> _deactivateDepartment() async {
+  Future<bool> _deactivateDepartment() async {
     final d = _selectedDepartment;
     if (d == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select a department to deactivate.')),
       );
-      return;
+      return false;
     }
     final ok = await showDialog<bool>(
       context: context,
@@ -226,7 +264,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
         ],
       ),
     );
-    if (ok != true || !mounted) return;
+    if (ok != true || !mounted) return false;
     try {
       await ApiClient.instance.put(
         '/api/departments/${d.id}',
@@ -239,6 +277,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
         _clearForm();
         _loadDepartments();
       }
+      return true;
     } on DioException catch (e) {
       if (mounted) {
         final msg =
@@ -249,60 +288,214 @@ class _ManageDepartmentState extends State<ManageDepartment> {
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to deactivate: $msg')));
       }
+      return false;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to deactivate: $e')));
       }
+      return false;
     }
+  }
+
+  Future<void> _openDepartmentDrawer({_DepartmentRecord? department}) async {
+    _drawerSetState = null;
+    if (department == null) {
+      _clearForm();
+    } else {
+      _selectDepartment(department);
+    }
+
+    try {
+      await showGeneralDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+        barrierColor: Colors.black.withValues(alpha: 0.32),
+        transitionDuration: const Duration(milliseconds: 220),
+        pageBuilder: (dialogContext, _, __) {
+          final screenWidth = MediaQuery.of(dialogContext).size.width;
+          final drawerWidth = screenWidth < 720 ? screenWidth : 520.0;
+          return Align(
+            alignment: Alignment.centerRight,
+            child: SizedBox(
+              width: drawerWidth,
+              height: double.infinity,
+              child: Material(
+                color: AppTheme.dashPanelOf(dialogContext),
+                elevation: 18,
+                child: StatefulBuilder(
+                  builder: (context, drawerSetState) {
+                    _drawerSetState = drawerSetState;
+                    return _buildDepartmentDrawer(dialogContext);
+                  },
+                ),
+              ),
+            ),
+          );
+        },
+        transitionBuilder: (context, animation, _, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(1, 0),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          );
+        },
+      );
+    } finally {
+      _drawerSetState = null;
+    }
+  }
+
+  Widget _buildDepartmentDrawer(BuildContext drawerContext) {
+    final isEditing = _selectedDepartment != null;
+    return SafeArea(
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    isEditing ? 'Edit Department' : 'Add Department',
+                    style: TextStyle(
+                      color: _headingColor(context),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(drawerContext).pop(),
+                  icon: Icon(Icons.close_rounded, color: _mutedColor(context)),
+                  tooltip: 'Close',
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              child: _buildFormPanel(framed: false, showActions: false),
+            ),
+          ),
+          _buildDrawerFooter(drawerContext),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDrawerFooter(BuildContext drawerContext) {
+    final isEditing = _selectedDepartment != null;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        border: Border(
+          top: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        ),
+      ),
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 8,
+        alignment: WrapAlignment.end,
+        children: [
+          TextButton(
+            onPressed: () => Navigator.of(drawerContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          if (isEditing)
+            OutlinedButton.icon(
+              onPressed: () async {
+                final ok = await _deactivateDepartment();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
+              icon: const Icon(Icons.person_off_rounded, size: 18),
+              label: const Text('Deactivate'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+              ),
+            ),
+          FilledButton.icon(
+            onPressed: () async {
+              final ok = isEditing
+                  ? await _updateDepartment()
+                  : await _addDepartment();
+              if (ok && drawerContext.mounted) {
+                Navigator.of(drawerContext).pop();
+              }
+            },
+            icon: Icon(
+              isEditing ? Icons.edit_rounded : Icons.add_rounded,
+              size: 18,
+            ),
+            label: Text(isEditing ? 'Update' : 'Add Department'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFE85D04),
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final w = MediaQuery.of(context).size.width;
-    final isNarrow = w < 700;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Department',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Department',
+                style: TextStyle(
+                  color: _headingColor(context),
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            FilledButton.icon(
+              onPressed: () => _openDepartmentDrawer(),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Add Department'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFE85D04),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 12,
+                ),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 20),
-        isNarrow ? _buildNarrowLayout() : _buildWideLayout(),
-      ],
-    );
-  }
-
-  Widget _buildWideLayout() {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(flex: 1, child: _buildLeftPanel()),
-        const SizedBox(width: 24),
-        Expanded(flex: 1, child: _buildRightPanel()),
-      ],
-    );
-  }
-
-  Widget _buildNarrowLayout() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
         _buildLeftPanel(),
-        const SizedBox(height: 24),
-        _buildRightPanel(),
       ],
     );
   }
 
   Widget _buildLeftPanel() {
+    final dark = _isDark(context);
     final search = _searchController.text.toLowerCase();
     final filtered = search.isEmpty
         ? _departments
@@ -314,18 +507,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
 
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -341,8 +523,11 @@ class _ManageDepartmentState extends State<ManageDepartment> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             decoration: BoxDecoration(
-              color: AppTheme.lightGray.withValues(alpha: 0.4),
+              color: AppTheme.dashMutedSurfaceOf(context),
               borderRadius: BorderRadius.circular(8),
+              border: Border(
+                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+              ),
             ),
             child: Row(
               children: [
@@ -369,7 +554,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
               child: Text(
                 'No departments',
                 style: TextStyle(
-                  color: AppTheme.textSecondary.withValues(alpha: 0.8),
+                  color: _mutedColor(context).withValues(alpha: 0.8),
                   fontSize: 14,
                 ),
               ),
@@ -386,18 +571,23 @@ class _ManageDepartmentState extends State<ManageDepartment> {
                 return TableRow(
                   decoration: BoxDecoration(
                     color: isSelected
-                        ? AppTheme.primaryNavy.withValues(alpha: 0.08)
+                        ? (dark
+                              ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                              : AppTheme.primaryNavy.withValues(alpha: 0.08))
                         : null,
                   ),
                   children: [
                     _tableCell(
                       d.displayDepartmentNo,
-                      onTap: () => _selectDepartment(d),
+                      onTap: () => _openDepartmentDrawer(department: d),
                     ),
-                    _tableCell(d.name, onTap: () => _selectDepartment(d)),
+                    _tableCell(
+                      d.name,
+                      onTap: () => _openDepartmentDrawer(department: d),
+                    ),
                     _tableCell(
                       d.description ?? '—',
-                      onTap: () => _selectDepartment(d),
+                      onTap: () => _openDepartmentDrawer(department: d),
                       secondary: true,
                     ),
                   ],
@@ -415,7 +605,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       style: TextStyle(
         fontWeight: FontWeight.w700,
         fontSize: 13,
-        color: AppTheme.textPrimary,
+        color: _headingColor(context),
       ),
       overflow: TextOverflow.ellipsis,
       maxLines: 1,
@@ -437,7 +627,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
             text,
             style: TextStyle(
               fontSize: secondary ? 12 : 13,
-              color: secondary ? AppTheme.textSecondary : AppTheme.textPrimary,
+              color: secondary ? _mutedColor(context) : _headingColor(context),
             ),
             overflow: TextOverflow.ellipsis,
             maxLines: 1,
@@ -451,28 +641,20 @@ class _ManageDepartmentState extends State<ManageDepartment> {
     return TextField(
       controller: _searchController,
       onChanged: (_) => setState(() {}),
-      decoration: InputDecoration(
+      style: AppTheme.dashFieldTextStyle(context),
+      decoration: AppTheme.dashInputDecoration(
+        context,
         hintText: 'Search',
-        hintStyle: TextStyle(
-          color: AppTheme.textSecondary.withValues(alpha: 0.8),
-          fontSize: 14,
-        ),
         prefixIcon: Icon(
           Icons.search_rounded,
           size: 20,
-          color: AppTheme.textSecondary.withValues(alpha: 0.7),
+          color: _mutedColor(context).withValues(alpha: 0.7),
         ),
-        isDense: true,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 14,
           vertical: 12,
         ),
-        filled: true,
-        fillColor: AppTheme.lightGray.withValues(alpha: 0.5),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide.none,
-        ),
+        radius: 10,
       ),
     );
   }
@@ -480,20 +662,21 @@ class _ManageDepartmentState extends State<ManageDepartment> {
   Widget _buildStatusDropdown() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppTheme.lightGray.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.transparent),
-      ),
+      decoration: _filterDecoration(context),
       child: DropdownButton<String>(
         value: _statusFilter,
+        dropdownColor: AppTheme.dashPanelOf(context),
+        style: AppTheme.dashFieldTextStyle(context),
         underline: const SizedBox.shrink(),
         isDense: true,
-        items: [
-          'Active',
-          'Inactive',
-          'All',
-        ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+        items: ['Active', 'Inactive', 'All']
+            .map(
+              (o) => DropdownMenuItem(
+                value: o,
+                child: Text(o, style: AppTheme.dashFieldTextStyle(context)),
+              ),
+            )
+            .toList(),
         onChanged: (v) {
           setState(() => _statusFilter = v ?? 'Active');
           _loadDepartments();
@@ -502,59 +685,48 @@ class _ManageDepartmentState extends State<ManageDepartment> {
     );
   }
 
-  Widget _buildRightPanel() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
+  Widget _buildFormPanel({bool framed = true, bool showActions = true}) {
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Department Name',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: _mutedColor(context),
           ),
-        ],
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Department Name',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
-            ),
+        ),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: _nameController,
+          style: AppTheme.dashFieldTextStyle(context),
+          decoration: _inputDecoration('Department Name'),
+        ),
+        const SizedBox(height: 20),
+        Text(
+          'Description',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: _mutedColor(context),
           ),
-          const SizedBox(height: 6),
-          TextFormField(
-            controller: _nameController,
-            decoration: _inputDecoration('Department Name'),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'Description',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 6),
-          TextFormField(
-            controller: _descriptionController,
-            decoration: _inputDecoration('Description'),
-            maxLines: 4,
-          ),
+        ),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: _descriptionController,
+          style: AppTheme.dashFieldTextStyle(context),
+          decoration: _inputDecoration('Description'),
+          maxLines: 4,
+        ),
+        if (showActions) ...[
           const SizedBox(height: 28),
           Wrap(
             spacing: 12,
             runSpacing: 12,
             children: [
               FilledButton.icon(
-                onPressed: _addDepartment,
+                onPressed: () => _addDepartment(),
                 icon: const Icon(Icons.add_rounded, size: 18),
                 label: const Text('Add Department'),
                 style: FilledButton.styleFrom(
@@ -572,7 +744,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
               ),
               OutlinedButton.icon(
                 onPressed: _selectedDepartment != null
-                    ? _updateDepartment
+                    ? () => _updateDepartment()
                     : null,
                 icon: const Icon(Icons.edit_rounded, size: 18),
                 label: const Text('Update'),
@@ -590,7 +762,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
               ),
               FilledButton.icon(
                 onPressed: _selectedDepartment != null
-                    ? _deactivateDepartment
+                    ? () => _deactivateDepartment()
                     : null,
                 icon: const Icon(Icons.person_off_rounded, size: 18),
                 label: const Text('Deactivate'),
@@ -610,30 +782,24 @@ class _ManageDepartmentState extends State<ManageDepartment> {
             ],
           ),
         ],
-      ),
+      ],
+    );
+
+    if (!framed) {
+      return Padding(padding: const EdgeInsets.all(24), child: content);
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
+      child: content,
     );
   }
 
-  InputDecoration _inputDecoration(String hint) => InputDecoration(
+  InputDecoration _inputDecoration(String hint) => AppTheme.dashInputDecoration(
+    context,
     hintText: hint,
-    hintStyle: TextStyle(
-      color: AppTheme.textSecondary.withValues(alpha: 0.7),
-      fontSize: 14,
-    ),
-    filled: true,
-    fillColor: AppTheme.white,
+    radius: 8,
     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: AppTheme.lightGray),
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: AppTheme.lightGray),
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: const BorderSide(color: Color(0xFF4CAF50), width: 1.5),
-    ),
   );
 }

@@ -11,8 +11,9 @@ const { requireAdmin } = require('../middleware/rbac');
 const { isAttachmentPathAllowedInDb } = require('../utils/rspAttachmentPolicy');
 const { resolveLocalRspAttachment, RSP_SUBDIR } = require('../utils/rspLocalAttachment');
 const { sendSmtpMail, isSmtpConfigured } = require('../utils/smtpMail');
+const { notifyNewRecruitmentApplication } = require('../utils/emailJsMail');
+const recruitmentNotifications = require('../services/recruitmentNotifications');
 const {
-  notifyNewRecruitmentApplication,
   isEmailJsConfiguredForHireEmail,
   sendHireCredentialsEmailJs,
 } = require('../utils/emailJsMail');
@@ -74,7 +75,7 @@ const RSP_APPLICATION_ROW_SELECT = `
   doc_tor_path, doc_tor_name,
   doc_eligibility_trainings_path, doc_eligibility_trainings_name,
   status, final_interview_at, final_interview_passed, hired_user_id,
-  hr_account_setup_done,
+  hr_account_setup_done, hire_credentials_email_sent_at,
   created_at, updated_at
 `.replace(/\s+/g, ' ');
 
@@ -187,6 +188,7 @@ async function ensureRspApplicationsTables() {
       ADD COLUMN IF NOT EXISTS final_interview_passed BOOLEAN,
       ADD COLUMN IF NOT EXISTS hired_user_id UUID,
       ADD COLUMN IF NOT EXISTS hr_account_setup_done BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS hire_credentials_email_sent_at TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS position_applied_for TEXT,
       ADD COLUMN IF NOT EXISTS first_name TEXT,
       ADD COLUMN IF NOT EXISTS middle_name TEXT,
@@ -321,6 +323,11 @@ router.post('/', async (req, res) => {
         await notifyNewRecruitmentApplication(application);
       } catch (e) {
         console.error('[rspApplications EmailJS]', e?.message || e);
+      }
+      try {
+        await recruitmentNotifications.notifyNewApplication(pool, application);
+      } catch (e) {
+        console.error('[rspApplications in-app notify]', e?.message || e);
       }
     })();
 
@@ -737,11 +744,22 @@ router.post('/:applicationId/send-hire-email', protect, async (req, res) => {
 
       await sendSmtpMail({ to, subject, text });
     }
+
+    await pool.query(
+      `
+      UPDATE public.recruitment_applications
+      SET hire_credentials_email_sent_at = now(), updated_at = now()
+      WHERE id = $1
+      `,
+      [applicationId]
+    );
+
     return res.json({
       ok: true,
       message: 'Email sent',
       to,
       via: useEmailJs ? 'emailjs' : 'smtp',
+      hire_credentials_email_sent_at: new Date().toISOString(),
     });
   } catch (err) {
     console.error('[rspApplications POST send-hire-email]', err);

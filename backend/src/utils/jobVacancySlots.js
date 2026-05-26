@@ -1,17 +1,29 @@
 const { pool } = require('../config/db');
 
+/** Lowercase, trimmed, without common HR prefixes — used to match applications to vacancies. */
+function normalizePositionKey(raw) {
+  let t = String(raw || '').trim().toLowerCase();
+  t = t.replace(/^now hiring:\s*/i, '');
+  t = t.replace(/\s+/g, ' ');
+  return t;
+}
+
 /** Same "position key" as the Flutter client stores in `position_applied_for` (headline, else body, else first E/E/T). */
 function vacancyPositionKey(v) {
   if (!v || typeof v !== 'object') return '';
   const h = typeof v.headline === 'string' ? v.headline.trim() : '';
-  if (h.length) return h.toLowerCase();
+  if (h.length) return normalizePositionKey(h);
   const b = typeof v.body === 'string' ? v.body.trim() : '';
-  if (b.length) return b.toLowerCase();
+  if (b.length) return normalizePositionKey(b);
   for (const k of ['education', 'experience', 'training']) {
     const s = typeof v[k] === 'string' ? v[k].trim() : '';
-    if (s.length) return s.toLowerCase();
+    if (s.length) return normalizePositionKey(s);
   }
   return '';
+}
+
+function normalizeStoredPositionKey(raw) {
+  return normalizePositionKey(raw);
 }
 
 function parseClosingDateIso(v) {
@@ -54,7 +66,7 @@ async function loadVacanciesFromDb() {
 }
 
 function findVacancyForPosition(vacancies, positionAppliedFor) {
-  const p = String(positionAppliedFor || '').trim().toLowerCase();
+  const p = normalizeStoredPositionKey(positionAppliedFor);
   if (!p) return null;
   for (const v of vacancies) {
     if (vacancyPositionKey(v) === p) return v;
@@ -72,16 +84,34 @@ const ACTIVE_APPLICANT_SLOT_SQL = `
 `;
 
 async function countApplicationsForPositionKey(positionKeyLower) {
+  const key = normalizeStoredPositionKey(positionKeyLower);
+  if (!key) return 0;
   const r = await pool.query(
     `
     SELECT COUNT(*)::int AS c
     FROM public.recruitment_applications
     WHERE position_applied_for IS NOT NULL
       AND btrim(position_applied_for::text) <> ''
-      AND lower(trim(position_applied_for::text)) = $1
+      AND lower(regexp_replace(regexp_replace(trim(position_applied_for::text), '^now hiring:\\s*', '', 'i'), '\\s+', ' ', 'g')) = $1
       AND (${ACTIVE_APPLICANT_SLOT_SQL})
     `,
-    [positionKeyLower]
+    [key]
+  );
+  return r.rows[0]?.c ?? 0;
+}
+
+async function countTotalApplicationsForPositionKey(positionKeyLower) {
+  const key = normalizeStoredPositionKey(positionKeyLower);
+  if (!key) return 0;
+  const r = await pool.query(
+    `
+    SELECT COUNT(*)::int AS c
+    FROM public.recruitment_applications
+    WHERE position_applied_for IS NOT NULL
+      AND btrim(position_applied_for::text) <> ''
+      AND lower(regexp_replace(regexp_replace(trim(position_applied_for::text), '^now hiring:\\s*', '', 'i'), '\\s+', ' ', 'g')) = $1
+    `,
+    [key]
   );
   return r.rows[0]?.c ?? 0;
 }
@@ -90,29 +120,59 @@ async function countApplicationsForPositionKey(positionKeyLower) {
  * Appends `application_count` per vacancy (by position key).
  * @param {object[]} vacancies
  */
+const POSITION_KEY_SQL = `
+  lower(
+    regexp_replace(
+      regexp_replace(trim(position_applied_for::text), '^now hiring:\\s*', '', 'i'),
+      '\\s+',
+      ' ',
+      'g'
+    )
+  )
+`;
+
 async function enrichVacanciesWithApplicationCounts(vacancies) {
   if (!Array.isArray(vacancies) || vacancies.length === 0) return vacancies;
-  let rows;
+  let activeRows = [];
+  let totalRows = [];
   try {
-    const r = await pool.query(
+    const activeQ = await pool.query(
       `
-      SELECT lower(trim(position_applied_for::text)) AS k, COUNT(*)::int AS c
+      SELECT ${POSITION_KEY_SQL} AS k, COUNT(*)::int AS c
       FROM public.recruitment_applications
       WHERE position_applied_for IS NOT NULL
         AND btrim(position_applied_for::text) <> ''
         AND (${ACTIVE_APPLICANT_SLOT_SQL})
-      GROUP BY lower(trim(position_applied_for::text))
+      GROUP BY ${POSITION_KEY_SQL}
       `
     );
-    rows = r.rows;
+    activeRows = activeQ.rows;
+    const totalQ = await pool.query(
+      `
+      SELECT ${POSITION_KEY_SQL} AS k, COUNT(*)::int AS c
+      FROM public.recruitment_applications
+      WHERE position_applied_for IS NOT NULL
+        AND btrim(position_applied_for::text) <> ''
+      GROUP BY ${POSITION_KEY_SQL}
+      `
+    );
+    totalRows = totalQ.rows;
   } catch {
-    rows = [];
+    activeRows = [];
+    totalRows = [];
   }
-  const map = new Map(rows.map((x) => [x.k, x.c]));
+  const activeMap = new Map(activeRows.map((x) => [x.k, x.c]));
+  const totalMap = new Map(totalRows.map((x) => [x.k, x.c]));
   return vacancies.map((v) => {
     const key = vacancyPositionKey(v);
-    const application_count = key ? map.get(key) ?? 0 : 0;
-    return { ...v, application_count, is_closed: isVacancyClosedByDate(v) };
+    const application_count = key ? activeMap.get(key) ?? 0 : 0;
+    const total_application_count = key ? totalMap.get(key) ?? 0 : 0;
+    return {
+      ...v,
+      application_count,
+      total_application_count,
+      is_closed: isVacancyClosedByDate(v),
+    };
   });
 }
 
@@ -166,10 +226,13 @@ async function assertPositionAcceptingApplications(positionTrimmed) {
 
 module.exports = {
   vacancyPositionKey,
+  normalizePositionKey,
+  normalizeStoredPositionKey,
   parseMaxApplicants,
   loadVacanciesFromDb,
   findVacancyForPosition,
   enrichVacanciesWithApplicationCounts,
+  countTotalApplicationsForPositionKey,
   assertPositionApplicationSlotAvailable,
   assertPositionAcceptingApplications,
   parseClosingDateIso,

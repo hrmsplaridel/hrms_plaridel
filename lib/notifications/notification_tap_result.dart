@@ -20,6 +20,12 @@ enum NotificationTapKind {
 
   /// Employee: My Attendance (e.g. DTR correction approved/rejected).
   employeeMyAttendance,
+
+  /// Admin: Recruitment (RSP) applications.
+  adminRecruitment,
+
+  /// Admin: Learning & development / training daily reports.
+  adminTrainingReports,
 }
 
 class NotificationTapResult {
@@ -44,6 +50,26 @@ class NotificationTapResult {
         );
       }
       return const NotificationTapResult(NotificationTapKind.none);
+    }
+
+    if (cat == 'recruitment' && isPrivileged) {
+      return const NotificationTapResult(NotificationTapKind.adminRecruitment);
+    }
+    if (cat == 'training' && isPrivileged) {
+      return const NotificationTapResult(
+        NotificationTapKind.adminTrainingReports,
+      );
+    }
+    if (cat == 'overtime') {
+      if (!isPrivileged &&
+          (t.contains('approved') || t.contains('rejected'))) {
+        return const NotificationTapResult(
+          NotificationTapKind.employeeMyAttendance,
+        );
+      }
+      if (isPrivileged && t.contains('pending')) {
+        return const NotificationTapResult(NotificationTapKind.none);
+      }
     }
 
     if (cat != 'leave') {

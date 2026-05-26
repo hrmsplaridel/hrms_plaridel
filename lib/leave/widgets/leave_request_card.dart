@@ -29,17 +29,18 @@ class LeaveRequestCard extends StatelessWidget {
         ? request.leaveTypeLabel
         : _formatRange(request);
 
+    final dark = AppTheme.dashIsDark(context);
     final content = Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: selected
-            ? AppTheme.primaryNavy.withOpacity(0.08)
-            : AppTheme.offWhite,
+            ? AppTheme.primaryNavy.withValues(alpha: dark ? 0.28 : 0.08)
+            : AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: selected
-              ? AppTheme.primaryNavy.withOpacity(0.22)
-              : Colors.black.withOpacity(0.06),
+              ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+              : AppTheme.dashHairlineOf(context),
         ),
       ),
       child: Column(
@@ -55,7 +56,7 @@ class LeaveRequestCard extends StatelessWidget {
                     Text(
                       title,
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
                       ),
@@ -64,7 +65,7 @@ class LeaveRequestCard extends StatelessWidget {
                     Text(
                       subtitle,
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 13,
                       ),
                     ),
@@ -107,7 +108,7 @@ class LeaveRequestCard extends StatelessWidget {
             Text(
               request.reason!.trim(),
               style: TextStyle(
-                color: AppTheme.textSecondary,
+                color: AppTheme.dashTextSecondaryOf(context),
                 fontSize: 13,
                 height: 1.45,
               ),
@@ -138,16 +139,10 @@ class LeaveRequestCard extends StatelessWidget {
   }
 }
 
-enum LeaveRequestCardVariant {
-  employee,
-  adminQueue,
-}
+enum LeaveRequestCardVariant { employee, adminQueue }
 
 class _DetailPill extends StatelessWidget {
-  const _DetailPill({
-    required this.label,
-    required this.value,
-  });
+  const _DetailPill({required this.label, required this.value});
 
   final String label;
   final String value;
@@ -157,9 +152,9 @@ class _DetailPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: AppTheme.white,
+        color: AppTheme.dashPanelOf(context),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -167,7 +162,7 @@ class _DetailPill extends StatelessWidget {
           Text(
             label,
             style: TextStyle(
-              color: AppTheme.textSecondary,
+              color: AppTheme.dashTextSecondaryOf(context),
               fontSize: 11,
               fontWeight: FontWeight.w600,
             ),
@@ -176,7 +171,7 @@ class _DetailPill extends StatelessWidget {
           Text(
             value,
             style: TextStyle(
-              color: AppTheme.textPrimary,
+              color: AppTheme.dashTextPrimaryOf(context),
               fontSize: 14,
               fontWeight: FontWeight.w700,
             ),

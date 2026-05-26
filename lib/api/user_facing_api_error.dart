@@ -24,6 +24,17 @@ String userFacingApiError(Object error) {
 String _dioMessage(DioException e) {
   final data = e.response?.data;
   if (data is Map) {
+    final err = data['error']?.toString().trim();
+    final details = data['details']?.toString().trim();
+    if (err != null &&
+        err.isNotEmpty &&
+        details != null &&
+        details.isNotEmpty &&
+        details != err) {
+      final combined = '$err ($details)';
+      if (combined.length <= 280) return combined;
+      return '${combined.substring(0, 277)}…';
+    }
     for (final key in ['error', 'message', 'detail', 'details']) {
       final v = data[key];
       if (v == null) continue;

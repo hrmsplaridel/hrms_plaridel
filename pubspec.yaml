@@ -80,7 +80,8 @@ flutter:
     - assets/images/
     - assets/images/hrmslogo.png
     - assets/fonts/
-    - assets/data/mis_occ_barangays.json
+    - assets/data/ph_psgc/index.json
+    - assets/data/ph_psgc/provinces/
 
   fonts:
     - family: NotoSans

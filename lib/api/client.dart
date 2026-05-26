@@ -186,7 +186,7 @@ class ApiClient {
       fieldName: await MultipartFile.fromFile(filePath),
       ...?extraFields,
     });
-    return _dio.post<T>(path, data: formData, options: options);
+    return _dio.post<T>(path, data: formData, options: _multipartOptions(options));
   }
 
   /// Upload from bytes (e.g. from file_picker). [fileName] is used for the part.
@@ -202,6 +202,16 @@ class ApiClient {
       fieldName: MultipartFile.fromBytes(bytes, filename: fileName),
       ...?extraFields,
     });
-    return _dio.post<T>(path, data: formData, options: options);
+    return _dio.post<T>(path, data: formData, options: _multipartOptions(options));
+  }
+
+  /// Base client defaults to JSON; multipart must not send application/json.
+  static Options _multipartOptions(Options? options) {
+    final merged = Map<String, dynamic>.from(options?.headers ?? {});
+    merged.remove(Headers.contentTypeHeader);
+    return (options ?? Options()).copyWith(
+      contentType: 'multipart/form-data',
+      headers: merged,
+    );
   }
 }

@@ -48,6 +48,38 @@ class _ManagePositionState extends State<ManagePosition> {
   bool _loading = false;
   _PositionRecord? _selectedPosition;
   String? _selectedDepartmentId;
+  StateSetter? _drawerSetState;
+
+  bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
+
+  Color _headingColor(BuildContext context) =>
+      AppTheme.dashTextPrimaryOf(context);
+
+  Color _mutedColor(BuildContext context) =>
+      AppTheme.dashTextSecondaryOf(context);
+
+  BoxDecoration _filterDecoration(BuildContext context) => BoxDecoration(
+    color: _isDark(context)
+        ? AppTheme.dashMutedSurfaceOf(context)
+        : AppTheme.lightGray.withValues(alpha: 0.5),
+    borderRadius: BorderRadius.circular(10),
+    border: Border.all(
+      color: _isDark(context)
+          ? AppTheme.dashHairlineOf(context)
+          : Colors.transparent,
+    ),
+  );
+
+  void _updatePositionFormState(VoidCallback update) {
+    if (mounted) setState(update);
+    final drawerSetState = _drawerSetState;
+    if (!mounted || drawerSetState == null) return;
+    try {
+      drawerSetState(() {});
+    } catch (_) {
+      _drawerSetState = null;
+    }
+  }
 
   @override
   void initState() {
@@ -84,7 +116,7 @@ class _ManagePositionState extends State<ManagePosition> {
       debugPrint('Load departments failed: $e');
       _departments = [];
     }
-    if (mounted) setState(() {});
+    _updatePositionFormState(() {});
   }
 
   Future<void> _loadPositions() async {
@@ -126,7 +158,7 @@ class _ManagePositionState extends State<ManagePosition> {
   }
 
   void _selectPosition(_PositionRecord p) {
-    setState(() {
+    _updatePositionFormState(() {
       _selectedPosition = p;
       _titleController.text = p.name;
       _descriptionController.text = p.description ?? '';
@@ -135,7 +167,7 @@ class _ManagePositionState extends State<ManagePosition> {
   }
 
   void _clearForm() {
-    setState(() {
+    _updatePositionFormState(() {
       _selectedPosition = null;
       _titleController.clear();
       _descriptionController.clear();
@@ -143,13 +175,13 @@ class _ManagePositionState extends State<ManagePosition> {
     });
   }
 
-  Future<void> _addPosition() async {
+  Future<bool> _addPosition() async {
     final title = _titleController.text.trim();
     if (title.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a position title.')),
       );
-      return;
+      return false;
     }
     try {
       await ApiClient.instance.post(
@@ -170,6 +202,7 @@ class _ManagePositionState extends State<ManagePosition> {
         _clearForm();
         _loadPositions();
       }
+      return true;
     } on DioException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -178,23 +211,24 @@ class _ManagePositionState extends State<ManagePosition> {
           ),
         );
       }
+      return false;
     }
   }
 
-  Future<void> _updatePosition() async {
+  Future<bool> _updatePosition() async {
     final p = _selectedPosition;
     if (p == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select a position to update.')),
       );
-      return;
+      return false;
     }
     final title = _titleController.text.trim();
     if (title.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a position title.')),
       );
-      return;
+      return false;
     }
     try {
       await ApiClient.instance.put(
@@ -214,6 +248,7 @@ class _ManagePositionState extends State<ManagePosition> {
         _clearForm();
         _loadPositions();
       }
+      return true;
     } on DioException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -222,16 +257,17 @@ class _ManagePositionState extends State<ManagePosition> {
           ),
         );
       }
+      return false;
     }
   }
 
-  Future<void> _deactivatePosition() async {
+  Future<bool> _deactivatePosition() async {
     final p = _selectedPosition;
     if (p == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select a position to deactivate.')),
       );
-      return;
+      return false;
     }
     final ok = await showDialog<bool>(
       context: context,
@@ -253,7 +289,7 @@ class _ManagePositionState extends State<ManagePosition> {
         ],
       ),
     );
-    if (ok != true || !mounted) return;
+    if (ok != true || !mounted) return false;
     try {
       await ApiClient.instance.put(
         '/api/positions/${p.id}',
@@ -266,6 +302,7 @@ class _ManagePositionState extends State<ManagePosition> {
         _clearForm();
         _loadPositions();
       }
+      return true;
     } on DioException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -276,54 +313,207 @@ class _ManagePositionState extends State<ManagePosition> {
           ),
         );
       }
+      return false;
     }
+  }
+
+  Future<void> _openPositionDrawer({_PositionRecord? position}) async {
+    _drawerSetState = null;
+    if (position == null) {
+      _clearForm();
+    } else {
+      _selectPosition(position);
+    }
+
+    try {
+      await showGeneralDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+        barrierColor: Colors.black.withValues(alpha: 0.32),
+        transitionDuration: const Duration(milliseconds: 220),
+        pageBuilder: (dialogContext, _, __) {
+          final screenWidth = MediaQuery.of(dialogContext).size.width;
+          final drawerWidth = screenWidth < 720 ? screenWidth : 520.0;
+          return Align(
+            alignment: Alignment.centerRight,
+            child: SizedBox(
+              width: drawerWidth,
+              height: double.infinity,
+              child: Material(
+                color: AppTheme.dashPanelOf(dialogContext),
+                elevation: 18,
+                child: StatefulBuilder(
+                  builder: (context, drawerSetState) {
+                    _drawerSetState = drawerSetState;
+                    return _buildPositionDrawer(dialogContext);
+                  },
+                ),
+              ),
+            ),
+          );
+        },
+        transitionBuilder: (context, animation, _, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(1, 0),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          );
+        },
+      );
+    } finally {
+      _drawerSetState = null;
+    }
+  }
+
+  Widget _buildPositionDrawer(BuildContext drawerContext) {
+    final isEditing = _selectedPosition != null;
+    return SafeArea(
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    isEditing ? 'Edit Position' : 'Add Position',
+                    style: TextStyle(
+                      color: _headingColor(context),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(drawerContext).pop(),
+                  icon: Icon(Icons.close_rounded, color: _mutedColor(context)),
+                  tooltip: 'Close',
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              child: _buildFormPanel(framed: false, showActions: false),
+            ),
+          ),
+          _buildDrawerFooter(drawerContext),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDrawerFooter(BuildContext drawerContext) {
+    final isEditing = _selectedPosition != null;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        border: Border(
+          top: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        ),
+      ),
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 8,
+        alignment: WrapAlignment.end,
+        children: [
+          TextButton(
+            onPressed: () => Navigator.of(drawerContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          if (isEditing)
+            OutlinedButton.icon(
+              onPressed: () async {
+                final ok = await _deactivatePosition();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
+              icon: const Icon(Icons.person_off_rounded, size: 18),
+              label: const Text('Deactivate'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+              ),
+            ),
+          FilledButton.icon(
+            onPressed: () async {
+              final ok = isEditing
+                  ? await _updatePosition()
+                  : await _addPosition();
+              if (ok && drawerContext.mounted) {
+                Navigator.of(drawerContext).pop();
+              }
+            },
+            icon: Icon(
+              isEditing ? Icons.edit_rounded : Icons.add_rounded,
+              size: 18,
+            ),
+            label: Text(isEditing ? 'Update' : 'Add Position'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFE85D04),
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final w = MediaQuery.of(context).size.width;
-    final isNarrow = w < 700;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Position',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Position',
+                style: TextStyle(
+                  color: _headingColor(context),
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            FilledButton.icon(
+              onPressed: () => _openPositionDrawer(),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Add Position'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFE85D04),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 12,
+                ),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 20),
-        isNarrow ? _buildNarrowLayout() : _buildWideLayout(),
-      ],
-    );
-  }
-
-  Widget _buildWideLayout() {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(flex: 1, child: _buildLeftPanel()),
-        const SizedBox(width: 24),
-        Expanded(flex: 1, child: _buildRightPanel()),
-      ],
-    );
-  }
-
-  Widget _buildNarrowLayout() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
         _buildLeftPanel(),
-        const SizedBox(height: 24),
-        _buildRightPanel(),
       ],
     );
   }
 
   Widget _buildLeftPanel() {
+    final dark = _isDark(context);
     final search = _searchController.text.toLowerCase();
     final filtered = search.isEmpty
         ? _positions
@@ -338,18 +528,7 @@ class _ManagePositionState extends State<ManagePosition> {
 
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -366,19 +545,22 @@ class _ManagePositionState extends State<ManagePosition> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             decoration: BoxDecoration(
-              color: AppTheme.lightGray.withValues(alpha: 0.4),
+              color: AppTheme.dashMutedSurfaceOf(context),
               borderRadius: BorderRadius.circular(8),
+              border: Border(
+                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+              ),
             ),
             child: Row(
               children: [
                 SizedBox(
-                  width: 60,
+                  width: 88,
                   child: Text(
                     'ID',
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 13,
-                      color: AppTheme.textPrimary,
+                      color: _headingColor(context),
                     ),
                   ),
                 ),
@@ -389,7 +571,18 @@ class _ManagePositionState extends State<ManagePosition> {
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 13,
-                      color: AppTheme.textPrimary,
+                      color: _headingColor(context),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  flex: 1,
+                  child: Text(
+                    'Department',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      color: _headingColor(context),
                     ),
                   ),
                 ),
@@ -400,7 +593,19 @@ class _ManagePositionState extends State<ManagePosition> {
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 13,
-                      color: AppTheme.textPrimary,
+                      color: _headingColor(context),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 96,
+                  child: Text(
+                    'Action',
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      color: _headingColor(context),
                     ),
                   ),
                 ),
@@ -420,65 +625,96 @@ class _ManagePositionState extends State<ManagePosition> {
               child: Text(
                 'No positions',
                 style: TextStyle(
-                  color: AppTheme.textSecondary.withValues(alpha: 0.8),
+                  color: _mutedColor(context).withValues(alpha: 0.8),
                   fontSize: 14,
                 ),
               ),
             )
           else
-            ...filtered.map((p) {
-              final isSelected = _selectedPosition?.id == p.id;
-              return Material(
-                color: isSelected
-                    ? AppTheme.primaryNavy.withValues(alpha: 0.08)
-                    : Colors.transparent,
-                child: InkWell(
-                  onTap: () => _selectPosition(p),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                    child: Row(
-                      children: [
-                        SizedBox(
-                          width: 60,
-                          child: Text(
-                            p.displayPositionNo,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.textSecondary,
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          flex: 1,
-                          child: Text(
-                            p.name,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: AppTheme.textPrimary,
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          flex: 2,
-                          child: Text(
-                            p.description ?? '—',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.textSecondary,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+            Table(
+              columnWidths: const {
+                0: FixedColumnWidth(88),
+                1: FlexColumnWidth(),
+                2: FlexColumnWidth(),
+                3: FlexColumnWidth(2),
+                4: FixedColumnWidth(96),
+              },
+              children: filtered.map((p) {
+                final isSelected = _selectedPosition?.id == p.id;
+                return TableRow(
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? (dark
+                              ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                              : AppTheme.primaryNavy.withValues(alpha: 0.08))
+                        : null,
                   ),
-                ),
-              );
-            }),
+                  children: [
+                    _tableCell(
+                      p.displayPositionNo,
+                      onTap: () => _openPositionDrawer(position: p),
+                      secondary: true,
+                    ),
+                    _tableCell(
+                      p.name,
+                      onTap: () => _openPositionDrawer(position: p),
+                    ),
+                    _tableCell(
+                      p.departmentName ?? '—',
+                      onTap: () => _openPositionDrawer(position: p),
+                      secondary: true,
+                    ),
+                    _tableCell(
+                      p.description ?? '—',
+                      onTap: () => _openPositionDrawer(position: p),
+                      secondary: true,
+                    ),
+                    _actionCell(p),
+                  ],
+                );
+              }).toList(),
+            ),
         ],
+      ),
+    );
+  }
+
+  Widget _tableCell(
+    String text, {
+    VoidCallback? onTap,
+    bool secondary = false,
+  }) {
+    return TableCell(
+      verticalAlignment: TableCellVerticalAlignment.middle,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Text(
+            text,
+            style: TextStyle(
+              fontSize: secondary ? 12 : 13,
+              color: secondary ? _mutedColor(context) : _headingColor(context),
+            ),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _actionCell(_PositionRecord position) {
+    return TableCell(
+      verticalAlignment: TableCellVerticalAlignment.middle,
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: IconButton(
+          onPressed: () => _openPositionDrawer(position: position),
+          icon: const Icon(Icons.open_in_new_rounded, size: 18),
+          tooltip: 'Open position',
+          color: const Color(0xFFE85D04),
+        ),
       ),
     );
   }
@@ -487,28 +723,20 @@ class _ManagePositionState extends State<ManagePosition> {
     return TextField(
       controller: _searchController,
       onChanged: (_) => setState(() {}),
-      decoration: InputDecoration(
+      style: AppTheme.dashFieldTextStyle(context),
+      decoration: AppTheme.dashInputDecoration(
+        context,
         hintText: 'Search',
-        hintStyle: TextStyle(
-          color: AppTheme.textSecondary.withValues(alpha: 0.8),
-          fontSize: 14,
-        ),
         prefixIcon: Icon(
           Icons.search_rounded,
           size: 20,
-          color: AppTheme.textSecondary.withValues(alpha: 0.7),
+          color: _mutedColor(context).withValues(alpha: 0.7),
         ),
-        isDense: true,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 14,
           vertical: 12,
         ),
-        filled: true,
-        fillColor: AppTheme.lightGray.withValues(alpha: 0.5),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide.none,
-        ),
+        radius: 10,
       ),
     );
   }
@@ -516,21 +744,25 @@ class _ManagePositionState extends State<ManagePosition> {
   Widget _buildDepartmentFilterDropdown() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppTheme.lightGray.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.transparent),
-      ),
+      decoration: _filterDecoration(context),
       child: DropdownButton<String?>(
         value: _departmentFilterId,
+        dropdownColor: AppTheme.dashPanelOf(context),
+        style: AppTheme.dashFieldTextStyle(context),
         underline: const SizedBox.shrink(),
         isDense: true,
         items: [
-          const DropdownMenuItem(value: null, child: Text('All')),
+          DropdownMenuItem(
+            value: null,
+            child: Text('All', style: AppTheme.dashFieldTextStyle(context)),
+          ),
           ..._departments.map(
             (d) => DropdownMenuItem(
               value: d['id'] as String?,
-              child: Text(d['name'] as String? ?? ''),
+              child: Text(
+                d['name'] as String? ?? '',
+                style: AppTheme.dashFieldTextStyle(context),
+              ),
             ),
           ),
         ],
@@ -545,20 +777,21 @@ class _ManagePositionState extends State<ManagePosition> {
   Widget _buildStatusDropdown() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppTheme.lightGray.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.transparent),
-      ),
+      decoration: _filterDecoration(context),
       child: DropdownButton<String>(
         value: _statusFilter,
+        dropdownColor: AppTheme.dashPanelOf(context),
+        style: AppTheme.dashFieldTextStyle(context),
         underline: const SizedBox.shrink(),
         isDense: true,
-        items: [
-          'Active',
-          'Inactive',
-          'All',
-        ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+        items: ['Active', 'Inactive', 'All']
+            .map(
+              (o) => DropdownMenuItem(
+                value: o,
+                child: Text(o, style: AppTheme.dashFieldTextStyle(context)),
+              ),
+            )
+            .toList(),
         onChanged: (v) {
           setState(() => _statusFilter = v ?? 'Active');
           _loadPositions();
@@ -567,95 +800,97 @@ class _ManagePositionState extends State<ManagePosition> {
     );
   }
 
-  Widget _buildRightPanel() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
+  Widget _buildFormPanel({bool framed = true, bool showActions = true}) {
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Position Title',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: _mutedColor(context),
           ),
-        ],
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Position Title',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
-            ),
+        ),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: _titleController,
+          style: AppTheme.dashFieldTextStyle(context),
+          decoration: _inputDecoration('Position Title'),
+        ),
+        const SizedBox(height: 20),
+        Text(
+          'Department',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: _mutedColor(context),
           ),
-          const SizedBox(height: 6),
-          TextFormField(
-            controller: _titleController,
-            decoration: _inputDecoration('Position Title'),
+        ),
+        const SizedBox(height: 6),
+        DropdownButtonFormField<String?>(
+          key: ValueKey(_selectedDepartmentId),
+          initialValue:
+              _departments.any((d) => d['id'] == _selectedDepartmentId)
+              ? _selectedDepartmentId
+              : null,
+          dropdownColor: AppTheme.dashPanelOf(context),
+          style: AppTheme.dashFieldTextStyle(context),
+          decoration: _inputDecoration('Select department'),
+          hint: Text(
+            'Select department',
+            style: TextStyle(color: _mutedColor(context)),
           ),
-          const SizedBox(height: 20),
-          Text(
-            'Department',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
-            ),
+          isExpanded: true,
+          icon: Icon(
+            Icons.arrow_drop_down_rounded,
+            color: _mutedColor(context).withValues(alpha: 0.8),
           ),
-          const SizedBox(height: 6),
-          DropdownButtonFormField<String?>(
-            initialValue:
-                _departments.any((d) => d['id'] == _selectedDepartmentId)
-                ? _selectedDepartmentId
-                : null,
-            decoration: _inputDecoration('Select department'),
-            hint: const Text('Select department'),
-            isExpanded: true,
-            icon: Icon(
-              Icons.arrow_drop_down_rounded,
-              color: AppTheme.textSecondary.withValues(alpha: 0.8),
-            ),
-            items: [
-              const DropdownMenuItem(
-                value: null,
-                child: Text('Select department'),
+          items: [
+            DropdownMenuItem(
+              value: null,
+              child: Text(
+                'Select department',
+                style: AppTheme.dashFieldTextStyle(context),
               ),
-              ..._departments.map(
-                (d) => DropdownMenuItem<String?>(
-                  value: d['id'] as String?,
-                  child: Text(d['name'] as String? ?? ''),
+            ),
+            ..._departments.map(
+              (d) => DropdownMenuItem<String?>(
+                value: d['id'] as String?,
+                child: Text(
+                  d['name'] as String? ?? '',
+                  style: AppTheme.dashFieldTextStyle(context),
                 ),
               ),
-            ],
-            onChanged: (v) => setState(() => _selectedDepartmentId = v),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'Description',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
             ),
+          ],
+          onChanged: (v) =>
+              _updatePositionFormState(() => _selectedDepartmentId = v),
+        ),
+        const SizedBox(height: 20),
+        Text(
+          'Description',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: _mutedColor(context),
           ),
-          const SizedBox(height: 6),
-          TextFormField(
-            controller: _descriptionController,
-            decoration: _inputDecoration('Description'),
-            maxLines: 4,
-          ),
+        ),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: _descriptionController,
+          style: AppTheme.dashFieldTextStyle(context),
+          decoration: _inputDecoration('Description'),
+          maxLines: 4,
+        ),
+        if (showActions) ...[
           const SizedBox(height: 28),
           Wrap(
             spacing: 12,
             runSpacing: 12,
             children: [
               FilledButton.icon(
-                onPressed: _addPosition,
+                onPressed: () => _addPosition(),
                 icon: const Icon(Icons.add_rounded, size: 18),
                 label: const Text('Add Position'),
                 style: FilledButton.styleFrom(
@@ -672,7 +907,9 @@ class _ManagePositionState extends State<ManagePosition> {
                 ),
               ),
               OutlinedButton.icon(
-                onPressed: _selectedPosition != null ? _updatePosition : null,
+                onPressed: _selectedPosition != null
+                    ? () => _updatePosition()
+                    : null,
                 icon: const Icon(Icons.edit_rounded, size: 18),
                 label: const Text('Update'),
                 style: OutlinedButton.styleFrom(
@@ -689,7 +926,7 @@ class _ManagePositionState extends State<ManagePosition> {
               ),
               FilledButton.icon(
                 onPressed: _selectedPosition != null
-                    ? _deactivatePosition
+                    ? () => _deactivatePosition()
                     : null,
                 icon: const Icon(Icons.person_off_rounded, size: 18),
                 label: const Text('Deactivate'),
@@ -709,30 +946,24 @@ class _ManagePositionState extends State<ManagePosition> {
             ],
           ),
         ],
-      ),
+      ],
+    );
+
+    if (!framed) {
+      return Padding(padding: const EdgeInsets.all(24), child: content);
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
+      child: content,
     );
   }
 
-  InputDecoration _inputDecoration(String hint) => InputDecoration(
+  InputDecoration _inputDecoration(String hint) => AppTheme.dashInputDecoration(
+    context,
     hintText: hint,
-    hintStyle: TextStyle(
-      color: AppTheme.textSecondary.withValues(alpha: 0.7),
-      fontSize: 14,
-    ),
-    filled: true,
-    fillColor: AppTheme.white,
+    radius: 8,
     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: AppTheme.lightGray),
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: AppTheme.lightGray),
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: const BorderSide(color: Color(0xFF4CAF50), width: 1.5),
-    ),
   );
 }

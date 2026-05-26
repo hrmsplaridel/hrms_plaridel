@@ -136,6 +136,9 @@ CREATE TABLE IF NOT EXISTS shifts (
   start_time TIME NOT NULL,
   end_time TIME NOT NULL,
   break_end TIME,
+  punch_mode TEXT NOT NULL DEFAULT 'auto'
+    CONSTRAINT shifts_punch_mode_check
+    CHECK (punch_mode IN ('auto', 'full_day', 'am_only', 'pm_only', 'single_session')),
 
   grace_period_minutes INT NOT NULL DEFAULT 0 CHECK (grace_period_minutes >= 0),
 
@@ -147,6 +150,7 @@ CREATE TABLE IF NOT EXISTS shifts (
 );
 
 COMMENT ON COLUMN shifts.working_days IS 'ISO weekday: 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 7=Sun';
+COMMENT ON COLUMN shifts.punch_mode IS 'Attendance punch interpretation: auto, full_day, am_only, pm_only, or single_session.';
 
 -- =========================================
 -- ATTENDANCE POLICIES
@@ -559,6 +563,54 @@ CREATE TABLE IF NOT EXISTS user_notifications (
 CREATE INDEX IF NOT EXISTS idx_user_notifications_user_id ON user_notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_notifications_read_at ON user_notifications(user_id, read_at);
 CREATE INDEX IF NOT EXISTS idx_user_notifications_created_at ON user_notifications(user_id, created_at DESC);
+
+-- =========================================
+-- LOCATOR / PASS SLIP / WFH REQUESTS
+-- =========================================
+CREATE TABLE IF NOT EXISTS locator_slips (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+  slip_date DATE NOT NULL,
+  am_in BOOLEAN NOT NULL DEFAULT false,
+  am_out BOOLEAN NOT NULL DEFAULT false,
+  pm_in BOOLEAN NOT NULL DEFAULT false,
+  pm_out BOOLEAN NOT NULL DEFAULT false,
+  request_type TEXT NOT NULL DEFAULT 'locator'
+    CONSTRAINT locator_slips_request_type_check
+    CHECK (request_type IN ('locator', 'pass_slip', 'work_from_home')),
+  office TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending_department_head'
+    CHECK (status IN (
+      'pending',
+      'pending_department_head',
+      'pending_hr',
+      'approved',
+      'rejected_by_department_head',
+      'rejected_by_hr',
+      'cancelled'
+    )),
+  dept_head_reviewer_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  dept_head_reviewed_at TIMESTAMPTZ,
+  dept_head_remarks TEXT,
+  hr_reviewer_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  hr_reviewed_at TIMESTAMPTZ,
+  hr_remarks TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_locator_slips_employee
+  ON locator_slips(employee_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_locator_slips_status
+  ON locator_slips(status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_locator_slips_department
+  ON locator_slips(department_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_locator_slips_date
+  ON locator_slips(slip_date DESC);
+CREATE INDEX IF NOT EXISTS idx_locator_slips_request_type
+  ON locator_slips(request_type);
 
 -- =========================================
 -- BIOMETRIC ATTENDANCE LOGS (raw import from .dat files)
@@ -1438,6 +1490,12 @@ EXECUTE PROCEDURE set_updated_at();
 DROP TRIGGER IF EXISTS trg_leave_requests_updated_at ON leave_requests;
 CREATE TRIGGER trg_leave_requests_updated_at
 BEFORE UPDATE ON leave_requests
+FOR EACH ROW
+EXECUTE PROCEDURE set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_locator_slips_updated_at ON locator_slips;
+CREATE TRIGGER trg_locator_slips_updated_at
+BEFORE UPDATE ON locator_slips
 FOR EACH ROW
 EXECUTE PROCEDURE set_updated_at();
 

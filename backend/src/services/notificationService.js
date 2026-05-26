@@ -1,6 +1,9 @@
 const { broadcastAppEvent } = require('../websockets/appEvents');
 
 /**
+ * Global in-app notifications (header bell). DocuTracker uses docutracker_notifications
+ * only — do not insert document workflow events here (Option B).
+ *
  * @param {import('pg').Pool} db
  * @param {object} opts
  * @param {string} opts.userId

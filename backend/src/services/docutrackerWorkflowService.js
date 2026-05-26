@@ -39,6 +39,22 @@ const TRANSITION_ALLOWED_FROM = {
   return: new Set(['in_review', 'escalated', 'overdue']),
 };
 
+let usersOfficeColumnReady = null;
+
+async function hasUsersOfficeIdColumn(client) {
+  if (usersOfficeColumnReady !== null) return usersOfficeColumnReady;
+  const result = await client.query(
+    `SELECT 1
+     FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name = 'users'
+       AND column_name = 'office_id'
+     LIMIT 1`
+  );
+  usersOfficeColumnReady = result.rowCount > 0;
+  return usersOfficeColumnReady;
+}
+
 function normalizeStatus(value) {
   if (!value) return 'pending';
   const s = String(value).toLowerCase().trim().replaceAll(' ', '_');
@@ -596,6 +612,12 @@ async function resolveStepAssignee(client, { explicitAssigneeId, stepConfig, cur
     const officeId = String(stepConfig?.office_id || '').trim();
     if (!officeId) {
       throw validationError(`No office_id configured for step ${stepConfig?.step_order ?? 'unknown'}`);
+    }
+    const canUseOfficeId = await hasUsersOfficeIdColumn(client);
+    if (!canUseOfficeId) {
+      throw validationError(
+        'Office-based DocuTracker routing is not installed on this database. Use role, department, or user routing instead.'
+      );
     }
     const r = await client.query(
       `SELECT u.id

@@ -17,7 +17,7 @@ import 'docutracker/docutracker_provider.dart';
 import 'docutracker/services/docutracker_access_policy.dart';
 import 'leave/leave_provider.dart';
 import 'leave/api_leave_repository.dart';
-import 'data/mis_occ_barangays_loader.dart';
+import 'data/philippine_psgc_loader.dart';
 import 'notifications/notification_provider.dart';
 import 'realtime/app_realtime_bridge.dart';
 import 'realtime/app_realtime_provider.dart';
@@ -61,7 +61,7 @@ Future<void> main() async {
     webview_platform_init.registerWebViewPlatform();
   }
 
-  await MisOccBarangaysData.load();
+  await PhilippinePsgcData.loadIndex();
 
   ApiClient.instance.init();
 

@@ -14,6 +14,20 @@ const List<String> _dayLabels = [
   'Sat',
   'Sun',
 ];
+const List<String> _punchModes = [
+  'auto',
+  'full_day',
+  'am_only',
+  'pm_only',
+  'single_session',
+];
+const Map<String, String> _punchModeLabels = {
+  'auto': 'Auto',
+  'full_day': 'Full day with break',
+  'am_only': 'AM only',
+  'pm_only': 'PM only',
+  'single_session': 'Single session',
+};
 
 /// Shift record for display/CRUD.
 class _ShiftRecord {
@@ -27,6 +41,7 @@ class _ShiftRecord {
     this.workingDays = const [1, 2, 3, 4, 5],
     this.shiftNumber,
     this.breakEndTime,
+    this.punchMode = 'auto',
   });
   final String id;
   final String name;
@@ -37,6 +52,7 @@ class _ShiftRecord {
   final int gracePeriodMinutes;
   final List<int> workingDays;
   final int? shiftNumber;
+  final String punchMode;
 
   /// Display as SHF-001, SHF-002, etc., or "—" if null.
   String get displayShiftNo => shiftNumber != null
@@ -47,6 +63,8 @@ class _ShiftRecord {
     if (workingDays.isEmpty) return '—';
     return workingDays.map((d) => _dayLabels[d - 1]).join(', ');
   }
+
+  String get punchModeDisplay => _punchModeLabels[punchMode] ?? 'Auto';
 }
 
 /// Shift management screen: list with search/status filter + form.
@@ -66,11 +84,44 @@ class _ManageShiftState extends State<ManageShift> {
   List<_ShiftRecord> _shifts = [];
   bool _loading = false;
   _ShiftRecord? _selectedShift;
+  StateSetter? _drawerSetState;
   TimeOfDay? _startTime;
   TimeOfDay? _endTime;
   TimeOfDay?
   _breakEndTime; // PM resume time (e.g. 13:00 for 1PM) – used for PM late check
   Set<int> _workingDays = {1, 2, 3, 4, 5}; // Mon–Fri default
+  String _punchMode = 'auto';
+
+  bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
+
+  Color _headingColor(BuildContext context) =>
+      AppTheme.dashTextPrimaryOf(context);
+
+  Color _mutedColor(BuildContext context) =>
+      AppTheme.dashTextSecondaryOf(context);
+
+  BoxDecoration _filterDecoration(BuildContext context) => BoxDecoration(
+        color: _isDark(context)
+            ? AppTheme.dashMutedSurfaceOf(context)
+            : AppTheme.lightGray.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: _isDark(context)
+              ? AppTheme.dashHairlineOf(context)
+              : Colors.transparent,
+        ),
+      );
+
+  void _updateShiftFormState(VoidCallback update) {
+    if (mounted) setState(update);
+    final drawerSetState = _drawerSetState;
+    if (!mounted || drawerSetState == null) return;
+    try {
+      drawerSetState(() {});
+    } catch (_) {
+      _drawerSetState = null;
+    }
+  }
 
   @override
   void initState() {
@@ -105,6 +156,11 @@ class _ManageShiftState extends State<ManageShift> {
       return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}:00';
     }
     return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+  }
+
+  String _parsePunchMode(dynamic value) {
+    final mode = value?.toString().trim().toLowerCase();
+    return _punchModes.contains(mode) ? mode! : 'auto';
   }
 
   Future<void> _loadShifts() async {
@@ -143,6 +199,7 @@ class _ManageShiftState extends State<ManageShift> {
           startTime: _parseTime(st) ?? const TimeOfDay(hour: 0, minute: 0),
           endTime: _parseTime(et) ?? const TimeOfDay(hour: 0, minute: 0),
           breakEndTime: _parseTime(be),
+          punchMode: _parsePunchMode(m['punch_mode']),
           isActive: m['is_active'] as bool? ?? true,
           gracePeriodMinutes: grace is int
               ? grace
@@ -169,7 +226,8 @@ class _ManageShiftState extends State<ManageShift> {
           : '';
       _startTime = s.startTime;
       _endTime = s.endTime;
-      _breakEndTime = s.breakEndTime;
+      _punchMode = s.punchMode;
+      _breakEndTime = _punchMode == 'single_session' ? null : s.breakEndTime;
       _workingDays = s.workingDays.toSet();
     });
   }
@@ -181,12 +239,14 @@ class _ManageShiftState extends State<ManageShift> {
       _graceController.clear();
       _startTime = null;
       _endTime = null;
+      _breakEndTime = null;
       _workingDays = {1, 2, 3, 4, 5};
+      _punchMode = 'auto';
     });
   }
 
   void _toggleWorkingDay(int day) {
-    setState(() {
+    _updateShiftFormState(() {
       if (_workingDays.contains(day)) {
         _workingDays = {..._workingDays}..remove(day);
       } else {
@@ -195,32 +255,34 @@ class _ManageShiftState extends State<ManageShift> {
     });
   }
 
-  Future<void> _addShift() async {
+  Future<bool> _addShift() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a shift name.')),
       );
-      return;
+      return false;
     }
     if (_startTime == null || _endTime == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please set Start Time and End Time.')),
       );
-      return;
+      return false;
     }
     if (_workingDays.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select at least one working day.')),
       );
-      return;
+      return false;
     }
     try {
       final body = <String, dynamic>{
         'name': name,
         'start_time': _timeStr(_startTime!),
         'end_time': _timeStr(_endTime!),
-        if (_breakEndTime != null) 'break_end': _timeStr(_breakEndTime!),
+        'punch_mode': _punchMode,
+        if (_breakEndTime != null && _punchMode != 'single_session')
+          'break_end': _timeStr(_breakEndTime!),
         'is_active': true,
         'grace_period_minutes': int.tryParse(_graceController.text.trim()) ?? 0,
         'working_days': _workingDays.toList()..sort(),
@@ -233,6 +295,7 @@ class _ManageShiftState extends State<ManageShift> {
         _clearForm();
         _loadShifts();
       }
+      return true;
     } on DioException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -241,42 +304,46 @@ class _ManageShiftState extends State<ManageShift> {
           ),
         );
       }
+      return false;
     }
   }
 
-  Future<void> _updateShift() async {
+  Future<bool> _updateShift() async {
     final s = _selectedShift;
     if (s == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select a shift to update.')),
       );
-      return;
+      return false;
     }
     final name = _nameController.text.trim();
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a shift name.')),
       );
-      return;
+      return false;
     }
     if (_startTime == null || _endTime == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please set Start Time and End Time.')),
       );
-      return;
+      return false;
     }
     if (_workingDays.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select at least one working day.')),
       );
-      return;
+      return false;
     }
     try {
       final body = <String, dynamic>{
         'name': name,
         'start_time': _timeStr(_startTime!),
         'end_time': _timeStr(_endTime!),
-        'break_end': _breakEndTime != null ? _timeStr(_breakEndTime!) : null,
+        'punch_mode': _punchMode,
+        'break_end': _breakEndTime != null && _punchMode != 'single_session'
+            ? _timeStr(_breakEndTime!)
+            : null,
         'grace_period_minutes': int.tryParse(_graceController.text.trim()) ?? 0,
         'working_days': _workingDays.toList()..sort(),
       };
@@ -288,6 +355,7 @@ class _ManageShiftState extends State<ManageShift> {
         _clearForm();
         _loadShifts();
       }
+      return true;
     } on DioException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -296,16 +364,17 @@ class _ManageShiftState extends State<ManageShift> {
           ),
         );
       }
+      return false;
     }
   }
 
-  Future<void> _deactivateShift() async {
+  Future<bool> _deactivateShift() async {
     final s = _selectedShift;
     if (s == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select a shift to deactivate.')),
       );
-      return;
+      return false;
     }
     final ok = await showDialog<bool>(
       context: context,
@@ -327,7 +396,7 @@ class _ManageShiftState extends State<ManageShift> {
         ],
       ),
     );
-    if (ok != true || !mounted) return;
+    if (ok != true || !mounted) return false;
     try {
       await ApiClient.instance.put(
         '/api/shifts/${s.id}',
@@ -340,6 +409,7 @@ class _ManageShiftState extends State<ManageShift> {
         _clearForm();
         _loadShifts();
       }
+      return true;
     } on DioException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -350,73 +420,217 @@ class _ManageShiftState extends State<ManageShift> {
           ),
         );
       }
+      return false;
     }
+  }
+
+  Future<void> _openShiftDrawer({_ShiftRecord? shift}) async {
+    _drawerSetState = null;
+    if (shift == null) {
+      _clearForm();
+    } else {
+      _selectShift(shift);
+    }
+
+    try {
+      await showGeneralDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+        barrierColor: Colors.black.withValues(alpha: 0.32),
+        transitionDuration: const Duration(milliseconds: 220),
+        pageBuilder: (dialogContext, _, __) {
+          final screenWidth = MediaQuery.of(dialogContext).size.width;
+          final drawerWidth = screenWidth < 720 ? screenWidth : 560.0;
+          return Align(
+            alignment: Alignment.centerRight,
+            child: SizedBox(
+              width: drawerWidth,
+              height: double.infinity,
+              child: Material(
+                color: AppTheme.dashPanelOf(dialogContext),
+                elevation: 18,
+                child: StatefulBuilder(
+                  builder: (context, drawerSetState) {
+                    _drawerSetState = drawerSetState;
+                    return _buildShiftDrawer(dialogContext);
+                  },
+                ),
+              ),
+            ),
+          );
+        },
+        transitionBuilder: (context, animation, _, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(1, 0),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          );
+        },
+      );
+    } finally {
+      _drawerSetState = null;
+    }
+  }
+
+  Widget _buildShiftDrawer(BuildContext drawerContext) {
+    final isEditing = _selectedShift != null;
+    return SafeArea(
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    isEditing ? 'Edit Shift' : 'Add Shift',
+                    style: TextStyle(
+                      color: _headingColor(context),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(drawerContext).pop(),
+                  icon: Icon(
+                    Icons.close_rounded,
+                    color: _mutedColor(context),
+                  ),
+                  tooltip: 'Close',
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              child: _buildFormPanel(framed: false, showActions: false),
+            ),
+          ),
+          _buildDrawerFooter(drawerContext),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDrawerFooter(BuildContext drawerContext) {
+    final isEditing = _selectedShift != null;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        border: Border(
+          top: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        ),
+      ),
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 8,
+        alignment: WrapAlignment.end,
+        children: [
+          TextButton(
+            onPressed: () => Navigator.of(drawerContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          if (isEditing)
+            OutlinedButton.icon(
+              onPressed: () async {
+                final ok = await _deactivateShift();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
+              icon: const Icon(Icons.person_off_rounded, size: 18),
+              label: const Text('Deactivate'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+              ),
+            ),
+          FilledButton.icon(
+            onPressed: () async {
+              final ok = isEditing ? await _updateShift() : await _addShift();
+              if (ok && drawerContext.mounted) {
+                Navigator.of(drawerContext).pop();
+              }
+            },
+            icon: Icon(
+              isEditing ? Icons.edit_rounded : Icons.add_rounded,
+              size: 18,
+            ),
+            label: Text(isEditing ? 'Update' : 'Add Shift'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFE85D04),
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final w = MediaQuery.of(context).size.width;
-    final isNarrow = w < 700;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Shift',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Shift',
+                style: TextStyle(
+                  color: _headingColor(context),
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            FilledButton.icon(
+              onPressed: () => _openShiftDrawer(),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Add Shift'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFE85D04),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 12,
+                ),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 20),
-        isNarrow ? _buildNarrowLayout() : _buildWideLayout(),
-      ],
-    );
-  }
-
-  Widget _buildWideLayout() {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(flex: 1, child: _buildLeftPanel()),
-        const SizedBox(width: 24),
-        Expanded(flex: 1, child: _buildRightPanel()),
-      ],
-    );
-  }
-
-  Widget _buildNarrowLayout() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
         _buildLeftPanel(),
-        const SizedBox(height: 24),
-        _buildRightPanel(),
       ],
     );
   }
 
   Widget _buildLeftPanel() {
+    final dark = _isDark(context);
     final search = _searchController.text.toLowerCase();
+    const shiftNoColumnWidth = 76.0;
     final filtered = search.isEmpty
         ? _shifts
         : _shifts.where((s) => s.name.toLowerCase().contains(search)).toList();
 
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -432,19 +646,22 @@ class _ManageShiftState extends State<ManageShift> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             decoration: BoxDecoration(
-              color: AppTheme.lightGray.withValues(alpha: 0.4),
+              color: AppTheme.dashMutedSurfaceOf(context),
               borderRadius: BorderRadius.circular(8),
+              border: Border(
+                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+              ),
             ),
             child: Row(
               children: [
                 SizedBox(
-                  width: 50,
+                  width: shiftNoColumnWidth,
                   child: Text(
                     'ID',
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 13,
-                      color: AppTheme.textPrimary,
+                      color: _headingColor(context),
                     ),
                   ),
                 ),
@@ -455,7 +672,7 @@ class _ManageShiftState extends State<ManageShift> {
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 13,
-                      color: AppTheme.textPrimary,
+                      color: _headingColor(context),
                     ),
                   ),
                 ),
@@ -466,7 +683,7 @@ class _ManageShiftState extends State<ManageShift> {
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 13,
-                      color: AppTheme.textPrimary,
+                      color: _headingColor(context),
                     ),
                   ),
                 ),
@@ -477,7 +694,7 @@ class _ManageShiftState extends State<ManageShift> {
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 13,
-                      color: AppTheme.textPrimary,
+                      color: _headingColor(context),
                     ),
                   ),
                 ),
@@ -488,7 +705,7 @@ class _ManageShiftState extends State<ManageShift> {
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 13,
-                      color: AppTheme.textPrimary,
+                      color: _headingColor(context),
                     ),
                   ),
                 ),
@@ -508,7 +725,7 @@ class _ManageShiftState extends State<ManageShift> {
               child: Text(
                 'No shifts',
                 style: TextStyle(
-                  color: AppTheme.textSecondary.withValues(alpha: 0.8),
+                  color: _mutedColor(context).withValues(alpha: 0.8),
                   fontSize: 14,
                 ),
               ),
@@ -518,10 +735,12 @@ class _ManageShiftState extends State<ManageShift> {
               final isSelected = _selectedShift?.id == s.id;
               return Material(
                 color: isSelected
-                    ? AppTheme.primaryNavy.withValues(alpha: 0.08)
+                    ? (dark
+                        ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                        : AppTheme.primaryNavy.withValues(alpha: 0.08))
                     : Colors.transparent,
                 child: InkWell(
-                  onTap: () => _selectShift(s),
+                  onTap: () => _openShiftDrawer(shift: s),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
@@ -530,23 +749,41 @@ class _ManageShiftState extends State<ManageShift> {
                     child: Row(
                       children: [
                         SizedBox(
-                          width: 50,
+                          width: shiftNoColumnWidth,
                           child: Text(
                             s.displayShiftNo,
                             style: TextStyle(
                               fontSize: 12,
-                              color: AppTheme.textSecondary,
+                              color: _mutedColor(context),
                             ),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
                           ),
                         ),
                         Expanded(
                           flex: 1,
-                          child: Text(
-                            s.name,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: AppTheme.textPrimary,
-                            ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                s.name,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: _headingColor(context),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                s.punchModeDisplay,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: _mutedColor(context),
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                              ),
+                            ],
                           ),
                         ),
                         Expanded(
@@ -555,7 +792,7 @@ class _ManageShiftState extends State<ManageShift> {
                             s.startTime.format(context),
                             style: TextStyle(
                               fontSize: 13,
-                              color: AppTheme.textPrimary,
+                              color: _headingColor(context),
                             ),
                           ),
                         ),
@@ -565,7 +802,7 @@ class _ManageShiftState extends State<ManageShift> {
                             s.endTime.format(context),
                             style: TextStyle(
                               fontSize: 13,
-                              color: AppTheme.textPrimary,
+                              color: _headingColor(context),
                             ),
                           ),
                         ),
@@ -575,7 +812,7 @@ class _ManageShiftState extends State<ManageShift> {
                             s.workingDaysDisplay,
                             style: TextStyle(
                               fontSize: 13,
-                              color: AppTheme.textPrimary,
+                              color: _headingColor(context),
                             ),
                           ),
                         ),
@@ -594,28 +831,20 @@ class _ManageShiftState extends State<ManageShift> {
     return TextField(
       controller: _searchController,
       onChanged: (_) => setState(() {}),
-      decoration: InputDecoration(
+      style: AppTheme.dashFieldTextStyle(context),
+      decoration: AppTheme.dashInputDecoration(
+        context,
         hintText: 'Search',
-        hintStyle: TextStyle(
-          color: AppTheme.textSecondary.withValues(alpha: 0.8),
-          fontSize: 14,
-        ),
         prefixIcon: Icon(
           Icons.search_rounded,
           size: 20,
-          color: AppTheme.textSecondary.withValues(alpha: 0.7),
+          color: _mutedColor(context).withValues(alpha: 0.7),
         ),
-        isDense: true,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 14,
           vertical: 12,
         ),
-        filled: true,
-        fillColor: AppTheme.lightGray.withValues(alpha: 0.5),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide.none,
-        ),
+        radius: 10,
       ),
     );
   }
@@ -623,20 +852,21 @@ class _ManageShiftState extends State<ManageShift> {
   Widget _buildStatusDropdown() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppTheme.lightGray.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.transparent),
-      ),
+      decoration: _filterDecoration(context),
       child: DropdownButton<String>(
         value: _statusFilter,
+        dropdownColor: AppTheme.dashPanelOf(context),
+        style: AppTheme.dashFieldTextStyle(context),
         underline: const SizedBox.shrink(),
         isDense: true,
-        items: [
-          'Active',
-          'Inactive',
-          'All',
-        ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+        items: ['Active', 'Inactive', 'All']
+            .map(
+              (o) => DropdownMenuItem(
+                value: o,
+                child: Text(o, style: AppTheme.dashFieldTextStyle(context)),
+              ),
+            )
+            .toList(),
         onChanged: (v) {
           setState(() => _statusFilter = v ?? 'Active');
           _loadShifts();
@@ -645,22 +875,47 @@ class _ManageShiftState extends State<ManageShift> {
     );
   }
 
-  Widget _buildRightPanel() {
+  Widget _buildPunchModeDropdown() {
     return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: _filterDecoration(context),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: _punchMode,
+          dropdownColor: AppTheme.dashPanelOf(context),
+          style: AppTheme.dashFieldTextStyle(context),
+          isExpanded: true,
+          items: _punchModes
+              .map(
+                (mode) => DropdownMenuItem(
+                  value: mode,
+                  child: Text(
+                    _punchModeLabels[mode] ?? mode,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTheme.dashFieldTextStyle(context),
+                  ),
+                ),
+              )
+              .toList(),
+          onChanged: (mode) {
+            _updateShiftFormState(() {
+              _punchMode = mode ?? 'auto';
+              if (_punchMode == 'single_session') {
+                _breakEndTime = null;
+              }
+            });
+          },
+        ),
       ),
-      child: Column(
+    );
+  }
+
+  Widget _buildFormPanel({
+    bool framed = true,
+    bool showActions = true,
+  }) {
+    final dark = _isDark(context);
+    final content = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
@@ -668,12 +923,13 @@ class _ManageShiftState extends State<ManageShift> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
+              color: _mutedColor(context),
             ),
           ),
           const SizedBox(height: 6),
           TextFormField(
             controller: _nameController,
+            style: AppTheme.dashFieldTextStyle(context),
             decoration: _inputDecoration('Shift Name'),
           ),
           const SizedBox(height: 20),
@@ -682,44 +938,72 @@ class _ManageShiftState extends State<ManageShift> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
+              color: _mutedColor(context),
             ),
           ),
           const SizedBox(height: 6),
-          _buildTimePicker(_startTime, (t) => setState(() => _startTime = t)),
+          _buildTimePicker(
+            _startTime,
+            (t) => _updateShiftFormState(() => _startTime = t),
+          ),
           const SizedBox(height: 20),
           Text(
             'End Time',
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
+              color: _mutedColor(context),
             ),
           ),
           const SizedBox(height: 6),
-          _buildTimePicker(_endTime, (t) => setState(() => _endTime = t)),
+          _buildTimePicker(
+            _endTime,
+            (t) => _updateShiftFormState(() => _endTime = t),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Attendance Mode',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: _mutedColor(context),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Choose Single session for schedules like 10:00 AM to 2:00 PM.',
+            style: TextStyle(
+              fontSize: 11,
+              color: _mutedColor(context).withValues(alpha: 0.8),
+            ),
+          ),
+          const SizedBox(height: 6),
+          _buildPunchModeDropdown(),
           const SizedBox(height: 20),
           Text(
             'PM Start (Break End)',
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
+              color: _mutedColor(context),
             ),
           ),
           const SizedBox(height: 4),
           Text(
-            'When PM shift starts; used for PM late check. Leave empty if not needed.',
+            _punchMode == 'single_session'
+                ? 'Not used for single-session shifts.'
+                : 'When PM shift starts; used for PM late check. Leave empty if not needed.',
             style: TextStyle(
               fontSize: 11,
-              color: AppTheme.textSecondary.withValues(alpha: 0.8),
+              color: _mutedColor(context).withValues(alpha: 0.8),
             ),
           ),
           const SizedBox(height: 6),
           _buildTimePicker(
             _breakEndTime,
-            (t) => setState(() => _breakEndTime = t),
+            (t) => _updateShiftFormState(() => _breakEndTime = t),
             allowClear: true,
+            enabled: _punchMode != 'single_session',
           ),
           const SizedBox(height: 20),
           Text(
@@ -727,13 +1011,14 @@ class _ManageShiftState extends State<ManageShift> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
+              color: _mutedColor(context),
             ),
           ),
           const SizedBox(height: 6),
           TextFormField(
             controller: _graceController,
             keyboardType: TextInputType.number,
+            style: AppTheme.dashFieldTextStyle(context),
             decoration: _inputDecoration('0'),
           ),
           const SizedBox(height: 20),
@@ -742,7 +1027,7 @@ class _ManageShiftState extends State<ManageShift> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
+              color: _mutedColor(context),
             ),
           ),
           const SizedBox(height: 6),
@@ -753,73 +1038,104 @@ class _ManageShiftState extends State<ManageShift> {
               final isOn = _workingDays.contains(day);
               return FilterChip(
                 selected: isOn,
-                label: Text(_dayLabels[day - 1]),
+                label: Text(
+                  _dayLabels[day - 1],
+                  style: TextStyle(
+                    color: isOn
+                        ? (dark
+                            ? AppTheme.primaryNavyLight
+                            : AppTheme.primaryNavy)
+                        : _headingColor(context),
+                  ),
+                ),
                 onSelected: (_) => _toggleWorkingDay(day),
-                selectedColor: AppTheme.primaryNavy.withValues(alpha: 0.2),
-                checkmarkColor: AppTheme.primaryNavy,
+                selectedColor: dark
+                    ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                    : AppTheme.primaryNavy.withValues(alpha: 0.2),
+                checkmarkColor:
+                    dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy,
+                backgroundColor: AppTheme.dashMutedSurfaceOf(context),
               );
             }).toList(),
           ),
-          const SizedBox(height: 28),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              FilledButton.icon(
-                onPressed: _addShift,
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Add Shift'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF4CAF50),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
+          if (showActions) ...[
+            const SizedBox(height: 28),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                FilledButton.icon(
+                  onPressed: () => _addShift(),
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('Add Shift'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF4CAF50),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    elevation: 0,
                   ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  elevation: 0,
                 ),
-              ),
-              FilledButton.icon(
-                onPressed: _selectedShift != null ? _updateShift : null,
-                icon: const Icon(Icons.edit_rounded, size: 18),
-                label: const Text('Update'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF4CAF50),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
+                FilledButton.icon(
+                  onPressed: _selectedShift != null
+                      ? () => _updateShift()
+                      : null,
+                  icon: const Icon(Icons.edit_rounded, size: 18),
+                  label: const Text('Update'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF4CAF50),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    elevation: 0,
                   ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  elevation: 0,
                 ),
-              ),
-              FilledButton.icon(
-                onPressed: _selectedShift != null ? _deactivateShift : null,
-                icon: const Icon(Icons.person_off_rounded, size: 18),
-                label: const Text('Deactivate'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFFE53935),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
+                FilledButton.icon(
+                  onPressed: _selectedShift != null
+                      ? () => _deactivateShift()
+                      : null,
+                  icon: const Icon(Icons.person_off_rounded, size: 18),
+                  label: const Text('Deactivate'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFE53935),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    elevation: 0,
                   ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  elevation: 0,
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
+          ],
         ],
-      ),
+      );
+
+    if (!framed) {
+      return Padding(
+        padding: const EdgeInsets.all(24),
+        child: content,
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
+      child: content,
     );
   }
 
@@ -827,45 +1143,50 @@ class _ManageShiftState extends State<ManageShift> {
     TimeOfDay? value,
     ValueChanged<TimeOfDay?> onChanged, {
     bool allowClear = false,
+    bool enabled = true,
   }) {
     return Row(
       children: [
         Expanded(
           child: InkWell(
-            onTap: () async {
-              final t = await showTimePicker(
-                context: context,
-                initialTime: value ?? const TimeOfDay(hour: 13, minute: 0),
-              );
-              if (t != null) onChanged(t);
-            },
+            onTap: enabled
+                ? () async {
+                    final t = await showTimePicker(
+                      context: context,
+                      initialTime: value ?? const TimeOfDay(hour: 13, minute: 0),
+                    );
+                    if (t != null) onChanged(t);
+                  }
+                : null,
             borderRadius: BorderRadius.circular(8),
             child: InputDecorator(
               decoration: _inputDecoration('HH:MM').copyWith(
                 suffixIcon: Icon(
                   Icons.access_time_rounded,
                   size: 20,
-                  color: AppTheme.textSecondary,
+                  color: _mutedColor(context),
                 ),
               ),
               child: Text(
                 value != null ? value.format(context) : '',
                 style: TextStyle(
                   fontSize: 14,
-                  color: value != null
-                      ? AppTheme.textPrimary
-                      : AppTheme.textSecondary,
+                  color: !enabled
+                      ? _mutedColor(context).withValues(alpha: 0.5)
+                      : value != null
+                      ? _headingColor(context)
+                      : _mutedColor(context),
                 ),
               ),
             ),
           ),
         ),
-        if (allowClear && value != null)
+        if (allowClear && value != null && enabled)
           IconButton(
             icon: Icon(
               Icons.clear_rounded,
               size: 20,
-              color: AppTheme.textSecondary,
+              color: _mutedColor(context),
             ),
             onPressed: () => onChanged(null),
             tooltip: 'Clear',
@@ -874,26 +1195,13 @@ class _ManageShiftState extends State<ManageShift> {
     );
   }
 
-  InputDecoration _inputDecoration(String hint) => InputDecoration(
-    hintText: hint,
-    hintStyle: TextStyle(
-      color: AppTheme.textSecondary.withValues(alpha: 0.7),
-      fontSize: 14,
-    ),
-    filled: true,
-    fillColor: AppTheme.white,
-    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: AppTheme.lightGray),
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: AppTheme.lightGray),
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: const BorderSide(color: Color(0xFF4CAF50), width: 1.5),
-    ),
-  );
+  InputDecoration _inputDecoration(String hint) => AppTheme.dashInputDecoration(
+        context,
+        hintText: hint,
+        radius: 8,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
+      );
 }

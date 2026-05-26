@@ -112,8 +112,10 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   GlobalKey<StructuredAddressFormState> _addressFormKey =
       GlobalKey<StructuredAddressFormState>();
   final _salaryGradeController = TextEditingController();
+  final _biometricIdController = TextEditingController();
 
-  String? _privilege;
+  /// Defaults to Employee so new hires are not accidentally saved as admin.
+  String? _privilege = 'Employee';
   String? _suffix;
   String? _sex;
   DateTime? _dateOfBirth;
@@ -181,29 +183,24 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     _contactController.dispose();
     _streetController.dispose();
     _salaryGradeController.dispose();
+    _biometricIdController.dispose();
     super.dispose();
   }
 
   bool _chromeDark(BuildContext context) =>
       Theme.of(context).brightness == Brightness.dark;
 
-  Color _chromeHeadingColor(BuildContext context) =>
-      _chromeDark(context)
-          ? AppTheme.dashTextPrimaryOf(context)
-          : AppTheme.textPrimary;
+  Color _chromeHeadingColor(BuildContext context) => _chromeDark(context)
+      ? AppTheme.dashTextPrimaryOf(context)
+      : AppTheme.textPrimary;
 
-  Color _chromeMutedColor(BuildContext context) =>
-      _chromeDark(context)
-          ? AppTheme.dashTextSecondaryOf(context)
-          : AppTheme.textSecondary;
+  Color _chromeMutedColor(BuildContext context) => _chromeDark(context)
+      ? AppTheme.dashTextSecondaryOf(context)
+      : AppTheme.textSecondary;
 
   InputDecoration _fieldDecoration(String label, {String? hint}) {
     final darkChrome = _chromeDark(context);
-    // Expanded label sits on white fill; floating label sits on the top edge and
-    // must stay light when the surrounding chrome is dark.
-    final floatingLabelColor = darkChrome
-        ? AppTheme.dashTextPrimaryOf(context)
-        : AppTheme.textPrimary;
+    final borderColor = AppTheme.dashInputBorderOf(context);
 
     return InputDecoration(
       labelText: label,
@@ -211,35 +208,30 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       floatingLabelBehavior: FloatingLabelBehavior.auto,
       floatingLabelAlignment: FloatingLabelAlignment.start,
       labelStyle: TextStyle(
-        color: AppTheme.textSecondary.withValues(alpha: 0.9),
+        color: _chromeMutedColor(context).withValues(alpha: 0.9),
         fontSize: 14,
         fontWeight: FontWeight.w500,
       ),
       floatingLabelStyle: TextStyle(
-        color: floatingLabelColor,
+        color: _chromeHeadingColor(context),
         fontSize: 13,
         fontWeight: FontWeight.w600,
       ),
       hintStyle: TextStyle(
-        color: AppTheme.textSecondary.withValues(alpha: 0.65),
+        color: _chromeMutedColor(context).withValues(alpha: 0.65),
         fontSize: 14,
       ),
       filled: true,
-      fillColor: AppTheme.white,
+      fillColor: AppTheme.dashInputFillOf(context),
       isDense: false,
-      contentPadding: EdgeInsets.fromLTRB(
-        16,
-        darkChrome ? 22 : 18,
-        16,
-        16,
-      ),
+      contentPadding: EdgeInsets.fromLTRB(16, darkChrome ? 22 : 18, 16, 16),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
-        borderSide: BorderSide(color: AppTheme.lightGray),
+        borderSide: BorderSide(color: borderColor),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
-        borderSide: BorderSide(color: AppTheme.lightGray),
+        borderSide: BorderSide(color: borderColor),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
@@ -299,9 +291,10 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     _contactController.clear();
     _streetController.clear();
     _salaryGradeController.clear();
+    _biometricIdController.clear();
     setState(() {
       _addressFormKey = GlobalKey<StructuredAddressFormState>();
-      _privilege = null;
+      _privilege = 'Employee';
       _suffix = null;
       _sex = null;
       _dateOfBirth = null;
@@ -349,6 +342,8 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         if (_employmentType != null) 'employment_type': _employmentType,
         if (_salaryGradeController.text.trim().isNotEmpty)
           'salary_grade': _salaryGradeController.text.trim(),
+        if (_biometricIdController.text.trim().isNotEmpty)
+          'biometric_user_id': _biometricIdController.text.trim(),
         'date_hired': _dateHired!.toIso8601String().split('T')[0],
         'employment_status': _employmentStatus,
       };
@@ -407,13 +402,16 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         widget.onAccountCreated!();
       } else {
         _showSnackBar(
-          'Account created successfully. They can sign in with their email and password.',
+          'Account created as $privilege. They can sign in with their email and password.',
         );
       }
     } on DioException catch (e) {
       if (!mounted) return;
       if (e.response?.statusCode == 409) {
-        _showSnackBar('Email already registered');
+        final msg = e.response?.data is Map
+            ? (e.response!.data as Map)['error']?.toString()
+            : null;
+        _showSnackBar(msg ?? 'Email already registered');
       } else {
         final msg = e.response?.data is Map
             ? (e.response!.data as Map)['error']?.toString()
@@ -487,8 +485,9 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
               color: _chromeDark(context)
                   ? AppTheme.dashPanelOf(context)
                   : AppTheme.white,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(16)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(16),
+              ),
             ),
             child: Padding(
               padding: EdgeInsets.all(isNarrow ? 16 : 24),
@@ -685,13 +684,51 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         DropdownButtonFormField<String>(
           initialValue: _privilege,
           isExpanded: true,
-          decoration: _fieldDecoration('Role', hint: 'Admin or Employee'),
-          items: [
-            'Admin',
-            'Employee',
-          ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+          decoration: _fieldDecoration('Role', hint: 'Employee (recommended)'),
+          items: const [
+            DropdownMenuItem(value: 'Employee', child: Text('Employee')),
+            DropdownMenuItem(value: 'Admin', child: Text('Administrator')),
+          ],
           onChanged: (v) => setState(() => _privilege = v),
           validator: (v) => v == null ? 'Required' : null,
+        ),
+        if (_privilege == 'Admin') ...[
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF3E0),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFEF6C00).withValues(alpha: 0.4)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFFEF6C00)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Administrator can access the full admin dashboard, DTR management, and all HR modules. Use Employee for hired staff.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.35,
+                      color: _chromeMutedColor(context),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(height: 18),
+        TextFormField(
+          controller: _biometricIdController,
+          decoration: _fieldDecoration('Biometric User ID (optional)').copyWith(
+            helperText:
+                'Set now if known, or leave blank and add it later from Edit employee.',
+            helperMaxLines: 2,
+          ),
+          textInputAction: TextInputAction.next,
         ),
         SizedBox(height: narrow ? 14 : 16),
         Container(
@@ -738,8 +775,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color:
-            dark ? AppTheme.dashMutedSurfaceOf(context) : AppTheme.white,
+        color: dark ? AppTheme.dashMutedSurfaceOf(context) : AppTheme.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: dark
@@ -885,8 +921,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color:
-            dark ? AppTheme.dashMutedSurfaceOf(context) : AppTheme.white,
+        color: dark ? AppTheme.dashMutedSurfaceOf(context) : AppTheme.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: dark
@@ -953,17 +988,18 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
                 },
                 borderRadius: BorderRadius.circular(8),
                 child: InputDecorator(
-                  decoration: _fieldDecoration(
-                    'Date hired',
-                    hint: 'Tap calendar to choose',
-                  ).copyWith(
-                    errorText: state.errorText,
-                    suffixIcon: Icon(
-                      Icons.calendar_today_rounded,
-                      size: 20,
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
+                  decoration:
+                      _fieldDecoration(
+                        'Date hired',
+                        hint: 'Tap calendar to choose',
+                      ).copyWith(
+                        errorText: state.errorText,
+                        suffixIcon: Icon(
+                          Icons.calendar_today_rounded,
+                          size: 20,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
                   child: Text(
                     _dateHired != null
                         ? '${_dateHired!.year}-${_dateHired!.month.toString().padLeft(2, '0')}-${_dateHired!.day.toString().padLeft(2, '0')}'
@@ -1126,6 +1162,26 @@ class _ManageEmployeeState extends State<ManageEmployee> {
   String _sortField = 'full_name';
   bool _sortAscending = true;
   bool _exportingCsv = false;
+
+  bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
+
+  Color _headingColor(BuildContext context) =>
+      AppTheme.dashTextPrimaryOf(context);
+
+  Color _mutedColor(BuildContext context) =>
+      AppTheme.dashTextSecondaryOf(context);
+
+  BoxDecoration _filterDecoration(BuildContext context) => BoxDecoration(
+    color: _isDark(context)
+        ? AppTheme.dashMutedSurfaceOf(context)
+        : AppTheme.lightGray.withValues(alpha: 0.5),
+    borderRadius: BorderRadius.circular(10),
+    border: Border.all(
+      color: _isDark(context)
+          ? AppTheme.dashHairlineOf(context)
+          : Colors.transparent,
+    ),
+  );
 
   final Set<String> _selectedBulkIds = {};
   final List<FocusNode> _rowFocusNodes = [];
@@ -1684,8 +1740,11 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     final canActivate = _employees.any(
       (e) => _selectedBulkIds.contains(e.id) && !e.isActive,
     );
+    final dark = _isDark(context);
     return Material(
-      color: AppTheme.primaryNavy.withValues(alpha: .07),
+      color: dark
+          ? AppTheme.primaryNavy.withValues(alpha: 0.22)
+          : AppTheme.primaryNavy.withValues(alpha: 0.07),
       borderRadius: BorderRadius.circular(10),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -1699,7 +1758,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: AppTheme.textPrimary,
+                color: _headingColor(context),
               ),
             ),
             TextButton(
@@ -1750,68 +1809,73 @@ class _ManageEmployeeState extends State<ManageEmployee> {
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
-        return Theme(
-          data: AppTheme.lightTheme,
-          child: Dialog(
-            insetPadding: const EdgeInsets.symmetric(
-              horizontal: 20,
-              vertical: 24,
+        return Dialog(
+          backgroundColor: AppTheme.dashPanelOf(dialogContext),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 24,
+          ),
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: AppTheme.dashHairlineOf(dialogContext)),
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 920,
+              maxHeight: MediaQuery.of(context).size.height * 0.92,
             ),
-            clipBehavior: Clip.antiAlias,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: 920,
-                maxHeight: MediaQuery.of(context).size.height * 0.92,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 16, 8, 8),
-                    child: Row(
-                      children: [
-                        Text(
-                          'Add employee',
-                          style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                          ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 8, 8),
+                  child: Row(
+                    children: [
+                      Text(
+                        'Add employee',
+                        style: TextStyle(
+                          color: AppTheme.dashTextPrimaryOf(dialogContext),
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
                         ),
-                        const Spacer(),
-                        IconButton(
-                          icon: const Icon(Icons.close_rounded),
-                          tooltip: 'Close',
-                          onPressed: () => Navigator.of(dialogContext).pop(),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Divider(height: 1),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: AddEmployeeForm(
-                        onAccountCreated: () {
-                          Navigator.of(dialogContext).pop();
-                          setState(() => _pageIndex = 0);
-                          _loadEmployees();
-                          messenger.showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Account created. The list has been refreshed.',
-                              ),
-                            ),
-                          );
-                        },
                       ),
+                      const Spacer(),
+                      IconButton(
+                        icon: Icon(
+                          Icons.close_rounded,
+                          color: AppTheme.dashTextSecondaryOf(dialogContext),
+                        ),
+                        tooltip: 'Close',
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                      ),
+                    ],
+                  ),
+                ),
+                Divider(
+                  height: 1,
+                  color: AppTheme.dashHairlineOf(dialogContext),
+                ),
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: AddEmployeeForm(
+                      onAccountCreated: () {
+                        Navigator.of(dialogContext).pop();
+                        setState(() => _pageIndex = 0);
+                        _loadEmployees();
+                        messenger.showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Account created. The list has been refreshed.',
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         );
@@ -1838,16 +1902,41 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Employees',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
+        _buildEmployeesHeader(isNarrow: isNarrow),
         const SizedBox(height: 20),
         isNarrow ? _buildNarrowLayout() : _buildWideLayout(),
+      ],
+    );
+  }
+
+  Widget _buildEmployeesHeader({required bool isNarrow}) {
+    final title = Text(
+      'Employees',
+      style: TextStyle(
+        color: _headingColor(context),
+        fontSize: 24,
+        fontWeight: FontWeight.w800,
+      ),
+    );
+    final actions = _buildEmployeeHeaderActions();
+
+    if (isNarrow) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          title,
+          const SizedBox(height: 12),
+          Align(alignment: Alignment.centerRight, child: actions),
+        ],
+      );
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(child: title),
+        const SizedBox(width: 16),
+        actions,
       ],
     );
   }
@@ -1875,42 +1964,74 @@ class _ManageEmployeeState extends State<ManageEmployee> {
   }
 
   Widget _buildEmployeesToolbar() {
-    // Single horizontal strip: sharing one row with action buttons squeezed the Wrap
-    // and forced each filter onto its own line. Scroll when the strip is wider than the panel.
-    final filterStrip = SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 2),
-        child: Row(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : 720.0;
+        const gap = 10.0;
+        const roleWidth = 128.0;
+        const statusWidth = 128.0;
+        final searchWidth = (maxWidth * 0.22).clamp(165.0, 230.0).toDouble();
+        final departmentWidth = (maxWidth * 0.22)
+            .clamp(165.0, 220.0)
+            .toDouble();
+        final usedWidth =
+            searchWidth + roleWidth + statusWidth + departmentWidth + gap * 4;
+        final deviceWidth = (maxWidth - usedWidth)
+            .clamp(150.0, 220.0)
+            .toDouble();
+
+        return Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            SizedBox(width: 220, child: _buildSearchField()),
-            const SizedBox(width: 12),
-            _buildDropdown(_privilegeFilter, ['All', 'Admin', 'Employee'], (v) {
-              setState(() {
-                _privilegeFilter = v ?? 'All';
-                _pageIndex = 0;
-              });
-              _loadEmployees();
-            }),
-            const SizedBox(width: 12),
-            _buildDropdown(_statusFilter, ['Active', 'Inactive', 'All'], (v) {
-              setState(() {
-                _statusFilter = v ?? 'Active';
-                _pageIndex = 0;
-              });
-              _loadEmployees();
-            }),
-            const SizedBox(width: 12),
-            _buildDepartmentFilterDropdown(),
-            const SizedBox(width: 12),
-            _buildBiometricDeviceFilterDropdown(),
+            SizedBox(width: searchWidth, child: _buildSearchField()),
+            const SizedBox(width: gap),
+            SizedBox(
+              width: roleWidth,
+              child: _buildDropdown(
+                _privilegeFilter,
+                ['All', 'Admin', 'Employee'],
+                (v) {
+                  setState(() {
+                    _privilegeFilter = v ?? 'All';
+                    _pageIndex = 0;
+                  });
+                  _loadEmployees();
+                },
+              ),
+            ),
+            const SizedBox(width: gap),
+            SizedBox(
+              width: statusWidth,
+              child: _buildDropdown(
+                _statusFilter,
+                ['Active', 'Inactive', 'All'],
+                (v) {
+                  setState(() {
+                    _statusFilter = v ?? 'Active';
+                    _pageIndex = 0;
+                  });
+                  _loadEmployees();
+                },
+              ),
+            ),
+            const SizedBox(width: gap),
+            _buildDepartmentFilterDropdown(width: departmentWidth),
+            const SizedBox(width: gap),
+            _buildBiometricDeviceFilterDropdown(width: deviceWidth),
           ],
-        ),
-      ),
+        );
+      },
     );
-    final actions = Row(
-      mainAxisSize: MainAxisSize.min,
+  }
+
+  Widget _buildEmployeeHeaderActions() {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      alignment: WrapAlignment.end,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         PopupMenuButton<_EmployeeToolbarAction>(
           tooltip: 'More actions',
@@ -1965,16 +2086,20 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             height: 44,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: AppTheme.white,
+              color: AppTheme.dashPanelOf(context),
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
                 color: AppTheme.primaryNavy.withValues(alpha: 0.45),
               ),
             ),
-            child: Icon(Icons.more_vert_rounded, color: AppTheme.primaryNavy),
+            child: Icon(
+              Icons.more_vert_rounded,
+              color: _isDark(context)
+                  ? AppTheme.primaryNavyLight
+                  : AppTheme.primaryNavy,
+            ),
           ),
         ),
-        const SizedBox(width: 8),
         FilledButton.icon(
           onPressed: _showAddEmployeeDialog,
           icon: const Icon(Icons.person_add_rounded, size: 18),
@@ -1990,14 +2115,6 @@ class _ManageEmployeeState extends State<ManageEmployee> {
         ),
       ],
     );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        filterStrip,
-        const SizedBox(height: 12),
-        Align(alignment: Alignment.centerRight, child: actions),
-      ],
-    );
   }
 
   Widget _toolbarMenuItem({required IconData icon, required String label}) {
@@ -2010,97 +2127,127 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     );
   }
 
-  Widget _buildDepartmentFilterDropdown() {
-    return Container(
-      constraints: const BoxConstraints(minWidth: 160, maxWidth: 220),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppTheme.lightGray.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.transparent),
-      ),
-      child: DropdownButton<String?>(
-        value: _departmentFilterId,
-        hint: Text(
-          'All departments',
-          style: TextStyle(
-            color: AppTheme.textSecondary.withValues(alpha: 0.85),
-            fontSize: 14,
+  Widget _buildDepartmentFilterDropdown({required double width}) {
+    return SizedBox(
+      width: width,
+      height: 44,
+      child: Container(
+        padding: const EdgeInsets.only(left: 12, right: 8),
+        decoration: _filterDecoration(context),
+        alignment: Alignment.center,
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String?>(
+            value: _departmentFilterId,
+            dropdownColor: AppTheme.dashPanelOf(context),
+            style: AppTheme.dashFieldTextStyle(context),
+            icon: Icon(
+              Icons.arrow_drop_down_rounded,
+              color: _mutedColor(context),
+            ),
+            hint: Text(
+              'All departments',
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+              style: AppTheme.dashFieldHintStyle(context),
+            ),
+            isExpanded: true,
+            items: [
+              DropdownMenuItem<String?>(
+                value: null,
+                child: Text(
+                  'All departments',
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                  style: AppTheme.dashFieldTextStyle(context),
+                ),
+              ),
+              ..._departmentOptions.map(
+                (d) => DropdownMenuItem<String?>(
+                  value: d.id,
+                  child: Text(
+                    d.name,
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                    style: AppTheme.dashFieldTextStyle(context),
+                  ),
+                ),
+              ),
+            ],
+            onChanged: (v) {
+              setState(() {
+                _departmentFilterId = v;
+                _pageIndex = 0;
+              });
+              _loadEmployees();
+            },
           ),
         ),
-        underline: const SizedBox.shrink(),
-        isDense: true,
-        isExpanded: true,
-        items: [
-          const DropdownMenuItem<String?>(
-            value: null,
-            child: Text('All departments'),
-          ),
-          ..._departmentOptions.map(
-            (d) => DropdownMenuItem<String?>(
-              value: d.id,
-              child: Text(d.name, overflow: TextOverflow.ellipsis, maxLines: 1),
-            ),
-          ),
-        ],
-        onChanged: (v) {
-          setState(() {
-            _departmentFilterId = v;
-            _pageIndex = 0;
-          });
-          _loadEmployees();
-        },
       ),
     );
   }
 
-  Widget _buildBiometricDeviceFilterDropdown() {
-    return Container(
-      constraints: const BoxConstraints(minWidth: 160, maxWidth: 240),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppTheme.lightGray.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.transparent),
-      ),
-      child: DropdownButton<String?>(
-        value: _biometricDeviceFilterId,
-        hint: Text(
-          'All devices',
-          style: TextStyle(
-            color: AppTheme.textSecondary.withValues(alpha: 0.85),
-            fontSize: 14,
+  Widget _buildBiometricDeviceFilterDropdown({required double width}) {
+    return SizedBox(
+      width: width,
+      height: 44,
+      child: Container(
+        padding: const EdgeInsets.only(left: 12, right: 8),
+        decoration: _filterDecoration(context),
+        alignment: Alignment.center,
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String?>(
+            value: _biometricDeviceFilterId,
+            dropdownColor: AppTheme.dashPanelOf(context),
+            style: AppTheme.dashFieldTextStyle(context),
+            icon: Icon(
+              Icons.arrow_drop_down_rounded,
+              color: _mutedColor(context),
+            ),
+            hint: Text(
+              'All devices',
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+              style: AppTheme.dashFieldHintStyle(context),
+            ),
+            isExpanded: true,
+            items: [
+              DropdownMenuItem<String?>(
+                value: null,
+                child: Text(
+                  'All devices',
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                  style: AppTheme.dashFieldTextStyle(context),
+                ),
+              ),
+              ..._biometricDevicesForFilter.map((d) {
+                final m = Map<String, dynamic>.from(d as Map);
+                final id = m['id']?.toString() ?? '';
+                final name = m['name']?.toString() ?? id;
+                final loc = m['location']?.toString();
+                final line = (loc != null && loc.isNotEmpty)
+                    ? '$name · $loc'
+                    : name;
+                return DropdownMenuItem<String?>(
+                  value: id,
+                  child: Text(
+                    line,
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                    style: AppTheme.dashFieldTextStyle(context),
+                  ),
+                );
+              }),
+            ],
+            onChanged: (v) {
+              setState(() {
+                _biometricDeviceFilterId = v;
+                _pageIndex = 0;
+              });
+              _loadEmployees();
+            },
           ),
         ),
-        underline: const SizedBox.shrink(),
-        isDense: true,
-        isExpanded: true,
-        items: [
-          const DropdownMenuItem<String?>(
-            value: null,
-            child: Text('All devices'),
-          ),
-          ..._biometricDevicesForFilter.map((d) {
-            final m = Map<String, dynamic>.from(d as Map);
-            final id = m['id']?.toString() ?? '';
-            final name = m['name']?.toString() ?? id;
-            final loc = m['location']?.toString();
-            final line = (loc != null && loc.isNotEmpty)
-                ? '$name · $loc'
-                : name;
-            return DropdownMenuItem<String?>(
-              value: id,
-              child: Text(line, overflow: TextOverflow.ellipsis, maxLines: 1),
-            );
-          }),
-        ],
-        onChanged: (v) {
-          setState(() {
-            _biometricDeviceFilterId = v;
-            _pageIndex = 0;
-          });
-          _loadEmployees();
-        },
       ),
     );
   }
@@ -2108,8 +2255,11 @@ class _ManageEmployeeState extends State<ManageEmployee> {
   Widget _buildLoadErrorBanner() {
     final err = _loadError;
     if (err == null) return const SizedBox.shrink();
+    final dark = _isDark(context);
     return Material(
-      color: const Color(0xFFFFEBEE),
+      color: dark
+          ? Colors.red.shade900.withValues(alpha: 0.35)
+          : const Color(0xFFFFEBEE),
       borderRadius: BorderRadius.circular(10),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -2118,7 +2268,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
           children: [
             Icon(
               Icons.error_outline_rounded,
-              color: Colors.red.shade700,
+              color: dark ? Colors.red.shade300 : Colors.red.shade700,
               size: 22,
             ),
             const SizedBox(width: 10),
@@ -2126,7 +2276,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
               child: Text(
                 err,
                 style: TextStyle(
-                  color: AppTheme.textPrimary,
+                  color: dark ? Colors.red.shade100 : _headingColor(context),
                   fontSize: 13,
                   height: 1.35,
                 ),
@@ -2164,7 +2314,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
               _titleCaseUnderscores(hrRaw),
               style: TextStyle(
                 fontSize: 10,
-                color: AppTheme.textSecondary.withValues(alpha: 0.9),
+                color: _mutedColor(context).withValues(alpha: 0.9),
               ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -2175,6 +2325,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
   }
 
   Widget _buildLeftPanel() {
+    final dark = _isDark(context);
     String emptyMessage() {
       if (_totalCount == 0) {
         return _searchQuery.trim().isNotEmpty
@@ -2200,7 +2351,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     Widget tableCore() {
       final headerRow = TableRow(
         decoration: BoxDecoration(
-          color: AppTheme.lightGray.withValues(alpha: 0.4),
+          color: AppTheme.dashMutedSurfaceOf(context),
           borderRadius: BorderRadius.circular(8),
         ),
         children: [
@@ -2249,7 +2400,9 @@ class _ManageEmployeeState extends State<ManageEmployee> {
               decoration: BoxDecoration(
                 border: Border(
                   top: BorderSide(
-                    color: AppTheme.lightGray.withValues(alpha: 0.6),
+                    color: AppTheme.dashHairlineOf(
+                      context,
+                    ).withValues(alpha: 0.6),
                   ),
                 ),
               ),
@@ -2259,7 +2412,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                   msg,
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: AppTheme.textSecondary.withValues(alpha: 0.88),
+                    color: _mutedColor(context).withValues(alpha: 0.88),
                     fontSize: 14,
                     height: 1.4,
                   ),
@@ -2281,7 +2434,9 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             return TableRow(
               decoration: BoxDecoration(
                 color: isSelected
-                    ? AppTheme.primaryNavy.withValues(alpha: 0.08)
+                    ? (dark
+                          ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                          : AppTheme.primaryNavy.withValues(alpha: 0.08))
                     : null,
               ),
               children: [
@@ -2323,7 +2478,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                         e.displayEmployeeNo,
                         style: TextStyle(
                           fontSize: 12,
-                          color: AppTheme.textSecondary,
+                          color: _mutedColor(context),
                         ),
                         overflow: TextOverflow.ellipsis,
                         maxLines: 1,
@@ -2354,7 +2509,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                                 e.fullName,
                                 style: TextStyle(
                                   fontSize: 13,
-                                  color: AppTheme.textPrimary,
+                                  color: _headingColor(context),
                                 ),
                                 overflow: TextOverflow.ellipsis,
                                 maxLines: 1,
@@ -2404,7 +2559,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                         e.assignmentDisplay,
                         style: TextStyle(
                           fontSize: 12,
-                          color: AppTheme.textSecondary,
+                          color: _mutedColor(context),
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
@@ -2444,7 +2599,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                         e.roleDisplay,
                         style: TextStyle(
                           fontSize: 12,
-                          color: AppTheme.textSecondary,
+                          color: _mutedColor(context),
                         ),
                         overflow: TextOverflow.ellipsis,
                         maxLines: 1,
@@ -2461,18 +2616,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
 
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2524,7 +2668,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             total == 0 ? 'No results' : 'Showing $start–$end of $total',
             style: TextStyle(
               fontSize: 13,
-              color: AppTheme.textSecondary.withValues(alpha: 0.9),
+              color: _mutedColor(context).withValues(alpha: 0.9),
             ),
           ),
           Row(
@@ -2534,18 +2678,25 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                 'Rows',
                 style: TextStyle(
                   fontSize: 12,
-                  color: AppTheme.textSecondary.withValues(alpha: 0.85),
+                  color: _mutedColor(context).withValues(alpha: 0.85),
                 ),
               ),
               const SizedBox(width: 8),
               DropdownButton<int>(
                 value: _pageSize,
+                dropdownColor: AppTheme.dashPanelOf(context),
+                style: AppTheme.dashFieldTextStyle(context),
                 underline: const SizedBox.shrink(),
                 isDense: true,
                 items: _kPageSizes
                     .map(
-                      (s) =>
-                          DropdownMenuItem(value: s, child: Text('$s / page')),
+                      (s) => DropdownMenuItem(
+                        value: s,
+                        child: Text(
+                          '$s / page',
+                          style: AppTheme.dashFieldTextStyle(context),
+                        ),
+                      ),
                     )
                     .toList(),
                 onChanged: (v) {
@@ -2563,7 +2714,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             'Page ${_pageIndex + 1} / ${maxPage + 1}',
             style: TextStyle(
               fontSize: 13,
-              color: AppTheme.textPrimary,
+              color: _headingColor(context),
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -2622,15 +2773,21 @@ class _ManageEmployeeState extends State<ManageEmployee> {
         child: Align(
           alignment: Alignment.centerLeft,
           child: Shimmer.fromColors(
-            baseColor: AppTheme.lightGray.withValues(alpha: 0.55),
-            highlightColor: AppTheme.white,
+            baseColor: _isDark(context)
+                ? AppTheme.dashMutedSurfaceOf(context)
+                : AppTheme.lightGray.withValues(alpha: 0.55),
+            highlightColor: _isDark(context)
+                ? AppTheme.dashPanelOf(context)
+                : AppTheme.white,
             period: const Duration(milliseconds: 1200),
             child: SizedBox(
               width: width,
               height: 12,
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: AppTheme.lightGray.withValues(alpha: 0.85),
+                  color: _isDark(context)
+                      ? AppTheme.dashHairlineOf(context)
+                      : AppTheme.lightGray.withValues(alpha: 0.85),
                   borderRadius: BorderRadius.circular(4),
                 ),
               ),
@@ -2695,7 +2852,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 13,
-                      color: AppTheme.textPrimary,
+                      color: _headingColor(context),
                     ),
                     overflow: TextOverflow.ellipsis,
                     maxLines: 1,
@@ -2707,7 +2864,9 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                         ? Icons.arrow_upward_rounded
                         : Icons.arrow_downward_rounded,
                     size: 16,
-                    color: AppTheme.primaryNavy,
+                    color: _isDark(context)
+                        ? AppTheme.primaryNavyLight
+                        : AppTheme.primaryNavy,
                   ),
               ],
             ),
@@ -2721,28 +2880,20 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     return TextField(
       controller: _searchController,
       onChanged: _onSearchChanged,
-      decoration: InputDecoration(
+      style: AppTheme.dashFieldTextStyle(context),
+      decoration: AppTheme.dashInputDecoration(
+        context,
         hintText: 'Search name, ID, or email',
-        hintStyle: TextStyle(
-          color: AppTheme.textSecondary.withValues(alpha: 0.8),
-          fontSize: 14,
-        ),
         prefixIcon: Icon(
           Icons.search_rounded,
           size: 20,
-          color: AppTheme.textSecondary.withValues(alpha: 0.7),
+          color: _mutedColor(context).withValues(alpha: 0.7),
         ),
-        isDense: true,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 14,
           vertical: 12,
         ),
-        filled: true,
-        fillColor: AppTheme.lightGray.withValues(alpha: 0.5),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide.none,
-        ),
+        radius: 10,
       ),
     );
   }
@@ -2755,18 +2906,21 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     return Container(
       constraints: const BoxConstraints(minWidth: 128, maxWidth: 200),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppTheme.lightGray.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.transparent),
-      ),
+      decoration: _filterDecoration(context),
       child: DropdownButton<String>(
         value: value,
+        dropdownColor: AppTheme.dashPanelOf(context),
+        style: AppTheme.dashFieldTextStyle(context),
         underline: const SizedBox.shrink(),
         isDense: true,
         isExpanded: true,
         items: options
-            .map((o) => DropdownMenuItem(value: o, child: Text(o)))
+            .map(
+              (o) => DropdownMenuItem(
+                value: o,
+                child: Text(o, style: AppTheme.dashFieldTextStyle(context)),
+              ),
+            )
             .toList(),
         onChanged: onChanged,
       ),
@@ -2774,6 +2928,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
   }
 
   Widget _buildRightPanel() {
+    final dark = _isDark(context);
     _EmployeeProfile? selected;
     if (_selectedEmployeeId != null) {
       try {
@@ -2787,18 +2942,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
 
     return Container(
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -2813,22 +2957,22 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                     errorBuilder: (_, __, ___) => Container(
                       width: 96,
                       height: 96,
-                      color: AppTheme.lightGray,
+                      color: AppTheme.dashMutedSurfaceOf(context),
                       child: Icon(
                         Icons.person_rounded,
                         size: 56,
-                        color: AppTheme.textSecondary.withValues(alpha: 0.5),
+                        color: _mutedColor(context).withValues(alpha: 0.5),
                       ),
                     ),
                   ),
                 )
               : CircleAvatar(
                   radius: 48,
-                  backgroundColor: AppTheme.lightGray,
+                  backgroundColor: AppTheme.dashMutedSurfaceOf(context),
                   child: Icon(
                     Icons.person_rounded,
                     size: 56,
-                    color: AppTheme.textSecondary.withValues(alpha: 0.5),
+                    color: _mutedColor(context).withValues(alpha: 0.5),
                   ),
                 ),
           const SizedBox(height: 16),
@@ -2836,8 +2980,8 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             hasSelection ? sel.fullName : 'Select an employee',
             style: TextStyle(
               color: hasSelection
-                  ? AppTheme.textPrimary
-                  : AppTheme.textSecondary.withValues(alpha: 0.8),
+                  ? _headingColor(context)
+                  : _mutedColor(context).withValues(alpha: 0.8),
               fontSize: 14,
               fontWeight: hasSelection ? FontWeight.w600 : FontWeight.w500,
             ),
@@ -2848,7 +2992,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             Text(
               emailTrim,
               style: TextStyle(
-                color: AppTheme.textSecondary.withValues(alpha: 0.9),
+                color: _mutedColor(context).withValues(alpha: 0.9),
                 fontSize: 12,
               ),
               textAlign: TextAlign.center,
@@ -2861,7 +3005,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             Text(
               sel.assignmentDisplay,
               style: TextStyle(
-                color: AppTheme.textSecondary.withValues(alpha: 0.85),
+                color: _mutedColor(context).withValues(alpha: 0.85),
                 fontSize: 12,
                 height: 1.3,
               ),
@@ -2882,10 +3026,14 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                  color: AppTheme.primaryNavy.withValues(
+                    alpha: dark ? 0.22 : 0.08,
+                  ),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.2),
+                    color: AppTheme.primaryNavy.withValues(
+                      alpha: dark ? 0.45 : 0.2,
+                    ),
                   ),
                 ),
                 child: Column(
@@ -2897,7 +3045,11 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
-                        color: AppTheme.primaryNavy.withValues(alpha: 0.9),
+                        color:
+                            (dark
+                                    ? AppTheme.primaryNavyLight
+                                    : AppTheme.primaryNavy)
+                                .withValues(alpha: 0.9),
                         letterSpacing: 0.2,
                       ),
                     ),
@@ -2908,7 +3060,11 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                         Icon(
                           Icons.fingerprint_rounded,
                           size: 14,
-                          color: AppTheme.primaryNavy.withValues(alpha: 0.85),
+                          color:
+                              (dark
+                                      ? AppTheme.primaryNavyLight
+                                      : AppTheme.primaryNavy)
+                                  .withValues(alpha: 0.85),
                         ),
                         const SizedBox(width: 4),
                         Flexible(
@@ -2916,9 +3072,9 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                             bioTrim,
                             style: TextStyle(
                               fontSize: 11,
-                              color: AppTheme.textPrimary.withValues(
-                                alpha: 0.85,
-                              ),
+                              color: _headingColor(
+                                context,
+                              ).withValues(alpha: 0.85),
                               fontWeight: FontWeight.w500,
                             ),
                             maxLines: 1,
@@ -2940,17 +3096,21 @@ class _ManageEmployeeState extends State<ManageEmployee> {
               icon: Icon(
                 Icons.assignment_turned_in_outlined,
                 size: 18,
-                color: AppTheme.primaryNavy,
+                color: dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy,
               ),
               label: Text(
                 'View assignment & shift',
                 style: TextStyle(
-                  color: AppTheme.primaryNavy,
+                  color: dark
+                      ? AppTheme.primaryNavyLight
+                      : AppTheme.primaryNavy,
                   fontWeight: FontWeight.w600,
                 ),
               ),
               style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
+                foregroundColor: dark
+                    ? AppTheme.primaryNavyLight
+                    : AppTheme.primaryNavy,
               ),
             ),
           ],
@@ -2965,16 +3125,16 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                 Icons.edit_rounded,
                 size: 20,
                 color: hasSelection
-                    ? AppTheme.textPrimary
-                    : AppTheme.textSecondary.withValues(alpha: 0.5),
+                    ? _headingColor(context)
+                    : _mutedColor(context).withValues(alpha: 0.5),
               ),
               label: const Text('Edit'),
               style: OutlinedButton.styleFrom(
-                foregroundColor: AppTheme.textPrimary,
+                foregroundColor: _headingColor(context),
                 side: BorderSide(
                   color: hasSelection
                       ? const Color(0xFF4CAF50).withValues(alpha: 0.6)
-                      : AppTheme.lightGray,
+                      : AppTheme.dashHairlineOf(context),
                 ),
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
@@ -3337,27 +3497,11 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
   bool get _biometricUserIdLocked =>
       (_profile.biometricUserId?.trim().isNotEmpty ?? false);
 
-  InputDecoration _inputDecoration(String hint) => InputDecoration(
+  InputDecoration _inputDecoration(String hint) => AppTheme.dashInputDecoration(
+    context,
     hintText: hint,
-    hintStyle: TextStyle(
-      color: AppTheme.textSecondary.withValues(alpha: 0.7),
-      fontSize: 14,
-    ),
-    filled: true,
-    fillColor: AppTheme.white,
+    radius: 8,
     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: AppTheme.lightGray),
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: AppTheme.lightGray),
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: const BorderSide(color: Color(0xFF4CAF50), width: 1.5),
-    ),
   );
 
   Future<void> _pickImage() async {
@@ -3445,7 +3589,13 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
+      ).showSnackBar(
+        SnackBar(
+          content: Text(
+            _apiErrorMessageFromDio(e, fallback: 'Failed to update employee.'),
+          ),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -3456,6 +3606,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
     final w = MediaQuery.of(context).size.width;
     final isNarrow = w < 700;
 
+    final dark = AppTheme.dashIsDark(context);
     return Dialog(
       backgroundColor: Colors.transparent,
       insetPadding: const EdgeInsets.all(24),
@@ -3465,15 +3616,18 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
           maxHeight: MediaQuery.of(context).size.height - 48,
         ),
         decoration: BoxDecoration(
-          color: const Color(0xFFF5F7F5),
+          color: AppTheme.dashPanelOf(context),
           borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.15),
-              blurRadius: 24,
-              offset: const Offset(0, 8),
-            ),
-          ],
+          border: Border.all(color: AppTheme.dashHairlineOf(context)),
+          boxShadow: dark
+              ? null
+              : [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.15),
+                    blurRadius: 24,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -3506,9 +3660,12 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: AppTheme.white,
+                color: AppTheme.dashMutedSurfaceOf(context),
                 borderRadius: const BorderRadius.vertical(
                   bottom: Radius.circular(16),
+                ),
+                border: Border(
+                  top: BorderSide(color: AppTheme.dashHairlineOf(context)),
                 ),
               ),
               child: Row(
@@ -3521,7 +3678,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
                     child: Text(
                       'Cancel',
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 14,
                       ),
                     ),
@@ -3564,18 +3721,14 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
   Widget _buildAccountSection() {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             'Account Information',
             style: TextStyle(
-              color: AppTheme.textPrimary,
+              color: AppTheme.dashTextPrimaryOf(context),
               fontSize: 16,
               fontWeight: FontWeight.w700,
             ),
@@ -3596,22 +3749,26 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => CircleAvatar(
                         radius: 48,
-                        backgroundColor: AppTheme.lightGray,
+                        backgroundColor: AppTheme.dashMutedSurfaceOf(context),
                         child: Icon(
                           Icons.person_rounded,
                           size: 56,
-                          color: AppTheme.textSecondary.withValues(alpha: 0.5),
+                          color: AppTheme.dashTextSecondaryOf(
+                            context,
+                          ).withValues(alpha: 0.5),
                         ),
                       ),
                     ),
                   )
                 : CircleAvatar(
                     radius: 48,
-                    backgroundColor: AppTheme.lightGray,
+                    backgroundColor: AppTheme.dashMutedSurfaceOf(context),
                     child: Icon(
                       Icons.person_rounded,
                       size: 56,
-                      color: AppTheme.textSecondary.withValues(alpha: 0.5),
+                      color: AppTheme.dashTextSecondaryOf(
+                        context,
+                      ).withValues(alpha: 0.5),
                     ),
                   ),
           ),
@@ -3639,17 +3796,22 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
           InputDecorator(
             decoration: _inputDecoration('Email'),
             child: Text(
-              _profile.email ?? 'â€”',
-              style: TextStyle(fontSize: 14, color: AppTheme.textSecondary),
+              _profile.email ?? '—',
+              style: TextStyle(
+                fontSize: 14,
+                color: AppTheme.dashTextSecondaryOf(context),
+              ),
             ),
           ),
           const SizedBox(height: 16),
           DropdownButtonFormField<String>(
             initialValue: _privilege,
+            dropdownColor: AppTheme.dashPanelOf(context),
+            style: AppTheme.dashFieldTextStyle(context),
             decoration: _inputDecoration('Select role'),
-            hint: const Text(
+            hint: Text(
               'Select role',
-              style: TextStyle(color: AppTheme.textSecondary),
+              style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
             ),
             items: [
               'Admin',
@@ -3743,18 +3905,14 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
   Widget _buildPersonalSection() {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             'Personal Information',
             style: TextStyle(
-              color: AppTheme.textPrimary,
+              color: AppTheme.dashTextPrimaryOf(context),
               fontSize: 16,
               fontWeight: FontWeight.w700,
             ),
@@ -3762,6 +3920,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
           const SizedBox(height: 20),
           TextFormField(
             controller: _firstNameController,
+            style: AppTheme.dashFieldTextStyle(context),
             decoration: _inputDecoration('First Name'),
             validator: (v) =>
                 (v == null || v.trim().isEmpty) ? 'Required' : null,
@@ -4437,6 +4596,14 @@ class _BiometricRosterDialog extends StatefulWidget {
 class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
   static const int _pageSize = 50;
 
+  bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
+
+  Color _headingColor(BuildContext context) =>
+      AppTheme.dashTextPrimaryOf(context);
+
+  Color _mutedColor(BuildContext context) =>
+      AppTheme.dashTextSecondaryOf(context);
+
   int _pageIndex = 0;
   String _filter = 'all';
   String? _selectedDeviceId;
@@ -4575,9 +4742,20 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final dark = _isDark(context);
+    final tableHeadingStyle = TextStyle(
+      fontWeight: FontWeight.w700,
+      fontSize: 13,
+      color: _headingColor(context),
+    );
+    final tableCellStyle = TextStyle(
+      fontSize: 13,
+      color: _headingColor(context),
+    );
+
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-      backgroundColor: AppTheme.white,
+      backgroundColor: AppTheme.dashPanelOf(context),
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       child: ConstrainedBox(
@@ -4617,7 +4795,7 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
                           style: TextStyle(
                             fontSize: 22,
                             fontWeight: FontWeight.w800,
-                            color: AppTheme.textPrimary,
+                            color: _headingColor(context),
                           ),
                         ),
                         const SizedBox(height: 6),
@@ -4629,7 +4807,7 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
                           style: TextStyle(
                             fontSize: 12.5,
                             height: 1.35,
-                            color: AppTheme.textSecondary,
+                            color: _mutedColor(context),
                           ),
                         ),
                       ],
@@ -4637,7 +4815,7 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
                   ),
                   IconButton(
                     onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close),
+                    icon: Icon(Icons.close, color: _mutedColor(context)),
                     tooltip: 'Close',
                   ),
                 ],
@@ -4651,31 +4829,32 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
                   DropdownButtonFormField<String?>(
                     isExpanded: true,
                     initialValue: _selectedDeviceId,
-                    decoration: InputDecoration(
-                      isDense: true,
-                      filled: true,
-                      fillColor: AppTheme.offWhite,
+                    dropdownColor: AppTheme.dashPanelOf(context),
+                    style: AppTheme.dashFieldTextStyle(context),
+                    decoration: AppTheme.dashInputDecoration(
+                      context,
                       labelText: 'Device',
-                      prefixIcon: const Icon(Icons.devices_other_outlined),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
+                      prefixIcon: Icon(
+                        Icons.devices_other_outlined,
+                        color: _mutedColor(context),
                       ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(
-                          color: Colors.black.withValues(alpha: 0.12),
-                        ),
-                      ),
+                      radius: 12,
                       contentPadding: const EdgeInsets.symmetric(
                         horizontal: 12,
                         vertical: 10,
                       ),
                     ),
-                    hint: const Text('All devices (HRMS only)'),
+                    hint: Text(
+                      'All devices (HRMS only)',
+                      style: TextStyle(color: _mutedColor(context)),
+                    ),
                     items: [
-                      const DropdownMenuItem<String?>(
+                      DropdownMenuItem<String?>(
                         value: null,
-                        child: Text('All devices (HRMS only)'),
+                        child: Text(
+                          'All devices (HRMS only)',
+                          style: AppTheme.dashFieldTextStyle(context),
+                        ),
                       ),
                       ..._devices.map((d) {
                         final map = Map<String, dynamic>.from(d as Map);
@@ -4687,7 +4866,11 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
                             : name;
                         return DropdownMenuItem<String?>(
                           value: id,
-                          child: Text(label, overflow: TextOverflow.ellipsis),
+                          child: Text(
+                            label,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppTheme.dashFieldTextStyle(context),
+                          ),
                         );
                       }),
                     ],
@@ -4713,9 +4896,15 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   ChoiceChip(
-                    label: const Text('All'),
+                    label: Text(
+                      'All',
+                      style: TextStyle(color: _headingColor(context)),
+                    ),
                     selected: _filter == 'all',
-                    selectedColor: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                    selectedColor: dark
+                        ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                        : AppTheme.primaryNavy.withValues(alpha: 0.12),
+                    backgroundColor: AppTheme.dashMutedSurfaceOf(context),
                     showCheckmark: false,
                     onSelected: (sel) {
                       if (sel) _setFilter('all');
@@ -4725,18 +4914,30 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
                     avatar: _filter == 'set'
                         ? const Icon(Icons.check_rounded, size: 18)
                         : null,
-                    label: const Text('Has ID'),
+                    label: Text(
+                      'Has ID',
+                      style: TextStyle(color: _headingColor(context)),
+                    ),
                     selected: _filter == 'set',
-                    selectedColor: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                    selectedColor: dark
+                        ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                        : AppTheme.primaryNavy.withValues(alpha: 0.12),
+                    backgroundColor: AppTheme.dashMutedSurfaceOf(context),
                     showCheckmark: false,
                     onSelected: (sel) {
                       if (sel) _setFilter('set');
                     },
                   ),
                   ChoiceChip(
-                    label: const Text('Missing ID'),
+                    label: Text(
+                      'Missing ID',
+                      style: TextStyle(color: _headingColor(context)),
+                    ),
                     selected: _filter == 'missing',
-                    selectedColor: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                    selectedColor: dark
+                        ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                        : AppTheme.primaryNavy.withValues(alpha: 0.12),
+                    backgroundColor: AppTheme.dashMutedSurfaceOf(context),
                     showCheckmark: false,
                     onSelected: (sel) {
                       if (sel) _setFilter('missing');
@@ -4750,21 +4951,20 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: TextField(
                 controller: _searchController,
-                decoration: InputDecoration(
+                style: AppTheme.dashFieldTextStyle(context),
+                decoration: AppTheme.dashInputDecoration(
+                  context,
                   hintText: 'Search name, email, employee no., biometric ID…',
-                  isDense: true,
-                  filled: true,
-                  fillColor: AppTheme.offWhite,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
+                  prefixIcon: Icon(
+                    Icons.search,
+                    size: 20,
+                    color: _mutedColor(context),
                   ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(
-                      color: Colors.black.withValues(alpha: 0.12),
-                    ),
+                  radius: 12,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
                   ),
-                  prefixIcon: const Icon(Icons.search, size: 20),
                 ),
                 onChanged: _onSearchChanged,
               ),
@@ -4776,11 +4976,9 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
                 child: Container(
                   clipBehavior: Clip.antiAlias,
                   decoration: BoxDecoration(
-                    color: AppTheme.white,
+                    color: AppTheme.dashMutedSurfaceOf(context),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: Colors.black.withValues(alpha: 0.08),
-                    ),
+                    border: Border.all(color: AppTheme.dashHairlineOf(context)),
                   ),
                   child: _loading
                       ? const Center(child: CircularProgressIndicator())
@@ -4799,7 +4997,7 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
                       ? Center(
                           child: Text(
                             'No employees match.',
-                            style: TextStyle(color: AppTheme.textSecondary),
+                            style: TextStyle(color: _mutedColor(context)),
                           ),
                         )
                       : LayoutBuilder(
@@ -4823,25 +5021,53 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
                                       headingRowHeight: 42,
                                       dataRowMinHeight: 44,
                                       headingRowColor: WidgetStateProperty.all(
-                                        AppTheme.offWhite,
+                                        AppTheme.dashMutedSurfaceOf(context),
                                       ),
-                                      columns: const [
-                                        DataColumn(label: Text('No.')),
-                                        DataColumn(label: Text('Name')),
-                                        DataColumn(label: Text('Biometric ID')),
-                                        DataColumn(label: Text('Active')),
+                                      headingTextStyle: tableHeadingStyle,
+                                      dataTextStyle: tableCellStyle,
+                                      columns: [
+                                        DataColumn(
+                                          label: Text(
+                                            'No.',
+                                            style: tableHeadingStyle,
+                                          ),
+                                        ),
+                                        DataColumn(
+                                          label: Text(
+                                            'Name',
+                                            style: tableHeadingStyle,
+                                          ),
+                                        ),
+                                        DataColumn(
+                                          label: Text(
+                                            'Biometric ID',
+                                            style: tableHeadingStyle,
+                                          ),
+                                        ),
+                                        DataColumn(
+                                          label: Text(
+                                            'Active',
+                                            style: tableHeadingStyle,
+                                          ),
+                                        ),
                                       ],
                                       rows: _rows.map((e) {
                                         final bio =
                                             e.biometricUserId?.trim() ?? '';
                                         return DataRow(
                                           cells: [
-                                            DataCell(Text(e.displayEmployeeNo)),
+                                            DataCell(
+                                              Text(
+                                                e.displayEmployeeNo,
+                                                style: tableCellStyle,
+                                              ),
+                                            ),
                                             DataCell(
                                               SizedBox(
                                                 width: 260,
                                                 child: Text(
                                                   e.fullName,
+                                                  style: tableCellStyle,
                                                   overflow:
                                                       TextOverflow.ellipsis,
                                                   maxLines: 2,
@@ -4851,7 +5077,7 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
                                             DataCell(
                                               Text(
                                                 bio.isNotEmpty ? bio : '—',
-                                                style: TextStyle(
+                                                style: tableCellStyle.copyWith(
                                                   fontFeatures: const [
                                                     FontFeature.tabularFigures(),
                                                   ],
@@ -4894,8 +5120,11 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
                         vertical: 6,
                       ),
                       decoration: BoxDecoration(
-                        color: AppTheme.offWhite,
+                        color: AppTheme.dashMutedSurfaceOf(context),
                         borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: AppTheme.dashHairlineOf(context),
+                        ),
                       ),
                       child: Text(
                         _total == 0
@@ -4905,7 +5134,7 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 12,
-                          color: AppTheme.textSecondary,
+                          color: _mutedColor(context),
                           fontWeight: FontWeight.w600,
                         ),
                       ),
