@@ -4,10 +4,7 @@ import '../widgets/section_container.dart';
 
 /// Step-by-step recruitment process. Registration only after passing exam.
 class RecruitmentProcessSection extends StatelessWidget {
-  const RecruitmentProcessSection({
-    super.key,
-    this.onStartApplicationTap,
-  });
+  const RecruitmentProcessSection({super.key, this.onStartApplicationTap});
 
   final VoidCallback? onStartApplicationTap;
 
@@ -73,7 +70,9 @@ class RecruitmentProcessSection extends StatelessWidget {
                           padding: const EdgeInsets.only(top: 32),
                           child: Icon(
                             Icons.arrow_forward,
-                            color: AppTheme.textSecondary.withValues(alpha: 0.6),
+                            color: AppTheme.textSecondary.withValues(
+                              alpha: 0.6,
+                            ),
                             size: 20,
                           ),
                         ),
@@ -93,7 +92,9 @@ class RecruitmentProcessSection extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(vertical: 8),
                           child: Icon(
                             Icons.arrow_downward,
-                            color: AppTheme.textSecondary.withValues(alpha: 0.6),
+                            color: AppTheme.textSecondary.withValues(
+                              alpha: 0.6,
+                            ),
                             size: 24,
                           ),
                         ),
@@ -109,7 +110,10 @@ class RecruitmentProcessSection extends StatelessWidget {
               style: FilledButton.styleFrom(
                 backgroundColor: AppTheme.primaryNavy,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 18),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 36,
+                  vertical: 18,
+                ),
                 minimumSize: const Size(0, 54),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
@@ -162,9 +166,7 @@ class _ProcessStepState extends State<_ProcessStep> {
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(
-                alpha: _hover ? 0.09 : 0.055,
-              ),
+              color: Colors.black.withValues(alpha: _hover ? 0.09 : 0.055),
               blurRadius: _hover ? 20 : 14,
               offset: Offset(0, _hover ? 7 : 4),
             ),

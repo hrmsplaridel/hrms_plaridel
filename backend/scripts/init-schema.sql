@@ -1,5 +1,5 @@
 -- HRMS Plaridel Schema v2
--- Core HR + DTR Module (Improved)
+-- Core HR + DTR + L&D + RSP modules
 -- PostgreSQL
 -- Run: psql -d hrms_plaridel -f scripts/init-schema.sql
 
@@ -766,6 +766,306 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 
 -- =========================================
+-- L&D — RSP SAVED FORMS
+-- =========================================
+CREATE TABLE IF NOT EXISTS bi_form_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  applicant_name TEXT NOT NULL,
+  applicant_department TEXT,
+  applicant_position TEXT,
+  position_applied_for TEXT,
+  respondent_name TEXT NOT NULL,
+  respondent_position TEXT,
+  respondent_relationship TEXT NOT NULL DEFAULT 'supervisor'
+    CHECK (respondent_relationship IN ('supervisor', 'peer', 'subordinate')),
+  rating_1 INT,
+  rating_2 INT,
+  rating_3 INT,
+  rating_4 INT,
+  rating_5 INT,
+  rating_6 INT,
+  rating_7 INT,
+  rating_8 INT,
+  rating_9 INT,
+  functional_areas JSONB DEFAULT '[]'::JSONB,
+  other_functional_area TEXT,
+  performance_3_years TEXT,
+  challenges_coping TEXT,
+  compliance_attendance TEXT,
+  other_relevant_information TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS performance_evaluation_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  applicant_name TEXT,
+  functional_areas JSONB DEFAULT '[]'::JSONB,
+  other_functional_area TEXT,
+  performance_3_years TEXT,
+  challenges_coping TEXT,
+  compliance_attendance TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS training_need_analysis_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  cy_year TEXT,
+  department TEXT,
+  rows JSONB DEFAULT '[]'::JSONB,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS action_brainstorming_coaching_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  department TEXT,
+  date TEXT,
+  rows JSONB DEFAULT '[]'::JSONB,
+  certified_by TEXT,
+  certification_date TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS turn_around_time_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  position TEXT,
+  office TEXT,
+  no_of_vacant_position TEXT,
+  date_of_publication TEXT,
+  end_search TEXT,
+  qs TEXT,
+  applicants JSONB DEFAULT '[]'::JSONB,
+  prepared_by_name TEXT,
+  prepared_by_title TEXT,
+  noted_by_name TEXT,
+  noted_by_title TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS idp_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name TEXT,
+  position TEXT,
+  category TEXT,
+  division TEXT,
+  department TEXT,
+  education TEXT,
+  experience TEXT,
+  training TEXT,
+  eligibility TEXT,
+  significant_accomplishments TEXT,
+  target_position_1 TEXT,
+  target_position_2 TEXT,
+  avg_rating TEXT,
+  opcr TEXT,
+  ipcr TEXT,
+  performance_rating TEXT,
+  competency_description TEXT,
+  competence_rating TEXT,
+  succession_priority_score TEXT,
+  succession_priority_rating TEXT,
+  development_plan_rows JSONB DEFAULT '[]'::JSONB,
+  prepared_by TEXT,
+  reviewed_by TEXT,
+  noted_by TEXT,
+  approved_by TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- =========================================
+-- L&D — TRAINING DAILY REPORTS
+-- =========================================
+CREATE TABLE IF NOT EXISTS training_daily_reports (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  description TEXT,
+  attachment_path TEXT,
+  attachment_name TEXT,
+  attachment_type TEXT,
+  submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  status TEXT NOT NULL DEFAULT 'submitted'
+    CHECK (status IN ('submitted', 'seen', 'reviewed', 'approved', 'needs_revision')),
+  seen_by_admin UUID REFERENCES users(id) ON DELETE SET NULL,
+  seen_at TIMESTAMPTZ,
+  reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS training_report_attachments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  report_id UUID NOT NULL REFERENCES training_daily_reports(id) ON DELETE CASCADE,
+  file_path TEXT NOT NULL,
+  file_name TEXT,
+  mime_type TEXT,
+  uploaded_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- =========================================
+-- RSP — RECRUITMENT
+-- =========================================
+CREATE TABLE IF NOT EXISTS recruitment_applications (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  first_name TEXT,
+  middle_name TEXT,
+  last_name TEXT,
+  suffix TEXT,
+  sex TEXT,
+  full_name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  phone TEXT,
+  resume_notes TEXT,
+  position_applied_for TEXT,
+  attachment_path TEXT,
+  attachment_name TEXT,
+  doc_application_letter_path TEXT,
+  doc_application_letter_name TEXT,
+  doc_resume_path TEXT,
+  doc_resume_name TEXT,
+  doc_tor_path TEXT,
+  doc_tor_name TEXT,
+  doc_eligibility_trainings_path TEXT,
+  doc_eligibility_trainings_name TEXT,
+  status TEXT NOT NULL DEFAULT 'submitted'
+    CHECK (
+      status IN (
+        'submitted',
+        'document_approved',
+        'document_declined',
+        'exam_taken',
+        'passed',
+        'failed',
+        'registered'
+      )
+    ),
+  final_interview_at TIMESTAMPTZ,
+  final_interview_passed BOOLEAN,
+  hired_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  hr_account_setup_done BOOLEAN NOT NULL DEFAULT FALSE,
+  hire_credentials_email_sent_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS recruitment_exam_results (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  application_id UUID NOT NULL REFERENCES recruitment_applications(id) ON DELETE CASCADE,
+  score_percent NUMERIC(5,2) NOT NULL,
+  passed BOOLEAN NOT NULL,
+  answers_json JSONB,
+  submitted_at TIMESTAMPTZ DEFAULT now(),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS recruitment_exam_questions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  exam_type TEXT NOT NULL,
+  sort_order INT NOT NULL,
+  question_text TEXT NOT NULL,
+  options_json JSONB,
+  correct_index INT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS job_vacancy_announcement (
+  id TEXT PRIMARY KEY DEFAULT 'default',
+  has_vacancies BOOLEAN DEFAULT true,
+  headline TEXT,
+  body TEXT,
+  vacancies JSONB DEFAULT '[]'::JSONB,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+INSERT INTO job_vacancy_announcement (id, has_vacancies, headline, body)
+VALUES ('default', true, NULL, NULL)
+ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS selection_lineup_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  date TEXT,
+  name_of_agency_office TEXT,
+  vacant_position TEXT,
+  item_no TEXT,
+  applicants JSONB DEFAULT '[]',
+  prepared_by_name TEXT,
+  prepared_by_title TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS applicants_profile_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  position_applied_for TEXT,
+  minimum_requirements TEXT,
+  date_of_posting TEXT,
+  closing_date TEXT,
+  applicants JSONB DEFAULT '[]',
+  prepared_by TEXT,
+  checked_by TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS comparative_assessment_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  position_to_be_filled TEXT,
+  min_req_education TEXT,
+  min_req_experience TEXT,
+  min_req_eligibility TEXT,
+  min_req_training TEXT,
+  candidates JSONB DEFAULT '[]',
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS promotion_certification_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  position_for_promotion TEXT,
+  candidates JSONB DEFAULT '[]',
+  date_day TEXT,
+  date_month TEXT,
+  date_year TEXT,
+  signatory_name TEXT,
+  signatory_title TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS recruitment_exam_time_limits (
+  exam_type TEXT PRIMARY KEY,
+  time_limit_seconds INT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+INSERT INTO recruitment_exam_time_limits (exam_type, time_limit_seconds)
+VALUES
+  ('general', 2700),
+  ('math', 2700),
+  ('general_info', 600)
+ON CONFLICT (exam_type) DO NOTHING;
+
+-- One exam result row per application (idempotent for existing DBs).
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'uq_recruitment_exam_results_application'
+  ) THEN
+    ALTER TABLE recruitment_exam_results
+      ADD CONSTRAINT uq_recruitment_exam_results_application
+      UNIQUE (application_id);
+  END IF;
+END $$;
+
+-- =========================================
 -- INDEXES
 -- =========================================
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
@@ -843,6 +1143,44 @@ CREATE INDEX IF NOT EXISTS idx_overtime_requests_ot_date ON overtime_requests(ot
 CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_entity_type ON audit_logs(entity_type);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
+
+CREATE INDEX IF NOT EXISTS idx_bi_form_entries_created
+  ON bi_form_entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_performance_evaluation_entries_created
+  ON performance_evaluation_entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_training_need_analysis_entries_created
+  ON training_need_analysis_entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_action_brainstorming_coaching_entries_created
+  ON action_brainstorming_coaching_entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_turn_around_time_entries_created
+  ON turn_around_time_entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_idp_entries_created
+  ON idp_entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_training_daily_reports_employee_submitted
+  ON training_daily_reports(employee_id, submitted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_training_daily_reports_status
+  ON training_daily_reports(status);
+CREATE INDEX IF NOT EXISTS idx_training_report_attachments_report
+  ON training_report_attachments(report_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_recruitment_applications_status
+  ON recruitment_applications(status);
+CREATE INDEX IF NOT EXISTS idx_recruitment_applications_created
+  ON recruitment_applications(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_recruitment_exam_results_application
+  ON recruitment_exam_results(application_id);
+CREATE INDEX IF NOT EXISTS idx_recruitment_exam_questions_type
+  ON recruitment_exam_questions(exam_type);
+CREATE INDEX IF NOT EXISTS idx_job_vacancy_announcement_updated
+  ON job_vacancy_announcement(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_selection_lineup_entries_created
+  ON selection_lineup_entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_applicants_profile_entries_created
+  ON applicants_profile_entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_comparative_assessment_entries_created
+  ON comparative_assessment_entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_promotion_certification_entries_created
+  ON promotion_certification_entries(created_at DESC);
 
 -- =========================================
 -- updated_at TRIGGERS
@@ -934,5 +1272,11 @@ EXECUTE PROCEDURE set_updated_at();
 DROP TRIGGER IF EXISTS trg_leave_balances_updated_at ON leave_balances;
 CREATE TRIGGER trg_leave_balances_updated_at
 BEFORE UPDATE ON leave_balances
+FOR EACH ROW
+EXECUTE PROCEDURE set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_training_daily_reports_updated_at ON training_daily_reports;
+CREATE TRIGGER trg_training_daily_reports_updated_at
+BEFORE UPDATE ON training_daily_reports
 FOR EACH ROW
 EXECUTE PROCEDURE set_updated_at();

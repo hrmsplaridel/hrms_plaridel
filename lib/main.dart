@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
@@ -22,6 +24,7 @@ import 'realtime/app_realtime_bridge.dart';
 import 'realtime/app_realtime_provider.dart';
 import 'admin/screens/admin_dashboard.dart';
 import 'employee/screens/employee_dashboard.dart';
+import 'utils/form_pdf.dart';
 
 /// Key for persisting last login role (Admin vs Employee) across sessions.
 const String kLoginAsKey = 'hrms_login_as';
@@ -30,7 +33,7 @@ const String kLoginAsKey = 'hrms_login_as';
 final RouteObserver<ModalRoute<void>> routeObserver =
     RouteObserver<ModalRoute<void>>();
 
-/// Chooses the initial screen based on platform and auth state.
+/// Chooses the initial screen based on platform anCD d auth state.
 /// If user has a restored session (API), go to the appropriate dashboard
 /// based on the user's role from the API (not user choice).
 /// Otherwise: web → LandingPage, mobile → LoginPage.
@@ -55,6 +58,7 @@ Widget _initialHome(AuthProvider auth, String storedLoginAs) {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  unawaited(FormPdf.warmupPrintAssets());
 
   if (kIsWeb) {
     webview_platform_init.registerWebViewPlatform();

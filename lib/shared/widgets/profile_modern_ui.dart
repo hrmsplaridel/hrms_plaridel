@@ -109,12 +109,15 @@ class ProfileBackButton extends StatelessWidget {
         child: InkWell(
           onTap: onPressed,
           customBorder: const CircleBorder(),
-          child: Padding(
-            padding: const EdgeInsets.all(8),
-            child: Icon(
-              Icons.arrow_back_rounded,
-              size: 22,
-              color: dark ? Colors.white : AppTheme.primaryNavy,
+          child: SizedBox(
+            width: 40,
+            height: 40,
+            child: Center(
+              child: Icon(
+                Icons.arrow_back_rounded,
+                size: 22,
+                color: dark ? Colors.white : AppTheme.primaryNavy,
+              ),
             ),
           ),
         ),
@@ -400,17 +403,17 @@ class ProfileHeroHeader extends StatelessWidget {
           children: [
             headerBandStack(
               children: [
-                if (onBack != null)
-                  Positioned(
-                    left: 20,
-                    top: 20,
-                    child: ProfileBackButton(onPressed: onBack!),
-                  ),
                 Positioned(
-                  left: 28,
-                  top: 28,
+                  left: 20,
+                  top: 20,
+                  right: 20,
                   child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
+                      if (onBack != null) ...[
+                        ProfileBackButton(onPressed: onBack!),
+                        const SizedBox(width: 12),
+                      ],
                       Icon(
                         Icons.account_circle_rounded,
                         size: 18,
@@ -424,6 +427,7 @@ class ProfileHeroHeader extends StatelessWidget {
                           fontSize: 12,
                           fontWeight: FontWeight.w800,
                           letterSpacing: 0.8,
+                          height: 1.2,
                         ),
                       ),
                     ],
@@ -465,22 +469,52 @@ class ProfileHeroHeader extends StatelessWidget {
                 Positioned(
                   top: 12,
                   left: 12,
-                  child: ProfileBackButton(onPressed: onBack!),
+                  right: 12,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      ProfileBackButton(onPressed: onBack!),
+                      const SizedBox(width: 12),
+                      Icon(
+                        Icons.account_circle_rounded,
+                        size: 18,
+                        color: titleColor.withValues(alpha: 0.85),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'My profile',
+                          style: TextStyle(
+                            color: titleColor.withValues(alpha: 0.9),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.4,
+                            height: 1.2,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               Positioned(
-                top: 16,
-                left: onBack != null ? 56 : 16,
-                child: Opacity(
-                  opacity: 0.9,
-                  child: Image.asset(
-                    'assets/images/TransparentLogo.png',
-                    width: 36,
-                    height: 36,
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => Icon(
-                      Icons.account_balance_rounded,
-                      color: titleColor.withValues(alpha: 0.8),
-                      size: 32,
+                top: onBack != null ? 60 : 16,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Opacity(
+                    opacity: 0.9,
+                    child: Image.asset(
+                      'assets/images/TransparentLogo.png',
+                      width: 36,
+                      height: 36,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) => Icon(
+                        Icons.account_balance_rounded,
+                        color: titleColor.withValues(alpha: 0.8),
+                        size: 32,
+                      ),
                     ),
                   ),
                 ),

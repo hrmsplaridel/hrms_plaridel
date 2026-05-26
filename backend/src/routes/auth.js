@@ -11,6 +11,10 @@ const {
   authTokenLimiter,
   authPasswordChangeLimiter,
 } = require('../middleware/rateLimiters');
+const {
+  buildDeviceInfoPayload,
+  enrichSessionRow,
+} = require('../utils/sessionDevice');
 
 const router = express.Router();
 
@@ -67,13 +71,16 @@ async function issueTokensForUser(user, req, db = pool) {
   const tokenHash = hashRefreshToken(refreshToken);
 
   const ua = req.get('user-agent');
+  const clientHint = req.get('x-hrms-device');
+  const devicePayload = buildDeviceInfoPayload(ua, clientHint);
+  const deviceInfoStored = JSON.stringify(devicePayload);
   const rawIp = req.ip || req.socket?.remoteAddress;
   const ipForDb = rawIp && String(rawIp).trim() !== '' ? String(rawIp) : null;
 
   await db.query(
     `INSERT INTO auth_refresh_tokens (user_id, token_hash, expires_at, device_info, ip_address)
      VALUES ($1, $2, $3, $4, $5::inet)`,
-    [user.id, tokenHash, expiresAt, ua || null, ipForDb]
+    [user.id, tokenHash, expiresAt, deviceInfoStored, ipForDb]
   );
 
   return { accessToken, refreshToken };
@@ -371,7 +378,9 @@ router.get('/sessions', authMiddleware, async (req, res) => {
        ORDER BY created_at DESC`,
       [req.user.id]
     );
-    res.json({ sessions: result.rows });
+    res.json({
+      sessions: result.rows.map((row) => enrichSessionRow(row)),
+    });
   } catch (err) {
     console.error('[auth/sessions]', err);
     res.status(500).json({ error: 'Failed to list sessions' });

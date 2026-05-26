@@ -67,6 +67,30 @@ class RspLdSavedEntryPreview {
           );
         }),
       ),
+      roFieldsGroup(
+        title: 'Functional areas',
+        children: [
+          ...roField(
+            'Areas checked',
+            e.functionalAreas.isEmpty ? null : e.functionalAreas.join(', '),
+          ),
+          ...roField('Other functional area', e.otherFunctionalArea),
+        ],
+      ),
+      roFieldsGroup(
+        title: 'Performance & other relevant information',
+        children: [
+          ...roField('Performance (3 years)', e.performance3Years),
+          ...roField('Challenges / coping', e.challengesCoping),
+          ...roField('Compliance / attendance', e.complianceAttendance),
+        ],
+      ),
+      roFieldsGroup(
+        title: 'Other relevant information',
+        children: [
+          ...roField('Additional data', e.otherRelevantInformation),
+        ],
+      ),
       ..._timestamps(e.createdAt, e.updatedAt),
     ];
   }
@@ -105,10 +129,11 @@ class RspLdSavedEntryPreview {
           ...roField('Experience', e.experience),
           ...roField('Training', e.training),
           ...roField('Eligibility', e.eligibility),
+          ...roField('Significant accomplishments', e.significantAccomplishments),
         ],
       ),
       roFieldsGroup(
-        title: 'Targets & ratings',
+        title: 'Succession analysis',
         children: [
           ...roField('Target position 1', e.targetPosition1),
           ...roField('Target position 2', e.targetPosition2),
