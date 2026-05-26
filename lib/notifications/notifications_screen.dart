@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../docutracker/docutracker_notification_navigation.dart';
+import '../docutracker/docutracker_provider.dart';
+import '../docutracker/widgets/docutracker_notifications_panel.dart';
 import '../landingpage/constants/app_theme.dart';
 import '../providers/auth_provider.dart';
 import 'app_notification.dart';
 import 'notification_provider.dart';
 import 'notification_tap_result.dart';
 
-/// In-app notifications (leave, future DTR, etc.) with HR-themed cards and clear read/unread states.
+/// Full notifications panel — HRMS (leave, locator, …) and DocuTracker in one place.
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
 
@@ -19,16 +22,44 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      context.read<NotificationProvider>().loadNotifications();
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _reload());
+  }
+
+  Future<void> _reload() async {
+    if (!mounted) return;
+    await Future.wait([
+      context.read<NotificationProvider>().loadNotifications(),
+      context.read<DocuTrackerProvider>().loadNotifications(forceRefresh: true),
+    ]);
+  }
+
+  bool _docuTrackerAdmin(BuildContext context) {
+    final role = context.read<AuthProvider>().user?.role?.toLowerCase();
+    return role == 'admin' || role == 'hr';
+  }
+
+  Future<void> _markAllRead(
+    NotificationProvider np,
+    DocuTrackerProvider doc,
+  ) async {
+    if (np.unreadCount > 0) await np.markAllRead();
+    if (doc.unreadNotificationsCount > 0) {
+      await doc.markAllNotificationsRead();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final np = context.watch<NotificationProvider>();
+    final doc = context.watch<DocuTrackerProvider>();
     final scheme = Theme.of(context).colorScheme;
+    final hrmsEmpty = np.items.isEmpty;
+    final docEmpty = doc.notifications.isEmpty;
+    final allEmpty = hrmsEmpty && docEmpty;
+    final loading =
+        (np.loading && hrmsEmpty) || (doc.loading && docEmpty);
+    final totalUnread = np.unreadCount + doc.unreadNotificationsCount;
+    final isDocuAdmin = _docuTrackerAdmin(context);
 
     return Scaffold(
       backgroundColor: AppTheme.sectionAlt,
@@ -59,11 +90,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           ),
         ),
         actions: [
-          if (np.unreadCount > 0)
+          if (totalUnread > 0)
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: TextButton(
-                onPressed: () => np.markAllRead(),
+                onPressed: () => _markAllRead(np, doc),
                 style: TextButton.styleFrom(
                   foregroundColor: AppTheme.primaryNavy,
                 ),
@@ -79,7 +110,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           ),
         ),
       ),
-      body: np.loading && np.items.isEmpty
+      body: loading
           ? Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -103,76 +134,51 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 ],
               ),
             )
-          : np.loadError != null && np.items.isEmpty
-          ? _ErrorState(message: np.loadError!)
-          : np.items.isEmpty
+          : allEmpty &&
+                (np.loadError != null || (doc.error?.isNotEmpty ?? false))
+          ? _ErrorState(
+              message: np.loadError ?? doc.error ?? 'Could not load notifications.',
+            )
+          : allEmpty
           ? const _EmptyState()
           : RefreshIndicator(
               color: AppTheme.primaryNavy,
-              onRefresh: () => np.loadNotifications(),
-              child: Builder(
-                builder: (context) {
-                  final nowLocal = DateTime.now().toLocal();
-                  final todayDay = DateTime(
-                    nowLocal.year,
-                    nowLocal.month,
-                    nowLocal.day,
-                  );
-
-                  String groupLabel(DateTime createdAt) {
-                    final d = createdAt.toLocal();
-                    final itemDay = DateTime(d.year, d.month, d.day);
-                    final daysAgo = todayDay.difference(itemDay).inDays;
-                    if (daysAgo == 0) return 'Today';
-                    if (daysAgo == 1) return 'Yesterday';
-                    return 'Earlier';
-                  }
-
-                  // Flatten list into: [header, card, card, header, card...]
-                  final rows = <_NotificationListRow>[];
-                  String? lastLabel;
-                  for (final n in np.items) {
-                    final label = groupLabel(n.createdAt);
-                    if (lastLabel != label) {
-                      rows.add(_NotificationListRow.header(label));
-                      lastLabel = label;
-                    }
-                    rows.add(_NotificationListRow.item(n));
-                  }
-
-                  return ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                    itemCount: rows.length,
-                    itemBuilder: (context, index) {
-                      final row = rows[index];
-                      if (row.isHeader) {
-                        return Padding(
-                          padding: const EdgeInsets.only(top: 10, bottom: 8),
-                          child: Text(
-                            row.header!,
-                            style: TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 13,
-                              letterSpacing: 0.5,
-                              color: AppTheme.primaryNavy,
+              onRefresh: _reload,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                children: [
+                  if (!docEmpty) ...[
+                    const _PanelSectionTitle(title: 'DocuTracker'),
+                    const SizedBox(height: 8),
+                    DocuTrackerNotificationPanel(
+                      notifications: doc.notifications,
+                      unreadCount: doc.unreadNotificationsCount,
+                      initialVisiblePerGroup: 20,
+                      onMarkAllRead: doc.unreadNotificationsCount > 0
+                          ? () => doc.markAllNotificationsRead()
+                          : null,
+                      onNotificationTap: (n) => navigateFromDocuTrackerNotification(
+                        context,
+                        notification: n,
+                        isAdmin: isDocuAdmin,
+                        afterNavigation: () =>
+                            refreshDocuTrackerAfterNotificationNav(
+                              context,
+                              isAdmin: isDocuAdmin,
                             ),
-                          ),
-                        );
-                      }
-
-                      final n = row.notification!;
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _NotificationCard(
-                          notification: n,
-                          onTap: () {
-                            _handleNotificationTap(context, n, np);
-                          },
-                        ),
-                      );
-                    },
-                  );
-                },
+                      ),
+                    ),
+                    if (!hrmsEmpty) const SizedBox(height: 20),
+                  ],
+                  if (!hrmsEmpty) ...[
+                    if (!docEmpty) const _PanelSectionTitle(title: 'Leave & HR'),
+                    if (!docEmpty) const SizedBox(height: 8),
+                    _HrmsNotificationList(
+                      items: np.items,
+                      onTap: (n) => _handleNotificationTap(context, n, np),
+                    ),
+                  ],
+                ],
               ),
             ),
     );
@@ -190,6 +196,89 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final role = context.read<AuthProvider>().user?.role;
     final result = NotificationTapResult.fromNotification(n, role: role);
     Navigator.of(context).pop(result);
+  }
+}
+
+class _PanelSectionTitle extends StatelessWidget {
+  const _PanelSectionTitle({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      title,
+      style: const TextStyle(
+        fontWeight: FontWeight.w800,
+        fontSize: 13,
+        letterSpacing: 0.5,
+        color: AppTheme.primaryNavy,
+      ),
+    );
+  }
+}
+
+class _HrmsNotificationList extends StatelessWidget {
+  const _HrmsNotificationList({
+    required this.items,
+    required this.onTap,
+  });
+
+  final List<AppNotification> items;
+  final void Function(AppNotification n) onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final nowLocal = DateTime.now().toLocal();
+    final todayDay = DateTime(nowLocal.year, nowLocal.month, nowLocal.day);
+
+    String groupLabel(DateTime createdAt) {
+      final d = createdAt.toLocal();
+      final itemDay = DateTime(d.year, d.month, d.day);
+      final daysAgo = todayDay.difference(itemDay).inDays;
+      if (daysAgo == 0) return 'Today';
+      if (daysAgo == 1) return 'Yesterday';
+      return 'Earlier';
+    }
+
+    final rows = <_NotificationListRow>[];
+    String? lastLabel;
+    for (final n in items) {
+      final label = groupLabel(n.createdAt);
+      if (lastLabel != label) {
+        rows.add(_NotificationListRow.header(label));
+        lastLabel = label;
+      }
+      rows.add(_NotificationListRow.item(n));
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final row in rows)
+          if (row.isHeader)
+            Padding(
+              padding: const EdgeInsets.only(top: 10, bottom: 8),
+              child: Text(
+                row.header!,
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                  letterSpacing: 0.5,
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.75),
+                ),
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _NotificationCard(
+                notification: row.notification!,
+                onTap: () => onTap(row.notification!),
+              ),
+            ),
+      ],
+    );
   }
 }
 
@@ -264,7 +353,7 @@ class _EmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'New leave updates and alerts will appear here.',
+              'New leave updates, DocuTracker routing alerts, and other notices will appear here.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 14,

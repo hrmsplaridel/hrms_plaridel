@@ -8,6 +8,7 @@ import '../../../data/time_record.dart';
 import '../../../dtr/widgets/attendance_display.dart';
 import '../../../dtr/widgets/attendance_source_badge.dart';
 import '../../../docutracker/docutracker_main.dart';
+import '../../../docutracker/docutracker_provider.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
 import '../../../leave/leave_provider.dart';
@@ -72,6 +73,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
     'Announcements',
   ];
 
+  static const int _docuTrackerNavIndex = 5;
+
   /// Shown only via account menu (not listed in sidebar).
   static const int _profileNavIndex = 7;
   static const _settingsPanelKey = PageStorageKey<String>('employee_settings');
@@ -87,10 +90,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<NotificationProvider>().refreshUnreadCount();
+      context.read<DocuTrackerProvider>().loadNotifications();
       _notificationPollTimer?.cancel();
       _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
         if (!mounted) return;
         context.read<NotificationProvider>().refreshUnreadCount();
+        context.read<DocuTrackerProvider>().loadNotifications();
       });
     });
   }
@@ -99,6 +104,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && mounted) {
       context.read<NotificationProvider>().refreshUnreadCount();
+      context.read<DocuTrackerProvider>().loadNotifications();
     }
   }
 
@@ -171,6 +177,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
     }
     setState(() => _selectedNavIndex = index);
     DashboardContentNavigator.showHome(_contentNavKey);
+    if (index == _docuTrackerNavIndex) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        context.read<DocuTrackerProvider>().loadNotifications(
+          forceRefresh: true,
+        );
+      });
+    }
   }
 
   Widget _employeeMainChild({required String displayName}) {

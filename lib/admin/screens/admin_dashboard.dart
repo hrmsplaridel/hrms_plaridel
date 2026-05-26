@@ -102,10 +102,12 @@ class _AdminDashboardState extends State<AdminDashboard>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<NotificationProvider>().refreshUnreadCount();
+      context.read<DocuTrackerProvider>().loadNotifications();
       _notificationPollTimer?.cancel();
       _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
         if (!mounted) return;
         context.read<NotificationProvider>().refreshUnreadCount();
+        context.read<DocuTrackerProvider>().loadNotifications();
       });
     });
   }
@@ -114,6 +116,7 @@ class _AdminDashboardState extends State<AdminDashboard>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && mounted) {
       context.read<NotificationProvider>().refreshUnreadCount();
+      context.read<DocuTrackerProvider>().loadNotifications();
     }
   }
 

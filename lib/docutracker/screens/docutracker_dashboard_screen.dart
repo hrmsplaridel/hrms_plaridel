@@ -11,8 +11,6 @@ import '../models/document.dart';
 import '../models/document_notification.dart';
 import '../models/document_status.dart';
 import '../widgets/docutracker_create_document_dialog.dart';
-import '../docutracker_notification_navigation.dart';
-import '../widgets/docutracker_notifications_panel.dart';
 import '../theme/docutracker_tokens.dart';
 import '../widgets/docutracker_module_header.dart';
 import '../widgets/docutracker_section_header.dart';
@@ -47,7 +45,6 @@ class _DocuTrackerDashboardScreenState
 
   Timer? _pollTimer;
   bool? _canCreateDocuments;
-  bool _notificationsExpanded = false;
   _AdminQuickFilter _adminFilter = _AdminQuickFilter.all;
   final Map<String, bool> _expandedSections = <String, bool>{};
 
@@ -104,8 +101,6 @@ class _DocuTrackerDashboardScreenState
     final provider = context.watch<DocuTrackerProvider>();
     final auth = context.watch<AuthProvider>();
     final userId = auth.user?.id ?? '';
-    final unreadCount = provider.unreadNotificationsCount;
-
     final showFab = _canCreateDocuments == true;
 
     return Stack(
@@ -144,20 +139,8 @@ class _DocuTrackerDashboardScreenState
                   equalizeHeights: true,
                 ),
                 const SizedBox(height: 16),
-                _buildNotificationsBar(provider, unreadCount),
-                if (_notificationsExpanded) ...[
-                  const SizedBox(height: 10),
-                  _buildExpandedNotifications(provider, unreadCount),
-                ],
-                const SizedBox(height: 16),
                 _buildAdminDashboard(provider, userId),
               ] else ...[
-                _buildNotificationsBar(provider, unreadCount),
-                if (_notificationsExpanded) ...[
-                  const SizedBox(height: 10),
-                  _buildExpandedNotifications(provider, unreadCount),
-                ],
-                const SizedBox(height: 16),
                 _buildEmployeeDashboard(provider, userId),
               ],
             ],
@@ -186,18 +169,6 @@ class _DocuTrackerDashboardScreenState
             ),
           ),
       ],
-    );
-  }
-
-  Future<void> _openNotification(
-    BuildContext context,
-    DocumentNotification n,
-  ) async {
-    await navigateFromDocuTrackerNotification(
-      context,
-      notification: n,
-      isAdmin: widget.isAdmin,
-      afterNavigation: _load,
     );
   }
 
@@ -745,69 +716,6 @@ class _DocuTrackerDashboardScreenState
           ],
         );
       },
-    );
-  }
-
-  Widget _buildNotificationsBar(DocuTrackerProvider provider, int unreadCount) {
-    final total = provider.notifications.length;
-    return Container(
-      decoration: DocuTrackerTokens.cardDecoration(),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      child: Row(
-        children: [
-          Icon(
-            unreadCount > 0
-                ? Icons.notifications_active_rounded
-                : Icons.notifications_none_rounded,
-            size: 20,
-            color: DocuTrackerTokens.terracotta,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: RichText(
-              text: TextSpan(
-                style: DocuTrackerTokens.subtitleStyle().copyWith(
-                  color: DocuTrackerTokens.textPrimary,
-                  fontWeight: FontWeight.w600,
-                ),
-                children: [
-                  const TextSpan(text: 'Notifications: '),
-                  TextSpan(
-                    text: unreadCount > 0
-                        ? '$unreadCount need your attention ($total total).'
-                        : 'You are all caught up for today ($total total).',
-                    style: const TextStyle(fontWeight: FontWeight.w500),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          DocuTrackerPressScale(
-            child: TextButton(
-              onPressed: () => setState(
-                () => _notificationsExpanded = !_notificationsExpanded,
-              ),
-              style: TextButton.styleFrom(
-                foregroundColor: DocuTrackerTokens.terracotta,
-              ),
-              child: Text(_notificationsExpanded ? 'Hide' : 'View History'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildExpandedNotifications(
-    DocuTrackerProvider provider,
-    int unreadCount,
-  ) {
-    return DocuTrackerNotificationPanel(
-      notifications: provider.notifications,
-      unreadCount: unreadCount,
-      onMarkAllRead: () => provider.markAllNotificationsRead(),
-      onNotificationTap: (n) => _openNotification(context, n),
-      initialVisiblePerGroup: 3,
     );
   }
 

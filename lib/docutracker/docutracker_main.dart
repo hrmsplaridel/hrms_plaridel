@@ -13,8 +13,8 @@ import 'widgets/docutracker_responsive_body.dart';
 /// Main DocuTracker module entry.
 /// Sections: Dashboard, Documents, and Admin (admin only).
 ///
-/// DocuTracker alerts are opened from the dashboard top bar (document icon + badge)
-/// when this module is selected.
+/// DocuTracker alerts are opened from the global dashboard header bell
+/// when the DocuTracker module is selected.
 class DocuTrackerMain extends StatefulWidget {
   const DocuTrackerMain({super.key, this.section, this.isAdmin = false});
 
