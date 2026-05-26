@@ -15,8 +15,10 @@ class EscalationConfig {
   final String? id;
   final String documentType;
   final String? departmentId;
+
   /// Role to escalate to (e.g. dept_head, admin)
   final String? escalationTargetRole;
+
   /// Minutes after deadline before escalating
   final int escalationDelayMinutes;
   final int maxEscalationLevel;
@@ -34,8 +36,7 @@ class EscalationConfig {
       escalationTargetRole: json['escalation_target_role']?.toString(),
       escalationDelayMinutes:
           (json['escalation_delay_minutes'] as num?)?.toInt() ?? 60,
-      maxEscalationLevel:
-          (json['max_escalation_level'] as num?)?.toInt() ?? 3,
+      maxEscalationLevel: (json['max_escalation_level'] as num?)?.toInt() ?? 3,
       notifyOriginalSender: json['notify_original_sender'] != false,
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at'] as String)
@@ -47,14 +48,14 @@ class EscalationConfig {
   }
 
   Map<String, dynamic> toJson() => {
-        if (id != null) 'id': id,
-        'document_type': documentType,
-        if (departmentId != null) 'department_id': departmentId,
-        if (escalationTargetRole != null)
-          'escalation_target_role': escalationTargetRole,
-        'escalation_delay_minutes': escalationDelayMinutes,
-        'max_escalation_level': maxEscalationLevel,
-        'notify_original_sender': notifyOriginalSender,
-        'updated_at': DateTime.now().toIso8601String(),
-      };
+    if (id != null) 'id': id,
+    'document_type': documentType,
+    if (departmentId != null) 'department_id': departmentId,
+    if (escalationTargetRole != null)
+      'escalation_target_role': escalationTargetRole,
+    'escalation_delay_minutes': escalationDelayMinutes,
+    'max_escalation_level': maxEscalationLevel,
+    'notify_original_sender': notifyOriginalSender,
+    'updated_at': DateTime.now().toIso8601String(),
+  };
 }

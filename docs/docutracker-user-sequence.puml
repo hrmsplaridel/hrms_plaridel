@@ -1,0 +1,33 @@
+@startuml
+title Figure 6. DocuTracker User Sequence
+
+actor Employee
+actor Reviewer
+participant "DocuTracker App" as App
+participant "Server" as Server
+database Database
+
+== Create and submit ==
+Employee -> App : **1.** Create document
+App -> Server : **2.** Save draft
+Server -> Database : **3.** Store document
+Database --> App : **4.** Draft saved
+
+Employee -> App : **5.** Submit for review
+App -> Server : **6.** Start workflow
+Server -> Database : **7.** Assign reviewer,\nset deadline
+Database --> Reviewer : **8.** Notification sent
+
+== Review ==
+Reviewer -> App : **9.** Open assigned document
+App -> Server : **10.** Request document
+Server -> Database : **11.** Fetch record
+Database --> App : **12.** Document details
+
+Reviewer -> App : **13.** Approve
+App -> Server : **14.** Process approval
+Server -> Database : **15.** Update status
+Database --> App : **16.** Approved
+App --> Employee : **17.** Status updated
+
+@enduml

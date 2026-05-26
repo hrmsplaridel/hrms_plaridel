@@ -1,0 +1,109 @@
+// DocuTracker ERD — PART 1: DOCUMENTS & RUNTIME
+// What happens when documents are created, routed, reviewed, and notified
+
+Project DocuTracker_Part1_Runtime {
+  database_type: 'PostgreSQL'
+  Note: 'Part 1 of 3 — document execution tables'
+}
+
+Table users {
+  id uuid [pk, note: 'HRMS shared']
+  full_name varchar [not null]
+  role varchar [not null]
+  email varchar
+}
+
+Table docutracker_documents {
+  id uuid [pk]
+  document_number varchar [unique, not null]
+  document_type varchar [not null]
+  title varchar [not null]
+  description text
+  source_module varchar
+  source_table varchar
+  source_record_id uuid
+  file_path varchar
+  file_name varchar
+  created_by uuid [ref: > users.id]
+  current_holder_id uuid [ref: > users.id]
+  current_step int [default: 1]
+  workflow_version int [note: 'Pins to config version — see Part 2']
+  status varchar [not null]
+  sent_time timestamptz
+  deadline_time timestamptz
+  reviewed_time timestamptz
+  escalation_level int [default: 0]
+  needs_admin_intervention boolean [default: false]
+  created_at timestamptz
+  updated_at timestamptz
+}
+
+Table docutracker_routing_records {
+  id uuid [pk]
+  document_id uuid [not null, ref: > docutracker_documents.id]
+  step_order int [not null]
+  assignee_id uuid [ref: > users.id]
+  sent_time timestamptz
+  deadline_time timestamptz
+  reviewed_time timestamptz
+  status varchar [not null]
+  remarks text
+  created_at timestamptz
+  updated_at timestamptz
+
+  indexes {
+    (document_id, step_order) [unique]
+  }
+}
+
+Table docutracker_routing_record_assignees {
+  routing_record_id uuid [not null, ref: > docutracker_routing_records.id]
+  user_id uuid [not null, ref: > users.id]
+  created_at timestamptz
+
+  indexes {
+    (routing_record_id, user_id) [pk]
+  }
+}
+
+Table docutracker_document_history {
+  id uuid [pk]
+  document_id uuid [not null, ref: > docutracker_documents.id]
+  action varchar
+  actor_id uuid [ref: > users.id]
+  actor_name varchar
+  from_step int
+  to_step int
+  from_status varchar
+  to_status varchar
+  remarks text
+  is_overdue_log boolean [default: false]
+  is_escalation_log boolean [default: false]
+  created_at timestamptz
+}
+
+Table docutracker_notifications {
+  id uuid [pk]
+  document_id uuid [not null, ref: > docutracker_documents.id]
+  user_id uuid [not null, ref: > users.id]
+  type varchar [not null]
+  title varchar
+  body text
+  event_key varchar
+  read boolean [default: false]
+  created_at timestamptz
+}
+
+Table docutracker_transition_requests {
+  id uuid [pk]
+  document_id uuid [not null, ref: > docutracker_documents.id]
+  action varchar [not null]
+  idempotency_key varchar [not null]
+  actor_id uuid [ref: > users.id]
+  response_payload json
+  created_at timestamptz
+
+  indexes {
+    (document_id, action, idempotency_key) [unique]
+  }
+}

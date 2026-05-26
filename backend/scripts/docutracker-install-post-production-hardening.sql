@@ -155,8 +155,8 @@ END $$;
 
 WITH baseline(role_id, document_type, action, granted) AS (
   VALUES
-    -- Employee baseline: can create/submit/view/download their workflow-relevant docs.
-    ('employee',  '*', 'view',     true),
+    -- Employee baseline: create/submit/download; view is relationship-scoped in API (not org-wide).
+    ('employee',  '*', 'view',     false),
     ('employee',  '*', 'create',   true),
     ('employee',  '*', 'submit',   true),
     ('employee',  '*', 'download', true),
@@ -167,8 +167,8 @@ WITH baseline(role_id, document_type, action, granted) AS (
     ('employee',  '*', 'reject',   false),
     ('employee',  '*', 'return',   false),
 
-    -- HR baseline: review-capable.
-    ('hr',        '*', 'view',     true),
+    -- HR baseline: review-capable; list visibility is relationship-scoped, not role-wide view.
+    ('hr',        '*', 'view',     false),
     ('hr',        '*', 'create',   true),
     ('hr',        '*', 'submit',   true),
     ('hr',        '*', 'download', true),
@@ -179,8 +179,8 @@ WITH baseline(role_id, document_type, action, granted) AS (
     ('hr',        '*', 'reject',   true),
     ('hr',        '*', 'return',   true),
 
-    -- Supervisor baseline: review-capable.
-    ('supervisor','*', 'view',     true),
+    -- Supervisor baseline: review-capable; list visibility is relationship-scoped.
+    ('supervisor','*', 'view',     false),
     ('supervisor','*', 'create',   true),
     ('supervisor','*', 'submit',   true),
     ('supervisor','*', 'download', true),

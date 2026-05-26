@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../docutracker_styles.dart';
+import '../theme/docutracker_tokens.dart';
 import '../models/document_notification.dart';
 
 /// Grouped DocuTracker notifications with read/unread styling, taps, paging per group, and mark-all-read.
@@ -50,8 +51,7 @@ class DocuTrackerNotificationPanel extends StatefulWidget {
   static List<DocumentNotification> inTypes(
     List<DocumentNotification> list,
     Set<String> types,
-  ) =>
-      list.where((n) => types.contains(n.type)).toList();
+  ) => list.where((n) => types.contains(n.type)).toList();
 
   @override
   State<DocuTrackerNotificationPanel> createState() =>
@@ -125,12 +125,12 @@ class _DocuTrackerNotificationPanelState
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                    color: DocuTrackerTokens.brand.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Icon(
                     Icons.notifications_outlined,
-                    color: AppTheme.primaryNavy,
+                    color: DocuTrackerTokens.brand,
                     size: 22,
                   ),
                 ),
@@ -168,7 +168,7 @@ class _DocuTrackerNotificationPanelState
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: AppTheme.primaryNavy,
+                      color: DocuTrackerTokens.brand,
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Text(
@@ -208,7 +208,7 @@ class _DocuTrackerNotificationPanelState
                       : const Icon(Icons.done_all_rounded, size: 18),
                   label: Text(_markingAll ? 'Marking…' : 'Mark all read'),
                   style: TextButton.styleFrom(
-                    foregroundColor: AppTheme.primaryNavy,
+                    foregroundColor: DocuTrackerTokens.brand,
                   ),
                 ),
               ),
@@ -229,9 +229,11 @@ class _DocuTrackerNotificationPanelState
                     visibleLimit: urgentShow,
                     onShowMore: urgentRemain > 0
                         ? () => setState(() {
-                              _urgentCap =
-                                  (_urgentCap + 10).clamp(0, urgent.length);
-                            })
+                            _urgentCap = (_urgentCap + 10).clamp(
+                              0,
+                              urgent.length,
+                            );
+                          })
                         : null,
                     remainingCount: urgentRemain,
                     onTap: widget.onNotificationTap,
@@ -247,9 +249,11 @@ class _DocuTrackerNotificationPanelState
                     visibleLimit: routingShow,
                     onShowMore: routingRemain > 0
                         ? () => setState(() {
-                              _routingCap =
-                                  (_routingCap + 10).clamp(0, routing.length);
-                            })
+                            _routingCap = (_routingCap + 10).clamp(
+                              0,
+                              routing.length,
+                            );
+                          })
                         : null,
                     remainingCount: routingRemain,
                     onTap: widget.onNotificationTap,
@@ -264,9 +268,11 @@ class _DocuTrackerNotificationPanelState
                     visibleLimit: outcomesShow,
                     onShowMore: outcomesRemain > 0
                         ? () => setState(() {
-                              _outcomesCap =
-                                  (_outcomesCap + 10).clamp(0, outcomes.length);
-                            })
+                            _outcomesCap = (_outcomesCap + 10).clamp(
+                              0,
+                              outcomes.length,
+                            );
+                          })
                         : null,
                     remainingCount: outcomesRemain,
                     onTap: widget.onNotificationTap,
@@ -307,7 +313,7 @@ class _NotificationGroup extends StatelessWidget {
   Widget build(BuildContext context) {
     final accent = emphasize
         ? Colors.deepOrange.shade800
-        : AppTheme.primaryNavy;
+        : DocuTrackerTokens.brand;
     final visible = items.take(visibleLimit).toList();
 
     return Padding(
@@ -343,7 +349,10 @@ class _NotificationGroup extends StatelessWidget {
                         if (unreadCount > 0) ...[
                           const SizedBox(width: 8),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
                             decoration: BoxDecoration(
                               color: accent,
                               borderRadius: BorderRadius.circular(10),
@@ -374,7 +383,8 @@ class _NotificationGroup extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          for (final n in visible) _NotificationTile(notification: n, onTap: onTap),
+          for (final n in visible)
+            _NotificationTile(notification: n, onTap: onTap),
           if (onShowMore != null && remainingCount > 0)
             Padding(
               padding: const EdgeInsets.only(top: 4, bottom: 4),
@@ -383,8 +393,11 @@ class _NotificationGroup extends StatelessWidget {
                 child: TextButton(
                   onPressed: onShowMore,
                   style: TextButton.styleFrom(
-                    foregroundColor: AppTheme.primaryNavy,
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    foregroundColor: DocuTrackerTokens.brand,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
@@ -426,10 +439,10 @@ class _NotificationTile extends StatefulWidget {
       DocumentNotification.typeOverdue => Colors.deepOrange.shade800,
       DocumentNotification.typeEscalated => Colors.red.shade800,
       DocumentNotification.typeRejected => Colors.purple.shade800,
-      DocumentNotification.typeReturned => AppTheme.primaryNavy,
+      DocumentNotification.typeReturned => DocuTrackerTokens.brand,
       DocumentNotification.typeDeadlineNear => Colors.amber.shade900,
-      DocumentNotification.typeAssigned => AppTheme.primaryNavy,
-      _ => AppTheme.primaryNavy,
+      DocumentNotification.typeAssigned => DocuTrackerTokens.brand,
+      _ => DocuTrackerTokens.brand,
     };
   }
 
@@ -505,7 +518,7 @@ class _NotificationTileState extends State<_NotificationTile> {
             child: Material(
               color: read
                   ? AppTheme.offWhite.withValues(alpha: 0.35)
-                  : AppTheme.primaryNavy.withValues(alpha: 0.05),
+                  : DocuTrackerTokens.brand.withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(10),
               child: InkWell(
                 borderRadius: BorderRadius.circular(10),
@@ -556,7 +569,9 @@ class _NotificationTileState extends State<_NotificationTile> {
                                 _NotificationTile._icon(n.type),
                                 size: 20,
                                 color: read
-                                    ? AppTheme.textSecondary.withValues(alpha: 0.8)
+                                    ? AppTheme.textSecondary.withValues(
+                                        alpha: 0.8,
+                                      )
                                     : accent,
                               ),
                             ),
@@ -595,7 +610,9 @@ class _NotificationTileState extends State<_NotificationTile> {
                                                 fontSize: 11,
                                                 color: read
                                                     ? AppTheme.textSecondary
-                                                        .withValues(alpha: 0.6)
+                                                          .withValues(
+                                                            alpha: 0.6,
+                                                          )
                                                     : accent,
                                                 fontWeight: read
                                                     ? FontWeight.normal
@@ -634,7 +651,7 @@ class _NotificationTileState extends State<_NotificationTile> {
                                               fontSize: 11,
                                               color: read
                                                   ? AppTheme.textSecondary
-                                                      .withValues(alpha: 0.6)
+                                                        .withValues(alpha: 0.6)
                                                   : accent,
                                               fontWeight: read
                                                   ? FontWeight.normal
@@ -672,7 +689,9 @@ class _NotificationTileState extends State<_NotificationTile> {
                                         ),
                                         decoration: BoxDecoration(
                                           color: AppTheme.lightGray,
-                                          borderRadius: BorderRadius.circular(4),
+                                          borderRadius: BorderRadius.circular(
+                                            4,
+                                          ),
                                         ),
                                         child: Text(
                                           n.displayType.toUpperCase(),
@@ -690,7 +709,7 @@ class _NotificationTileState extends State<_NotificationTile> {
                                           width: 6,
                                           height: 6,
                                           decoration: const BoxDecoration(
-                                            color: AppTheme.primaryNavy,
+                                            color: DocuTrackerTokens.brand,
                                             shape: BoxShape.circle,
                                           ),
                                         ),

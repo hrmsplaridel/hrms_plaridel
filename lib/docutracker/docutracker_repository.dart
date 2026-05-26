@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import '../api/client.dart';
 import 'docutracker_api_result.dart';
 import 'models/document.dart';
+import 'models/escalation_config.dart';
 import 'models/document_history.dart';
 import 'models/document_notification.dart';
 import 'models/document_action.dart';
@@ -10,6 +11,7 @@ import 'models/document_permission.dart';
 import 'models/document_routing_config.dart';
 import 'models/document_routing_record.dart';
 import 'models/document_status.dart';
+import 'services/docutracker_document_visibility.dart';
 import 'services/docutracker_permission_service.dart';
 import 'services/docutracker_permissions_datasource.dart';
 
@@ -57,13 +59,87 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
-  Future<DocuTrackerResult<bool>> saveRoutingConfig(DocumentRoutingConfig config) async {
+  Future<DocuTrackerResult<int>> saveRoutingConfig(
+    DocumentRoutingConfig config,
+  ) async {
     try {
-      await ApiClient.instance.post<void>(
+      final res = await ApiClient.instance.post<Map<String, dynamic>>(
         '$_base/routing-configs',
         data: config.toJson(),
       );
-      return const DocuTrackerSuccess(true);
+      final row = res.data;
+      final version = (row?['version'] as num?)?.toInt() ?? config.version + 1;
+      return DocuTrackerSuccess(version);
+    } catch (e) {
+      return DocuTrackerFailure(_apiErrorMessage(e));
+    }
+  }
+
+  Future<List<EscalationConfig>> listEscalationConfigs({
+    String? documentType,
+    String? departmentId,
+  }) async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '$_base/escalation-configs',
+        queryParameters: {
+          if (documentType != null && documentType.isNotEmpty)
+            'document_type': documentType,
+          if (departmentId != null && departmentId.isNotEmpty)
+            'department_id': departmentId,
+        },
+      );
+      final list = res.data ?? [];
+      return list
+          .map(
+            (e) =>
+                EscalationConfig.fromJson(Map<String, dynamic>.from(e as Map)),
+          )
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<DocuTrackerResult<EscalationConfig>> createEscalationConfig(
+    EscalationConfig config,
+  ) async {
+    try {
+      final res = await ApiClient.instance.post<Map<String, dynamic>>(
+        '$_base/escalation-configs',
+        data: config.toJson(),
+      );
+      final row = res.data;
+      if (row == null) {
+        return DocuTrackerFailure<EscalationConfig>(
+          'Empty response from server',
+        );
+      }
+      return DocuTrackerSuccess(EscalationConfig.fromJson(row));
+    } catch (e) {
+      return DocuTrackerFailure(_apiErrorMessage(e));
+    }
+  }
+
+  Future<DocuTrackerResult<EscalationConfig>> updateEscalationConfig(
+    EscalationConfig config,
+  ) async {
+    final id = config.id;
+    if (id == null || id.isEmpty) {
+      return DocuTrackerFailure<EscalationConfig>('Config id is required');
+    }
+    try {
+      final res = await ApiClient.instance.patch<Map<String, dynamic>>(
+        '$_base/escalation-configs/$id',
+        data: config.toJson(),
+      );
+      final row = res.data;
+      if (row == null) {
+        return DocuTrackerFailure<EscalationConfig>(
+          'Empty response from server',
+        );
+      }
+      return DocuTrackerSuccess(EscalationConfig.fromJson(row));
     } catch (e) {
       return DocuTrackerFailure(_apiErrorMessage(e));
     }
@@ -74,14 +150,17 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     String? userRoleId,
     String? userDepartmentId,
     String? userOfficeId,
+    String? createdBy,
     String? documentType,
     DocumentStatus? status,
     int? limit,
   }) async {
     try {
       final qp = <String, dynamic>{
-        if (documentType != null && documentType.isNotEmpty) 'type': documentType,
+        if (documentType != null && documentType.isNotEmpty)
+          'type': documentType,
         if (status != null) 'status': status.value,
+        if (createdBy != null && createdBy.isNotEmpty) 'createdBy': createdBy,
         if (limit != null) 'limit': limit,
       };
       final res = await ApiClient.instance.get<List<dynamic>>(
@@ -109,7 +188,8 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
   }) async {
     try {
       final qp = <String, dynamic>{
-        if (documentType != null && documentType.isNotEmpty) 'type': documentType,
+        if (documentType != null && documentType.isNotEmpty)
+          'type': documentType,
         if (status != null) 'status': status.value,
         if (limit != null) 'limit': limit,
       };
@@ -148,7 +228,9 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
-  Future<List<DocumentRoutingRecord>> getDocumentRoutingRecords(String id) async {
+  Future<List<DocumentRoutingRecord>> getDocumentRoutingRecords(
+    String id,
+  ) async {
     try {
       final res = await ApiClient.instance.get<Map<String, dynamic>>(
         '$_base/documents/$id',
@@ -167,7 +249,9 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
-  Future<DocuTrackerResult<DocuTrackerDocument>> createDocument(DocuTrackerDocument doc) async {
+  Future<DocuTrackerResult<DocuTrackerDocument>> createDocument(
+    DocuTrackerDocument doc,
+  ) async {
     try {
       final payload = Map<String, dynamic>.from(doc.toJson())
         ..remove('id')
@@ -181,7 +265,9 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
       );
       final row = res.data;
       if (row == null) {
-        return DocuTrackerFailure<DocuTrackerDocument>('Empty response from server');
+        return DocuTrackerFailure<DocuTrackerDocument>(
+          'Empty response from server',
+        );
       }
       return DocuTrackerSuccess(DocuTrackerDocument.fromJson(row));
     } catch (e) {
@@ -189,7 +275,9 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
-  Future<List<DocumentHistoryEntry>> listDocumentHistory(String documentId) async {
+  Future<List<DocumentHistoryEntry>> listDocumentHistory(
+    String documentId,
+  ) async {
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '$_base/documents/$documentId/history',
@@ -226,7 +314,9 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
       );
       final row = res.data;
       if (row == null) {
-        return DocuTrackerFailure<DocuTrackerDocument>('Empty response from server');
+        return DocuTrackerFailure<DocuTrackerDocument>(
+          'Empty response from server',
+        );
       }
       return DocuTrackerSuccess(DocuTrackerDocument.fromJson(row));
     } catch (e) {
@@ -268,7 +358,9 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
   }
 
   /// Marks one notification as read for the current user.
-  Future<DocumentNotification?> markNotificationRead(String notificationId) async {
+  Future<DocumentNotification?> markNotificationRead(
+    String notificationId,
+  ) async {
     try {
       final res = await ApiClient.instance.patch<Map<String, dynamic>>(
         '$_base/notifications/$notificationId/read',
@@ -413,21 +505,25 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     required String userId,
     required String documentId,
     bool isAdmin = false,
+    DocuTrackerDocument? document,
+    List<DocumentRoutingRecord>? routingRecords,
   }) async {
     if (isAdmin) return true;
     try {
-      final res = await getDocument(documentId);
-      if (res is DocuTrackerFailure<DocuTrackerDocument>) return false;
-      if (res is! DocuTrackerSuccess<DocuTrackerDocument>) return false;
-      final doc = res.value;
-      if (doc.createdBy == userId || doc.currentHolderId == userId) return true;
-      final routing = await getDocumentRoutingRecords(documentId);
-      final current = doc.currentStep ?? 1;
-      for (final r in routing) {
-        if (r.stepOrder != current) continue;
-        if (r.assigneeIds.contains(userId)) return true;
+      DocuTrackerDocument? doc = document;
+      if (doc == null) {
+        final res = await getDocument(documentId);
+        if (res is DocuTrackerFailure<DocuTrackerDocument>) return false;
+        if (res is! DocuTrackerSuccess<DocuTrackerDocument>) return false;
+        doc = res.value;
       }
-      return false;
+      final routing =
+          routingRecords ?? await getDocumentRoutingRecords(documentId);
+      return DocuTrackerDocumentVisibility.isVisible(
+        doc: doc,
+        userId: userId,
+        routingForDocument: routing,
+      );
     } catch (_) {
       return false;
     }
@@ -481,8 +577,8 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
         final source = isHolder
             ? DocuTrackerPermissionSource.currentHolder
             : isAssignee
-                ? DocuTrackerPermissionSource.stepAssignee
-                : DocuTrackerPermissionSource.defaultDeny;
+            ? DocuTrackerPermissionSource.stepAssignee
+            : DocuTrackerPermissionSource.defaultDeny;
         return DocuTrackerPermissionExplanation(
           granted: granted,
           source: granted ? source : DocuTrackerPermissionSource.defaultDeny,
@@ -509,5 +605,61 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
       action: action,
       isAdmin: isAdmin,
     );
+  }
+
+  Future<DocuTrackerResult<DocuTrackerDocument>> uploadAttachment({
+    required String documentId,
+    required List<int> fileBytes,
+    required String fileName,
+  }) async {
+    try {
+      final res = await ApiClient.instance.uploadBytes<Map<String, dynamic>>(
+        '$_base/documents/$documentId/attachment',
+        bytes: fileBytes,
+        fileName: fileName,
+        fieldName: 'file',
+      );
+      final row = res.data;
+      if (row == null) {
+        return DocuTrackerFailure<DocuTrackerDocument>(
+          'Empty response from server',
+        );
+      }
+      return DocuTrackerSuccess(DocuTrackerDocument.fromJson(row));
+    } catch (e) {
+      return DocuTrackerFailure(_apiErrorMessage(e));
+    }
+  }
+
+  Future<DocuTrackerResult<DocuTrackerDocument>> removeAttachment(
+    String documentId,
+  ) async {
+    try {
+      final res = await ApiClient.instance.delete<Map<String, dynamic>>(
+        '$_base/documents/$documentId/attachment',
+      );
+      final row = res.data;
+      if (row == null) {
+        return DocuTrackerFailure<DocuTrackerDocument>(
+          'Empty response from server',
+        );
+      }
+      return DocuTrackerSuccess(DocuTrackerDocument.fromJson(row));
+    } catch (e) {
+      return DocuTrackerFailure(_apiErrorMessage(e));
+    }
+  }
+
+  Future<List<int>?> getAttachmentBytes(String documentId) async {
+    try {
+      final res = await ApiClient.instance.dio.get<List<int>>(
+        '$_base/documents/$documentId/attachment',
+        options: Options(responseType: ResponseType.bytes),
+      );
+      return res.data;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) return null;
+      rethrow;
+    }
   }
 }

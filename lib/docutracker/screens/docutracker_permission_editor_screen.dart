@@ -3,12 +3,15 @@ import '../../api/client.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../docutracker_repository.dart';
 import '../docutracker_styles.dart';
+import '../theme/docutracker_tokens.dart';
 import '../models/document_action.dart';
 import '../models/document_permission.dart';
 import '../models/document_type.dart';
 import '../security/docutracker_roles.dart';
 import '../services/docutracker_permission_service.dart';
 import '../services/employee_directory_lookup.dart';
+import '../widgets/docutracker_error_banner.dart';
+import '../widgets/docutracker_module_header.dart';
 import '../widgets/docutracker_responsive_body.dart';
 
 String _permissionExplanationChipTooltip(DocuTrackerPermissionExplanation e) {
@@ -284,7 +287,9 @@ class _DocuTrackerPermissionEditorScreenState
 
   Future<void> _loadUserRoleBaseline() async {
     if (_userId == null || _userRoleId == null) {
-      _userRoleBaselineGranted = {for (final a in _editableActions) a.name: false};
+      _userRoleBaselineGranted = {
+        for (final a in _editableActions) a.name: false,
+      };
       return;
     }
     final label = DocuTrackerRoles.normalize(_userRoleId);
@@ -299,17 +304,24 @@ class _DocuTrackerPermissionEditorScreenState
       byAction[p.action.name] = p;
     }
     _userRoleBaselineGranted = {
-      for (final a in _editableActions) a.name: (byAction[a.name]?.granted ?? false),
+      for (final a in _editableActions)
+        a.name: (byAction[a.name]?.granted ?? false),
     };
   }
 
   Future<void> _loadOverrides() async {
     if (_userId == null) {
       _overrideSpecificByAction = const {};
-      _overrideSpecificDraft = {for (final a in _editableActions) a.name: false};
+      _overrideSpecificDraft = {
+        for (final a in _editableActions) a.name: false,
+      };
       _overrideWildcardByAction = const {};
-      _overrideWildcardDraft = {for (final a in _editableActions) a.name: false};
-      _userRoleBaselineGranted = {for (final a in _editableActions) a.name: false};
+      _overrideWildcardDraft = {
+        for (final a in _editableActions) a.name: false,
+      };
+      _userRoleBaselineGranted = {
+        for (final a in _editableActions) a.name: false,
+      };
       return;
     }
 
@@ -333,7 +345,9 @@ class _DocuTrackerPermissionEditorScreenState
           draft[a.name] = byAction[a.name]!.granted;
         } else {
           // Default to baseline if no explicit override exists
-          draft[a.name] = isWildcard ? false : (_userRoleBaselineGranted[a.name] ?? false);
+          draft[a.name] = isWildcard
+              ? false
+              : (_userRoleBaselineGranted[a.name] ?? false);
         }
       }
       return (byAction, draft);
@@ -823,7 +837,7 @@ class _DocuTrackerPermissionEditorScreenState
                     onChanged: _loading
                         ? null
                         : (v) => setState(() => _editWildcardToo = v),
-                    activeTrackColor: AppTheme.primaryNavy.withValues(
+                    activeTrackColor: DocuTrackerTokens.brand.withValues(
                       alpha: 0.55,
                     ),
                   ),
@@ -1020,7 +1034,9 @@ class _DocuTrackerPermissionEditorScreenState
                     waitDuration: const Duration(milliseconds: 400),
                     child: Chip(
                       avatar: Icon(
-                        r.explanation.granted ? Icons.check_circle : Icons.cancel,
+                        r.explanation.granted
+                            ? Icons.check_circle
+                            : Icons.cancel,
                         size: 16,
                         color: r.explanation.granted
                             ? Colors.green.shade800
@@ -1030,8 +1046,8 @@ class _DocuTrackerPermissionEditorScreenState
                         r.action == DocumentAction.edit
                             ? 'Edit Own Draft'
                             : r.action == DocumentAction.delete
-                                ? 'Delete Own Draft'
-                                : r.action.displayName,
+                            ? 'Delete Own Draft'
+                            : r.action.displayName,
                         style: const TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
@@ -1061,7 +1077,7 @@ class _DocuTrackerPermissionEditorScreenState
                 Icon(
                   Icons.visibility_rounded,
                   size: 18,
-                  color: AppTheme.primaryNavy,
+                  color: DocuTrackerTokens.brand,
                 ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -1105,22 +1121,30 @@ class _DocuTrackerPermissionEditorScreenState
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            const DocuTrackerModuleHeader(
+              title: 'DocuTracker permissions',
+              subtitle:
+                  'Role baseline applies to everyone in that role. User overrides win for that person only.',
+            ),
+            const SizedBox(height: 10),
             Text(
-              'Role baseline applies to everyone in that role. User overrides win for that person only.',
+              'Use one source of truth per action to avoid conflicting grants/denies.',
               style: TextStyle(
                 color: AppTheme.textSecondary,
-                fontSize: 13,
+                fontSize: 12,
                 height: 1.35,
               ),
             ),
             const SizedBox(height: 12),
             _buildFilterCard(),
             const SizedBox(height: 12),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(_error!, style: const TextStyle(color: Colors.red)),
+            if (_error != null) ...[
+              DocuTrackerErrorBanner(
+                message: _error!,
+                onDismiss: () => setState(() => _error = null),
               ),
+              const SizedBox(height: 8),
+            ],
             Expanded(
               child: TabBarView(
                 controller: _tabs,
@@ -1221,7 +1245,8 @@ class _DocuTrackerPermissionEditorScreenState
                               ? _userId
                               : null,
                           decoration: DocuTrackerStyles.dropdownDecoration(
-                            context, 'Employee',
+                            context,
+                            'Employee',
                           ),
                           items: () {
                             final rows = _filteredEmployees();
@@ -1229,15 +1254,15 @@ class _DocuTrackerPermissionEditorScreenState
                             if (selected != null &&
                                 selected.isNotEmpty &&
                                 rows.every((e) => e.id != selected)) {
-                              final fromAll = _employees.where((e) => e.id == selected);
+                              final fromAll = _employees.where(
+                                (e) => e.id == selected,
+                              );
                               if (fromAll.isNotEmpty) {
-                                return [
-                                  ...fromAll,
-                                  ...rows,
-                                ].map((e) {
+                                return [...fromAll, ...rows].map((e) {
                                   final line =
-                                      _employeeDirectory[e.id]?.nameAndDepartment ??
-                                          e.fullName;
+                                      _employeeDirectory[e.id]
+                                          ?.nameAndDepartment ??
+                                      e.fullName;
                                   return DropdownMenuItem<String?>(
                                     value: e.id,
                                     child: Text(
@@ -1251,7 +1276,7 @@ class _DocuTrackerPermissionEditorScreenState
                             return rows.map((e) {
                               final line =
                                   _employeeDirectory[e.id]?.nameAndDepartment ??
-                                      e.fullName;
+                                  e.fullName;
                               return DropdownMenuItem<String?>(
                                 value: e.id,
                                 child: Text(
@@ -1418,9 +1443,7 @@ class _PermissionRoleMatrix extends StatelessWidget {
                   Center(
                     child: _LabeledSwitch(
                       value: v,
-                      onChanged: enabled
-                          ? (nv) => onToggle(role, a, nv)
-                          : null,
+                      onChanged: enabled ? (nv) => onToggle(role, a, nv) : null,
                     ),
                   ),
                 );
@@ -1464,7 +1487,6 @@ class _LabeledSwitch extends StatelessWidget {
   }
 }
 
-
 /// Two logical rows: baseline (icons) vs override (checkboxes).
 class _UserBaselineOverrideMatrix extends StatelessWidget {
   const _UserBaselineOverrideMatrix({
@@ -1491,10 +1513,14 @@ class _UserBaselineOverrideMatrix extends StatelessWidget {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: granted ? Colors.green.withValues(alpha: 0.1) : Colors.red.withValues(alpha: 0.1),
+          color: granted
+              ? Colors.green.withValues(alpha: 0.1)
+              : Colors.red.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(6),
           border: Border.all(
-            color: granted ? Colors.green.withValues(alpha: 0.3) : Colors.red.withValues(alpha: 0.3),
+            color: granted
+                ? Colors.green.withValues(alpha: 0.3)
+                : Colors.red.withValues(alpha: 0.3),
           ),
         ),
         child: Row(
@@ -1604,9 +1630,7 @@ class _UserBaselineOverrideMatrix extends StatelessWidget {
                 Center(
                   child: _LabeledSwitch(
                     value: overrideDraft[a.name] ?? false,
-                    onChanged: enabled
-                        ? (v) => onOverrideToggle(a, v)
-                        : null,
+                    onChanged: enabled ? (v) => onOverrideToggle(a, v) : null,
                   ),
                 ),
               ),
@@ -1615,7 +1639,7 @@ class _UserBaselineOverrideMatrix extends StatelessWidget {
         ),
         DataRow(
           color: WidgetStateProperty.all(
-            AppTheme.primaryNavy.withValues(alpha: 0.05),
+            DocuTrackerTokens.brand.withValues(alpha: 0.05),
           ),
           cells: [
             DataCell(
@@ -1627,7 +1651,7 @@ class _UserBaselineOverrideMatrix extends StatelessWidget {
                     'Effective result',
                     style: TextStyle(
                       fontWeight: FontWeight.w800,
-                      color: AppTheme.primaryNavy,
+                      color: DocuTrackerTokens.brand,
                     ),
                   ),
                   Text(
@@ -1642,9 +1666,7 @@ class _UserBaselineOverrideMatrix extends StatelessWidget {
             ),
             ...actions.map((a) {
               final effective = overrideDraft[a.name] ?? false;
-              return DataCell(
-                Center(child: cellLabel(effective)),
-              );
+              return DataCell(Center(child: cellLabel(effective)));
             }),
           ],
         ),

@@ -22,4 +22,3 @@ class DocuTrackerPermissionEvaluator {
     return false; // default deny
   }
 }
-

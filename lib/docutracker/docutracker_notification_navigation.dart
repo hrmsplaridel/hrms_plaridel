@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
+import 'docutracker_document_navigation.dart';
 import 'docutracker_provider.dart';
 import 'docutracker_api_result.dart';
 import 'docutracker_repository.dart';
 import 'models/document.dart';
 import 'models/document_notification.dart';
-import 'screens/docutracker_document_detail_screen.dart';
 
 /// Opens the document for a notification after marking it read (when [notification.id] is set).
 Future<void> navigateFromDocuTrackerNotification(
@@ -16,6 +16,8 @@ Future<void> navigateFromDocuTrackerNotification(
   Future<void> Function()? afterNavigation,
 }) async {
   final provider = context.read<DocuTrackerProvider>();
+  final auth = context.read<AuthProvider>();
+  final userId = auth.user?.id ?? '';
   final nid = notification.id;
   if (nid != null) {
     await provider.markNotificationRead(nid);
@@ -33,23 +35,33 @@ Future<void> navigateFromDocuTrackerNotification(
   if (fetch is DocuTrackerSuccess<DocuTrackerDocument>) {
     doc = fetch.value;
   }
+  if (!isAdmin && doc != null) {
+    final visible = docuTrackerDocumentsForDisplay(
+      documents: [doc],
+      isAdmin: false,
+      userId: userId,
+    );
+    if (visible.isEmpty) {
+      doc = null;
+    }
+  }
   if (!context.mounted) return;
   if (doc == null) {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text(
-          'Document could not be opened. It may have been removed.',
+          'Document could not be opened. It may have been removed or you '
+          'do not have access.',
         ),
       ),
     );
     return;
   }
-  final docOpen = doc;
-  await Navigator.of(context).push<void>(
-    MaterialPageRoute<void>(
-      builder: (_) =>
-          DocuTrackerDocumentDetailScreen(document: docOpen, isAdmin: isAdmin),
-    ),
+  await openDocuTrackerDocumentDetail(
+    context,
+    document: doc,
+    isAdmin: isAdmin,
+    userId: userId,
   );
   if (context.mounted) await afterNavigation?.call();
 }

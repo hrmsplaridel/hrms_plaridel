@@ -1,0 +1,271 @@
+// DocuTracker — COMPLETE ERD (all tables — crowded on one page)
+// For easier viewing, use the split files instead:
+//   docutracker-erd-00-overview.dbml      ← manuscript Figure 5 (simplest)
+//   docutracker-erd-01-documents-runtime.dbml
+//   docutracker-erd-02-workflow-config.dbml
+//   docutracker-erd-03-security-policy.dbml
+// See DOCUTRACKER_ERD.md
+Project DocuTracker {
+  database_type: 'PostgreSQL'
+  Note: '''
+    Complete DocuTracker ERD: 14 module tables + users + departments.
+    Logical (no FK): documents.workflow_version + document_type → routing_config_versions.
+  '''
+}
+
+// =========================
+// HRMS SHARED
+// =========================
+
+Table users {
+  id uuid [pk, note: 'HRMS shared']
+  email varchar [unique, not null]
+  role varchar [not null]
+  full_name varchar [not null]
+  is_active boolean [not null, default: true]
+  created_at timestamptz
+  updated_at timestamptz
+}
+
+Table departments {
+  id uuid [pk, note: 'HRMS shared']
+  name varchar [unique, not null]
+  is_active boolean [not null, default: true]
+  created_at timestamptz
+  updated_at timestamptz
+}
+
+// =========================
+// DOCUMENTS & RUNTIME
+// =========================
+
+TableGroup runtime [color: #4CAF50] {
+  docutracker_documents
+  docutracker_routing_records
+  docutracker_routing_record_assignees
+  docutracker_document_history
+  docutracker_notifications
+  docutracker_transition_requests
+}
+
+Table docutracker_documents {
+  id uuid [pk]
+  document_number varchar [unique, not null]
+  document_type varchar [not null, default: 'memo']
+  title varchar [not null]
+  description text
+  source_module varchar
+  source_table varchar
+  source_record_id uuid
+  source_title varchar
+  file_path varchar
+  file_name varchar
+  created_by uuid [ref: > users.id]
+  current_holder_id uuid [ref: > users.id]
+  current_step int [default: 1]
+  workflow_version int
+  status varchar [not null, default: 'pending']
+  sent_time timestamptz
+  deadline_time timestamptz
+  reviewed_time timestamptz
+  escalation_level int [default: 0]
+  needs_admin_intervention boolean [default: false]
+  created_at timestamptz
+  updated_at timestamptz
+}
+
+Table docutracker_routing_records {
+  id uuid [pk]
+  document_id uuid [not null, ref: > docutracker_documents.id]
+  step_order int [not null]
+  assignee_id uuid [ref: > users.id]
+  sent_time timestamptz
+  deadline_time timestamptz
+  reviewed_time timestamptz
+  status varchar [not null, default: 'pending']
+  remarks text
+  created_at timestamptz
+  updated_at timestamptz
+
+  indexes {
+    (document_id, step_order) [unique]
+  }
+}
+
+Table docutracker_routing_record_assignees {
+  routing_record_id uuid [not null, ref: > docutracker_routing_records.id]
+  user_id uuid [not null, ref: > users.id]
+  created_at timestamptz
+
+  indexes {
+    (routing_record_id, user_id) [pk]
+  }
+}
+
+Table docutracker_document_history {
+  id uuid [pk]
+  document_id uuid [not null, ref: > docutracker_documents.id]
+  action varchar
+  actor_id uuid [ref: > users.id]
+  actor_name varchar
+  from_step int
+  to_step int
+  from_status varchar
+  to_status varchar
+  remarks text
+  is_overdue_log boolean [default: false]
+  is_escalation_log boolean [default: false]
+  escalation_level int
+  created_at timestamptz
+}
+
+Table docutracker_notifications {
+  id uuid [pk]
+  document_id uuid [not null, ref: > docutracker_documents.id]
+  user_id uuid [not null, ref: > users.id]
+  type varchar [not null]
+  title varchar
+  body text
+  event_key varchar
+  read boolean [default: false]
+  created_at timestamptz
+}
+
+Table docutracker_transition_requests {
+  id uuid [pk]
+  document_id uuid [not null, ref: > docutracker_documents.id]
+  action varchar [not null]
+  idempotency_key varchar [not null]
+  actor_id uuid [ref: > users.id]
+  response_payload json
+  created_at timestamptz
+
+  indexes {
+    (document_id, action, idempotency_key) [unique]
+  }
+}
+
+// =========================
+// WORKFLOW CONFIGURATION
+// =========================
+
+TableGroup workflow_config [color: #9C27B0] {
+  docutracker_routing_configs
+  docutracker_routing_config_versions
+  docutracker_workflow_steps
+  docutracker_workflow_step_assignees
+}
+
+Table docutracker_routing_configs {
+  id uuid [pk]
+  document_type varchar [unique, not null, note: 'Legacy latest-config cache']
+  steps json [not null]
+  review_deadline_hours int [default: 1]
+  created_at timestamptz
+  updated_at timestamptz
+}
+
+Table docutracker_routing_config_versions {
+  id uuid [pk]
+  document_type varchar [not null]
+  version int [not null]
+  steps json [not null]
+  review_deadline_hours int [not null, default: 1]
+  created_by uuid [ref: > users.id]
+  created_at timestamptz [not null]
+
+  indexes {
+    (document_type, version) [unique]
+  }
+}
+
+Table docutracker_workflow_steps {
+  id uuid [pk]
+  document_type varchar [not null]
+  workflow_version int [not null, default: 1]
+  step_order int [not null]
+  department_id uuid [ref: > departments.id]
+  label varchar
+  enabled boolean [not null, default: true]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+
+  indexes {
+    (document_type, workflow_version, step_order) [unique]
+  }
+}
+
+Table docutracker_workflow_step_assignees {
+  id uuid [pk]
+  step_id uuid [not null, ref: > docutracker_workflow_steps.id]
+  user_id uuid [not null, ref: > users.id]
+  is_primary boolean [not null, default: false]
+  backup_rank int
+  is_enabled boolean [not null, default: true]
+  allowed_actions varchar [note: 'approve | forward | reject | return']
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+
+  indexes {
+    (step_id, user_id) [unique]
+  }
+}
+
+// =========================
+// SECURITY & POLICY
+// =========================
+
+TableGroup security [color: #F44336] {
+  docutracker_roles
+  docutracker_role_aliases
+  docutracker_permissions
+  docutracker_escalation_configs
+}
+
+Table docutracker_roles {
+  role_id varchar [pk, note: 'admin | hr | supervisor | employee']
+  created_at timestamptz [not null]
+}
+
+Table docutracker_role_aliases {
+  alias varchar [pk, note: 'hr_staff → hr, dept_head → supervisor']
+  role_id varchar [not null, ref: > docutracker_roles.role_id]
+  created_at timestamptz [not null]
+}
+
+Table docutracker_permissions {
+  id uuid [pk]
+  role_id varchar [ref: > docutracker_roles.role_id, note: 'XOR with user_id']
+  user_id uuid [ref: > users.id, note: 'XOR with role_id']
+  document_type varchar [not null, default: '*']
+  action varchar [not null]
+  granted boolean [default: true]
+  created_at timestamptz
+  updated_at timestamptz
+}
+
+Table docutracker_escalation_configs {
+  id uuid [pk]
+  document_type varchar [not null]
+  department_id uuid [ref: > departments.id]
+  escalation_target_role varchar
+  escalation_delay_minutes int [default: 60]
+  max_escalation_level int [default: 3]
+  notify_original_sender boolean [default: true]
+  created_at timestamptz
+  updated_at timestamptz
+}
+
+// =========================
+// UTILITY (optional — omit from figure if crowded)
+// =========================
+
+Table docutracker_document_number_seq {
+  year int [pk]
+  last_value bigint [not null, default: 0]
+  Note: 'Sequence counter for DOC-YYYY-###### numbers — not linked by FK'
+}
+
+// Logical relationship (document pins to config version at creation):
+// docutracker_documents.(document_type, workflow_version) → docutracker_routing_config_versions.(document_type, version)
+// docutracker_workflow_steps.(document_type, workflow_version) → same config version row

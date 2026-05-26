@@ -51,11 +51,17 @@ class DocumentRoutingRecord {
   factory DocumentRoutingRecord.fromJson(Map<String, dynamic> json) {
     final assigneeIdsRaw = json['assignee_ids'];
     final assigneeIds = assigneeIdsRaw is List
-        ? assigneeIdsRaw.map((e) => e?.toString() ?? '').where((e) => e.isNotEmpty).toList()
+        ? assigneeIdsRaw
+              .map((e) => e?.toString() ?? '')
+              .where((e) => e.isNotEmpty)
+              .toList()
         : const <String>[];
     final assigneeNamesRaw = json['assignee_names'];
     final assigneeNames = assigneeNamesRaw is List
-        ? assigneeNamesRaw.map((e) => e?.toString() ?? '').where((e) => e.isNotEmpty).toList()
+        ? assigneeNamesRaw
+              .map((e) => e?.toString() ?? '')
+              .where((e) => e.isNotEmpty)
+              .toList()
         : const <String>[];
     return DocumentRoutingRecord(
       id: json['id']?.toString(),
@@ -86,17 +92,17 @@ class DocumentRoutingRecord {
   }
 
   Map<String, dynamic> toJson() => {
-        if (id != null) 'id': id,
-        'document_id': documentId,
-        'step_order': stepOrder,
-        'assignee_id': assigneeId,
-        if (assigneeIds.isNotEmpty) 'assignee_ids': assigneeIds,
-        if (assigneeNames.isNotEmpty) 'assignee_names': assigneeNames,
-        if (sentTime != null) 'sent_time': sentTime!.toIso8601String(),
-        if (deadlineTime != null) 'deadline_time': deadlineTime!.toIso8601String(),
-        if (reviewedTime != null) 'reviewed_time': reviewedTime!.toIso8601String(),
-        'status': status.value,
-        if (remarks != null) 'remarks': remarks,
-        'updated_at': DateTime.now().toIso8601String(),
-      };
+    if (id != null) 'id': id,
+    'document_id': documentId,
+    'step_order': stepOrder,
+    'assignee_id': assigneeId,
+    if (assigneeIds.isNotEmpty) 'assignee_ids': assigneeIds,
+    if (assigneeNames.isNotEmpty) 'assignee_names': assigneeNames,
+    if (sentTime != null) 'sent_time': sentTime!.toIso8601String(),
+    if (deadlineTime != null) 'deadline_time': deadlineTime!.toIso8601String(),
+    if (reviewedTime != null) 'reviewed_time': reviewedTime!.toIso8601String(),
+    'status': status.value,
+    if (remarks != null) 'remarks': remarks,
+    'updated_at': DateTime.now().toIso8601String(),
+  };
 }

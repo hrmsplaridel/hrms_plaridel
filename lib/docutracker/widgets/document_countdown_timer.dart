@@ -87,6 +87,6 @@ class DocumentCountdownTimer extends StatelessWidget {
     if (d.inDays > 0) return '$prefix${d.inDays}d ${d.inHours % 24}h';
     if (d.inHours > 0) return '$prefix${d.inHours}h ${d.inMinutes % 60}m';
     if (d.inMinutes > 0) return '$prefix${d.inMinutes}m';
-    return '${prefix}${d.inSeconds}s';
+    return '$prefix${d.inSeconds}s';
   }
 }

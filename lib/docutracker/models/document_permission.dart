@@ -68,12 +68,12 @@ class DocumentPermission {
   }
 
   Map<String, dynamic> toJson() => {
-        if (id != null) 'id': id,
-        if (roleId != null) 'role_id': roleId,
-        if (userId != null) 'user_id': userId,
-        'document_type': documentType,
-        'action': action.value,
-        'granted': granted,
-        'updated_at': DateTime.now().toIso8601String(),
-      };
+    if (id != null) 'id': id,
+    if (roleId != null) 'role_id': roleId,
+    if (userId != null) 'user_id': userId,
+    'document_type': documentType,
+    'action': action.value,
+    'granted': granted,
+    'updated_at': DateTime.now().toIso8601String(),
+  };
 }

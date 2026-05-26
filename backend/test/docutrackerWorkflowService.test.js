@@ -7,6 +7,8 @@ const {
   permissionPriority,
   resolvePermissionDecisionFromRows,
   hasPermission,
+  canUserPerformDocumentAction,
+  filterDocumentsViewableByUser,
   transitionDocument,
   getEffectivePermissionExplanation,
 } = require('../src/services/docutrackerWorkflowService');
@@ -361,4 +363,112 @@ test('transitionDocument blocks non-holder even with explicit approve grant', as
       return true;
     }
   );
+});
+
+test('canUserPerformDocumentAction view denies unrelated employee despite role view *', async () => {
+  const mockClient = {
+    query: async (sql) => {
+      if (sql.includes('FROM docutracker_permissions')) {
+        return {
+          rowCount: 1,
+          rows: [
+            {
+              user_id: null,
+              role_id: 'employee',
+              document_type: '*',
+              granted: true,
+            },
+          ],
+        };
+      }
+      if (sql.includes('docutracker_routing_records')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('docutracker_document_history')) {
+        return { rowCount: 0, rows: [] };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+  };
+
+  const allowed = await canUserPerformDocumentAction(mockClient, {
+    user: { id: 'employee-a', role: 'employee' },
+    document: {
+      id: 'doc-other',
+      document_type: 'memo',
+      status: 'in_review',
+      created_by: 'employee-b',
+      current_holder_id: 'employee-b',
+      current_step: 1,
+    },
+    action: 'view',
+  });
+
+  assert.equal(allowed, false);
+});
+
+test('canUserPerformDocumentAction view allows creator on WIP draft', async () => {
+  const mockClient = { query: async () => ({ rowCount: 0, rows: [] }) };
+
+  const allowed = await canUserPerformDocumentAction(mockClient, {
+    user: { id: 'creator-1', role: 'employee' },
+    document: {
+      id: 'doc-draft',
+      document_type: 'memo',
+      status: 'pending',
+      created_by: 'creator-1',
+      current_holder_id: null,
+      current_step: null,
+      sent_time: null,
+    },
+    action: 'view',
+  });
+
+  assert.equal(allowed, true);
+});
+
+test('filterDocumentsViewableByUser excludes unrelated rows when role view is granted', async () => {
+  const rows = [
+    {
+      id: 'doc-mine',
+      document_type: 'memo',
+      status: 'pending',
+      created_by: 'user-a',
+      current_holder_id: null,
+      current_step: null,
+      sent_time: null,
+    },
+    {
+      id: 'doc-other',
+      document_type: 'memo',
+      status: 'in_review',
+      created_by: 'user-b',
+      current_holder_id: 'user-b',
+      current_step: 1,
+    },
+  ];
+
+  const pool = {
+    query: async (sql, params) => {
+      if (sql.includes('rr.step_order = d.current_step')) {
+        return { rows: [] };
+      }
+      if (sql.includes('FROM docutracker_document_history')) {
+        return { rows: [] };
+      }
+      if (sql.includes('ON rr.document_id = d.id') && !sql.includes('current_step')) {
+        return { rows: [] };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const filtered = await filterDocumentsViewableByUser(
+    pool,
+    { id: 'user-a', role: 'employee' },
+    rows
+  );
+
+  assert.equal(filtered.length, 1);
+  assert.equal(filtered[0].id, 'doc-mine');
 });
