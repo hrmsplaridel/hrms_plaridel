@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../landingpage/constants/app_theme.dart';
 import '../theme/docutracker_tokens.dart';
 
 /// Top-of-module title + optional one-line description (dashboard-style).
@@ -17,32 +16,53 @@ class DocuTrackerModuleHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 20,
-                  height: 1.2,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.3,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final stackTrailingBelow =
+            trailing != null && constraints.maxWidth < 780;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          color: DocuTrackerTokens.textPrimary,
+                          fontSize: 22,
+                          height: 1.2,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.4,
+                        ),
+                      ),
+                      if (subtitle != null && subtitle!.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          subtitle!,
+                          style: DocuTrackerTokens.subtitleStyle(),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
-              ),
-              if (subtitle != null && subtitle!.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(subtitle!, style: DocuTrackerTokens.subtitleStyle()),
+                if (trailing != null && !stackTrailingBelow) ...[
+                  const SizedBox(width: 16),
+                  trailing!,
+                ],
               ],
+            ),
+            if (trailing != null && stackTrailingBelow) ...[
+              const SizedBox(height: 12),
+              trailing!,
             ],
-          ),
-        ),
-        if (trailing != null) trailing!,
-      ],
+          ],
+        );
+      },
     );
   }
 }

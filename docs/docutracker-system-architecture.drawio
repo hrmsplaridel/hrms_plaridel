@@ -1,0 +1,97 @@
+<mxfile host="app.diagrams.net" agent="Cursor" version="24.7.17">
+  <diagram id="docutracker-architecture-styled" name="System Architecture">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="DocuTracker - System Architecture" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontStyle=1;fontSize=18;" vertex="1" parent="1">
+          <mxGeometry x="430" y="20" width="520" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="laneActors" value="Actors" style="swimlane;html=1;rounded=0;strokeColor=#b3b3b3;fillColor=#fafafa;startSize=28;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="90" width="230" height="760" as="geometry" />
+        </mxCell>
+        <mxCell id="laneClient" value="Client Layer" style="swimlane;html=1;rounded=0;strokeColor=#6c8ebf;fillColor=#eaf2ff;startSize=28;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="300" y="90" width="330" height="300" as="geometry" />
+        </mxCell>
+        <mxCell id="laneServer" value="Server Layer" style="swimlane;html=1;rounded=0;strokeColor=#82b366;fillColor=#edf8ea;startSize=28;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="300" y="430" width="330" height="360" as="geometry" />
+        </mxCell>
+        <mxCell id="laneData" value="Data &amp; Integration" style="swimlane;html=1;rounded=0;strokeColor=#9673a6;fillColor=#f5eff9;startSize=28;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="670" y="90" width="690" height="700" as="geometry" />
+        </mxCell>
+
+        <mxCell id="a1" value="Employee" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;" vertex="1" parent="1">
+          <mxGeometry x="95" y="170" width="40" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="a2" value="Reviewer" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;" vertex="1" parent="1">
+          <mxGeometry x="175" y="170" width="40" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="a3" value="Administrator" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;" vertex="1" parent="1">
+          <mxGeometry x="135" y="300" width="40" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="clientIcon" value="" style="shape=image;html=1;imageAspect=1;aspect=fixed;image=https://upload.wikimedia.org/wikipedia/commons/1/17/Google-flutter-logo.png;" vertex="1" parent="1">
+          <mxGeometry x="328" y="145" width="42" height="42" as="geometry" />
+        </mxCell>
+        <mxCell id="clientBox" value="DocuTracker Flutter App&#10;- Dashboard / Documents / Admin screens&#10;- Provider state management&#10;- Repository + HTTP client" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;arcSize=8;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="380" y="130" width="220" height="220" as="geometry" />
+        </mxCell>
+
+        <mxCell id="serverIcon" value="" style="shape=image;html=1;imageAspect=1;aspect=fixed;image=https://upload.wikimedia.org/wikipedia/commons/d/d9/Node.js_logo.svg;" vertex="1" parent="1">
+          <mxGeometry x="323" y="482" width="56" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="serverBox" value="Node.js + Express API&#10;- /api/docutracker routes&#10;- Workflow transitions&#10;- Permission checks&#10;- Escalation worker" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;arcSize=8;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="380" y="470" width="220" height="250" as="geometry" />
+        </mxCell>
+
+        <mxCell id="dbIcon" value="" style="shape=image;html=1;imageAspect=1;aspect=fixed;image=https://upload.wikimedia.org/wikipedia/commons/2/29/Postgresql_elephant.svg;" vertex="1" parent="1">
+          <mxGeometry x="710" y="154" width="48" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="postgres" value="PostgreSQL&#10;- DocuTracker tables&#10;- users, departments&#10;- history, notifications" style="shape=mxgraph.flowchart.database;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="770" y="145" width="250" height="170" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fsIcon" value="FS" style="ellipse;html=1;fillColor=#b85450;strokeColor=#8b3d3a;fontColor=#ffffff;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="715" y="385" width="38" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="storage" value="Attachment Storage&#10;uploads/docutracker-attachments" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;arcSize=8;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="770" y="370" width="250" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="hrIcon" value="HR" style="ellipse;html=1;fillColor=#9673a6;strokeColor=#6f4f80;fontColor=#ffffff;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1055" y="270" width="38" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="external" value="HRMS Source Modules&#10;LD / DTR / RSP&#10;(source-linked documents)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;arcSize=8;align=left;verticalAlign=top;spacingLeft=10;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="1110" y="255" width="220" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n1" value="Create, review, approve" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="a1" target="clientBox">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="n2" value="Review actions" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="a2" target="clientBox">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="n3" value="Workflow setup" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="a3" target="clientBox">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="n4" value="REST API (JWT)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="clientBox" target="serverBox">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="n5" value="Read / write data" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="serverBox" target="postgres">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="n6" value="Store / fetch files" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="serverBox" target="storage">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="n7" value="Optional source sync" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="external" target="serverBox">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="legend" value="Logos: Flutter, Node.js, PostgreSQL | Badges: FS=File Storage, HR=HRMS Modules" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="930" width="1200" height="20" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

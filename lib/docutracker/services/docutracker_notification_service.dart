@@ -26,7 +26,9 @@ class DocuTrackerNotificationService {
     return list;
   }
 
-  List<DocumentNotification> unreadOnly(List<DocumentNotification> notifications) {
+  List<DocumentNotification> unreadOnly(
+    List<DocumentNotification> notifications,
+  ) {
     return notifications.where((n) => !n.read).toList();
   }
 
@@ -43,4 +45,3 @@ class DocuTrackerNotificationService {
   int unreadCount(List<DocumentNotification> notifications) =>
       notifications.where((n) => !n.read).length;
 }
-

@@ -38,7 +38,6 @@ import '../../../dtr/manage/manage_holiday.dart';
 import '../../../dtr/manage/manage_attendance_policy.dart';
 import '../../../dtr/manage/manage_biometric_devices.dart';
 import '../../../docutracker/docutracker_main.dart';
-import '../../../docutracker/docutracker_notification_sheet.dart';
 import '../../../docutracker/docutracker_provider.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
@@ -418,10 +417,12 @@ class _AdminDashboardState extends State<AdminDashboard>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<NotificationProvider>().refreshUnreadCount();
+      context.read<DocuTrackerProvider>().loadNotifications();
       _notificationPollTimer?.cancel();
       _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
         if (!mounted) return;
         context.read<NotificationProvider>().refreshUnreadCount();
+        context.read<DocuTrackerProvider>().loadNotifications();
       });
     });
   }
@@ -430,6 +431,7 @@ class _AdminDashboardState extends State<AdminDashboard>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && mounted) {
       context.read<NotificationProvider>().refreshUnreadCount();
+      context.read<DocuTrackerProvider>().loadNotifications();
     }
   }
 
@@ -498,7 +500,9 @@ class _AdminDashboardState extends State<AdminDashboard>
     if (menu == AdminMenu.docutracker) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        context.read<DocuTrackerProvider>().loadNotifications(forceRefresh: true);
+        context.read<DocuTrackerProvider>().loadNotifications(
+          forceRefresh: true,
+        );
       });
     }
   }
@@ -702,17 +706,20 @@ class _AdminDashboardState extends State<AdminDashboard>
               )
             : Column(
                 children: [
-                  DashboardAppHeaderBar(
-                    showMenuButton: true,
-                    onMenuPressed: () => Scaffold.of(context).openDrawer(),
-                    compactActions: width < 600,
-                    onViewAllNotifications: _handleOpenNotifications,
-                    onNotificationTap: _applyNotificationTapResult,
-                    trailing: DashboardAccountMenuButton(
-                      avatarPath: avatarPath,
-                      compact: width < 600,
-                      tooltip: displayName,
-                      onProfile: () => _openMyProfile(),
+                  Builder(
+                    builder: (innerContext) => DashboardAppHeaderBar(
+                      showMenuButton: true,
+                      onMenuPressed: () =>
+                          Scaffold.of(innerContext).openDrawer(),
+                      compactActions: width < 600,
+                      onViewAllNotifications: _handleOpenNotifications,
+                      onNotificationTap: _applyNotificationTapResult,
+                      trailing: DashboardAccountMenuButton(
+                        avatarPath: avatarPath,
+                        compact: width < 600,
+                        tooltip: displayName,
+                        onProfile: () => _openMyProfile(),
+                      ),
                     ),
                   ),
                   Expanded(
@@ -2090,6 +2097,13 @@ class _DtrContentState extends State<_DtrContent> {
                       subtitle: 'Manage departments.',
                       icon: Icons.business_rounded,
                       onTap: () => _openDtrSection(5),
+                    ),
+                    FeatureCard(
+                      title: 'Office',
+                      subtitle:
+                          'Manage branch or site offices (DocuTracker routing).',
+                      icon: Icons.domain_rounded,
+                      onTap: () => setState(() => _dtrSectionIndex = 13),
                     ),
                     FeatureCard(
                       title: 'Position',

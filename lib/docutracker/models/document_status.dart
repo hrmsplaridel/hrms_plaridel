@@ -34,8 +34,12 @@ DocumentStatus documentStatusFromString(String? s) {
   if (s == null || s.isEmpty) return DocumentStatus.pending;
   final normalized = s.toLowerCase().replaceAll(' ', '').replaceAll('_', '');
   // Legacy / alias mappings
-  if (normalized == 'forwarded' || normalized == 'inreview') return DocumentStatus.inReview;
-  if (normalized == 'draft') return DocumentStatus.pending; // DB doesn't allow draft
+  if (normalized == 'forwarded' || normalized == 'inreview') {
+    return DocumentStatus.inReview;
+  }
+  if (normalized == 'draft') {
+    return DocumentStatus.pending; // DB doesn't allow draft
+  }
   if (normalized == 'cancelled') return DocumentStatus.cancelled;
   for (final e in DocumentStatus.values) {
     if (e.value.replaceAll('_', '') == normalized) return e;

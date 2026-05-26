@@ -77,10 +77,16 @@ class EmployeeDirectoryLookup {
 
   /// Fills missing ids via [GET /api/employees/:id] (includes department after backend update).
   Future<void> ensureIds(Iterable<String> ids) async {
-    final need = ids.map((e) => e.trim()).where((e) => e.isNotEmpty).where((id) => !_byId.containsKey(id)).toSet();
+    final need = ids
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .where((id) => !_byId.containsKey(id))
+        .toSet();
     for (final id in need) {
       try {
-        final res = await ApiClient.instance.get<Map<String, dynamic>>('/api/employees/$id');
+        final res = await ApiClient.instance.get<Map<String, dynamic>>(
+          '/api/employees/$id',
+        );
         final m = res.data;
         if (m == null) continue;
         _byId[id] = EmployeeDirectoryEntry(

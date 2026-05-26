@@ -427,7 +427,9 @@ function ensureActionAllowedFromStatus(action, status) {
   const allowedFrom = TRANSITION_ALLOWED_FROM[action];
   if (!allowedFrom) return;
   if (!allowedFrom.has(status)) {
-    throw validationError(`${action} is not valid from status ${status}`);
+    throw validationError(
+      userFacingValidationMessage(`${action} is not valid from status ${status}`)
+    );
   }
 }
 
@@ -444,13 +446,43 @@ function isDraftOrWipDocument(document, normalizedStatus = null) {
   );
 }
 
+function userFacingValidationMessage(message) {
+  if (!message) return message;
+  const noSteps = message.match(/Workflow config for '([^']+)' has no steps/);
+  if (noSteps) {
+    const typeLabel = noSteps[1];
+    return (
+      `The "${typeLabel}" workflow has no routing steps configured. ` +
+      'An admin must open DocuTracker → Admin → Workflows, add at least one step with assignees, and save before documents can be forwarded, approved, rejected, or returned.'
+    );
+  }
+  const badAction = message.match(/^(\w+) is not valid from status (\w+)$/);
+  if (badAction) {
+    const [, action, status] = badAction;
+    if (action === 'submit' && status === 'overdue') {
+      return (
+        'Submit is not available while this document is overdue. ' +
+        'Use Forward, Approve, Reject, or Return if you are the current reviewer, or ask an admin to reassign.'
+      );
+    }
+    return `${action} is not allowed while the document is ${status.replaceAll('_', ' ')}.`;
+  }
+  return message;
+}
+
 function ensureValidWorkflowConfig(config, documentType) {
   if (!config) {
-    throw validationError(`Missing workflow config for document_type '${documentType}'`);
+    throw validationError(
+      userFacingValidationMessage(
+        `Missing workflow config for document_type '${documentType}'`
+      )
+    );
   }
   const steps = parseSteps(config.steps || []);
   if (!steps.length) {
-    throw validationError(`Workflow config for '${documentType}' has no steps`);
+    throw validationError(
+      userFacingValidationMessage(`Workflow config for '${documentType}' has no steps`)
+    );
   }
   if (steps[0].step_order !== 1) {
     throw validationError(`Workflow config for '${documentType}' must start at step 1`);
@@ -615,35 +647,119 @@ async function resolveStepAssignee(client, { explicitAssigneeId, stepConfig, cur
   throw validationError(`No valid assignee configured for step ${stepConfig?.step_order ?? 'unknown'}`);
 }
 
+async function loadStepsFromNormalizedTables(client, documentType, workflowVersion) {
+  const stepsRes = await client.query(
+    `SELECT id, step_order, department_id, label, enabled
+     FROM docutracker_workflow_steps
+     WHERE document_type = $1
+       AND workflow_version = $2
+     ORDER BY step_order ASC`,
+    [documentType, workflowVersion]
+  );
+  if (stepsRes.rowCount === 0) return [];
+
+  const assigneeRes = await client.query(
+    `SELECT ws.step_order, wsa.user_id::text AS user_id
+     FROM docutracker_workflow_step_assignees wsa
+     JOIN docutracker_workflow_steps ws ON ws.id = wsa.step_id
+     WHERE ws.document_type = $1
+       AND ws.workflow_version = $2
+       AND (wsa.is_enabled IS NULL OR wsa.is_enabled = true)
+     ORDER BY ws.step_order ASC,
+              wsa.is_primary DESC,
+              wsa.backup_rank ASC NULLS LAST`,
+    [documentType, workflowVersion]
+  );
+  const userIdsByStep = new Map();
+  for (const row of assigneeRes.rows || []) {
+    const order = Number(row.step_order);
+    if (!userIdsByStep.has(order)) userIdsByStep.set(order, []);
+    const uid = row.user_id;
+    if (uid && !userIdsByStep.get(order).includes(uid)) {
+      userIdsByStep.get(order).push(uid);
+    }
+  }
+
+  return stepsRes.rows
+    .map((row) => ({
+      step_order: Number(row.step_order),
+      assignee_type: 'user',
+      department_id: row.department_id ?? null,
+      label: row.label ?? null,
+      enabled: row.enabled !== false,
+      user_ids: userIdsByStep.get(Number(row.step_order)) || [],
+    }))
+    .filter((s) => s.step_order > 0 && s.enabled !== false);
+}
+
+async function enrichRoutingConfigRow(client, documentType, row) {
+  if (!row) return null;
+  let steps = parseSteps(row.steps || []);
+  if (!steps.length && row.version != null) {
+    const rebuilt = await loadStepsFromNormalizedTables(
+      client,
+      documentType,
+      row.version
+    );
+    if (rebuilt.length) {
+      return { ...row, steps: rebuilt };
+    }
+  }
+  return row;
+}
+
 async function getRoutingConfig(client, documentType, workflowVersion = null) {
-  if (workflowVersion != null) {
+  async function fetchVersionRow(version) {
     const r = await client.query(
       `SELECT document_type, steps, review_deadline_hours, version
        FROM docutracker_routing_config_versions
        WHERE document_type = $1
          AND version = $2
        LIMIT 1`,
-      [documentType, workflowVersion]
+      [documentType, version]
     );
-    if (r.rowCount > 0) return r.rows[0];
+    return r.rows[0] || null;
   }
 
-  // Fallback: latest version.
-  const configRes = await client.query(
-    `SELECT v.document_type, v.steps, v.review_deadline_hours, v.version
-     FROM docutracker_routing_config_versions v
-     JOIN (
-       SELECT document_type, MAX(version) AS version
-       FROM docutracker_routing_config_versions
-       GROUP BY document_type
-     ) latest
-       ON latest.document_type = v.document_type
-      AND latest.version = v.version
-     WHERE v.document_type = $1
-     LIMIT 1`,
-    [documentType]
-  );
-  return configRes.rows[0] || null;
+  async function fetchLatestRow() {
+    const configRes = await client.query(
+      `SELECT v.document_type, v.steps, v.review_deadline_hours, v.version
+       FROM docutracker_routing_config_versions v
+       JOIN (
+         SELECT document_type, MAX(version) AS version
+         FROM docutracker_routing_config_versions
+         GROUP BY document_type
+       ) latest
+         ON latest.document_type = v.document_type
+        AND latest.version = v.version
+       WHERE v.document_type = $1
+       LIMIT 1`,
+      [documentType]
+    );
+    return configRes.rows[0] || null;
+  }
+
+  const hasRunnableSteps = (row) => row && parseSteps(row.steps || []).length > 0;
+
+  if (workflowVersion != null) {
+    const pinned = await enrichRoutingConfigRow(
+      client,
+      documentType,
+      await fetchVersionRow(workflowVersion)
+    );
+    if (hasRunnableSteps(pinned)) return pinned;
+
+    const latest = await enrichRoutingConfigRow(
+      client,
+      documentType,
+      await fetchLatestRow()
+    );
+    if (hasRunnableSteps(latest)) return latest;
+
+    return pinned || latest;
+  }
+
+  return enrichRoutingConfigRow(client, documentType, await fetchLatestRow());
 }
 
 function getRoleVariants(role) {
@@ -703,50 +819,53 @@ async function fetchAllPermissionRowsForAction(client, { role, userId, action })
 }
 
 /**
- * Filters document rows the same way canUserPerformDocumentAction(..., 'view') would,
- * using batched queries + a narrow fallback to isUserAssignedToCurrentStep when needed.
+ * Filters document rows the same way canUserPerformDocumentAction(..., 'view') would.
+ * Relationship-scoped only — role-level `view` on '*' must NOT grant org-wide list access.
  */
 async function filterDocumentsViewableByUser(pool, user, rows) {
   if (!rows?.length || user?.role === 'admin') return rows || [];
   const uid = user.id;
-  const role = user.role;
-  const roleIds = getRoleVariants(role);
-
   const ids = rows.map((r) => r.id).filter(Boolean);
-  const allPermRows = await fetchAllPermissionRowsForAction(pool, {
-    role,
-    userId: uid,
-    action: 'view',
-  });
 
-  let assigneeIdSet = new Set();
+  let currentStepAssigneeIds = new Set();
+  let anyStepAssigneeIds = new Set();
+  let historyActorDocIds = new Set();
+
   if (ids.length) {
-    const ar = await pool.query(
-      `SELECT DISTINCT d.id
-       FROM docutracker_documents d
-       INNER JOIN docutracker_routing_records rr
-         ON rr.document_id = d.id AND rr.step_order = d.current_step
-       INNER JOIN docutracker_routing_record_assignees a
-         ON a.routing_record_id = rr.id AND a.user_id = $1::uuid
-       WHERE d.id = ANY($2::uuid[])`,
-      [uid, ids]
-    );
-    assigneeIdSet = new Set(ar.rows.map((x) => x.id));
+    const [currentStepRes, anyStepRes, historyRes] = await Promise.all([
+      pool.query(
+        `SELECT DISTINCT d.id
+         FROM docutracker_documents d
+         INNER JOIN docutracker_routing_records rr
+           ON rr.document_id = d.id AND rr.step_order = d.current_step
+         INNER JOIN docutracker_routing_record_assignees a
+           ON a.routing_record_id = rr.id AND a.user_id = $1::uuid
+         WHERE d.id = ANY($2::uuid[])`,
+        [uid, ids]
+      ),
+      pool.query(
+        `SELECT DISTINCT d.id
+         FROM docutracker_documents d
+         INNER JOIN docutracker_routing_records rr
+           ON rr.document_id = d.id
+         INNER JOIN docutracker_routing_record_assignees a
+           ON a.routing_record_id = rr.id AND a.user_id = $1::uuid
+         WHERE d.id = ANY($2::uuid[])`,
+        [uid, ids]
+      ),
+      pool.query(
+        `SELECT DISTINCT document_id AS id
+         FROM docutracker_document_history
+         WHERE actor_id = $1::uuid
+           AND document_id = ANY($2::uuid[])`,
+        [uid, ids]
+      ),
+    ]);
+    currentStepAssigneeIds = new Set(currentStepRes.rows.map((x) => x.id));
+    anyStepAssigneeIds = new Set(anyStepRes.rows.map((x) => x.id));
+    historyActorDocIds = new Set(historyRes.rows.map((x) => x.id));
   }
 
-  const uniqueTypes = [...new Set(rows.map((r) => r.document_type).filter(Boolean))];
-  const viewAllowedByType = new Map();
-  for (const dt of uniqueTypes) {
-    const rowsForType = allPermRows.filter((r) => r.document_type === dt || r.document_type === '*');
-    const decision = resolvePermissionDecisionFromRows(rowsForType, {
-      userId: uid,
-      roleIds,
-      documentType: dt,
-    });
-    viewAllowedByType.set(dt, decision === true);
-  }
-
-  const needFallback = [];
   const out = [];
   for (const row of rows) {
     const rel = getRelationshipFlags(row, user);
@@ -754,27 +873,14 @@ async function filterDocumentsViewableByUser(pool, user, rows) {
       out.push(row);
       continue;
     }
-    if (assigneeIdSet.has(row.id)) {
+    if (currentStepAssigneeIds.has(row.id)) {
       out.push(row);
       continue;
     }
-    const allow = viewAllowedByType.get(row.document_type);
-    if (allow === true) {
+    if (anyStepAssigneeIds.has(row.id) || historyActorDocIds.has(row.id)) {
       out.push(row);
       continue;
     }
-    needFallback.push(row);
-  }
-
-  if (!needFallback.length) return out;
-
-  const fallbackChecks = await Promise.all(
-    needFallback.map((row) =>
-      isUserAssignedToCurrentStep(pool, { document: row, userId: uid }).catch(() => false)
-    )
-  );
-  for (let i = 0; i < needFallback.length; i += 1) {
-    if (fallbackChecks[i]) out.push(needFallback[i]);
   }
 
   return out;
@@ -798,6 +904,21 @@ function permissionPriority(row, { userId, roleIds, documentType }) {
 function resolvePermissionDecisionFromRows(rows, context) {
   const ranked = rows
     .map((row) => ({ row, score: permissionPriority(row, context) }))
+    .filter((entry) => entry.score >= 0)
+    .sort((a, b) => b.score - a.score);
+  if (!ranked.length) return null;
+  return ranked[0].row.granted === true;
+}
+
+/** User-specific rows only (user_id set). Ignores role-wide grants. */
+function resolveUserSpecificPermissionFromRows(rows, { userId, documentType }) {
+  const userRows = rows.filter((r) => r.user_id && String(r.user_id) === String(userId));
+  if (!userRows.length) return null;
+  const ranked = userRows
+    .map((row) => ({
+      row,
+      score: permissionPriority(row, { userId, roleIds: [], documentType }),
+    }))
     .filter((entry) => entry.score >= 0)
     .sort((a, b) => b.score - a.score);
   if (!ranked.length) return null;
@@ -1115,14 +1236,28 @@ async function canUserPerformDocumentAction(client, { user, document, action }) 
     return canUserPerformWorkflowAction(client, { user, document, action });
   }
 
-  // General type-level actions: view/create/download are permission-table driven.
+  // View is relationship-scoped (not role-wide browse). User-specific deny still wins.
+  if (action === 'view') {
+    const viewRows = await fetchPermissionRows(client, {
+      role: user.role,
+      userId: user.id,
+      documentType: document.document_type,
+      action: 'view',
+    });
+    const userSpecific = resolveUserSpecificPermissionFromRows(viewRows, {
+      userId: user.id,
+      documentType: document.document_type,
+    });
+    if (userSpecific === false) return false;
+
+    if (relationship.isCreator || relationship.isReviewer) return true;
+    if (await isUserAssignedToCurrentStep(client, { document, userId: user.id })) return true;
+    if (await isUserAssignedToAnyStep(client, { document, userId: user.id })) return true;
+    return false;
+  }
+
+  // Other general type-level actions: create_draft / download use permission rows.
   if (GENERAL_PERMISSION_ACTIONS.has(action)) {
-    // View has extra "relationship" allowances on a specific document.
-    if (action === 'view') {
-      if (relationship.isCreator || relationship.isReviewer) return true;
-      if (await isUserAssignedToCurrentStep(client, { document, userId: user.id })) return true;
-      if (await isUserAssignedToAnyStep(client, { document, userId: user.id })) return true;
-    }
     return canUserPerformGeneralAction(client, {
       user,
       documentType: document.document_type,
@@ -1228,10 +1363,85 @@ async function getEffectivePermissionExplanation(client, { user, action, documen
     .filter((entry) => entry.score >= 0)
     .sort((a, b) => b.score - a.score);
 
+  if (canonicalAction === 'view' && document) {
+    const userSpecificDecision = resolveUserSpecificPermissionFromRows(rows, {
+      userId: user.id,
+      documentType,
+    });
+    const isHolder = isCurrentHolder(document, user.id);
+    const isAssigned = await isUserAssignedToCurrentStep(client, {
+      document,
+      userId: user.id,
+    });
+    const relationshipAllowed =
+      relationship.isCreator ||
+      isHolder ||
+      isAssigned ||
+      (await isUserAssignedToAnyStep(client, { document, userId: user.id }));
+
+    if (userSpecificDecision === false) {
+      return {
+        scope: scopeType,
+        action: canonicalAction,
+        document_type: documentType,
+        explicit_matches: ranked.map((entry) => ({
+          score: entry.score,
+          user_id: entry.row.user_id,
+          role_id: entry.row.role_id,
+          document_type: entry.row.document_type,
+          granted: entry.row.granted === true,
+        })),
+        explicit_decision: false,
+        fallback_decision: relationshipAllowed,
+        final_decision: false,
+        relationship: {
+          ...relationship,
+          isCurrentHolder: isHolder,
+          isStepAssignee: isAssigned,
+        },
+        reason: 'explicit_permission',
+      };
+    }
+
+    const allowed =
+      userSpecificDecision === true ? true : relationshipAllowed;
+    const reason = allowed
+      ? userSpecificDecision === true
+        ? 'explicit_permission'
+        : relationship.isCreator
+          ? 'creator'
+          : isHolder
+            ? 'current_holder'
+            : isAssigned
+              ? 'step_assignee'
+              : 'past_participant'
+      : 'relationship_required';
+
+    return {
+      scope: scopeType,
+      action: canonicalAction,
+      document_type: documentType,
+      explicit_matches: ranked.map((entry) => ({
+        score: entry.score,
+        user_id: entry.row.user_id,
+        role_id: entry.row.role_id,
+        document_type: entry.row.document_type,
+        granted: entry.row.granted === true,
+      })),
+      explicit_decision: userSpecificDecision,
+      fallback_decision: relationshipAllowed,
+      final_decision: allowed,
+      relationship: {
+        ...relationship,
+        isCurrentHolder: isHolder,
+        isStepAssignee: isAssigned,
+      },
+      reason,
+    };
+  }
+
   const explicitDecision = ranked.length ? ranked[0].row.granted === true : null;
-  const fallbackDecision = scopeType === 'document'
-    ? (canonicalAction === 'view' && (relationship.isCreator || relationship.isReviewer))
-    : false;
+  const fallbackDecision = false;
   const finalDecision = explicitDecision !== null ? explicitDecision : fallbackDecision;
 
   return {
@@ -1360,10 +1570,12 @@ async function getDocumentBundle(pool, id, user) {
       [id]
     ),
     pool.query(
-      `SELECT *
-       FROM docutracker_document_history
+      `SELECT h.*,
+              COALESCE(NULLIF(h.actor_name, ''), u.full_name) AS actor_name
+       FROM docutracker_document_history h
+       LEFT JOIN users u ON u.id = h.actor_id
        WHERE document_id = $1
-       ORDER BY created_at ASC`,
+       ORDER BY h.created_at ASC`,
       [id]
     ),
   ]);
@@ -2184,7 +2396,9 @@ module.exports = {
   hasPermission,
   canUserPerformDocumentAction,
   canUserPerformTypeAction,
+  filterDocumentsViewableByUser,
   getEffectivePermissionExplanation,
+  isDraftOrWipDocument,
   listDocuments,
   getDocumentBundle,
   createDocument,

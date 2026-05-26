@@ -14,8 +14,10 @@ import '../models/document_type.dart';
 import '../models/workflow_step.dart';
 import '../services/docutracker_workflow_config_validator.dart';
 import '../theme/docutracker_tokens.dart';
+import '../widgets/docutracker_error_banner.dart';
 import '../widgets/docutracker_responsive_body.dart';
 import '../widgets/docutracker_section_header.dart';
+import 'docutracker_step_assignees_editor_screen.dart';
 import '../widgets/workflow_step_editor_panel.dart';
 
 class DocuTrackerWorkflowEditorScreen extends StatefulWidget {
@@ -43,8 +45,10 @@ class _DocuTrackerWorkflowEditorScreenState
   ];
 
   late List<WorkflowStep> _steps;
+
   /// Stable per-step IDs used for selection, reorder identity and preview mapping.
   late List<String> _stepIds;
+
   /// A [GlobalKey] per stable step ID for preview-chip jump scrolling.
   final Map<String, GlobalKey> _stepItemKeyById = {};
   final ScrollController _listScrollController = ScrollController();
@@ -54,25 +58,31 @@ class _DocuTrackerWorkflowEditorScreenState
   String? _error;
   String? _selectedStepId;
   final Map<String, String> _departmentNameById = {};
-  final Map<String, _WorkflowStepAssigneeSnapshot> _assigneeSnapshotsByStepId = {};
+  final Map<String, _WorkflowStepAssigneeSnapshot> _assigneeSnapshotsByStepId =
+      {};
 
   @override
   void initState() {
     super.initState();
-    _steps = widget.initialConfig.steps
-        .map((s) => WorkflowStep(
-              stepOrder: s.stepOrder,
-              assigneeType: s.assigneeType,
-              roleId: s.roleId,
-              departmentId: s.departmentId,
-              officeId: s.officeId,
-              userIds: s.userIds == null ? null : List<String>.from(s.userIds!),
-              label: s.label,
-              enabled: s.enabled,
-              deadlineHours: s.deadlineHours,
-            ))
-        .toList()
-      ..sort((a, b) => a.stepOrder.compareTo(b.stepOrder));
+    _steps =
+        widget.initialConfig.steps
+            .map(
+              (s) => WorkflowStep(
+                stepOrder: s.stepOrder,
+                assigneeType: s.assigneeType,
+                roleId: s.roleId,
+                departmentId: s.departmentId,
+                officeId: s.officeId,
+                userIds: s.userIds == null
+                    ? null
+                    : List<String>.from(s.userIds!),
+                label: s.label,
+                enabled: s.enabled,
+                deadlineHours: s.deadlineHours,
+              ),
+            )
+            .toList()
+          ..sort((a, b) => a.stepOrder.compareTo(b.stepOrder));
 
     final stamp = DateTime.now().microsecondsSinceEpoch;
     _stepIds = List.generate(_steps.length, (i) => 'wf-$stamp-$i');
@@ -81,8 +91,8 @@ class _DocuTrackerWorkflowEditorScreenState
     }
     _selectedStepId = _stepIds.isEmpty ? null : _stepIds.first;
 
-    _defaultDeadlineController.text =
-        widget.initialConfig.reviewDeadlineHours.toString();
+    _defaultDeadlineController.text = widget.initialConfig.reviewDeadlineHours
+        .toString();
     _revalidate();
     _loadDepartmentLookup();
     _loadStepAssigneeSnapshots();
@@ -90,7 +100,9 @@ class _DocuTrackerWorkflowEditorScreenState
 
   Future<void> _loadDepartmentLookup() async {
     try {
-      final res = await ApiClient.instance.get<List<dynamic>>('/api/departments');
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/departments',
+      );
       final data = res.data ?? [];
       final map = <String, String>{};
       for (final e in data) {
@@ -119,7 +131,8 @@ class _DocuTrackerWorkflowEditorScreenState
       );
       final snapshots = <String, _WorkflowStepAssigneeSnapshot>{};
       for (final row in rows) {
-        final order = (row['step_order'] as num?)?.toInt() ??
+        final order =
+            (row['step_order'] as num?)?.toInt() ??
             int.tryParse(row['step_order']?.toString() ?? '');
         if (order == null || order < 1 || order > _stepIds.length) continue;
 
@@ -192,14 +205,17 @@ class _DocuTrackerWorkflowEditorScreenState
       auth = null;
     }
     if (auth?.user == null) return true; // Allow tests and isolated previews.
-    return DocuTrackerRoles.normalize(auth!.user!.role) == DocuTrackerRoles.admin;
+    return DocuTrackerRoles.normalize(auth!.user!.role) ==
+        DocuTrackerRoles.admin;
   }
 
   bool _ensureAdminAction() {
     if (_isAdminUser()) return true;
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Access denied. Only admins can edit workflows.')),
+        const SnackBar(
+          content: Text('Access denied. Only admins can edit workflows.'),
+        ),
       );
     }
     return false;
@@ -315,13 +331,17 @@ class _DocuTrackerWorkflowEditorScreenState
         if (s.deadlineHours! <= 0) {
           errors.add('$stepLabel deadline must be greater than 0 hours.');
         } else if (s.deadlineHours! > maxDeadlineHours) {
-          errors.add('$stepLabel deadline cannot exceed $maxDeadlineHours hours.');
+          errors.add(
+            '$stepLabel deadline cannot exceed $maxDeadlineHours hours.',
+          );
         }
       }
 
       if (!s.enabled) continue;
       final stepId = i < _stepIds.length ? _stepIds[i] : null;
-      final snapshot = stepId == null ? null : _assigneeSnapshotsByStepId[stepId];
+      final snapshot = stepId == null
+          ? null
+          : _assigneeSnapshotsByStepId[stepId];
 
       if (s.assigneeType.trim().toLowerCase() == 'user') {
         final userIds = (s.userIds ?? [])
@@ -334,7 +354,9 @@ class _DocuTrackerWorkflowEditorScreenState
           final primaryId = userIds.first;
           final backups = userIds.skip(1).toList();
           if (backups.contains(primaryId)) {
-            errors.add('$stepLabel backup users cannot include the primary user.');
+            errors.add(
+              '$stepLabel backup users cannot include the primary user.',
+            );
           }
           if (backups.length != backups.toSet().length) {
             errors.add('$stepLabel has duplicate backup users.');
@@ -342,24 +364,32 @@ class _DocuTrackerWorkflowEditorScreenState
         }
 
         if ((s.departmentId ?? '').trim().isEmpty) {
-          errors.add('$stepLabel must include a department scope for selected users.');
+          errors.add(
+            '$stepLabel must include a department scope for selected users.',
+          );
         }
       }
 
       if (s.assigneeType.trim().toLowerCase() == 'department' &&
           (s.departmentId ?? '').trim().isEmpty) {
-        errors.add('$stepLabel is department-based but no department is selected.');
+        errors.add(
+          '$stepLabel is department-based but no department is selected.',
+        );
       }
 
       final stepActions = snapshot?.allowedActions ?? _defaultWorkflowActions;
       if (stepActions.isEmpty) {
-        errors.add('$stepLabel must include at least one allowed workflow action.');
+        errors.add(
+          '$stepLabel must include at least one allowed workflow action.',
+        );
       } else {
         final invalid = stepActions.where(
           (a) => !allowedActionsSet.contains(a.trim().toLowerCase()),
         );
         if (invalid.isNotEmpty) {
-          errors.add('$stepLabel has invalid allowed actions: ${invalid.join(', ')}.');
+          errors.add(
+            '$stepLabel has invalid allowed actions: ${invalid.join(', ')}.',
+          );
         }
       }
     }
@@ -368,9 +398,7 @@ class _DocuTrackerWorkflowEditorScreenState
   }
 
   bool get _canSave =>
-      _isAdminUser() &&
-      _restrictionErrors().isEmpty &&
-      !_saving;
+      _isAdminUser() && _restrictionErrors().isEmpty && !_saving;
 
   bool get _canPublish =>
       _isAdminUser() &&
@@ -403,7 +431,8 @@ class _DocuTrackerWorkflowEditorScreenState
           .map((e) => e.trim())
           .where((e) => e.isNotEmpty)
           .toList();
-      if (userIds.isEmpty) return 'Active selected-user steps need at least one user.';
+      if (userIds.isEmpty)
+        return 'Active selected-user steps need at least one user.';
       if ((step.departmentId ?? '').trim().isEmpty) {
         return 'Selected-user steps require a department scope.';
       }
@@ -433,19 +462,23 @@ class _DocuTrackerWorkflowEditorScreenState
           label: _steps[i].label,
           enabled: _steps[i].enabled,
           deadlineHours: _steps[i].deadlineHours,
-        )
+        ),
     ];
   }
 
   Future<void> _addStep({String? afterStepId}) async {
     if (!_ensureAdminAction()) return;
-    final afterIndex =
-        afterStepId == null ? null : _stepIds.indexWhere((id) => id == afterStepId);
-    final resolvedAfterIndex =
-        (afterIndex == null || afterIndex < 0) ? null : afterIndex;
+    final afterIndex = afterStepId == null
+        ? null
+        : _stepIds.indexWhere((id) => id == afterStepId);
+    final resolvedAfterIndex = (afterIndex == null || afterIndex < 0)
+        ? null
+        : afterIndex;
     final nextOrder = _steps.isEmpty
         ? 1
-        : (resolvedAfterIndex == null ? _steps.length + 1 : resolvedAfterIndex + 2);
+        : (resolvedAfterIndex == null
+              ? _steps.length + 1
+              : resolvedAfterIndex + 2);
     final created = await showWorkflowStepEditor(
       context,
       title: resolvedAfterIndex == null
@@ -461,16 +494,18 @@ class _DocuTrackerWorkflowEditorScreenState
     final draftIssue = _validateStepDraft(created);
     if (draftIssue != null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(draftIssue)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(draftIssue)));
       }
       return;
     }
     setState(() {
-      final insertAt =
-          resolvedAfterIndex == null ? _steps.length : resolvedAfterIndex + 1;
-      final key = 'wf-${DateTime.now().microsecondsSinceEpoch}-${_stepIds.length}';
+      final insertAt = resolvedAfterIndex == null
+          ? _steps.length
+          : resolvedAfterIndex + 1;
+      final key =
+          'wf-${DateTime.now().microsecondsSinceEpoch}-${_stepIds.length}';
       _steps.insert(insertAt, created);
       _stepIds.insert(insertAt, key);
       _stepItemKeyById[key] = GlobalKey();
@@ -500,9 +535,9 @@ class _DocuTrackerWorkflowEditorScreenState
     final draftIssue = _validateStepDraft(edited);
     if (draftIssue != null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(draftIssue)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(draftIssue)));
       }
       return;
     }
@@ -521,7 +556,9 @@ class _DocuTrackerWorkflowEditorScreenState
     if (_steps[index].enabled && activeCount <= 1) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('At least one active step is required.')),
+          const SnackBar(
+            content: Text('At least one active step is required.'),
+          ),
         );
       }
       return;
@@ -553,10 +590,10 @@ class _DocuTrackerWorkflowEditorScreenState
       _assigneeSnapshotsByStepId.remove(removedKey);
       _steps.removeAt(index);
       if (_selectedStepId == removedKey) {
-        final nextIndex = index >= _stepIds.length ? _stepIds.length - 1 : index;
-        _selectedStepId = _stepIds.isEmpty
-            ? null
-            : _stepIds[nextIndex];
+        final nextIndex = index >= _stepIds.length
+            ? _stepIds.length - 1
+            : index;
+        _selectedStepId = _stepIds.isEmpty ? null : _stepIds[nextIndex];
       }
       _renumberStepsContiguously();
       _markUnsaved();
@@ -622,7 +659,8 @@ class _DocuTrackerWorkflowEditorScreenState
       _error = null;
     });
     try {
-      final defaultDeadline = int.tryParse(_defaultDeadlineController.text.trim()) ?? 1;
+      final defaultDeadline =
+          int.tryParse(_defaultDeadlineController.text.trim()) ?? 1;
       final updated = DocumentRoutingConfig(
         documentType: widget.initialConfig.documentType,
         steps: _steps,
@@ -631,16 +669,25 @@ class _DocuTrackerWorkflowEditorScreenState
 
       final repo = DocuTrackerRepository.instance;
       final saveResult = await repo.saveRoutingConfig(updated);
-      if (saveResult is DocuTrackerFailure<bool>) {
+      if (saveResult is DocuTrackerFailure<int>) {
         setState(() {
           _error = saveResult.message.isNotEmpty
               ? saveResult.message
               : 'Save was rejected by the server. Check that routing rules are valid, '
-                  'or that no blocking constraint exists for this document type.';
+                    'or that no blocking constraint exists for this document type.';
           _saving = false;
         });
         return;
       }
+      if (saveResult is! DocuTrackerSuccess<int>) {
+        setState(() {
+          _error = 'Save failed.';
+          _saving = false;
+        });
+        return;
+      }
+
+      final publishedVersion = saveResult.value;
 
       if (!mounted) return;
       await context.read<DocuTrackerProvider>().loadRoutingConfigs();
@@ -650,7 +697,38 @@ class _DocuTrackerWorkflowEditorScreenState
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Workflow version published.')),
         );
+        final openAssignees = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Configure step assignees?'),
+            content: const Text(
+              'Review primary/backup reviewers and which actions each person may use '
+              'for this workflow version.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Later'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Open assignees'),
+              ),
+            ],
+          ),
+        );
+        if (openAssignees == true && mounted) {
+          await Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => DocuTrackerStepAssigneesEditorScreen(
+                initialDocumentType: widget.initialConfig.documentType.value,
+                initialWorkflowVersion: publishedVersion,
+              ),
+            ),
+          );
+        }
       }
+      if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (e) {
       setState(() {
@@ -666,10 +744,12 @@ class _DocuTrackerWorkflowEditorScreenState
     final blocking = _issues.where((i) => !i.isWarning).toList();
     final warnings = _issues.where((i) => i.isWarning).toList();
     final restrictionErrors = _restrictionErrors();
-    final selectedIndex =
-        _selectedStepId == null ? -1 : _stepIds.indexOf(_selectedStepId!);
-    final selectedStep =
-        selectedIndex >= 0 && selectedIndex < _steps.length ? _steps[selectedIndex] : null;
+    final selectedIndex = _selectedStepId == null
+        ? -1
+        : _stepIds.indexOf(_selectedStepId!);
+    final selectedStep = selectedIndex >= 0 && selectedIndex < _steps.length
+        ? _steps[selectedIndex]
+        : null;
 
     if (!isAdminUser) {
       return Scaffold(
@@ -682,7 +762,11 @@ class _DocuTrackerWorkflowEditorScreenState
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.lock_rounded, color: Colors.red.shade700, size: 44),
+                  Icon(
+                    Icons.lock_rounded,
+                    color: Colors.red.shade700,
+                    size: 44,
+                  ),
                   const SizedBox(height: 10),
                   Text(
                     'Access denied',
@@ -717,7 +801,20 @@ class _DocuTrackerWorkflowEditorScreenState
         children: [
           _InfoBanner(version: widget.initialConfig.version),
           const SizedBox(height: 10),
-          const _AssigneesReminderBanner(),
+          _AssigneesReminderBanner(
+            onManageAssignees: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => DocuTrackerStepAssigneesEditorScreen(
+                    initialDocumentType:
+                        widget.initialConfig.documentType.value,
+                    initialWorkflowVersion: widget.initialConfig.version,
+                  ),
+                ),
+              );
+              if (mounted) await _loadStepAssigneeSnapshots();
+            },
+          ),
           const SizedBox(height: 12),
           _DefaultDeadlineCard(
             controller: _defaultDeadlineController,
@@ -744,12 +841,13 @@ class _DocuTrackerWorkflowEditorScreenState
             onSelectIndex: _saving ? null : _onPreviewSelectStep,
           ),
           const SizedBox(height: 12),
-          if (_issues.isNotEmpty) _ValidationPanel(blocking: blocking, warnings: warnings),
+          if (_issues.isNotEmpty)
+            _ValidationPanel(blocking: blocking, warnings: warnings),
           if (_error != null) ...[
             const SizedBox(height: 8),
-            SelectableText(
-              _error!,
-              style: TextStyle(color: Colors.red.shade800, fontSize: 13),
+            DocuTrackerErrorBanner(
+              message: _error!,
+              onDismiss: () => setState(() => _error = null),
             ),
           ],
           const SizedBox(height: 8),
@@ -780,120 +878,139 @@ class _DocuTrackerWorkflowEditorScreenState
         navigator.pop(false);
       },
       child: Scaffold(
-      backgroundColor: DocuTrackerTokens.canvas,
-      appBar: AppBar(
-        backgroundColor: DocuTrackerTokens.surface,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        shadowColor: Colors.black.withValues(alpha: 0.06),
-        title: Text(
-          'Workflow • ${widget.initialConfig.documentType.displayName}',
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: Center(
-              child: Text(
-                'v${widget.initialConfig.version} → new',
-                style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
+        backgroundColor: DocuTrackerTokens.canvas,
+        appBar: AppBar(
+          backgroundColor: DocuTrackerTokens.surface,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          shadowColor: Colors.black.withValues(alpha: 0.06),
+          title: Text(
+            'Workflow • ${widget.initialConfig.documentType.displayName}',
+          ),
+          actions: [
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Center(
+                child: Text(
+                  'v${widget.initialConfig.version} → new',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
-      ),
-      body: DocuTrackerResponsiveBody(
-        maxWidth: DocuTrackerTokens.maxContentWidth,
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: CustomScrollView(
-                controller: _listScrollController,
-                physics: const AlwaysScrollableScrollPhysics(),
-                slivers: [
-                  SliverToBoxAdapter(child: workflowHeaderBlock()),
-                  if (_steps.isEmpty)
-                    SliverFillRemaining(
-                      hasScrollBody: true,
-                      child: _EmptySteps(onAdd: _saving ? null : () => _addStep()),
-                    )
-                  else
-                    SliverPadding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      sliver: SliverReorderableList(
-                        itemCount: _steps.length,
-                        onReorder: _onReorderSteps,
-                        proxyDecorator: (child, index, animation) {
-                          return AnimatedBuilder(
-                            animation: animation,
-                            builder: (context, _) {
-                              final t = Curves.easeOut.transform(animation.value);
-                              return Material(
-                                elevation: 6 + 10 * t,
-                                shadowColor: Colors.black.withValues(alpha: 0.18),
-                                borderRadius:
-                                    BorderRadius.circular(DocuTrackerTokens.radiusLg),
-                                clipBehavior: Clip.antiAlias,
-                                child: child,
-                              );
-                            },
-                          );
-                        },
-                        itemBuilder: (ctx, idx) {
-                          final s = _steps[idx];
-                          final last = idx == _steps.length - 1;
-                          final stepId = _stepIds[idx];
-                          final activeCount = _steps.where((x) => x.enabled).length;
-                          final canDeleteStep = !(s.enabled && activeCount <= 1) && !_saving;
-                          return _WorkflowStepFlowCard(
-                            key: _stepItemKeyById[stepId]!,
-                            index: idx,
-                            step: s,
-                            departmentNameById: _departmentNameById,
-                            assigneeSnapshot: _assigneeSnapshotsByStepId[stepId],
-                            defaultDeadlineHours:
-                                int.tryParse(_defaultDeadlineController.text.trim()) ?? 1,
-                            showConnector: !last,
-                            isSelected: _selectedStepId == stepId,
-                            hasBlockingIssue:
-                                blocking.any((i) => i.stepOrder == s.stepOrder),
-                            hasWarning:
-                                warnings.any((i) => i.stepOrder == s.stepOrder),
-                            onSelect: () => setState(() {
-                              _selectedStepId = stepId;
-                            }),
-                            onEdit: () => _editStep(idx),
-                            onDelete: canDeleteStep ? () => _removeStep(idx) : null,
-                            onAddAfter:
-                                _saving ? null : () => _addStep(afterStepId: stepId),
-                          );
-                        },
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
           ],
         ),
-      ),
-      bottomNavigationBar: _WorkflowEditorBottomActions(
-        saving: _saving,
-        canSave: _canSave,
-        canPublish: _canPublish,
-        hasUnsavedChanges: _hasUnsavedChanges,
-        restrictionErrors: restrictionErrors,
-        onAddStep: () => _addStep(),
-        onAddAfter: () => _addStepAfterSelected(),
-        onDiscard: () => _discardAndClose(),
-        onSave: () => _save(publish: false),
-        onPublish: () => _save(publish: true),
-      ),
+        body: DocuTrackerResponsiveBody(
+          maxWidth: DocuTrackerTokens.maxContentWidth,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: CustomScrollView(
+                  controller: _listScrollController,
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  slivers: [
+                    SliverToBoxAdapter(child: workflowHeaderBlock()),
+                    if (_steps.isEmpty)
+                      SliverFillRemaining(
+                        hasScrollBody: true,
+                        child: _EmptySteps(
+                          onAdd: _saving ? null : () => _addStep(),
+                        ),
+                      )
+                    else
+                      SliverPadding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        sliver: SliverReorderableList(
+                          itemCount: _steps.length,
+                          onReorder: _onReorderSteps,
+                          proxyDecorator: (child, index, animation) {
+                            return AnimatedBuilder(
+                              animation: animation,
+                              builder: (context, _) {
+                                final t = Curves.easeOut.transform(
+                                  animation.value,
+                                );
+                                return Material(
+                                  elevation: 6 + 10 * t,
+                                  shadowColor: Colors.black.withValues(
+                                    alpha: 0.18,
+                                  ),
+                                  borderRadius: BorderRadius.circular(
+                                    DocuTrackerTokens.radiusLg,
+                                  ),
+                                  clipBehavior: Clip.antiAlias,
+                                  child: child,
+                                );
+                              },
+                            );
+                          },
+                          itemBuilder: (ctx, idx) {
+                            final s = _steps[idx];
+                            final last = idx == _steps.length - 1;
+                            final stepId = _stepIds[idx];
+                            final activeCount = _steps
+                                .where((x) => x.enabled)
+                                .length;
+                            final canDeleteStep =
+                                !(s.enabled && activeCount <= 1) && !_saving;
+                            return _WorkflowStepFlowCard(
+                              key: _stepItemKeyById[stepId]!,
+                              index: idx,
+                              step: s,
+                              departmentNameById: _departmentNameById,
+                              assigneeSnapshot:
+                                  _assigneeSnapshotsByStepId[stepId],
+                              defaultDeadlineHours:
+                                  int.tryParse(
+                                    _defaultDeadlineController.text.trim(),
+                                  ) ??
+                                  1,
+                              showConnector: !last,
+                              isSelected: _selectedStepId == stepId,
+                              hasBlockingIssue: blocking.any(
+                                (i) => i.stepOrder == s.stepOrder,
+                              ),
+                              hasWarning: warnings.any(
+                                (i) => i.stepOrder == s.stepOrder,
+                              ),
+                              onSelect: () => setState(() {
+                                _selectedStepId = stepId;
+                              }),
+                              onEdit: () => _editStep(idx),
+                              onDelete: canDeleteStep
+                                  ? () => _removeStep(idx)
+                                  : null,
+                              onAddAfter: _saving
+                                  ? null
+                                  : () => _addStep(afterStepId: stepId),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+        bottomNavigationBar: _WorkflowEditorBottomActions(
+          saving: _saving,
+          canSave: _canSave,
+          canPublish: _canPublish,
+          hasUnsavedChanges: _hasUnsavedChanges,
+          restrictionErrors: restrictionErrors,
+          onAddStep: () => _addStep(),
+          onAddAfter: () => _addStepAfterSelected(),
+          onDiscard: () => _discardAndClose(),
+          onSave: () => _save(publish: false),
+          onPublish: () => _save(publish: true),
+        ),
       ),
     );
   }
@@ -930,7 +1047,9 @@ class _WorkflowEditorBottomActions extends StatelessWidget {
   Widget build(BuildContext context) {
     final helperText = restrictionErrors.isNotEmpty
         ? '${restrictionErrors.length} issue(s) block save/publish.'
-        : (!canSave && !saving ? 'Fix validation errors above before saving.' : null);
+        : (!canSave && !saving
+              ? 'Fix validation errors above before saving.'
+              : null);
 
     return SafeArea(
       top: false,
@@ -961,10 +1080,8 @@ class _WorkflowEditorBottomActions extends StatelessWidget {
                   OutlinedButton.icon(
                     onPressed: hasUnsavedChanges && !saving ? onDiscard : null,
                     icon: const Icon(Icons.cancel_outlined),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.red.shade700,
-                    ),
-                    label: const Text('Cancel unsaved changes'),
+                    style: DocuTrackerStyles.outlinedRedStyle(),
+                    label: const Text('Discard changes'),
                   ),
                   FilledButton.icon(
                     onPressed: canSave ? onSave : null,
@@ -988,7 +1105,10 @@ class _WorkflowEditorBottomActions extends StatelessWidget {
                 const SizedBox(height: 6),
                 Text(
                   helperText,
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 11.5),
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 11.5,
+                  ),
                 ),
               ],
               if (restrictionErrors.isNotEmpty && !saving) ...[
@@ -1021,7 +1141,11 @@ class _InfoBanner extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.info_outline_rounded, color: AppTheme.primaryNavy, size: 22),
+            Icon(
+              Icons.info_outline_rounded,
+              color: DocuTrackerTokens.brand,
+              size: 22,
+            ),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -1042,7 +1166,9 @@ class _InfoBanner extends StatelessWidget {
 }
 
 class _AssigneesReminderBanner extends StatelessWidget {
-  const _AssigneesReminderBanner();
+  const _AssigneesReminderBanner({required this.onManageAssignees});
+
+  final VoidCallback onManageAssignees;
 
   @override
   Widget build(BuildContext context) {
@@ -1054,21 +1180,39 @@ class _AssigneesReminderBanner extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Row(
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.groups_rounded, color: Colors.green.shade800, size: 22),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'After you save this workflow, open Admin → “Manage step assignees” to set '
-                'who is primary, who is backup, and which actions (approve, forward, etc.) '
-                'each person may use.',
-                style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 12,
-                  height: 1.3,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.groups_rounded,
+                  color: Colors.green.shade800,
+                  size: 22,
                 ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Set who is primary vs backup on each step and which workflow actions '
+                    'they may use. Saving the workflow keeps existing action permissions when '
+                    'the same people remain on a step.',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                      height: 1.3,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: onManageAssignees,
+                icon: const Icon(Icons.group_rounded, size: 18),
+                label: const Text('Manage step assignees'),
               ),
             ),
           ],
@@ -1113,7 +1257,8 @@ class _DefaultDeadlineCard extends StatelessWidget {
               controller: controller,
               keyboardType: TextInputType.number,
               decoration: DocuTrackerStyles.inputDecoration(
-context,                 'Used when a step has no per-step deadline',
+                context,
+                'Used when a step has no per-step deadline',
                 Icons.schedule_rounded,
               ),
               onChanged: (_) => onChanged(),
@@ -1126,10 +1271,7 @@ context,                 'Used when a step has no per-step deadline',
 }
 
 class _ValidationPanel extends StatelessWidget {
-  const _ValidationPanel({
-    required this.blocking,
-    required this.warnings,
-  });
+  const _ValidationPanel({required this.blocking, required this.warnings});
 
   final List<DocuTrackerWorkflowValidationIssue> blocking;
   final List<DocuTrackerWorkflowValidationIssue> warnings;
@@ -1150,9 +1292,13 @@ class _ValidationPanel extends StatelessWidget {
             Row(
               children: [
                 Icon(
-                  blocking.isNotEmpty ? Icons.block_rounded : Icons.warning_amber_rounded,
+                  blocking.isNotEmpty
+                      ? Icons.block_rounded
+                      : Icons.warning_amber_rounded,
                   size: 20,
-                  color: blocking.isNotEmpty ? Colors.red.shade800 : Colors.orange.shade900,
+                  color: blocking.isNotEmpty
+                      ? Colors.red.shade800
+                      : Colors.orange.shade900,
                 ),
                 const SizedBox(width: 8),
                 Text(
@@ -1247,7 +1393,11 @@ class _RestrictionPanel extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.gpp_bad_rounded, color: Colors.red.shade800, size: 20),
+                Icon(
+                  Icons.gpp_bad_rounded,
+                  color: Colors.red.shade800,
+                  size: 20,
+                ),
                 const SizedBox(width: 8),
                 Text(
                   'Workflow restrictions',
@@ -1288,8 +1438,9 @@ class _EmptySteps extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final minHeight =
-            (constraints.maxHeight - 16).clamp(0.0, double.infinity).toDouble();
+        final minHeight = (constraints.maxHeight - 16)
+            .clamp(0.0, double.infinity)
+            .toDouble();
         return SingleChildScrollView(
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: ConstrainedBox(
@@ -1431,10 +1582,10 @@ class _OverviewMetric extends StatelessWidget {
             height: 34,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+              color: DocuTrackerTokens.brand.withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(icon, size: 18, color: AppTheme.primaryNavy),
+            child: Icon(icon, size: 18, color: DocuTrackerTokens.brand),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -1498,7 +1649,11 @@ class _WorkflowPathPreviewStrip extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.route_rounded, size: 20, color: AppTheme.primaryNavy.withValues(alpha: 0.9)),
+                Icon(
+                  Icons.route_rounded,
+                  size: 20,
+                  color: DocuTrackerTokens.brand.withValues(alpha: 0.9),
+                ),
                 const SizedBox(width: 8),
                 Text(
                   'Route preview',
@@ -1549,15 +1704,23 @@ class _WorkflowPathPreviewStrip extends StatelessWidget {
                         departmentNameById: departmentNameById,
                         assigneeSnapshot: assigneeSnapshotsByKey[rowKeys[i]],
                         isSelected: i == selectedIndex,
-                        onTap: onSelectIndex == null ? null : () => onSelectIndex!(i),
+                        onTap: onSelectIndex == null
+                            ? null
+                            : () => onSelectIndex!(i),
                       ),
                       if (i < steps.length - 1)
                         Padding(
-                          padding: const EdgeInsets.only(top: 10, left: 2, right: 2),
+                          padding: const EdgeInsets.only(
+                            top: 10,
+                            left: 2,
+                            right: 2,
+                          ),
                           child: Icon(
                             Icons.arrow_forward_rounded,
                             size: 18,
-                            color: AppTheme.textSecondary.withValues(alpha: 0.45),
+                            color: AppTheme.textSecondary.withValues(
+                              alpha: 0.45,
+                            ),
                           ),
                         ),
                     ],
@@ -1590,10 +1753,10 @@ class _PathPreviewChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final enabled = step.enabled;
     final borderColor = isSelected
-        ? AppTheme.primaryNavy
+        ? DocuTrackerTokens.brand
         : DocuTrackerTokens.borderSubtle;
     final fill = isSelected
-        ? AppTheme.primaryNavy.withValues(alpha: 0.06)
+        ? DocuTrackerTokens.brand.withValues(alpha: 0.06)
         : DocuTrackerTokens.surface;
 
     return Material(
@@ -1621,7 +1784,7 @@ class _PathPreviewChip extends StatelessWidget {
                   height: 26,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                    color: DocuTrackerTokens.brand.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
@@ -1629,7 +1792,7 @@ class _PathPreviewChip extends StatelessWidget {
                     style: TextStyle(
                       fontWeight: FontWeight.w900,
                       fontSize: 12,
-                      color: AppTheme.primaryNavy,
+                      color: DocuTrackerTokens.brand,
                     ),
                   ),
                 ),
@@ -1646,7 +1809,9 @@ class _PathPreviewChip extends StatelessWidget {
                         style: TextStyle(
                           fontWeight: FontWeight.w800,
                           fontSize: 12.5,
-                          color: enabled ? AppTheme.textPrimary : AppTheme.textSecondary,
+                          color: enabled
+                              ? AppTheme.textPrimary
+                              : AppTheme.textSecondary,
                         ),
                       ),
                       const SizedBox(height: 2),
@@ -1676,7 +1841,11 @@ class _PathPreviewChip extends StatelessWidget {
                 if (!enabled)
                   Padding(
                     padding: const EdgeInsets.only(left: 2),
-                    child: Icon(Icons.pause_circle_outline_rounded, size: 16, color: AppTheme.textSecondary),
+                    child: Icon(
+                      Icons.pause_circle_outline_rounded,
+                      size: 16,
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
               ],
             ),
@@ -1718,12 +1887,15 @@ class _WorkflowBuilderToolbar extends StatelessWidget {
                       _MiniChip(
                         icon: Icons.swap_vert_rounded,
                         label: 'Drag to reorder',
-                        tint: AppTheme.primaryNavy,
+                        tint: DocuTrackerTokens.brand,
                       ),
                       const SizedBox(width: 12),
                       Text(
                         status,
-                        style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 12,
+                        ),
                       ),
                     ],
                   ),
@@ -1747,7 +1919,7 @@ class _WorkflowBuilderToolbar extends StatelessWidget {
                 _MiniChip(
                   icon: Icons.swap_vert_rounded,
                   label: 'Drag to reorder',
-                  tint: AppTheme.primaryNavy,
+                  tint: DocuTrackerTokens.brand,
                 ),
                 Text(
                   status,
@@ -1784,7 +1956,9 @@ String _departmentLabel(
   }
   if (type == 'office') {
     final officeId = (step.officeId ?? '').trim();
-    return officeId.isEmpty ? 'No department scope' : 'Office: ${_shortId(officeId)}';
+    return officeId.isEmpty
+        ? 'No department scope'
+        : 'Office: ${_shortId(officeId)}';
   }
   if (type == 'role') return 'No department scope';
   return 'Department not set';
@@ -1797,7 +1971,8 @@ String _primaryUserLabel(
   final snapshotName = snapshot?.primaryUserName?.trim();
   if (snapshotName != null && snapshotName.isNotEmpty) return snapshotName;
 
-  final ids = step.userIds?.map((e) => e.trim()).where((e) => e.isNotEmpty).toList() ??
+  final ids =
+      step.userIds?.map((e) => e.trim()).where((e) => e.isNotEmpty).toList() ??
       const <String>[];
   if (ids.isNotEmpty) return 'User ${_shortId(ids.first)}';
 
@@ -1821,7 +1996,8 @@ List<String> _backupUserLabels(
   if (snapshot != null && snapshot.backupUserNames.isNotEmpty) {
     return snapshot.backupUserNames;
   }
-  final ids = step.userIds?.map((e) => e.trim()).where((e) => e.isNotEmpty).toList() ??
+  final ids =
+      step.userIds?.map((e) => e.trim()).where((e) => e.isNotEmpty).toList() ??
       const <String>[];
   if (ids.length <= 1) return const [];
   return ids.skip(1).map((id) => 'User ${_shortId(id)}').toList();
@@ -1847,7 +2023,11 @@ String _deadlineLabel(WorkflowStep step, int defaultDeadlineHours) {
   return '$hours h';
 }
 
-Color _stepAccentColor(WorkflowStep step, bool hasBlockingIssue, bool hasWarning) {
+Color _stepAccentColor(
+  WorkflowStep step,
+  bool hasBlockingIssue,
+  bool hasWarning,
+) {
   if (!step.enabled) return Colors.grey.shade600;
   if (hasBlockingIssue) return Colors.red.shade700;
   if (hasWarning) return Colors.orange.shade800;
@@ -1901,8 +2081,8 @@ class _WorkflowStepFlowCard extends StatelessWidget {
     final borderColor = isSelected
         ? accent
         : hasBlockingIssue
-            ? Colors.red.shade300
-            : DocuTrackerTokens.borderSubtle;
+        ? Colors.red.shade300
+        : DocuTrackerTokens.borderSubtle;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
@@ -1926,7 +2106,9 @@ class _WorkflowStepFlowCard extends StatelessWidget {
                 curve: Curves.easeOut,
                 decoration: BoxDecoration(
                   color: DocuTrackerTokens.surface,
-                  borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusLg),
+                  borderRadius: BorderRadius.circular(
+                    DocuTrackerTokens.radiusLg,
+                  ),
                   border: Border.all(
                     color: borderColor,
                     width: isSelected || hasBlockingIssue ? 2 : 1,
@@ -2004,7 +2186,9 @@ class _WorkflowStepFlowCard extends StatelessWidget {
                                   'Drag to reorder: press and hold, then move the card up or down',
                               child: Icon(
                                 Icons.drag_indicator_rounded,
-                                color: AppTheme.textSecondary.withValues(alpha: 0.85),
+                                color: AppTheme.textSecondary.withValues(
+                                  alpha: 0.85,
+                                ),
                               ),
                             ),
                           ),
@@ -2015,11 +2199,14 @@ class _WorkflowStepFlowCard extends StatelessWidget {
                         spacing: 8,
                         runSpacing: 8,
                         children: [
-                          _StepBadge(label: 'Step ${step.stepOrder}', color: accent),
+                          _StepBadge(
+                            label: 'Step ${step.stepOrder}',
+                            color: accent,
+                          ),
                           if (isSelected)
                             _StepBadge(
                               label: 'Highlighted',
-                              color: AppTheme.primaryNavy,
+                              color: DocuTrackerTokens.brand,
                               isSoft: true,
                             ),
                           if (!step.enabled)
@@ -2039,7 +2226,8 @@ class _WorkflowStepFlowCard extends StatelessWidget {
                             accent: accent,
                           ),
                           _ActionChip(
-                            label: 'Primary: ${_primaryUserLabel(step, assigneeSnapshot)}',
+                            label:
+                                'Primary: ${_primaryUserLabel(step, assigneeSnapshot)}',
                             accent: accent,
                           ),
                           _ActionChip(
@@ -2089,14 +2277,18 @@ class _WorkflowStepFlowCard extends StatelessWidget {
                               Icons.delete_outline_rounded,
                               size: 18,
                               color: onDelete == null
-                                  ? AppTheme.textSecondary.withValues(alpha: 0.55)
+                                  ? AppTheme.textSecondary.withValues(
+                                      alpha: 0.55,
+                                    )
                                   : Colors.red.shade700,
                             ),
                             label: Text(
                               'Delete',
                               style: TextStyle(
                                 color: onDelete == null
-                                    ? AppTheme.textSecondary.withValues(alpha: 0.65)
+                                    ? AppTheme.textSecondary.withValues(
+                                        alpha: 0.65,
+                                      )
                                     : Colors.red.shade700,
                               ),
                             ),
@@ -2145,7 +2337,9 @@ class _TimelineMarker extends StatelessWidget {
               color: isSelected ? accent : accent.withValues(alpha: 0.12),
               shape: BoxShape.circle,
               border: Border.all(
-                color: isSelected ? accent.withValues(alpha: 0.9) : accent.withValues(alpha: 0.45),
+                color: isSelected
+                    ? accent.withValues(alpha: 0.9)
+                    : accent.withValues(alpha: 0.45),
                 width: isSelected ? 2.5 : 1.5,
               ),
               boxShadow: isSelected
@@ -2264,11 +2458,7 @@ class _ActionChip extends StatelessWidget {
 }
 
 class _MiniChip extends StatelessWidget {
-  const _MiniChip({
-    required this.icon,
-    required this.label,
-    this.tint,
-  });
+  const _MiniChip({required this.icon, required this.label, this.tint});
 
   final IconData icon;
   final String label;

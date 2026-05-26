@@ -308,4 +308,3 @@ class DocuTrackerPermissionExplanation {
   final String? matchedRoleId;
   final String? reason;
 }
-

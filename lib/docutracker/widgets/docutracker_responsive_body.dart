@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
-/// Constrains content width on large screens for readable enterprise layouts.
+/// Constrains content on very wide screens but expands to fill the host area.
 class DocuTrackerResponsiveBody extends StatelessWidget {
   const DocuTrackerResponsiveBody({
     super.key,
     required this.child,
-    this.maxWidth = 1120,
+    this.maxWidth = 1680,
     this.padding = const EdgeInsets.symmetric(horizontal: 24),
   });
 
@@ -15,12 +15,13 @@ class DocuTrackerResponsiveBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
+    return Align(
+      alignment: Alignment.topCenter,
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth),
-        child: Padding(
-          padding: padding,
-          child: child,
+        child: SizedBox(
+          width: double.infinity,
+          child: Padding(padding: padding, child: child),
         ),
       ),
     );

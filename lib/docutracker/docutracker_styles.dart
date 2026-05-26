@@ -10,6 +10,28 @@ class DocuTrackerStyles {
   static const Color destructiveRed = Color(0xFFE53935);
   static const Color warningOrange = Color(0xFFF59E0B);
   static const Color secondaryBlue = Color(0xFF3B82F6);
+  static const EdgeInsets panelPadding = EdgeInsets.all(16);
+
+  static TextStyle cardLabelStyle({Color? color}) => TextStyle(
+        color: color ?? AppTheme.textSecondary,
+        fontSize: 11.5,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.2,
+      );
+
+  static TextStyle cardValueStyle({Color? color}) => TextStyle(
+        color: color ?? AppTheme.textPrimary,
+        fontSize: 22,
+        fontWeight: FontWeight.w800,
+        height: 1.15,
+      );
+
+  static TextStyle cardMetaStyle({Color? color}) => TextStyle(
+        color: (color ?? AppTheme.textSecondary).withValues(alpha: 0.92),
+        fontSize: 11.5,
+        height: 1.3,
+        fontWeight: FontWeight.w500,
+      );
 
   static InputDecoration inputDecoration(
     BuildContext context,
@@ -20,7 +42,7 @@ class DocuTrackerStyles {
       context,
       hintText: hint,
       prefixIcon: icon != null
-          ? Icon(icon, color: AppTheme.primaryNavy, size: 22)
+          ? Icon(icon, color: DocuTrackerTokens.brand, size: 22)
           : null,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       radius: 12,
@@ -36,6 +58,7 @@ class DocuTrackerStyles {
     );
   }
 
+  /// Green primary (approve / success actions).
   static ButtonStyle primaryButtonStyle() => FilledButton.styleFrom(
         backgroundColor: primaryGreen,
         foregroundColor: Colors.white,
@@ -46,19 +69,16 @@ class DocuTrackerStyles {
         elevation: 0,
       );
 
-  static ButtonStyle primaryButtonStyleNavy() => FilledButton.styleFrom(
-        backgroundColor: AppTheme.primaryNavy,
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
-        elevation: 0,
-      );
+  /// Orange brand primary (module chrome, create, open, links).
+  static ButtonStyle primaryBrandButtonStyle() =>
+      DocuTrackerTokens.brandFilledStyle();
+
+  /// @deprecated Use [primaryBrandButtonStyle].
+  static ButtonStyle primaryButtonStyleNavy() => primaryBrandButtonStyle();
 
   static ButtonStyle outlinedButtonStyle() => OutlinedButton.styleFrom(
         foregroundColor: AppTheme.textPrimary,
-        side: BorderSide(color: AppTheme.primaryNavy.withValues(alpha: 0.6)),
+        side: BorderSide(color: DocuTrackerTokens.brand.withValues(alpha: 0.6)),
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(10),
@@ -136,15 +156,15 @@ class DocuTrackerStyles {
       );
 
   static ButtonStyle iconButtonStyle() => IconButton.styleFrom(
-        foregroundColor: AppTheme.primaryNavy,
+        foregroundColor: DocuTrackerTokens.brand,
       );
 
   static Widget filterDropdownWrapper(Widget child) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         decoration: BoxDecoration(
-          color: const Color(0xFFF8F9FB),
+          color: DocuTrackerTokens.surfaceCream,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFFE4E7ED)),
+          border: Border.all(color: DocuTrackerTokens.borderSubtle),
         ),
         child: child,
       );

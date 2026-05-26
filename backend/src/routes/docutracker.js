@@ -1,4 +1,8 @@
 const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
+const { v4: uuidv4 } = require('uuid');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
@@ -8,6 +12,8 @@ const {
   createDocument: createDocumentEngine,
   getEffectivePermissionExplanation,
   listDocuments,
+  canUserPerformDocumentAction,
+  isDraftOrWipDocument,
 } = require('../services/docutrackerWorkflowService');
 const {
   ACTIVE_WORKFLOW_STATUSES_FOR_OVERDUE,
@@ -18,6 +24,72 @@ const { sameEntityId } = require('../utils/sameEntityId');
 
 const router = express.Router();
 const protect = [authMiddleware];
+
+const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
+const DOCUTRACKER_ATTACHMENT_SUBDIR = 'docutracker-attachments';
+const DOCUTRACKER_ATTACHMENT_DIR = path.join(UPLOAD_DIR, DOCUTRACKER_ATTACHMENT_SUBDIR);
+if (!fs.existsSync(DOCUTRACKER_ATTACHMENT_DIR)) {
+  fs.mkdirSync(DOCUTRACKER_ATTACHMENT_DIR, { recursive: true });
+}
+
+const ALLOWED_DOCUTRACKER_ATTACHMENT_EXT = /\.(pdf|jpg|jpeg|png)$/i;
+const MAX_DOCUTRACKER_ATTACHMENT_SIZE = 10 * 1024 * 1024; // 10MB
+
+const docutrackerAttachmentStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, DOCUTRACKER_ATTACHMENT_DIR),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname) || '.pdf';
+    const safeExt = ALLOWED_DOCUTRACKER_ATTACHMENT_EXT.test(ext) ? ext : '.pdf';
+    cb(null, `dt_${uuidv4()}${safeExt}`);
+  },
+});
+
+const uploadDocutrackerAttachment = multer({
+  storage: docutrackerAttachmentStorage,
+  limits: { fileSize: MAX_DOCUTRACKER_ATTACHMENT_SIZE },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const ok = ['.pdf', '.jpg', '.jpeg', '.png'].includes(ext);
+    if (!ok) cb(new Error('Allowed file types: PDF, JPG, JPEG, PNG'), false);
+    else cb(null, true);
+  },
+});
+
+function uploadDocutrackerAttachmentMw(req, res, next) {
+  uploadDocutrackerAttachment.single('file')(req, res, (err) => {
+    if (err) {
+      if (err.message === 'Allowed file types: PDF, JPG, JPEG, PNG') {
+        return res.status(400).json({ error: err.message });
+      }
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ error: 'File too large. Max 10MB.' });
+      }
+      return next(err);
+    }
+    next();
+  });
+}
+
+async function loadDocumentRowForAccess(documentId) {
+  const r = await pool.query('SELECT * FROM docutracker_documents WHERE id = $1', [documentId]);
+  return r.rows[0] || null;
+}
+
+async function canModifyDocumentAttachment(client, docRow, user) {
+  if (!docRow || !user?.id) return false;
+  if (user.role === 'admin') return true;
+  if (isDraftOrWipDocument(docRow) && sameEntityId(docRow.created_by, user.id)) return true;
+  return canUserPerformDocumentAction(client, { user, document: docRow, action: 'edit' });
+}
+
+async function canDownloadDocumentFile(client, docRow, user) {
+  if (!docRow || !user?.id) return false;
+  if (user.role === 'admin') return true;
+  if (await canUserPerformDocumentAction(client, { user, document: docRow, action: 'download' })) {
+    return true;
+  }
+  return canUserPerformDocumentAction(client, { user, document: docRow, action: 'view' });
+}
 
 // Role/user permission rows cover baseline access and draft-start capability.
 // Runtime workflow actions (approve/forward/reject/return) are enforced by
@@ -60,6 +132,66 @@ const DOCUTRACKER_PUT_WORKFLOW_FIELDS = [
 function putBodyTouchesWorkflowFields(body) {
   if (!body || typeof body !== 'object') return false;
   return DOCUTRACKER_PUT_WORKFLOW_FIELDS.some((k) => body[k] !== undefined);
+}
+
+/** Legacy DBs may have unused NOT NULL flow_id on docutracker_routing_configs. */
+async function routingConfigCacheFlowIdColumn(client) {
+  const r = await client.query(
+    `SELECT data_type
+     FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name = 'docutracker_routing_configs'
+       AND column_name = 'flow_id'`
+  );
+  return r.rows[0]?.data_type ?? null;
+}
+
+function flowIdValueForRoutingConfig(documentType, dataType) {
+  if (dataType === 'uuid') return uuidv4();
+  return String(documentType || '').trim() || 'default';
+}
+
+/**
+ * Upsert latest routing config cache row (schema-tolerant: optional flow_id column).
+ */
+async function upsertLatestRoutingConfigCache(
+  client,
+  { documentType, stepsJson, reviewDeadlineHours }
+) {
+  const flowIdType = await routingConfigCacheFlowIdColumn(client);
+  const cacheHit = await client.query(
+    `SELECT id FROM docutracker_routing_configs WHERE document_type = $1 LIMIT 1`,
+    [documentType]
+  );
+  if (cacheHit.rows.length > 0) {
+    await client.query(
+      `UPDATE docutracker_routing_configs
+       SET steps = $2::jsonb,
+           review_deadline_hours = COALESCE($3, review_deadline_hours),
+           updated_at = now()
+       WHERE document_type = $1`,
+      [documentType, stepsJson, reviewDeadlineHours ?? null]
+    );
+    return;
+  }
+
+  if (flowIdType) {
+    const flowId = flowIdValueForRoutingConfig(documentType, flowIdType);
+    await client.query(
+      `INSERT INTO docutracker_routing_configs
+       (document_type, steps, review_deadline_hours, flow_id)
+       VALUES ($1, $2::jsonb, COALESCE($3, 1), $4)`,
+      [documentType, stepsJson, reviewDeadlineHours ?? null, flowId]
+    );
+    return;
+  }
+
+  await client.query(
+    `INSERT INTO docutracker_routing_configs
+     (document_type, steps, review_deadline_hours)
+     VALUES ($1, $2::jsonb, COALESCE($3, 1))`,
+    [documentType, stepsJson, reviewDeadlineHours ?? null]
+  );
 }
 
 /**
@@ -106,8 +238,6 @@ function normalizeDocStatus(s) {
   };
   return map[x] || x;
 }
-
-const { canUserPerformDocumentAction } = require('../services/docutrackerWorkflowService');
 
 async function assertDocumentReadable(req, documentId) {
   const isAdmin = req.user.role === 'admin';
@@ -370,13 +500,136 @@ router.get('/escalation-configs', protect, async (req, res) => {
     }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const result = await pool.query(
-      `SELECT * FROM docutracker_escalation_configs ${whereSql} ORDER BY document_type, department_id NULLS LAST LIMIT 20`,
+      `SELECT * FROM docutracker_escalation_configs ${whereSql} ORDER BY document_type, department_id NULLS LAST LIMIT 100`,
       params
     );
     res.json(result.rows);
   } catch (err) {
     console.error('[docutracker GET /escalation-configs]', err);
     res.status(500).json({ error: 'Failed to fetch escalation configs' });
+  }
+});
+
+/**
+ * POST /api/docutracker/escalation-configs
+ * Admin-only. Body: document_type, escalation_target_role, escalation_delay_minutes?,
+ * max_escalation_level?, notify_original_sender?, department_id?
+ */
+router.post('/escalation-configs', protect, requireAdmin, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const documentType = String(b.document_type || '').trim();
+    if (!documentType) {
+      return res.status(400).json({ error: 'document_type is required' });
+    }
+    const targetRole = String(b.escalation_target_role || b.escalationTargetRole || '').trim();
+    if (!targetRole) {
+      return res.status(400).json({ error: 'escalation_target_role is required' });
+    }
+    const delayMinutes = Number(b.escalation_delay_minutes ?? b.escalationDelayMinutes ?? 60);
+    const maxLevel = Number(b.max_escalation_level ?? b.maxEscalationLevel ?? 3);
+    if (!Number.isFinite(delayMinutes) || delayMinutes < 1) {
+      return res.status(400).json({ error: 'escalation_delay_minutes must be at least 1' });
+    }
+    if (!Number.isFinite(maxLevel) || maxLevel < 1) {
+      return res.status(400).json({ error: 'max_escalation_level must be at least 1' });
+    }
+    const departmentId = b.department_id ?? b.departmentId ?? null;
+    const notifyOriginal =
+      b.notify_original_sender !== false && b.notifyOriginalSender !== false;
+
+    const result = await pool.query(
+      `INSERT INTO docutracker_escalation_configs
+       (document_type, department_id, escalation_target_role, escalation_delay_minutes,
+        max_escalation_level, notify_original_sender)
+       VALUES ($1, $2::uuid, $3, $4, $5, $6)
+       RETURNING *`,
+      [
+        documentType,
+        departmentId || null,
+        targetRole,
+        Math.round(delayMinutes),
+        Math.round(maxLevel),
+        notifyOriginal,
+      ]
+    );
+    return res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('[docutracker POST /escalation-configs]', err);
+    res.status(500).json({ error: 'Failed to create escalation config' });
+  }
+});
+
+/**
+ * PATCH /api/docutracker/escalation-configs/:id
+ * Admin-only.
+ */
+router.patch('/escalation-configs/:id', protect, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const b = req.body || {};
+    const fields = [];
+    const params = [];
+    let i = 1;
+
+    const setField = (col, val) => {
+      fields.push(`${col} = $${i++}`);
+      params.push(val);
+    };
+
+    if (b.document_type != null || b.documentType != null) {
+      setField('document_type', String(b.document_type ?? b.documentType).trim());
+    }
+    if (b.department_id !== undefined || b.departmentId !== undefined) {
+      const dept = b.department_id ?? b.departmentId;
+      setField('department_id', dept || null);
+    }
+    if (b.escalation_target_role != null || b.escalationTargetRole != null) {
+      setField(
+        'escalation_target_role',
+        String(b.escalation_target_role ?? b.escalationTargetRole).trim()
+      );
+    }
+    if (b.escalation_delay_minutes != null || b.escalationDelayMinutes != null) {
+      const n = Number(b.escalation_delay_minutes ?? b.escalationDelayMinutes);
+      if (!Number.isFinite(n) || n < 1) {
+        return res.status(400).json({ error: 'escalation_delay_minutes must be at least 1' });
+      }
+      setField('escalation_delay_minutes', Math.round(n));
+    }
+    if (b.max_escalation_level != null || b.maxEscalationLevel != null) {
+      const n = Number(b.max_escalation_level ?? b.maxEscalationLevel);
+      if (!Number.isFinite(n) || n < 1) {
+        return res.status(400).json({ error: 'max_escalation_level must be at least 1' });
+      }
+      setField('max_escalation_level', Math.round(n));
+    }
+    if (b.notify_original_sender !== undefined || b.notifyOriginalSender !== undefined) {
+      setField(
+        'notify_original_sender',
+        b.notify_original_sender !== false && b.notifyOriginalSender !== false
+      );
+    }
+
+    if (fields.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    params.push(id);
+    const result = await pool.query(
+      `UPDATE docutracker_escalation_configs
+       SET ${fields.join(', ')}, updated_at = now()
+       WHERE id = $${i}::uuid
+       RETURNING *`,
+      params
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ error: 'Escalation config not found' });
+    }
+    return res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[docutracker PATCH /escalation-configs/:id]', err);
+    res.status(500).json({ error: 'Failed to update escalation config' });
   }
 });
 
@@ -423,9 +676,12 @@ router.get('/documents/:id/history', protect, async (req, res) => {
       return res.status(403).json({ error: 'Forbidden' });
     }
     const result = await pool.query(
-      `SELECT * FROM docutracker_document_history
+      `SELECT h.*,
+              COALESCE(NULLIF(h.actor_name, ''), u.full_name) AS actor_name
+       FROM docutracker_document_history h
+       LEFT JOIN users u ON u.id = h.actor_id
        WHERE document_id = $1
-       ORDER BY created_at DESC`,
+       ORDER BY h.created_at DESC`,
       [id]
     );
     res.json(result.rows);
@@ -455,7 +711,7 @@ router.post('/documents/:id/history', protect, async (req, res) => {
         id,
         b.action || null,
         req.user.id,
-        b.actor_name || null,
+        b.actor_name || req.user.full_name || req.user.name || null,
         b.from_step ?? null,
         b.to_step ?? null,
         b.from_status != null ? normalizeDocStatus(b.from_status) : null,
@@ -579,10 +835,12 @@ router.get('/documents/:id', protect, async (req, res) => {
         [id]
       ),
       pool.query(
-        `SELECT *
-         FROM docutracker_document_history
+        `SELECT h.*,
+                COALESCE(NULLIF(h.actor_name, ''), u.full_name) AS actor_name
+         FROM docutracker_document_history h
+         LEFT JOIN users u ON u.id = h.actor_id
          WHERE document_id = $1
-         ORDER BY created_at ASC`,
+         ORDER BY h.created_at ASC`,
         [id]
       ),
     ]);
@@ -915,6 +1173,28 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
         [document_type]
       );
       const nextVersion = nextVersionRes.rows?.[0]?.next_version ?? 1;
+      const prevVersion = nextVersion > 1 ? nextVersion - 1 : null;
+
+      /** Preserve per-user allowed_actions from the previous workflow version. */
+      const preservedActionsByStepUser = new Map();
+      if (prevVersion != null) {
+        const prevAssigneesRes = await client.query(
+          `SELECT ws.step_order,
+                  wsa.user_id::text AS user_id,
+                  wsa.allowed_actions
+           FROM docutracker_workflow_step_assignees wsa
+           JOIN docutracker_workflow_steps ws ON ws.id = wsa.step_id
+           WHERE ws.document_type = $1
+             AND ws.workflow_version = $2`,
+          [document_type, prevVersion]
+        );
+        for (const row of prevAssigneesRes.rows || []) {
+          const key = `${row.step_order}:${row.user_id}`;
+          if (Array.isArray(row.allowed_actions) && row.allowed_actions.length) {
+            preservedActionsByStepUser.set(key, row.allowed_actions);
+          }
+        }
+      }
 
       const vRes = await client.query(
         `INSERT INTO docutracker_routing_config_versions
@@ -930,18 +1210,11 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
         ]
       );
 
-      // Keep docutracker_routing_configs as a convenient "latest config" cache for other queries,
-      // but routing for documents should use workflow_version (versions table) for safety.
-      await client.query(
-        `INSERT INTO docutracker_routing_configs
-         (document_type, steps, review_deadline_hours)
-         VALUES ($1, $2::jsonb, COALESCE($3, 1))
-         ON CONFLICT (document_type)
-         DO UPDATE SET steps = EXCLUDED.steps,
-                       review_deadline_hours = COALESCE(EXCLUDED.review_deadline_hours, docutracker_routing_configs.review_deadline_hours),
-                       updated_at = now()`,
-        [document_type, JSON.stringify(normalizedSteps), review_deadline_hours ?? null]
-      );
+      await upsertLatestRoutingConfigCache(client, {
+        documentType: document_type,
+        stepsJson: JSON.stringify(normalizedSteps),
+        reviewDeadlineHours: review_deadline_hours ?? null,
+      });
 
       // Write normalized workflow steps + assignees for this new version.
       // This makes step-level "selected persons per department" the durable source of truth.
@@ -983,17 +1256,17 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
           const uid = ids[i];
           const isPrimary = i === 0;
           const backupRank = isPrimary ? null : i; // 1..N for backups
+          const preserveKey = `${s.step_order}:${uid}`;
+          const preserved = preservedActionsByStepUser.get(preserveKey);
+          const allowedActions =
+            Array.isArray(preserved) && preserved.length
+              ? preserved
+              : ['approve', 'forward', 'reject', 'return'];
           await client.query(
             `INSERT INTO docutracker_workflow_step_assignees
              (step_id, user_id, is_primary, backup_rank, is_enabled, allowed_actions)
              VALUES ($1, $2::uuid, $3, $4, true, $5::text[])`,
-            [
-              stepId,
-              uid,
-              isPrimary,
-              backupRank,
-              ['approve', 'forward', 'reject', 'return'],
-            ]
+            [stepId, uid, isPrimary, backupRank, allowedActions]
           );
         }
       }
@@ -1501,7 +1774,9 @@ function mapWorkflowServiceError(err) {
   const code = err?.code;
   if (code === 'FORBIDDEN') return { status: 403, error: err.message || 'Forbidden' };
   if (code === 'NOT_FOUND') return { status: 404, error: err.message || 'Not found' };
-  if (code === 'VALIDATION') return { status: 400, error: err.message || 'Bad request' };
+  if (code === 'VALIDATION') {
+    return { status: 400, error: err.message || 'Request could not be completed.' };
+  }
   return { status: 500, error: err?.message || 'Internal server error' };
 }
 
@@ -1562,6 +1837,122 @@ router.post('/documents/:id/remark', protect, async (req, res) => {
     console.error('[docutracker POST /documents/:id/remark]', err);
     const mapped = mapWorkflowServiceError(err);
     return res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
+/**
+ * POST /api/docutracker/documents/:id/attachment
+ * multipart/form-data: file (PDF, JPG, JPEG, PNG; max 10MB)
+ */
+router.post('/documents/:id/attachment', protect, uploadDocutrackerAttachmentMw, async (req, res) => {
+  const { id } = req.params;
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        error: 'No file uploaded. Allowed: PDF, JPG, JPEG, PNG (max 10MB).',
+      });
+    }
+    const docRow = await loadDocumentRowForAccess(id);
+    if (!docRow) return res.status(404).json({ error: 'Document not found' });
+    if (!(await assertDocumentReadable(req, id))) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    if (!(await canModifyDocumentAttachment(pool, docRow, req.user))) {
+      return res.status(403).json({ error: 'You do not have permission to attach a file.' });
+    }
+
+    const relPath = `${DOCUTRACKER_ATTACHMENT_SUBDIR}/${req.file.filename}`;
+    if (docRow.file_path) {
+      const oldPath = path.join(UPLOAD_DIR, docRow.file_path);
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    }
+
+    const updated = await pool.query(
+      `UPDATE docutracker_documents
+       SET file_path = $1, file_name = $2, updated_at = NOW()
+       WHERE id = $3
+       RETURNING *`,
+      [relPath, req.file.originalname || req.file.filename, id]
+    );
+
+    return res.json(mapDocumentRow(updated.rows[0]));
+  } catch (err) {
+    console.error('[docutracker POST /documents/:id/attachment]', err);
+    res.status(500).json({ error: 'Failed to upload attachment' });
+  }
+});
+
+/**
+ * DELETE /api/docutracker/documents/:id/attachment
+ */
+router.delete('/documents/:id/attachment', protect, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const docRow = await loadDocumentRowForAccess(id);
+    if (!docRow) return res.status(404).json({ error: 'Document not found' });
+    if (!(await assertDocumentReadable(req, id))) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    if (!(await canModifyDocumentAttachment(pool, docRow, req.user))) {
+      return res.status(403).json({ error: 'You do not have permission to remove the file.' });
+    }
+    if (docRow.file_path) {
+      const filePath = path.join(UPLOAD_DIR, docRow.file_path);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
+    const updated = await pool.query(
+      `UPDATE docutracker_documents
+       SET file_path = NULL, file_name = NULL, updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [id]
+    );
+    return res.json(mapDocumentRow(updated.rows[0]));
+  } catch (err) {
+    console.error('[docutracker DELETE /documents/:id/attachment]', err);
+    res.status(500).json({ error: 'Failed to remove attachment' });
+  }
+});
+
+/**
+ * GET /api/docutracker/documents/:id/attachment
+ * Download / inline view (requires view or download permission).
+ */
+router.get('/documents/:id/attachment', protect, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const docRow = await loadDocumentRowForAccess(id);
+    if (!docRow) return res.status(404).json({ error: 'Document not found' });
+    if (!(await canDownloadDocumentFile(pool, docRow, req.user))) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    if (!docRow.file_path) {
+      return res.status(404).json({ error: 'No attachment for this document' });
+    }
+    const filePath = path.join(UPLOAD_DIR, docRow.file_path);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Attachment file not found' });
+    }
+    const filename = (docRow.file_name || 'attachment').replace(/[^\w.\- ()]/g, '_').slice(0, 180);
+    const asDownload = req.query.download === '1' || req.query.download === 'true';
+    res.setHeader(
+      'Content-Disposition',
+      `${asDownload ? 'attachment' : 'inline'}; filename="${filename}"`
+    );
+    const ext = path.extname(filename).toLowerCase();
+    const mime =
+      ext === '.pdf'
+        ? 'application/pdf'
+        : ext === '.png'
+          ? 'image/png'
+          : ext === '.jpg' || ext === '.jpeg'
+            ? 'image/jpeg'
+            : 'application/octet-stream';
+    res.setHeader('Content-Type', mime);
+    return res.sendFile(path.resolve(filePath));
+  } catch (err) {
+    console.error('[docutracker GET /documents/:id/attachment]', err);
+    res.status(500).json({ error: 'Failed to fetch attachment' });
   }
 });
 

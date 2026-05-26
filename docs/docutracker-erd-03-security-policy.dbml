@@ -1,0 +1,58 @@
+// DocuTracker ERD — PART 3: SECURITY & ESCALATION POLICY
+// Roles, permissions, and deadline escalation rules
+
+Project DocuTracker_Part3_Security {
+  database_type: 'PostgreSQL'
+  Note: 'Part 3 of 3 — access control and escalation'
+}
+
+Table users {
+  id uuid [pk, note: 'HRMS shared']
+  full_name varchar [not null]
+  role varchar [not null]
+}
+
+Table departments {
+  id uuid [pk, note: 'HRMS shared']
+  name varchar [unique, not null]
+}
+
+Table docutracker_roles {
+  role_id varchar [pk, note: 'admin | hr | supervisor | employee']
+  created_at timestamptz [not null]
+}
+
+Table docutracker_role_aliases {
+  alias varchar [pk, note: 'hr_staff → hr, dept_head → supervisor']
+  role_id varchar [not null, ref: > docutracker_roles.role_id]
+  created_at timestamptz [not null]
+}
+
+Table docutracker_permissions {
+  id uuid [pk]
+  role_id varchar [ref: > docutracker_roles.role_id, note: 'Use role_id OR user_id']
+  user_id uuid [ref: > users.id]
+  document_type varchar [not null, default: '*']
+  action varchar [not null, note: 'view | submit | approve | forward | reject | return | ...']
+  granted boolean [default: true]
+  created_at timestamptz
+  updated_at timestamptz
+}
+
+Table docutracker_escalation_configs {
+  id uuid [pk]
+  document_type varchar [not null]
+  department_id uuid [ref: > departments.id]
+  escalation_target_role varchar
+  escalation_delay_minutes int [default: 60]
+  max_escalation_level int [default: 3]
+  notify_original_sender boolean [default: true]
+  created_at timestamptz
+  updated_at timestamptz
+}
+
+Table docutracker_document_number_seq {
+  year int [pk]
+  last_value bigint [not null, default: 0]
+  Note: 'Utility — DOC-YYYY-###### sequence (no FK links)'
+}

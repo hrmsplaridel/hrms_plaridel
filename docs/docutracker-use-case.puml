@@ -1,0 +1,122 @@
+@startuml
+title Figure 9. DocuTracker Use Case Diagram
+
+left to right direction
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam packageStyle rectangle
+
+' Spacing for readability
+skinparam nodesep 12
+skinparam ranksep 42
+
+' Safe line routing for use case diagrams
+skinparam linetype polyline
+
+' Make arrowheads and labels easier to see
+skinparam ArrowColor #303030
+skinparam ArrowThickness 1.4
+skinparam ArrowFontColor #111111
+skinparam ArrowFontSize 11
+
+skinparam actor {
+  BorderColor #4f4f4f
+  FontColor #222222
+}
+
+skinparam usecase {
+  BorderColor #4f4f4f
+  FontColor #1f1f1f
+  BackgroundColor #ffffff
+}
+
+skinparam rectangle {
+  BorderColor #666666
+  BackgroundColor #f8fbff
+}
+
+' Left-side actors
+actor "Employee" as EMP
+actor "Administrator" as ADM
+EMP -[hidden]- ADM
+
+rectangle "DocuTracker System" {
+
+  usecase "View Notifications" as UC5
+
+  package "Employee Use Cases" {
+    usecase "Create Draft Document" as UC1
+    usecase "Manage Attachments" as UC2
+    usecase "Submit Document" as UC3
+    usecase "Track Document Status" as UC4
+  }
+
+  package "Administrator Use Cases" {
+    usecase "Configure Workflow Steps" as UC12
+    usecase "Manage Step Assignees" as UC13
+    usecase "Manage Permissions" as UC14
+    usecase "View Overdue / Escalated Documents" as UC15
+    usecase "Admin Override Document State" as UC16
+  }
+
+  package "Reviewer Use Cases" {
+    usecase "Open Assigned Document" as UC6
+    usecase "Add Remarks" as UC11
+    usecase "Approve Document" as UC7
+    usecase "Forward Document" as UC8
+    usecase "Return Document" as UC9
+    usecase "Reject Document" as UC10
+  }
+
+  usecase "Validate Access and Permissions" as UC17
+}
+
+' Right-side actor
+actor "Reviewer" as REV
+
+' =========================================
+' Employee links (left -> system)
+' =========================================
+EMP --> UC5
+EMP --> UC1
+EMP --> UC2
+EMP --> UC3
+EMP --> UC4
+
+' =========================================
+' Admin links (left -> system)
+' =========================================
+ADM --> UC5
+ADM --> UC12
+ADM --> UC13
+ADM --> UC14
+ADM --> UC15
+ADM --> UC16
+
+' =========================================
+' Reviewer links (right -> system, arrow points left)
+' =========================================
+UC5 <-- REV
+UC6 <-- REV
+UC11 <-- REV
+UC7 <-- REV
+UC8 <-- REV
+UC9 <-- REV
+UC10 <-- REV
+
+' =========================================
+' Include / Extend relationships
+' =========================================
+UC2 .> UC1 : <<extend>>
+UC11 .> UC6 : <<extend>>
+
+UC3 .> UC17 : <<include>>
+UC6 .> UC17 : <<include>>
+UC7 .> UC17 : <<include>>
+UC8 .> UC17 : <<include>>
+UC9 .> UC17 : <<include>>
+UC10 .> UC17 : <<include>>
+UC16 .> UC17 : <<include>>
+
+@enduml
+

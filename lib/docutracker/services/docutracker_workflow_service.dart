@@ -30,10 +30,6 @@ class DocuTrackerWorkflowService {
     required String documentId,
     required String remarks,
   }) {
-    return _repo.addDocumentRemark(
-      documentId: documentId,
-      remarks: remarks,
-    );
+    return _repo.addDocumentRemark(documentId: documentId, remarks: remarks);
   }
 }
-

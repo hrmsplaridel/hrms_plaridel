@@ -7,6 +7,9 @@ ALTER TABLE docutracker_documents
 ALTER TABLE docutracker_workflow_steps
   DROP COLUMN IF EXISTS flow_id;
 
+ALTER TABLE docutracker_routing_configs
+  DROP COLUMN IF EXISTS flow_id;
+
 -- Also check docutracker_routing_config_versions just in case
 DO $$
 BEGIN

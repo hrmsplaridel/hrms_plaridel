@@ -1,94 +1,126 @@
 import 'package:flutter/material.dart';
-import '../../landingpage/constants/app_theme.dart';
-import '../theme/docutracker_tokens.dart';
+import '../docutracker_styles.dart';
+import 'docutracker_press_scale.dart';
 
-/// Card strip for workflow actions (approve / forward / return / reject).
-/// Order buttons from positive → neutral → destructive when building [actions].
+/// Distinct workflow transition buttons (Approve / Forward / Return / Reject).
 class DocuTrackerWorkflowActionBar extends StatelessWidget {
   const DocuTrackerWorkflowActionBar({
     super.key,
-    required this.actions,
-    this.title = 'Workflow actions',
-    this.description,
+    required this.canApprove,
+    required this.canForward,
+    required this.canReturn,
+    required this.canReject,
+    required this.onApprove,
+    required this.onForward,
+    required this.onReturn,
+    required this.onReject,
+    this.busy = false,
   });
 
-  final List<Widget> actions;
-  final String title;
-  final String? description;
+  final bool canApprove;
+  final bool canForward;
+  final bool canReturn;
+  final bool canReject;
+  final VoidCallback? onApprove;
+  final VoidCallback? onForward;
+  final VoidCallback? onReturn;
+  final VoidCallback? onReject;
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
+    final actions = <_ActionSpec>[
+      if (canApprove)
+        _ActionSpec(
+          label: 'Approve',
+          icon: Icons.check_circle_rounded,
+          style: DocuTrackerStyles.approveButtonStyle(),
+          onPressed: busy ? null : onApprove,
+        ),
+      if (canForward)
+        _ActionSpec(
+          label: 'Forward',
+          icon: Icons.arrow_forward_rounded,
+          style: DocuTrackerStyles.secondaryButtonStyle(),
+          onPressed: busy ? null : onForward,
+        ),
+      if (canReturn)
+        _ActionSpec(
+          label: 'Return',
+          icon: Icons.undo_rounded,
+          style: DocuTrackerStyles.warningButtonStyle(),
+          onPressed: busy ? null : onReturn,
+        ),
+      if (canReject)
+        _ActionSpec(
+          label: 'Reject',
+          icon: Icons.cancel_rounded,
+          style: DocuTrackerStyles.destructiveButtonStyle(),
+          onPressed: busy ? null : onReject,
+        ),
+    ];
+
     if (actions.isEmpty) return const SizedBox.shrink();
 
-    return Container(
-      decoration: DocuTrackerTokens.cardDecoration(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(18, 16, 18, 0),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFEEF2FF),
-                    borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusSm),
-                  ),
-                  child: const Icon(
-                    Icons.touch_app_rounded,
-                    size: 17,
-                    color: Color(0xFF3B5BDB),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: const TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.2,
-                        ),
-                      ),
-                      if (description != null && description!.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          description!,
-                          style: DocuTrackerTokens.metaStyle(),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final stacked = constraints.maxWidth < 520;
+        if (stacked) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final a in actions) ...[
+                DocuTrackerPressScale(child: _ActionButton(spec: a)),
+                const SizedBox(height: 8),
               ],
-            ),
-          ),
-          const SizedBox(height: 14),
-          Divider(height: 1, color: DocuTrackerTokens.borderSubtle.withValues(alpha: 0.85)),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-            child: Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                for (final w in actions)
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(minHeight: 44),
-                    child: w,
-                  ),
-              ],
-            ),
-          ),
-        ],
+            ],
+          );
+        }
+        return Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            for (final a in actions)
+              SizedBox(
+                width: (constraints.maxWidth - 30) / 2,
+                child: DocuTrackerPressScale(child: _ActionButton(spec: a)),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _ActionSpec {
+  const _ActionSpec({
+    required this.label,
+    required this.icon,
+    required this.style,
+    required this.onPressed,
+  });
+
+  final String label;
+  final IconData icon;
+  final ButtonStyle style;
+  final VoidCallback? onPressed;
+}
+
+class _ActionButton extends StatelessWidget {
+  const _ActionButton({required this.spec});
+
+  final _ActionSpec spec;
+
+  @override
+  Widget build(BuildContext context) {
+    return FilledButton.icon(
+      onPressed: spec.onPressed,
+      icon: Icon(spec.icon, size: 18),
+      label: Text(spec.label),
+      style: spec.style.copyWith(
+        padding: WidgetStateProperty.all(
+          const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+        ),
       ),
     );
   }

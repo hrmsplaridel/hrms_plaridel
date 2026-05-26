@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../landingpage/constants/app_theme.dart';
 import '../theme/docutracker_tokens.dart';
 
 /// Section title row for dashboard / lists: clear hierarchy + optional
@@ -47,7 +46,7 @@ class DocuTrackerSectionHeader extends StatelessWidget {
   final int? count;
 
   /// Tint used for the icon container and count badge.
-  /// Defaults to [AppTheme.primaryNavy].
+  /// Defaults to [DocuTrackerTokens.brand].
   final Color? accentColor;
 
   /// When true, draws a subtle hairline below the header.
@@ -55,7 +54,7 @@ class DocuTrackerSectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = accentColor ?? AppTheme.primaryNavy;
+    final accent = accentColor ?? DocuTrackerTokens.terracotta;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -96,20 +95,14 @@ class DocuTrackerSectionHeader extends StatelessWidget {
                       _CountBadge(count: count!, color: accent),
                     ] else if (subtitle != null && subtitle!.isNotEmpty) ...[
                       const SizedBox(width: 8),
-                      Text(
-                        subtitle!,
-                        style: DocuTrackerTokens.metaStyle(),
-                      ),
+                      Text(subtitle!, style: DocuTrackerTokens.metaStyle()),
                     ],
                   ],
                 ),
               ),
 
               // ── Trailing action ───────────────────────────────────────
-              if (trailing != null) ...[
-                const SizedBox(width: 8),
-                trailing!,
-              ],
+              if (trailing != null) ...[const SizedBox(width: 8), trailing!],
             ],
           ),
 
@@ -145,12 +138,13 @@ class _CountBadge extends StatelessWidget {
         border: Border.all(color: color.withValues(alpha: 0.18)),
       ),
       child: Text(
-        '$count',
+        '$count ${count == 1 ? 'ITEM' : 'ITEMS'}',
         style: TextStyle(
-          fontSize: 11,
+          fontSize: 10,
           fontWeight: FontWeight.w800,
           color: color,
           height: 1.3,
+          letterSpacing: 0.3,
         ),
       ),
     );
