@@ -87,13 +87,6 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
     }
   }
 
-  void _onApplyForJob() {
-    // No specific vacancy selected; go directly to the recruitment form.
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (context) => const ApplicationFlowPage()),
-    );
-  }
-
   void _onApplyForVacancy(JobVacancyItem vacancy) {
     final selected = vacancy.positionKey;
 
@@ -130,52 +123,65 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
             onLoginTap: _onLogin,
           ),
           Expanded(
-            child: SingleChildScrollView(
-              controller: _scrollController,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  HeroSection(key: _heroKey, onRecruitmentTap: _onApplyForJob),
-                  const SizedBox(height: 18),
-                  FutureBuilder<JobVacancyAnnouncement>(
-                    future: _announcementFuture,
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting &&
-                          !snapshot.hasData) {
-                        return const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 48),
-                          child: Center(
-                            child: SizedBox(
-                              width: 28,
-                              height: 28,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.5,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return SingleChildScrollView(
+                  controller: _scrollController,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      HeroSection(
+                        key: _heroKey,
+                        height: constraints.maxHeight,
+                        onViewVacanciesTap: () => _scrollTo(_jobVacanciesKey),
+                        onScrollToVacancies: () => _scrollTo(_jobVacanciesKey),
+                      ),
+                      const SizedBox(height: 18),
+                      FutureBuilder<JobVacancyAnnouncement>(
+                        future: _announcementFuture,
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState ==
+                                  ConnectionState.waiting &&
+                              !snapshot.hasData) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 48),
+                              child: Center(
+                                child: SizedBox(
+                                  width: 28,
+                                  height: 28,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.5,
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                        );
-                      }
-                      final a =
-                          snapshot.data ??
-                          const JobVacancyAnnouncement(hasVacancies: false);
-                      return JobVacanciesSection(
-                        key: _jobVacanciesKey,
-                        hasVacancies: a.hasVacancies,
-                        headline: a.headline,
-                        body: a.body,
-                        vacancies: a.vacancies.isEmpty ? null : a.vacancies,
-                        // Applicants should use the per-vacancy "Apply" buttons instead.
-                        onGoToRecruitmentTap: null,
-                        onApplyForVacancyTap: a.hasVacancies
-                            ? _onApplyForVacancy
-                            : null,
-                      );
-                    },
+                            );
+                          }
+                          final a =
+                              snapshot.data ??
+                              const JobVacancyAnnouncement(
+                                hasVacancies: false,
+                              );
+                          return JobVacanciesSection(
+                            key: _jobVacanciesKey,
+                            hasVacancies: a.hasVacancies,
+                            headline: a.headline,
+                            body: a.body,
+                            vacancies:
+                                a.vacancies.isEmpty ? null : a.vacancies,
+                            // Applicants should use the per-vacancy "Apply" buttons instead.
+                            onGoToRecruitmentTap: null,
+                            onApplyForVacancyTap: a.hasVacancies
+                                ? _onApplyForVacancy
+                                : null,
+                          );
+                        },
+                      ),
+                      ContactSection(key: _contactKey),
+                      const FooterSection(),
+                    ],
                   ),
-                  ContactSection(key: _contactKey),
-                  const FooterSection(),
-                ],
-              ),
+                );
+              },
             ),
           ),
         ],

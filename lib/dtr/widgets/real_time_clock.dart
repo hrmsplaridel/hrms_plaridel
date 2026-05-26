@@ -7,7 +7,10 @@ const String _kClock12hrKey = 'dtr_clock_12hr';
 
 /// Real-time clock for DTR dashboards. Updates every second.
 class RealTimeClock extends StatefulWidget {
-  const RealTimeClock({super.key});
+  const RealTimeClock({super.key, this.accentColor});
+
+  /// Icon and format-toggle accent (defaults to [AppTheme.primaryNavy]).
+  final Color? accentColor;
 
   @override
   State<RealTimeClock> createState() => _RealTimeClockState();
@@ -84,6 +87,7 @@ class _RealTimeClockState extends State<RealTimeClock> {
   @override
   Widget build(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
+    final accent = widget.accentColor ?? AppTheme.primaryNavy;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       decoration: BoxDecoration(
@@ -109,7 +113,7 @@ class _RealTimeClockState extends State<RealTimeClock> {
               Icon(
                 Icons.access_time_rounded,
                 size: 20,
-                color: AppTheme.primaryNavy,
+                color: accent,
               ),
               const SizedBox(width: 8),
               Text(
@@ -150,7 +154,7 @@ class _RealTimeClockState extends State<RealTimeClock> {
                     vertical: 4,
                   ),
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  foregroundColor: AppTheme.primaryNavy,
+                  foregroundColor: accent,
                 ),
                 child: Text(
                   _use12Hour ? '24h' : '12h',

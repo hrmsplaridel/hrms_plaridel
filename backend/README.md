@@ -41,7 +41,7 @@ Create the database (if needed):
 createdb hrms_plaridel
 ```
 
-Run the schema (Schema v2 – effective dates, override times, policy_assignments, etc.):
+Run the schema (Schema v2 — core HR/DTR plus **L&D** and **RSP** tables):
 
 ```bash
 psql -d hrms_plaridel -f scripts/init-schema.sql
@@ -49,14 +49,15 @@ psql -d hrms_plaridel -f scripts/init-schema.sql
 
 (Or use pgAdmin: create DB, then run the SQL file.)
 
-**RSP recruitment (optional):** after `init-schema.sql`, run `scripts/init-schema-rsp.sql`, then apply the **attachment access policy** in PostgreSQL (required so `/api/rsp/storage/view-token` only allows paths tied to `recruitment_applications`). Files are stored under `uploads/rsp-attachments/`.
+**RSP file uploads:** after `init-schema.sql`, apply the **attachment access policy** (required so `/api/rsp/storage/view-token` only allows paths tied to `recruitment_applications`). Files are stored under `uploads/rsp-attachments/`.
 
 ```bash
-psql -d hrms_plaridel -f scripts/init-schema-rsp.sql
 psql -d hrms_plaridel -f scripts/rsp-storage-attachment-policy.sql
 ```
 
-**DocuTracker:** after `init-schema.sql`, run `scripts/init-schema-docutracker.sql` (and `scripts/migrate-docutracker-supabase-parity.sql` if upgrading an older DB).
+**DocuTracker (optional):** after `init-schema.sql`, run `scripts/init-schema-docutracker.sql` (and `scripts/migrate-docutracker-supabase-parity.sql` if upgrading an older DB).
+
+`init-schema-ld.sql` and `init-schema-rsp.sql` are deprecated stubs; new installs only need `init-schema.sql`.
 
 ### 4. Run the server
 

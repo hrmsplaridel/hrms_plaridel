@@ -117,7 +117,7 @@ const rspUpload = multer({
 });
 
 async function ensureRspApplicationsTables() {
-  // Defensive: allow delete to work even if init-schema-rsp.sql wasn't run yet.
+  // Defensive: allow delete to work even if init-schema.sql wasn't run yet.
   await pool.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`);
 
   await pool.query(`

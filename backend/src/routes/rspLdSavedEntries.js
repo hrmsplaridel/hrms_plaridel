@@ -1,6 +1,6 @@
 /**
- * RSP / L&D saved form rows — persisted in PostgreSQL (same tables as init-schema-ld.sql
- * and init-schema-rsp.sql). Flutter calls this API with JWT; all rows are in Postgres only.
+ * RSP / L&D saved form rows — persisted in PostgreSQL (tables from init-schema.sql).
+ * Flutter calls this API with JWT; all rows are in Postgres only.
  *
  * All routes: JWT + admin role.
  */
@@ -33,6 +33,12 @@ const TABLE_COLUMNS = {
     'rating_7',
     'rating_8',
     'rating_9',
+    'functional_areas',
+    'other_functional_area',
+    'performance_3_years',
+    'challenges_coping',
+    'compliance_attendance',
+    'other_relevant_information',
     'updated_at',
   ],
   performance_evaluation_entries: [
@@ -77,6 +83,7 @@ const TABLE_COLUMNS = {
     'experience',
     'training',
     'eligibility',
+    'significant_accomplishments',
     'target_position_1',
     'target_position_2',
     'avg_rating',
@@ -216,7 +223,7 @@ function pgErrorHint(err) {
 }
 
 /**
- * Defensive: same DDL as init-schema-ld.sql / init-schema-rsp.sql so saves work
+ * Defensive: same DDL as init-schema.sql so saves work
  * if the DB was created before those scripts were added.
  */
 let rspLdSavedEntryTablesReady = false;
@@ -245,9 +252,28 @@ async function ensureRspLdSavedEntryTables() {
       rating_7 INT,
       rating_8 INT,
       rating_9 INT,
+      functional_areas JSONB DEFAULT '[]'::JSONB,
+      other_functional_area TEXT,
+      performance_3_years TEXT,
+      challenges_coping TEXT,
+      compliance_attendance TEXT,
+      other_relevant_information TEXT,
       created_at TIMESTAMPTZ DEFAULT now(),
       updated_at TIMESTAMPTZ DEFAULT now()
     );
+  `);
+
+  await pool.query(`
+    ALTER TABLE public.bi_form_entries ADD COLUMN IF NOT EXISTS functional_areas JSONB DEFAULT '[]'::JSONB;
+    ALTER TABLE public.bi_form_entries ADD COLUMN IF NOT EXISTS other_functional_area TEXT;
+    ALTER TABLE public.bi_form_entries ADD COLUMN IF NOT EXISTS performance_3_years TEXT;
+    ALTER TABLE public.bi_form_entries ADD COLUMN IF NOT EXISTS challenges_coping TEXT;
+    ALTER TABLE public.bi_form_entries ADD COLUMN IF NOT EXISTS compliance_attendance TEXT;
+    ALTER TABLE public.bi_form_entries ADD COLUMN IF NOT EXISTS other_relevant_information TEXT;
+  `);
+
+  await pool.query(`
+    ALTER TABLE public.idp_entries ADD COLUMN IF NOT EXISTS significant_accomplishments TEXT;
   `);
 
   await pool.query(`
@@ -422,7 +448,7 @@ router.get('/:table/:id', async (req, res) => {
   } catch (err) {
     if (err.code === '42P01') {
       return res.status(503).json({
-        error: 'Form table not found in database. Run init-schema-ld.sql / init-schema-rsp.sql.',
+        error: 'Form table not found in database. Run init-schema.sql.',
       });
     }
     console.error('[rspLdSavedEntries GET one]', err);
@@ -443,7 +469,7 @@ router.get('/:table', async (req, res) => {
   } catch (err) {
     if (err.code === '42P01') {
       return res.status(503).json({
-        error: 'Form table not found in database. Run init-schema-ld.sql / init-schema-rsp.sql.',
+        error: 'Form table not found in database. Run init-schema.sql.',
       });
     }
     console.error('[rspLdSavedEntries GET list]', err);
@@ -477,7 +503,7 @@ router.post('/:table', async (req, res) => {
   } catch (err) {
     if (err.code === '42P01') {
       return res.status(503).json({
-        error: 'Form table not found in database. Run init-schema-ld.sql / init-schema-rsp.sql.',
+        error: 'Form table not found in database. Run init-schema.sql.',
       });
     }
     console.error('[rspLdSavedEntries POST]', err);
@@ -524,7 +550,7 @@ router.put('/:table/:id', async (req, res) => {
   } catch (err) {
     if (err.code === '42P01') {
       return res.status(503).json({
-        error: 'Form table not found in database. Run init-schema-ld.sql / init-schema-rsp.sql.',
+        error: 'Form table not found in database. Run init-schema.sql.',
       });
     }
     console.error('[rspLdSavedEntries PUT]', err);
@@ -554,7 +580,7 @@ router.delete('/:table/:id', async (req, res) => {
   } catch (err) {
     if (err.code === '42P01') {
       return res.status(503).json({
-        error: 'Form table not found in database. Run init-schema-ld.sql / init-schema-rsp.sql.',
+        error: 'Form table not found in database. Run init-schema.sql.',
       });
     }
     console.error('[rspLdSavedEntries DELETE]', err);

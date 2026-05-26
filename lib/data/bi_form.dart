@@ -1,6 +1,8 @@
 import 'rsp_ld_saved_entries_api.dart';
 
-/// One Background Investigation (BI) form entry: applicant + respondent + 9 competency ratings.
+/// One Background Investigation (BI) form entry: applicant, respondent,
+/// competencies (page 1), functional areas & performance (page 2),
+/// other relevant information (page 3).
 class BiFormEntry {
   const BiFormEntry({
     this.id,
@@ -20,6 +22,12 @@ class BiFormEntry {
     this.rating7,
     this.rating8,
     this.rating9,
+    this.functionalAreas = const [],
+    this.otherFunctionalArea,
+    this.performance3Years,
+    this.challengesCoping,
+    this.complianceAttendance,
+    this.otherRelevantInformation,
     this.createdAt,
     this.updatedAt,
   });
@@ -42,12 +50,35 @@ class BiFormEntry {
   final int? rating7;
   final int? rating8;
   final int? rating9;
+  final List<String> functionalAreas;
+  final String? otherFunctionalArea;
+  final String? performance3Years;
+  final String? challengesCoping;
+  final String? complianceAttendance;
+  final String? otherRelevantInformation;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
   static const String tableName = 'bi_form_entries';
 
-  static const List<String> relationshipOptions = ['supervisor', 'peer', 'subordinate'];
+  static const List<String> relationshipOptions = [
+    'supervisor',
+    'peer',
+    'subordinate',
+  ];
+
+  /// Functional area checkboxes (BI form page 2).
+  static const List<String> functionalAreaOptions = [
+    'Accounting',
+    'Audit',
+    'Corporate Communications',
+    'Information Technology',
+    'Strategic and Corporate Planning',
+    'Policy Interpretation and Implementation',
+    'Program Management',
+    'Records Management',
+    'Supplies and Property Management',
+  ];
 
   /// Core competency descriptions (9 areas) for the BI form.
   static const List<String> competencyDescriptions = [
@@ -63,6 +94,13 @@ class BiFormEntry {
   ];
 
   factory BiFormEntry.fromJson(Map<String, dynamic> json) {
+    List<String> areas = [];
+    final rawAreas = json['functional_areas'];
+    if (rawAreas is List) {
+      for (final e in rawAreas) {
+        if (e != null) areas.add(e.toString());
+      }
+    }
     return BiFormEntry(
       id: json['id']?.toString(),
       applicantName: json['applicant_name'] as String? ?? '',
@@ -71,7 +109,8 @@ class BiFormEntry {
       positionAppliedFor: json['position_applied_for']?.toString(),
       respondentName: json['respondent_name'] as String? ?? '',
       respondentPosition: json['respondent_position']?.toString(),
-      respondentRelationship: json['respondent_relationship'] as String? ?? 'supervisor',
+      respondentRelationship:
+          json['respondent_relationship'] as String? ?? 'supervisor',
       rating1: _parseRating(json['rating_1']),
       rating2: _parseRating(json['rating_2']),
       rating3: _parseRating(json['rating_3']),
@@ -81,8 +120,18 @@ class BiFormEntry {
       rating7: _parseRating(json['rating_7']),
       rating8: _parseRating(json['rating_8']),
       rating9: _parseRating(json['rating_9']),
-      createdAt: json['created_at'] != null ? DateTime.tryParse(json['created_at'] as String) : null,
-      updatedAt: json['updated_at'] != null ? DateTime.tryParse(json['updated_at'] as String) : null,
+      functionalAreas: areas,
+      otherFunctionalArea: json['other_functional_area']?.toString(),
+      performance3Years: json['performance_3_years']?.toString(),
+      challengesCoping: json['challenges_coping']?.toString(),
+      complianceAttendance: json['compliance_attendance']?.toString(),
+      otherRelevantInformation: json['other_relevant_information']?.toString(),
+      createdAt: json['created_at'] != null
+          ? DateTime.tryParse(json['created_at'] as String)
+          : null,
+      updatedAt: json['updated_at'] != null
+          ? DateTime.tryParse(json['updated_at'] as String)
+          : null,
     );
   }
 
@@ -112,6 +161,12 @@ class BiFormEntry {
       'rating_7': rating7,
       'rating_8': rating8,
       'rating_9': rating9,
+      'functional_areas': functionalAreas,
+      'other_functional_area': otherFunctionalArea,
+      'performance_3_years': performance3Years,
+      'challenges_coping': challengesCoping,
+      'compliance_attendance': complianceAttendance,
+      'other_relevant_information': otherRelevantInformation,
       'updated_at': DateTime.now().toIso8601String(),
     };
   }
@@ -138,7 +193,11 @@ class BiFormRepo {
 
   Future<void> update(BiFormEntry entry) async {
     if (entry.id == null) return;
-    await RspLdSavedEntriesApi.updateRow(BiFormEntry.tableName, entry.id!, entry.toJson());
+    await RspLdSavedEntriesApi.updateRow(
+      BiFormEntry.tableName,
+      entry.id!,
+      entry.toJson(),
+    );
   }
 
   Future<void> delete(String id) async {

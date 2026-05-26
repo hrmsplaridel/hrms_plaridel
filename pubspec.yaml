@@ -79,6 +79,8 @@ flutter:
   assets:
     - assets/images/
     - assets/images/hrmslogo.png
+    - assets/forms/a4_letter.pdf
+    - assets/forms/long_letter.pdf
     - assets/fonts/
     - assets/data/ph_psgc/index.json
     - assets/data/ph_psgc/provinces/

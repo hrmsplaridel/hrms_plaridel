@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 
+import 'client_device_header.dart';
 import 'config.dart';
 import 'token_storage.dart';
 
@@ -30,6 +31,9 @@ class ApiClient {
         if (token != null && token.isNotEmpty) {
           options.headers['Authorization'] = 'Bearer $token';
         }
+        try {
+          options.headers['X-HRMS-Device'] = await ClientDeviceHeader.build();
+        } catch (_) {}
         return handler.next(options);
       },
       onError: (error, handler) async {
@@ -96,11 +100,16 @@ class ApiClient {
     if (refresh == null || refresh.isEmpty) return false;
 
     try {
+      final deviceHeader = await ClientDeviceHeader.build();
       final plain = Dio(BaseOptions(
         baseUrl: ApiConfig.baseUrl,
         connectTimeout: const Duration(seconds: 15),
         receiveTimeout: const Duration(seconds: 15),
-        headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-HRMS-Device': deviceHeader,
+        },
       ));
 
       final res = await plain.post<Map<String, dynamic>>(

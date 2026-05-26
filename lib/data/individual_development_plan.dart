@@ -44,6 +44,7 @@ class IdpEntry {
     this.experience,
     this.training,
     this.eligibility,
+    this.significantAccomplishments,
     this.targetPosition1,
     this.targetPosition2,
     this.avgRating,
@@ -73,6 +74,7 @@ class IdpEntry {
   final String? experience;
   final String? training;
   final String? eligibility;
+  final String? significantAccomplishments;
   final String? targetPosition1;
   final String? targetPosition2;
   final String? avgRating;
@@ -102,16 +104,29 @@ class IdpEntry {
 
   static const List<String> competenceRatingOptions = [
     'basic',
-    'intermediate',
+    'immediate',
     'advanced',
     'superior',
   ];
+
+  /// Default signatory titles on the printed IDP form.
+  static const String defaultNotedByName = 'MARCELO B. CAÑARES';
+  static const String defaultNotedByTitle = 'HRMDO';
+  static const String defaultApprovedByName = 'HON. GADWIN E. HANDUMON';
+  static const String defaultApprovedByTitle = 'Municipal Mayor';
 
   static const List<String> successionPriorityOptions = [
     'priority',
     'priority_2',
     'priority_3',
   ];
+
+  static String? _parseCompetenceRating(dynamic v) {
+    final s = v?.toString();
+    if (s == null || s.isEmpty) return null;
+    if (s == 'intermediate') return 'immediate';
+    return s;
+  }
 
   factory IdpEntry.fromJson(Map<String, dynamic> json) {
     List<IdpPlanRow> rows = [];
@@ -134,6 +149,7 @@ class IdpEntry {
       experience: json['experience']?.toString(),
       training: json['training']?.toString(),
       eligibility: json['eligibility']?.toString(),
+      significantAccomplishments: json['significant_accomplishments']?.toString(),
       targetPosition1: json['target_position_1']?.toString(),
       targetPosition2: json['target_position_2']?.toString(),
       avgRating: json['avg_rating']?.toString(),
@@ -141,7 +157,7 @@ class IdpEntry {
       ipcr: json['ipcr']?.toString(),
       performanceRating: json['performance_rating']?.toString(),
       competencyDescription: json['competency_description']?.toString(),
-      competenceRating: json['competence_rating']?.toString(),
+      competenceRating: _parseCompetenceRating(json['competence_rating']),
       successionPriorityScore: json['succession_priority_score']?.toString(),
       successionPriorityRating: json['succession_priority_rating']?.toString(),
       developmentPlanRows: rows,
@@ -166,6 +182,7 @@ class IdpEntry {
       'experience': experience,
       'training': training,
       'eligibility': eligibility,
+      'significant_accomplishments': significantAccomplishments,
       'target_position_1': targetPosition1,
       'target_position_2': targetPosition2,
       'avg_rating': avgRating,

@@ -6,7 +6,7 @@
 -- This function mirrors the intended rule: only paths tied to a real application
 -- may receive a signed URL (admin-only API still required by Express).
 --
--- Run after init-schema-rsp.sql, same database as DATABASE_URL:
+-- Run after init-schema.sql (RSP tables), same database as DATABASE_URL:
 --   psql "$DATABASE_URL" -f scripts/rsp-storage-attachment-policy.sql
 -- =============================================================================
 

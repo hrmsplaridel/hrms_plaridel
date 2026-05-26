@@ -9,6 +9,7 @@ import '../../../data/recruitment_application.dart';
 import '../../../data/action_brainstorming_coaching.dart';
 import '../../../data/training_need_analysis.dart';
 import '../../../data/training_daily_report.dart';
+import '../../ld/widgets/training_daily_report_date_filter.dart';
 import '../../../landingpage/constants/app_theme.dart';
 import '../../../utils/form_pdf.dart';
 import '../../../widgets/read_only_saved_entry_dialog.dart';
@@ -412,6 +413,7 @@ class _AdminDashboardState extends State<AdminDashboard>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    unawaited(FormPdf.warmupPrintAssets());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<NotificationProvider>().refreshUnreadCount();
@@ -2877,20 +2879,18 @@ class _TrainingNeedAnalysisSectionState
 
   Future<void> _printTna(TrainingNeedAnalysisEntry entry) async {
     try {
-      final doc = await FormPdf.buildTrainingNeedAnalysisPdf(entry);
-      await FormPdf.printDocument(doc, name: 'Training_Need_Analysis.pdf');
+      await FormPdf.printForm(
+        context: context,
+        buildDocument: () => FormPdf.buildTrainingNeedAnalysisPdf(entry),
+        filename: 'Training_Need_Analysis.pdf',
+        format: FormPdf.pageLetterLandscape,
+      );
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
-      }
-    }
+    } catch (_) {}
   }
 
   Future<void> _downloadTna(TrainingNeedAnalysisEntry entry) async {
@@ -3016,6 +3016,24 @@ class _LdTrainingReportsSectionState extends State<_LdTrainingReportsSection> {
   final _searchController = TextEditingController();
   bool _loading = false;
   List<TrainingDailyReport> _reports = [];
+  DateTime? _filterByDate;
+  final Set<DateTime> _reportDatesCache = {};
+  final Map<DateTime, int> _countByDay = {};
+
+  List<DateTime> get _datesWithReports {
+    final list = _reportDatesCache.toList()
+      ..sort((a, b) => b.compareTo(a));
+    if (_filterByDate != null &&
+        !list.any((d) => d == _filterByDate)) {
+      list.insert(0, _filterByDate!);
+    }
+    return list;
+  }
+
+  void _onFilterDateChanged(DateTime? day) {
+    setState(() => _filterByDate = day);
+    _load();
+  }
 
   @override
   void initState() {
@@ -3026,15 +3044,29 @@ class _LdTrainingReportsSectionState extends State<_LdTrainingReportsSection> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
+      final dateQ = _filterByDate != null
+          ? TrainingDailyReportDateUtils.formatQuery(_filterByDate!)
+          : null;
       final list = await TrainingDailyReportRepo.instance.listAllReports(
         search: _searchController.text.trim().isEmpty
             ? null
             : _searchController.text.trim(),
+        fromDate: dateQ,
+        toDate: dateQ,
       );
       if (!mounted) return;
       setState(() {
         _reports = list;
         _loading = false;
+        if (_filterByDate == null) {
+          _reportDatesCache.clear();
+          _countByDay.clear();
+          for (final r in list) {
+            final d = TrainingDailyReportDateUtils.toLocalDate(r.submittedAt);
+            _reportDatesCache.add(d);
+            _countByDay[d] = (_countByDay[d] ?? 0) + 1;
+          }
+        }
       });
     } catch (_) {
       if (!mounted) return;
@@ -3265,6 +3297,13 @@ class _LdTrainingReportsSectionState extends State<_LdTrainingReportsSection> {
                   ],
                 ),
         ),
+        const SizedBox(height: 14),
+        TrainingDailyReportDateFilterBar(
+          filterByDate: _filterByDate,
+          datesWithReports: _datesWithReports,
+          onDateChanged: _onFilterDateChanged,
+          countForDay: (day) => _countByDay[day] ?? 0,
+        ),
         const SizedBox(height: 20),
         if (_loading)
           const Padding(
@@ -3285,26 +3324,32 @@ class _LdTrainingReportsSectionState extends State<_LdTrainingReportsSection> {
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
-                      Icons.assignment_outlined,
+                      _filterByDate != null
+                          ? Icons.event_busy_rounded
+                          : Icons.assignment_outlined,
                       size: 40,
                       color: AppTheme.primaryNavy.withValues(alpha: 0.75),
                     ),
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    'No reports match your search',
+                    _filterByDate != null
+                        ? 'No reports on ${TrainingDailyReportDateUtils.formatDisplay(_filterByDate!)}'
+                        : 'No reports match your search',
                     style: TextStyle(
-                      color: AppTheme.textPrimary,
+                      color: AppTheme.dashTextPrimaryOf(context),
                       fontSize: 16,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Try another keyword or refresh after employees submit.',
+                    _filterByDate != null
+                        ? 'Pick another date from the calendar or tap Show all.'
+                        : 'Try another keyword or refresh after employees submit.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                       fontSize: 14,
                       height: 1.4,
                     ),
@@ -3362,6 +3407,8 @@ class _LdReportCard extends StatelessWidget {
     final hairline = AppTheme.dashHairlineOf(context);
     final muted = AppTheme.dashMutedSurfaceOf(context);
     final panel = AppTheme.dashPanelOf(context);
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
     final name = r.employeeName ?? 'Unknown employee';
     final parts = name.trim().split(RegExp(r'\s+'));
     var initials = '';
@@ -3429,8 +3476,10 @@ class _LdReportCard extends StatelessWidget {
                   alignment: Alignment.center,
                   child: Text(
                     initials,
-                    style: const TextStyle(
-                      color: AppTheme.primaryNavy,
+                    style: TextStyle(
+                      color: AppTheme.dashIsDark(context)
+                          ? AppTheme.primaryNavyLight
+                          : AppTheme.primaryNavy,
                       fontWeight: FontWeight.w800,
                       fontSize: 15,
                     ),
@@ -3451,7 +3500,7 @@ class _LdReportCard extends StatelessWidget {
                                 Text(
                                   name,
                                   style: TextStyle(
-                                    color: AppTheme.dashTextPrimaryOf(context),
+                                    color: primary,
                                     fontWeight: FontWeight.w800,
                                     fontSize: 17,
                                     letterSpacing: -0.2,
@@ -3464,17 +3513,14 @@ class _LdReportCard extends StatelessWidget {
                                     Icon(
                                       Icons.topic_rounded,
                                       size: 15,
-                                      color: AppTheme.textSecondary.withValues(
-                                        alpha: 0.75,
-                                      ),
+                                      color: secondary.withValues(alpha: 0.85),
                                     ),
                                     const SizedBox(width: 6),
                                     Expanded(
                                       child: Text(
                                         r.title,
                                         style: TextStyle(
-                                          color: AppTheme.textSecondary
-                                              .withValues(alpha: 0.95),
+                                          color: secondary,
                                           fontSize: 13.5,
                                           fontWeight: FontWeight.w600,
                                           height: 1.3,
@@ -3508,8 +3554,8 @@ class _LdReportCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: desc.isEmpty
-                                ? AppTheme.textSecondary.withValues(alpha: 0.65)
-                                : AppTheme.textPrimary.withValues(alpha: 0.88),
+                                ? secondary.withValues(alpha: 0.75)
+                                : primary,
                             fontSize: 13.5,
                             height: 1.45,
                             fontStyle: desc.isEmpty
@@ -3524,17 +3570,13 @@ class _LdReportCard extends StatelessWidget {
                           Icon(
                             Icons.schedule_rounded,
                             size: 15,
-                            color: AppTheme.textSecondary.withValues(
-                              alpha: 0.7,
-                            ),
+                            color: secondary.withValues(alpha: 0.85),
                           ),
                           const SizedBox(width: 6),
                           Text(
                             'Submitted $submitted',
                             style: TextStyle(
-                              color: AppTheme.textSecondary.withValues(
-                                alpha: 0.88,
-                              ),
+                              color: secondary,
                               fontSize: 12,
                               fontWeight: FontWeight.w500,
                               fontFeatures: const [
@@ -3679,23 +3721,27 @@ class _LdStatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
     Color color;
     switch (status.toLowerCase()) {
       case 'seen':
         color = const Color(0xFF0EA5E9);
         break;
       case 'reviewed':
-        color = Colors.indigo;
+        color = dark ? const Color(0xFF9FA8DA) : Colors.indigo;
         break;
       case 'approved':
-        color = Colors.green;
+        color = dark ? const Color(0xFF81C784) : Colors.green;
         break;
       case 'needs_revision':
       case 'needs-revision':
-        color = Colors.orange;
+        color = dark ? const Color(0xFFFFB74D) : Colors.orange;
+        break;
+      case 'submitted':
+        color = dark ? const Color(0xFFB0BEC5) : Colors.blueGrey;
         break;
       default:
-        color = Colors.grey;
+        color = dark ? const Color(0xFFB0BEC5) : Colors.grey.shade700;
     }
     final label = status.isEmpty
         ? '—'
@@ -3704,8 +3750,8 @@ class _LdStatusChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
-        color: color.withValues(alpha: 0.14),
-        border: Border.all(color: color.withValues(alpha: 0.28)),
+        color: color.withValues(alpha: dark ? 0.22 : 0.14),
+        border: Border.all(color: color.withValues(alpha: dark ? 0.45 : 0.28)),
         boxShadow: [
           BoxShadow(
             color: color.withValues(alpha: 0.1),
@@ -4246,23 +4292,18 @@ class _ActionBrainstormingSectionState
 
   Future<void> _printAb(ActionBrainstormingEntry entry) async {
     try {
-      final doc = await FormPdf.buildActionBrainstormingCoachingPdf(entry);
-      await FormPdf.printDocument(
-        doc,
-        name: 'Action_Brainstorming_Coaching.pdf',
+      await FormPdf.printForm(
+        context: context,
+        buildDocument: () => FormPdf.buildActionBrainstormingCoachingPdf(entry),
+        filename: 'Action_Brainstorming_Coaching.pdf',
+        format: FormPdf.pageLetterLandscape,
       );
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
-      }
-    }
+    } catch (_) {}
   }
 
   Future<void> _downloadAb(ActionBrainstormingEntry entry) async {
