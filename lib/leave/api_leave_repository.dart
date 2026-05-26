@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 
 import '../api/client.dart';
@@ -29,6 +31,20 @@ class ApiLeaveRepository implements LeaveRepository {
     return json;
   }
 
+  static Map<String, dynamic> _toMultipartFields(LeaveRequest request) {
+    final payload = _toApiPayload(request);
+    final fields = <String, dynamic>{};
+    payload.forEach((key, value) {
+      if (value == null) return;
+      if (value is Map || value is List) {
+        fields[key] = jsonEncode(value);
+      } else {
+        fields[key] = value.toString();
+      }
+    });
+    return fields;
+  }
+
   @override
   Future<LeaveRequest> saveDraft(LeaveRequest request) async {
     try {
@@ -50,6 +66,28 @@ class ApiLeaveRepository implements LeaveRepository {
       final res = await ApiClient.instance.post<Map<String, dynamic>>(
         '/api/leave/submit',
         data: _toApiPayload(request),
+      );
+      final data = res.data;
+      if (data == null) throw Exception('No data returned');
+      return LeaveRequest.fromJson(data);
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
+  Future<LeaveRequest> submitRequestWithAttachment({
+    required LeaveRequest request,
+    required List<int> fileBytes,
+    required String fileName,
+  }) async {
+    try {
+      final res = await ApiClient.instance.uploadBytes<Map<String, dynamic>>(
+        '/api/leave/submit-with-attachment',
+        bytes: fileBytes,
+        fileName: fileName,
+        fieldName: 'file',
+        extraFields: _toMultipartFields(request),
       );
       final data = res.data;
       if (data == null) throw Exception('No data returned');

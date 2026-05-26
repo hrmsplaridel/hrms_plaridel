@@ -47,6 +47,21 @@ class MockLeaveRepository implements LeaveRepository {
   }
 
   @override
+  Future<LeaveRequest> submitRequestWithAttachment({
+    required LeaveRequest request,
+    required List<int> fileBytes,
+    required String fileName,
+  }) {
+    return submitRequest(
+      request.copyWith(
+        attachmentName: fileName,
+        attachmentPath:
+            'mock://${LeaveRequest.storageBucket}/pending/$fileName',
+      ),
+    );
+  }
+
+  @override
   Future<LeaveRequest> updateRequest(LeaveRequest request) async {
     final old = _getRequestByIdInternal(request.id);
     final saved = request.copyWith(updatedAt: DateTime.now());

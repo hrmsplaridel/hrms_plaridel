@@ -299,6 +299,7 @@ CREATE TABLE IF NOT EXISTS leave_types (
   requires_attachment BOOLEAN NOT NULL DEFAULT false,
   requires_attachment_when_over_days NUMERIC,
   max_days NUMERIC,
+  minimum_advance_days INTEGER,
   affects_dtr_normally BOOLEAN NOT NULL DEFAULT true,
   balance_ledger_type TEXT NOT NULL DEFAULT 'others',
   is_system BOOLEAN NOT NULL DEFAULT false,
@@ -357,6 +358,11 @@ SET display_name = COALESCE(NULLIF(display_name, ''), description, name),
       WHEN name = 'rehabilitationPrivilege' THEN 180
       WHEN name = 'specialLeaveBenefitsForWomen' THEN 60
       WHEN name = 'specialEmergencyCalamityLeave' THEN 5
+      ELSE NULL
+    END,
+    minimum_advance_days = CASE
+      WHEN name IN ('vacationLeave', 'soloParentLeave', 'specialLeaveBenefitsForWomen') THEN 5
+      WHEN name = 'specialPrivilegeLeave' THEN 7
       ELSE NULL
     END,
     affects_dtr_normally = true,

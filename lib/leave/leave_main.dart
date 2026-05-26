@@ -250,6 +250,16 @@ class _LeaveMainState extends State<LeaveMain> {
         final saved = await provider.submitRequest(request);
         return saved != null;
       },
+      onSubmitRequestWithAttachment:
+          (LeaveRequest request, List<int> fileBytes, String fileName) async {
+            final provider = context.read<LeaveProvider>();
+            final saved = await provider.submitRequestWithAttachment(
+              request: request,
+              fileBytes: fileBytes,
+              fileName: fileName,
+            );
+            return saved != null;
+          },
     );
   }
 }

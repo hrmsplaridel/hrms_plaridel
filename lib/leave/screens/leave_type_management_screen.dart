@@ -20,6 +20,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   final _displayNameController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _maxDaysController = TextEditingController();
+  final _minimumAdvanceDaysController = TextEditingController();
   final _attachmentOverDaysController = TextEditingController();
   final _searchController = TextEditingController();
 
@@ -74,6 +75,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     _displayNameController.dispose();
     _descriptionController.dispose();
     _maxDaysController.dispose();
+    _minimumAdvanceDaysController.dispose();
     _attachmentOverDaysController.dispose();
     _searchController.dispose();
     super.dispose();
@@ -120,6 +122,8 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     _displayNameController.text = item.displayName;
     _descriptionController.text = item.description ?? '';
     _maxDaysController.text = item.maxDays?.toString() ?? '';
+    _minimumAdvanceDaysController.text =
+        item.minimumAdvanceDays?.toString() ?? '';
     _isActive = item.isActive;
     _employeeCanFile = item.employeeCanFile;
     _adminOnly = item.adminOnly;
@@ -144,6 +148,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       _displayNameController.clear();
       _descriptionController.clear();
       _maxDaysController.clear();
+      _minimumAdvanceDaysController.clear();
       _attachmentOverDaysController.clear();
       _isActive = true;
       _employeeCanFile = true;
@@ -286,6 +291,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
           ? _numberOrNull(_attachmentOverDaysController.text)
           : null,
       'max_days': _numberOrNull(_maxDaysController.text),
+      'minimum_advance_days': _intOrNull(_minimumAdvanceDaysController.text),
       'affects_dtr_normally': _affectsDtrNormally,
       'balance_ledger_type': _balanceLedgerType,
       'sex_eligibility': _sexEligibility,
@@ -647,6 +653,19 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     children: [
                       Expanded(
                         child: TextFormField(
+                          controller: _minimumAdvanceDaysController,
+                          readOnly: _saving || systemLocked,
+                          style: AppTheme.dashFieldTextStyle(context),
+                          keyboardType: TextInputType.number,
+                          decoration: _inputDecoration(
+                            'Minimum advance days',
+                            helperText: 'Blank means no advance rule',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextFormField(
                           controller: _maxDaysController,
                           readOnly: _saving || systemLocked,
                           style: AppTheme.dashFieldTextStyle(context),
@@ -659,27 +678,23 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextFormField(
-                          controller: _attachmentOverDaysController,
-                          enabled:
-                              systemLocked || (!_saving && _requiresAttachment),
-                          readOnly:
-                              _saving || systemLocked || !_requiresAttachment,
-                          style: AppTheme.dashFieldTextStyle(context),
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          decoration: _inputDecoration(
-                            'Attachment required at days',
-                            helperText: _requiresAttachment
-                                ? 'Optional threshold'
-                                : 'Enable Requires attachment first',
-                          ),
-                        ),
-                      ),
                     ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _attachmentOverDaysController,
+                    enabled: systemLocked || (!_saving && _requiresAttachment),
+                    readOnly: _saving || systemLocked || !_requiresAttachment,
+                    style: AppTheme.dashFieldTextStyle(context),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: _inputDecoration(
+                      'Attachment required at days',
+                      helperText: _requiresAttachment
+                          ? 'Optional threshold'
+                          : 'Enable Requires attachment first',
+                    ),
                   ),
                   const SizedBox(height: 24),
                   _sectionTitle(Icons.sync_alt_rounded, 'Balance And DTR'),
@@ -919,6 +934,14 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     final text = value.trim();
     if (text.isEmpty) return null;
     return double.tryParse(text);
+  }
+
+  int? _intOrNull(String value) {
+    final text = value.trim();
+    if (text.isEmpty) return null;
+    final parsed = int.tryParse(text);
+    if (parsed == null || parsed < 0) return null;
+    return parsed;
   }
 
   String _messageFromDio(DioException e) {

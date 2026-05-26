@@ -301,6 +301,18 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
               );
         return saved != null;
       },
+      onSubmitRequestWithAttachment: (updated, fileBytes, fileName) async {
+        final saved = updated.id == null || updated.id!.isEmpty
+            ? await provider.submitRequestWithAttachment(
+                request: updated,
+                fileBytes: fileBytes,
+                fileName: fileName,
+              )
+            : await provider.updateRequest(
+                updated.copyWith(status: LeaveRequestStatus.pending),
+              );
+        return saved != null;
+      },
     );
   }
 

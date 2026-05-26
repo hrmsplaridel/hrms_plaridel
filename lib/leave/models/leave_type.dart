@@ -154,6 +154,9 @@ SickLeaveNature? sickLeaveNatureFromString(String? s) {
 /// Detail options for maternity leave delivery classification.
 enum MaternityDeliveryType { normalDelivery, caesareanSection }
 
+const int kMaternityNormalDeliveryWorkingDays = 105;
+const int kMaternityCaesareanSectionWorkingDays = 115;
+
 extension MaternityDeliveryTypeExtension on MaternityDeliveryType {
   String get value => name;
 
@@ -161,6 +164,22 @@ extension MaternityDeliveryTypeExtension on MaternityDeliveryType {
     MaternityDeliveryType.normalDelivery => 'Normal Delivery (Non-CS)',
     MaternityDeliveryType.caesareanSection => 'Caesarean Section (CS)',
   };
+}
+
+int maternityLeaveMaxWorkingDays(MaternityDeliveryType deliveryType) =>
+    deliveryType == MaternityDeliveryType.caesareanSection
+    ? kMaternityCaesareanSectionWorkingDays
+    : kMaternityNormalDeliveryWorkingDays;
+
+int? maxWorkingDaysForLeaveDetails(
+  LeaveType leaveType, {
+  MaternityDeliveryType? maternityDeliveryType,
+}) {
+  if (leaveType == LeaveType.maternityLeave) {
+    if (maternityDeliveryType == null) return null;
+    return maternityLeaveMaxWorkingDays(maternityDeliveryType);
+  }
+  return leaveType.maxDays;
 }
 
 MaternityDeliveryType? maternityDeliveryTypeFromString(String? s) {

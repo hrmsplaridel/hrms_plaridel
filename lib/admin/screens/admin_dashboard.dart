@@ -37,7 +37,6 @@ import '../../../dtr/manage/manage_holiday.dart';
 import '../../../dtr/manage/manage_attendance_policy.dart';
 import '../../../dtr/manage/manage_biometric_devices.dart';
 import '../../../docutracker/docutracker_main.dart';
-import '../../../docutracker/docutracker_notification_sheet.dart';
 import '../../../docutracker/docutracker_provider.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
@@ -403,10 +402,8 @@ class _AdminDashboardState extends State<AdminDashboard>
   static const _settingsPanelKey = PageStorageKey<String>('admin_settings');
   final GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
 
-  Widget _settingsPanel() => DashboardProfilePanel(
-        key: _settingsPanelKey,
-        onBack: _closeMyProfile,
-      );
+  Widget _settingsPanel() =>
+      DashboardProfilePanel(key: _settingsPanelKey, onBack: _closeMyProfile);
   Timer? _notificationPollTimer;
 
   @override
@@ -496,7 +493,9 @@ class _AdminDashboardState extends State<AdminDashboard>
     if (menu == AdminMenu.docutracker) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        context.read<DocuTrackerProvider>().loadNotifications(forceRefresh: true);
+        context.read<DocuTrackerProvider>().loadNotifications(
+          forceRefresh: true,
+        );
       });
     }
   }
@@ -568,6 +567,16 @@ class _AdminDashboardState extends State<AdminDashboard>
         final saved = await provider.submitRequest(request);
         return saved != null;
       },
+      onSubmitRequestWithAttachment:
+          (LeaveRequest request, List<int> fileBytes, String fileName) async {
+            final provider = context.read<LeaveProvider>();
+            final saved = await provider.submitRequestWithAttachment(
+              request: request,
+              fileBytes: fileBytes,
+              fileName: fileName,
+            );
+            return saved != null;
+          },
     );
   }
 

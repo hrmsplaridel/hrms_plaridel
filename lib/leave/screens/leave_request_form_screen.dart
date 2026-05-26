@@ -14,6 +14,12 @@ import '../models/leave_type_definition.dart';
 import '../widgets/leave_guidance_widgets.dart';
 
 typedef LeaveRequestAction = Future<bool> Function(LeaveRequest request);
+typedef LeaveRequestAttachmentAction =
+    Future<bool> Function(
+      LeaveRequest request,
+      List<int> fileBytes,
+      String fileName,
+    );
 
 /// Modern, digital-first employee leave request form.
 class LeaveRequestFormScreen extends StatefulWidget {
@@ -22,11 +28,13 @@ class LeaveRequestFormScreen extends StatefulWidget {
     this.initialRequest,
     this.onSaveDraft,
     this.onSubmitRequest,
+    this.onSubmitRequestWithAttachment,
   });
 
   final LeaveRequest? initialRequest;
   final LeaveRequestAction? onSaveDraft;
   final LeaveRequestAction? onSubmitRequest;
+  final LeaveRequestAttachmentAction? onSubmitRequestWithAttachment;
 
   @override
   State<LeaveRequestFormScreen> createState() => _LeaveRequestFormScreenState();
@@ -34,6 +42,8 @@ class LeaveRequestFormScreen extends StatefulWidget {
 
 class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _messengerKey = GlobalKey<ScaffoldMessengerState>();
+  static const int _maxAttachmentBytes = 10 * 1024 * 1024;
 
   late LeaveType _leaveType;
   late String _leaveTypeName;
@@ -54,6 +64,11 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   bool _busy = false;
   LeaveRequest? _savedRequest;
   bool _attachmentUploading = false;
+  List<int>? _pendingAttachmentBytes;
+  String? _pendingAttachmentName;
+  bool _workingDaysLoading = false;
+  String? _workingDaysHelperText;
+  int _workingDaysRequestSerial = 0;
 
   late final TextEditingController _customLeaveTypeController;
   late final TextEditingController _reasonController;
@@ -104,7 +119,14 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     );
     _coerceSelectedLeaveTypeForAccount();
     _loadLeaveTypes();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadCreditContext());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadCreditContext();
+      if (_startDate != null &&
+          _endDate != null &&
+          initial?.workingDaysApplied == null) {
+        _syncWorkingDaysFromDates();
+      }
+    });
   }
 
   @override
@@ -122,7 +144,16 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
   void _showMessage(String text) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    final messenger = _messengerKey.currentState;
+    if (messenger != null) {
+      messenger
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(content: Text(text)));
+      return;
+    }
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(content: Text(text)));
   }
 
   void _resetConditionalSelectionsForType(LeaveType type) {
@@ -167,8 +198,21 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   }
 
   double? get _selectedMaxDays {
+    final maternityMaxDays = maxWorkingDaysForLeaveDetails(
+      _leaveType,
+      maternityDeliveryType: _maternityDeliveryType,
+    );
+    if (_leaveType == LeaveType.maternityLeave) {
+      return maternityMaxDays?.toDouble();
+    }
     final def = _selectedLeaveTypeDefinition;
     return def?.maxDays ?? _leaveType.maxDays?.toDouble();
+  }
+
+  int? get _selectedMinimumAdvanceDays {
+    final days = _selectedLeaveTypeDefinition?.minimumAdvanceDays;
+    if (days == null || days <= 0) return null;
+    return days;
   }
 
   String? _normalizedAccountSex() {
@@ -461,6 +505,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       return;
     }
     if (!_validateSelectedDates()) return;
+    if (_workingDaysLoading) {
+      _showMessage('Please wait while working days are computed.');
+      return;
+    }
     await _submit(isDraft: true);
   }
 
@@ -477,25 +525,18 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     }
     if (!_validateSelectedDates()) return;
 
-    // FIX #7: Validate that the working days field matches the computed value.
-    final computed = _computeWorkingDays();
-    if (computed != null) {
-      final entered = double.tryParse(_workingDaysController.text.trim());
-      if (entered == null) {
-        _showMessage('Please enter a valid number of working days.');
-        return;
-      }
-      if (entered <= 0) {
-        _showMessage('Working days must be greater than 0.');
-        return;
-      }
-      if (entered > computed) {
-        _showMessage(
-          'Working days ($entered) cannot exceed the computed '
-          'Mon–Fri days for the selected range ($computed).',
-        );
-        return;
-      }
+    if (_workingDaysLoading) {
+      _showMessage('Please wait while working days are computed.');
+      return;
+    }
+    final entered = _currentWorkingDaysApplied;
+    if (entered == null) {
+      _showMessage('Please enter a valid number of working days.');
+      return;
+    }
+    if (entered <= 0) {
+      _showMessage('Working days must be greater than 0.');
+      return;
     }
 
     if (_leaveType == LeaveType.maternityLeave &&
@@ -511,8 +552,11 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     await _submit(isDraft: false);
   }
 
-  /// Returns the number of Mon–Fri days between start and end date (inclusive),
-  /// or null if dates are not yet set.
+  double? get _currentWorkingDaysApplied =>
+      double.tryParse(_workingDaysController.text.trim());
+
+  /// Local fallback only. The backend recomputes using assigned shift working
+  /// days and holidays before saving/submitting.
   int? _computeWorkingDays() {
     if (_startDate == null || _endDate == null) return null;
     if (_endDate!.isBefore(_startDate!)) return null;
@@ -526,7 +570,81 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     return count;
   }
 
+  String _dateOnly(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  String _formatWorkingDays(num days) =>
+      days % 1 == 0 ? days.toStringAsFixed(0) : days.toStringAsFixed(1);
+
+  Future<void> _syncWorkingDaysFromDates() async {
+    final start = _startDate;
+    final end = _endDate;
+    final serial = ++_workingDaysRequestSerial;
+    if (start == null || end == null || end.isBefore(start)) {
+      if (!mounted) return;
+      setState(() {
+        _workingDaysLoading = false;
+        _workingDaysHelperText = 'Select dates to auto-compute';
+        _workingDaysController.clear();
+      });
+      return;
+    }
+
+    final fallback = _computeWorkingDays();
+    setState(() {
+      _workingDaysLoading = true;
+      _workingDaysHelperText = 'Computing from assigned shift and holidays...';
+      _workingDaysController.text = fallback?.toString() ?? '';
+    });
+
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/leave/working-days',
+        queryParameters: {
+          'start_date': _dateOnly(start),
+          'end_date': _dateOnly(end),
+        },
+      );
+      final data = res.data ?? const <String, dynamic>{};
+      final raw = data['working_days_applied'] ?? data['workingDaysApplied'];
+      final days = raw is num ? raw.toDouble() : double.tryParse('$raw');
+      if (!mounted || serial != _workingDaysRequestSerial) return;
+      if (days == null) {
+        setState(() {
+          _workingDaysLoading = false;
+          _workingDaysHelperText =
+              'Could not compute from shift; using Mon-Fri fallback';
+        });
+        return;
+      }
+      final source = (data['schedule_source'] ?? '').toString();
+      final helper = switch (source) {
+        'shift' => 'Auto-applied from assigned shift and holidays',
+        'assignment_fallback' =>
+          'No shift working days found; used Mon-Fri and holidays',
+        'fallback' => 'No active assignment found; used Mon-Fri and holidays',
+        _ => 'Auto-applied from schedule and holidays',
+      };
+      setState(() {
+        _workingDaysLoading = false;
+        _workingDaysController.text = _formatWorkingDays(days);
+        _workingDaysHelperText = '$helper: ${_formatWorkingDays(days)} day(s)';
+      });
+    } catch (_) {
+      if (!mounted || serial != _workingDaysRequestSerial) return;
+      setState(() {
+        _workingDaysLoading = false;
+        _workingDaysHelperText =
+            'Server estimate unavailable; using Mon-Fri fallback';
+      });
+    }
+  }
+
   bool _hasAttachment() {
+    if ((_pendingAttachmentName ?? '').trim().isNotEmpty &&
+        _pendingAttachmentBytes != null) {
+      return true;
+    }
     final current = _savedRequest ?? widget.initialRequest;
     return (current?.attachmentName ?? '').trim().isNotEmpty;
   }
@@ -540,7 +658,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   /// or any non–sick type with [LeaveType.requiresAttachment].
   bool _shouldShowAttachmentSection() {
     if (_leaveType == LeaveType.sickLeave) {
-      return (_computeWorkingDays() ?? 0) >= 5;
+      return (_currentWorkingDaysApplied ?? 0) >= 5;
     }
     return _selectedRequiresAttachment;
   }
@@ -560,6 +678,21 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       if (startOnly.isBefore(today)) {
         _showMessage(
           'Past-date filing is not allowed for $_selectedLeaveTypeLabel.',
+        );
+        return false;
+      }
+    }
+    final minimumAdvanceDays = _selectedMinimumAdvanceDays;
+    if (minimumAdvanceDays != null) {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final startOnly = DateTime(start.year, start.month, start.day);
+      final calendarDaysBeforeStart = startOnly.difference(today).inDays;
+      if (calendarDaysBeforeStart < minimumAdvanceDays) {
+        final unit = minimumAdvanceDays == 1 ? 'day' : 'days';
+        _showMessage(
+          '$_selectedLeaveTypeLabel must be filed at least '
+          '$minimumAdvanceDays $unit before the intended leave date.',
         );
         return false;
       }
@@ -732,16 +865,54 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
               saved.id != null &&
               saved.id!.trim().isNotEmpty) {
             setState(() => _savedRequest = saved);
+            if (_pendingAttachmentBytes != null &&
+                (_pendingAttachmentName ?? '').trim().isNotEmpty) {
+              final uploaded = await _uploadPendingAttachmentToRequest(
+                saved.id!,
+              );
+              if (!mounted) return;
+              if (!uploaded) return;
+            }
           }
           _showMessage('Draft saved.');
         }
       } else {
-        final action = widget.onSubmitRequest;
-        if (action != null) {
-          final success = await action(req);
+        final pendingBytes = _pendingAttachmentBytes;
+        final pendingName = _pendingAttachmentName?.trim();
+        final hasPendingAttachment =
+            pendingBytes != null &&
+            pendingName != null &&
+            pendingName.isNotEmpty;
+        final hasExistingRequestId = (req.id ?? '').trim().isNotEmpty;
+        if (hasPendingAttachment && !hasExistingRequestId) {
+          final action = widget.onSubmitRequestWithAttachment;
+          if (action == null) {
+            _showMessage('Could not submit the attachment directly.');
+            return;
+          }
+          final success = await action(req, pendingBytes, pendingName);
           if (!mounted) return;
           if (success) {
             Navigator.of(context).pop(kLeaveFormResultSubmitted);
+          } else {
+            final err = context.read<LeaveProvider>().error;
+            _showMessage(
+              (err != null && err.trim().isNotEmpty) ? err : 'Submit failed.',
+            );
+          }
+        } else {
+          final action = widget.onSubmitRequest;
+          if (action != null) {
+            final success = await action(req);
+            if (!mounted) return;
+            if (success) {
+              Navigator.of(context).pop(kLeaveFormResultSubmitted);
+            } else {
+              final err = context.read<LeaveProvider>().error;
+              _showMessage(
+                (err != null && err.trim().isNotEmpty) ? err : 'Submit failed.',
+              );
+            }
           }
         }
       }
@@ -756,283 +927,296 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   Widget build(BuildContext context) {
     final formMaxWidth = 800.0; // Clean, narrow column for digital entry
 
-    return Scaffold(
-      backgroundColor: AppTheme.dashCanvasOf(context),
-      appBar: AppBar(
-        title: const Text('File Leave Request'),
-        centerTitle: true,
-      ),
-      body: SafeArea(
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24.0),
-            child: Center(
-              child: ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: formMaxWidth),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      'Leave Details',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.dashTextPrimaryOf(context),
+    return ScaffoldMessenger(
+      key: _messengerKey,
+      child: Scaffold(
+        backgroundColor: AppTheme.dashCanvasOf(context),
+        appBar: AppBar(
+          title: const Text('File Leave Request'),
+          centerTitle: true,
+        ),
+        body: SafeArea(
+          child: Form(
+            key: _formKey,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24.0),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: formMaxWidth),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'Leave Details',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.dashTextPrimaryOf(context),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Select the type of leave and provide the necessary details.',
-                      style: TextStyle(
-                        color: AppTheme.dashTextSecondaryOf(context),
-                        fontSize: 14,
+                      const SizedBox(height: 8),
+                      Text(
+                        'Select the type of leave and provide the necessary details.',
+                        style: TextStyle(
+                          color: AppTheme.dashTextSecondaryOf(context),
+                          fontSize: 14,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 16),
+                      const SizedBox(height: 16),
 
-                    // A. General instruction panel
-                    const LeaveGeneralInstructionsPanel(),
-                    const SizedBox(height: 24),
+                      // A. General instruction panel
+                      const LeaveGeneralInstructionsPanel(),
+                      const SizedBox(height: 24),
 
-                    // Card 1: Leave Type
-                    _buildCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _buildSectionTitle('1. Leave Type'),
-                          const SizedBox(height: 16),
-                          DropdownButtonFormField<String>(
-                            value: _leaveTypeName,
-                            isExpanded: true,
-                            decoration: _inputDecoration('Select Leave Type'),
-                            items: _leaveTypeDropdownItems(),
-                            onChanged: (val) {
-                              if (val != null) {
-                                setState(() {
-                                  final def = _definitionForName(val);
-                                  if (def != null) {
-                                    _selectLeaveTypeDefinition(def);
-                                  } else {
-                                    _leaveTypeName = val;
-                                    _leaveType = leaveTypeFromString(val);
-                                    _resetConditionalSelectionsForType(
-                                      _leaveType,
-                                    );
-                                  }
-                                });
-                              }
-                            },
-                          ),
-                          if (_loadingLeaveTypes) ...[
-                            const SizedBox(height: 8),
-                            const LinearProgressIndicator(minHeight: 2),
-                          ],
-
-                          // B. Dynamic leave-type guidance
-                          const SizedBox(height: 14),
-                          LeaveTypeGuidanceCard(
-                            leaveType: _leaveType,
-                            definition: _selectedLeaveTypeDefinition,
-                          ),
-                          const SizedBox(height: 12),
-                          _buildCreditPolicyPanel(),
-
-                          if (_leaveType == LeaveType.others &&
-                              _leaveTypeName == LeaveType.others.value) ...[
+                      // Card 1: Leave Type
+                      _buildCard(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildSectionTitle('1. Leave Type'),
                             const SizedBox(height: 16),
-                            TextFormField(
-                              controller: _customLeaveTypeController,
-                              decoration: _inputDecoration(
-                                'Specify other leave type...',
-                              ),
-                              validator: (val) =>
-                                  val == null || val.trim().isEmpty
-                                  ? 'Required'
-                                  : null,
+                            DropdownButtonFormField<String>(
+                              value: _leaveTypeName,
+                              isExpanded: true,
+                              decoration: _inputDecoration('Select Leave Type'),
+                              items: _leaveTypeDropdownItems(),
+                              onChanged: (val) {
+                                if (val != null) {
+                                  setState(() {
+                                    final def = _definitionForName(val);
+                                    if (def != null) {
+                                      _selectLeaveTypeDefinition(def);
+                                    } else {
+                                      _leaveTypeName = val;
+                                      _leaveType = leaveTypeFromString(val);
+                                      _resetConditionalSelectionsForType(
+                                        _leaveType,
+                                      );
+                                    }
+                                  });
+                                }
+                              },
                             ),
-                          ],
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
+                            if (_loadingLeaveTypes) ...[
+                              const SizedBox(height: 8),
+                              const LinearProgressIndicator(minHeight: 2),
+                            ],
 
-                    // Card 2: Dates
-                    _buildCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _buildSectionTitle('2. Dates of Leave'),
-                          const SizedBox(height: 16),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _buildDatePicker(
-                                  label: 'Start Date',
-                                  value: _startDate,
-                                  onChanged: (d) =>
-                                      setState(() => _startDate = d),
+                            // B. Dynamic leave-type guidance
+                            const SizedBox(height: 14),
+                            LeaveTypeGuidanceCard(
+                              leaveType: _leaveType,
+                              definition: _selectedLeaveTypeDefinition,
+                            ),
+                            const SizedBox(height: 12),
+                            _buildCreditPolicyPanel(),
+
+                            if (_leaveType == LeaveType.others &&
+                                _leaveTypeName == LeaveType.others.value) ...[
+                              const SizedBox(height: 16),
+                              TextFormField(
+                                controller: _customLeaveTypeController,
+                                decoration: _inputDecoration(
+                                  'Specify other leave type...',
                                 ),
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: _buildDatePicker(
-                                  label: 'End Date',
-                                  value: _endDate,
-                                  onChanged: (d) =>
-                                      setState(() => _endDate = d),
-                                ),
+                                validator: (val) =>
+                                    val == null || val.trim().isEmpty
+                                    ? 'Required'
+                                    : null,
                               ),
                             ],
-                          ),
-                          const SizedBox(height: 16),
-                          // FIX #7: Auto-fill working days and validate against computed.
-                          Builder(
-                            builder: (context) {
-                              final computed = _computeWorkingDays();
-                              return TextFormField(
-                                controller: _workingDaysController,
-                                keyboardType: TextInputType.numberWithOptions(
-                                  decimal: true,
-                                ),
-                                decoration:
-                                    _inputDecoration(
-                                      'Number of Working Days Applied For',
-                                    ).copyWith(
-                                      suffixIcon: computed != null
-                                          ? Tooltip(
-                                              message:
-                                                  'Auto-computed: $computed Mon–Fri day(s)',
-                                              child: IconButton(
-                                                icon: const Icon(
-                                                  Icons.auto_fix_high,
-                                                  size: 18,
-                                                ),
-                                                onPressed: () => setState(
-                                                  () =>
-                                                      _workingDaysController
-                                                          .text = computed
-                                                          .toString(),
-                                                ),
-                                              ),
-                                            )
-                                          : null,
-                                      helperText: computed != null
-                                          ? 'Mon–Fri days for selected range: $computed'
-                                          : 'Select dates to auto-compute',
-                                    ),
-                                validator: (val) {
-                                  if (val == null || val.trim().isEmpty)
-                                    return 'Required';
-                                  final entered = double.tryParse(val.trim());
-                                  if (entered == null)
-                                    return 'Must be a number';
-                                  if (entered <= 0)
-                                    return 'Must be greater than 0';
-                                  // FIX #7: Hard-block if entered > computed.
-                                  if (computed != null && entered > computed) {
-                                    return 'Cannot exceed $computed computed working day(s) for this range';
-                                  }
-                                  // Warn about max days for leave type
-                                  final maxDays = _selectedMaxDays;
-                                  if (maxDays != null && entered > maxDays) {
-                                    return '$_selectedLeaveTypeLabel allows max ${maxDays.toStringAsFixed(maxDays % 1 == 0 ? 0 : 1)} days';
-                                  }
-                                  return null;
-                                },
-                              );
-                            },
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 16),
+                      const SizedBox(height: 16),
 
-                    // Card 3: Dynamic Details based on leave type
-                    _buildDetailsCard(),
-
-                    const SizedBox(height: 16),
-
-                    // Card 4: Attachments & Commutation
-                    _buildCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _buildSectionTitle('4. Additional Information'),
-                          const SizedBox(height: 16),
-                          Row(
-                            children: [
-                              Checkbox(
-                                value:
-                                    _commutation ==
-                                    LeaveCommutationOption.requested,
-                                onChanged: (val) {
-                                  setState(() {
-                                    _commutation = val == true
-                                        ? LeaveCommutationOption.requested
-                                        : LeaveCommutationOption.notRequested;
-                                  });
-                                },
-                              ),
-                              Expanded(
-                                child: Text(
-                                  'Requested Commutation of Leave',
-                                  style: TextStyle(
-                                    color: AppTheme.dashTextPrimaryOf(context),
+                      // Card 2: Dates
+                      _buildCard(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildSectionTitle('2. Dates of Leave'),
+                            const SizedBox(height: 16),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _buildDatePicker(
+                                    label: 'Start Date',
+                                    value: _startDate,
+                                    onChanged: (d) {
+                                      setState(() {
+                                        _startDate = d;
+                                      });
+                                      _syncWorkingDaysFromDates();
+                                    },
                                   ),
                                 ),
-                              ),
-                            ],
-                          ),
-                          if (_shouldShowAttachmentSection()) ...[
-                            const Divider(height: 32),
-                            _buildAttachmentSection(),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: _buildDatePicker(
+                                    label: 'End Date',
+                                    value: _endDate,
+                                    onChanged: (d) {
+                                      setState(() {
+                                        _endDate = d;
+                                      });
+                                      _syncWorkingDaysFromDates();
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+                            // FIX #7: Auto-fill working days from the backend schedule calculation.
+                            Builder(
+                              builder: (context) {
+                                final applied = _currentWorkingDaysApplied;
+                                return TextFormField(
+                                  controller: _workingDaysController,
+                                  readOnly: true,
+                                  keyboardType: TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                                  decoration:
+                                      _inputDecoration(
+                                        'Number of Working Days Applied For',
+                                      ).copyWith(
+                                        prefixIcon: const Icon(
+                                          Icons.calculate_outlined,
+                                        ),
+                                        suffixIcon: _workingDaysLoading
+                                            ? const Padding(
+                                                padding: EdgeInsets.all(14),
+                                                child: SizedBox(
+                                                  width: 18,
+                                                  height: 18,
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                        strokeWidth: 2,
+                                                      ),
+                                                ),
+                                              )
+                                            : null,
+                                        helperText:
+                                            _workingDaysHelperText ??
+                                            (applied != null
+                                                ? 'Auto-applied from selected dates: ${_formatWorkingDays(applied)} day(s)'
+                                                : 'Select dates to auto-compute'),
+                                      ),
+                                  validator: (val) {
+                                    if (val == null || val.trim().isEmpty) {
+                                      return 'Required';
+                                    }
+                                    final entered = double.tryParse(val.trim());
+                                    if (entered == null) {
+                                      return 'Must be a number';
+                                    }
+                                    if (entered <= 0) {
+                                      return 'Must be greater than 0';
+                                    }
+                                    // Warn about max days for leave type
+                                    final maxDays = _selectedMaxDays;
+                                    if (maxDays != null && entered > maxDays) {
+                                      return '$_selectedLeaveTypeLabel allows max ${maxDays.toStringAsFixed(maxDays % 1 == 0 ? 0 : 1)} days';
+                                    }
+                                    return null;
+                                  },
+                                );
+                              },
+                            ),
                           ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Card 3: Dynamic Details based on leave type
+                      _buildDetailsCard(),
+
+                      const SizedBox(height: 16),
+
+                      // Card 4: Attachments & Commutation
+                      _buildCard(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildSectionTitle('4. Additional Information'),
+                            const SizedBox(height: 16),
+                            Row(
+                              children: [
+                                Checkbox(
+                                  value:
+                                      _commutation ==
+                                      LeaveCommutationOption.requested,
+                                  onChanged: (val) {
+                                    setState(() {
+                                      _commutation = val == true
+                                          ? LeaveCommutationOption.requested
+                                          : LeaveCommutationOption.notRequested;
+                                    });
+                                  },
+                                ),
+                                Expanded(
+                                  child: Text(
+                                    'Requested Commutation of Leave',
+                                    style: TextStyle(
+                                      color: AppTheme.dashTextPrimaryOf(
+                                        context,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (_shouldShowAttachmentSection()) ...[
+                              const Divider(height: 32),
+                              _buildAttachmentSection(),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+
+                      // Actions
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          if (widget.onSaveDraft != null)
+                            OutlinedButton(
+                              onPressed: _busy ? null : _saveDraft,
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 24,
+                                  vertical: 16,
+                                ),
+                              ),
+                              child: const Text('Save Draft'),
+                            ),
+                          const SizedBox(width: 16),
+                          if (widget.onSubmitRequest != null)
+                            FilledButton(
+                              onPressed: _busy ? null : _submitRequest,
+                              style: FilledButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 24,
+                                  vertical: 16,
+                                ),
+                              ),
+                              child: _busy
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        color: Colors.white,
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Text('Submit Request'),
+                            ),
                         ],
                       ),
-                    ),
-                    const SizedBox(height: 32),
-
-                    // Actions
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        if (widget.onSaveDraft != null)
-                          OutlinedButton(
-                            onPressed: _busy ? null : _saveDraft,
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 24,
-                                vertical: 16,
-                              ),
-                            ),
-                            child: const Text('Save Draft'),
-                          ),
-                        const SizedBox(width: 16),
-                        if (widget.onSubmitRequest != null)
-                          FilledButton(
-                            onPressed: _busy ? null : _submitRequest,
-                            style: FilledButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 24,
-                                vertical: 16,
-                              ),
-                            ),
-                            child: _busy
-                                ? const SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                      color: Colors.white,
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Text('Submit Request'),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 40),
-                  ],
+                      const SizedBox(height: 40),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -1356,7 +1540,18 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
   Widget _buildAttachmentSection() {
     final current = _savedRequest ?? widget.initialRequest;
-    final hasAttachment = (current?.attachmentName ?? '').trim().isNotEmpty;
+    final pendingName = _pendingAttachmentName?.trim();
+    final hasPendingAttachment =
+        pendingName != null &&
+        pendingName.isNotEmpty &&
+        _pendingAttachmentBytes != null;
+    final savedAttachmentName = current?.attachmentName?.trim();
+    final hasSavedAttachment =
+        savedAttachmentName != null && savedAttachmentName.isNotEmpty;
+    final hasAttachment = hasSavedAttachment || hasPendingAttachment;
+    final attachmentLabel = hasSavedAttachment
+        ? savedAttachmentName
+        : pendingName;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1405,7 +1600,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         if (!_hasLeaveRequestId()) ...[
           const SizedBox(height: 8),
           Text(
-            'If you upload before saving manually, a draft is created automatically.',
+            'The selected file will be submitted together with this request.',
             style: TextStyle(
               color: AppTheme.dashTextSecondaryOf(context),
               fontSize: 12,
@@ -1423,7 +1618,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    current!.attachmentName!,
+                    attachmentLabel ?? 'Selected attachment',
                     style: TextStyle(
                       fontWeight: FontWeight.w500,
                       color: AppTheme.dashTextPrimaryOf(context),
@@ -1467,30 +1662,6 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   Future<void> _pickAndUploadAttachment() async {
     if (!_shouldShowAttachmentSection()) return;
 
-    var current = _savedRequest ?? widget.initialRequest;
-    var requestId = current?.id;
-
-    if (requestId == null || requestId.isEmpty) {
-      if (!_formKey.currentState!.validate()) return;
-      if (_startDate == null || _endDate == null) {
-        _showMessage('Please select start and end dates before uploading.');
-        return;
-      }
-      await _submit(isDraft: true);
-      if (!mounted) return;
-      current = _savedRequest ?? widget.initialRequest;
-      requestId = current?.id;
-      if (requestId == null || requestId.isEmpty) {
-        final err = context.read<LeaveProvider>().error;
-        _showMessage(
-          (err != null && err.trim().isNotEmpty)
-              ? err
-              : 'Could not create a draft for your attachment. Try again.',
-        );
-        return;
-      }
-    }
-
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png'],
@@ -1499,37 +1670,85 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     );
     if (result == null ||
         result.files.isEmpty ||
-        result.files.single.bytes == null)
+        result.files.single.bytes == null) {
       return;
+    }
     if (!mounted) return;
 
     final file = result.files.single;
     final bytes = file.bytes!;
     final name = file.name;
     if (name.isEmpty) return;
+    if (bytes.length > _maxAttachmentBytes) {
+      _showMessage('File too large. Max 10MB.');
+      return;
+    }
 
+    final current = _savedRequest ?? widget.initialRequest;
+    final requestId = current?.id;
+    if (requestId == null || requestId.isEmpty) {
+      setState(() {
+        _pendingAttachmentBytes = bytes;
+        _pendingAttachmentName = name;
+      });
+      _showMessage('Attachment selected.');
+      return;
+    }
+
+    await _uploadAttachmentToRequest(
+      requestId: requestId,
+      fileBytes: bytes,
+      fileName: name,
+    );
+  }
+
+  Future<bool> _uploadPendingAttachmentToRequest(String requestId) async {
+    final bytes = _pendingAttachmentBytes;
+    final name = _pendingAttachmentName?.trim();
+    if (bytes == null || name == null || name.isEmpty) return true;
+    return _uploadAttachmentToRequest(
+      requestId: requestId,
+      fileBytes: bytes,
+      fileName: name,
+      clearPendingOnSuccess: true,
+    );
+  }
+
+  Future<bool> _uploadAttachmentToRequest({
+    required String requestId,
+    required List<int> fileBytes,
+    required String fileName,
+    bool clearPendingOnSuccess = false,
+  }) async {
     setState(() => _attachmentUploading = true);
     try {
       final provider = context.read<LeaveProvider>();
       final updated = await provider.attachFile(
         requestId: requestId,
-        fileBytes: bytes,
-        fileName: name,
+        fileBytes: fileBytes,
+        fileName: fileName,
       );
-      if (!mounted) return;
+      if (!mounted) return false;
       if (updated != null) {
         setState(() {
           _savedRequest = updated;
+          if (clearPendingOnSuccess) {
+            _pendingAttachmentBytes = null;
+            _pendingAttachmentName = null;
+          }
           _attachmentUploading = false;
         });
         _showMessage('Attachment uploaded.');
+        return true;
       } else {
         setState(() => _attachmentUploading = false);
         _showMessage(provider.error ?? 'Upload failed.');
+        return false;
       }
     } catch (e) {
       if (mounted) setState(() => _attachmentUploading = false);
-      _showMessage('Upload failed: $e');
+      if (mounted) _showMessage('Upload failed: $e');
+      return false;
     }
   }
 
@@ -1538,7 +1757,17 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
     final current = _savedRequest ?? widget.initialRequest;
     final requestId = current?.id;
-    if (requestId == null || requestId.isEmpty) return;
+    if (requestId == null || requestId.isEmpty) {
+      if (_pendingAttachmentBytes != null ||
+          (_pendingAttachmentName ?? '').trim().isNotEmpty) {
+        setState(() {
+          _pendingAttachmentBytes = null;
+          _pendingAttachmentName = null;
+        });
+        _showMessage('Attachment removed.');
+      }
+      return;
+    }
 
     final ok = await showDialog<bool>(
       context: context,

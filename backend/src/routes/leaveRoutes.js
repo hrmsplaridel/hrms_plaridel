@@ -9,6 +9,8 @@ const { requireAdmin, requireAdminOrHr } = require('../middleware/rbac');
 const {
   LEAVE_TYPE_RULES,
   SPECIAL_PROCESS_PURPOSES,
+  effectiveMaxDaysForRule,
+  minimumAdvanceDaysFilingError,
   mustBlockMissingAttachment,
 } = require('./leaveTypeRules');
 const {
@@ -273,6 +275,7 @@ pool
         ADD COLUMN IF NOT EXISTS requires_attachment BOOLEAN NOT NULL DEFAULT false,
         ADD COLUMN IF NOT EXISTS requires_attachment_when_over_days NUMERIC,
         ADD COLUMN IF NOT EXISTS max_days NUMERIC,
+        ADD COLUMN IF NOT EXISTS minimum_advance_days INTEGER,
         ADD COLUMN IF NOT EXISTS affects_dtr_normally BOOLEAN NOT NULL DEFAULT true,
         ADD COLUMN IF NOT EXISTS balance_ledger_type TEXT NOT NULL DEFAULT 'none',
         ADD COLUMN IF NOT EXISTS sex_eligibility TEXT NOT NULL DEFAULT 'any',
@@ -344,6 +347,11 @@ pool
             WHEN name = 'specialEmergencyCalamityLeave' THEN 5
             ELSE NULL
           END,
+          minimum_advance_days = CASE
+            WHEN name IN ('vacationLeave', 'soloParentLeave', 'specialLeaveBenefitsForWomen') THEN 5
+            WHEN name = 'specialPrivilegeLeave' THEN 7
+            ELSE NULL
+          END,
           affects_dtr_normally = true,
           balance_ledger_type = CASE
             WHEN name = 'mandatoryForcedLeave' THEN 'vacationLeave'
@@ -401,6 +409,61 @@ function isWeekday(dateObj) {
   return d !== 0 && d !== 6;
 }
 
+function isoWeekdayFromDateString(dateStr) {
+  const d = new Date(`${dateStr}T12:00:00`);
+  if (isNaN(d.getTime())) return null;
+  const day = d.getDay(); // 0 Sun .. 6 Sat
+  return day === 0 ? 7 : day;
+}
+
+function normalizeWorkingDays(value) {
+  const source = Array.isArray(value)
+    ? value
+    : (typeof value === 'string' ? (value.match(/\d+/g) || []) : [1, 2, 3, 4, 5]);
+  const days = source
+    .map((d) => parseInt(d, 10))
+    .filter((d) => Number.isInteger(d) && d >= 1 && d <= 7);
+  return days.length > 0 ? days : [1, 2, 3, 4, 5];
+}
+
+async function holidayDateSetForRange(startStr, endStr, dbClient = null) {
+  const holidayDates = new Set();
+  if (!dbClient) return holidayDates;
+  try {
+    const nonRec = await dbClient.query(
+      `SELECT date_from, date_to FROM holidays
+       WHERE is_active = true
+        AND recurring = false
+         AND holiday_type IN ('regular', 'special', 'local')
+         AND date_from <= $2::date AND date_to >= $1::date`,
+      [startStr, endStr]
+    );
+    for (const row of nonRec.rows) {
+      const df = String(row.date_from).split('T')[0].slice(0, 10);
+      const dt = String(row.date_to).split('T')[0].slice(0, 10);
+      for (const ds of expandNonRecurringToWindow(df, dt, startStr, endStr)) {
+        holidayDates.add(ds);
+      }
+    }
+    const rec = await dbClient.query(
+      `SELECT date_from, date_to FROM holidays
+       WHERE is_active = true
+         AND recurring = true
+         AND holiday_type IN ('regular', 'special', 'local')`
+    );
+    for (const row of rec.rows) {
+      const df = String(row.date_from).split('T')[0].slice(0, 10);
+      const dt = String(row.date_to).split('T')[0].slice(0, 10);
+      for (const ds of expandRecurringToWindow(df, dt, startStr, endStr)) {
+        holidayDates.add(ds);
+      }
+    }
+  } catch (_) {
+    // Keep callers resilient; they can still count scheduled days without holidays.
+  }
+  return holidayDates;
+}
+
 /**
  * #12 Holiday-aware working day count (Mon–Fri, excluding public holidays).
  *
@@ -418,42 +481,7 @@ async function computeNumberOfDays(startStr, endStr, dbClient = null) {
   if (isNaN(start.getTime()) || isNaN(end.getTime())) return null;
   if (end < start) return null;
 
-  // Fetch active public holidays in the range from the DB (if client provided).
-  const holidayDates = new Set();
-  if (dbClient) {
-    try {
-      const nonRec = await dbClient.query(
-        `SELECT date_from, date_to FROM holidays
-         WHERE is_active = true
-          AND recurring = false
-           AND holiday_type IN ('regular', 'special', 'local')
-           AND date_from <= $2::date AND date_to >= $1::date`,
-        [startStr, endStr]
-      );
-      for (const row of nonRec.rows) {
-        const df = String(row.date_from).split('T')[0].slice(0, 10);
-        const dt = String(row.date_to).split('T')[0].slice(0, 10);
-        for (const ds of expandNonRecurringToWindow(df, dt, startStr, endStr)) {
-          holidayDates.add(ds);
-        }
-      }
-      const rec = await dbClient.query(
-        `SELECT date_from, date_to FROM holidays
-         WHERE is_active = true
-           AND recurring = true
-           AND holiday_type IN ('regular', 'special', 'local')`
-      );
-      for (const row of rec.rows) {
-        const df = String(row.date_from).split('T')[0].slice(0, 10);
-        const dt = String(row.date_to).split('T')[0].slice(0, 10);
-        for (const ds of expandRecurringToWindow(df, dt, startStr, endStr)) {
-          holidayDates.add(ds);
-        }
-      }
-    } catch (_) {
-      // Silently fall back to plain Mon–Fri count if holiday query fails.
-    }
-  }
+  const holidayDates = await holidayDateSetForRange(startStr, endStr, dbClient);
 
   let count = 0;
   for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
@@ -462,6 +490,66 @@ async function computeNumberOfDays(startStr, endStr, dbClient = null) {
     if (!holidayDates.has(ds)) count += 1;
   }
   return count;
+}
+
+async function computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr) {
+  if (!client || !userId || !startStr || !endStr) {
+    return { days: await computeNumberOfDays(startStr, endStr, client), countedDates: [], scheduleSource: 'fallback' };
+  }
+  const start = new Date(`${startStr}T12:00:00`);
+  const end = new Date(`${endStr}T12:00:00`);
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) || end < start) {
+    return { days: null, countedDates: [], scheduleSource: 'invalid' };
+  }
+
+  const holidayDates = await holidayDateSetForRange(startStr, endStr, client);
+  const q = await client.query(
+    `SELECT
+        to_char(gs::date, 'YYYY-MM-DD') AS attendance_date,
+        COALESCE(s.working_days, ARRAY[1,2,3,4,5]::int[]) AS working_days,
+        eff.assignment_id IS NOT NULL AS has_assignment,
+        s.id IS NOT NULL AS has_shift
+     FROM generate_series($2::date, $3::date, '1 day'::interval) AS gs
+     LEFT JOIN LATERAL (
+       SELECT a.id AS assignment_id, a.shift_id
+       FROM assignments a
+       WHERE a.employee_id = $1::uuid
+         AND (a.is_active IS NULL OR a.is_active = true)
+         AND a.effective_from <= gs::date
+         AND (a.effective_to IS NULL OR a.effective_to >= gs::date)
+       ORDER BY a.effective_from DESC
+       LIMIT 1
+     ) eff ON TRUE
+     LEFT JOIN shifts s ON s.id = eff.shift_id
+     ORDER BY gs::date`,
+    [userId, startStr, endStr]
+  );
+
+  const countedDates = [];
+  let sawShift = false;
+  let sawAssignmentWithoutShift = false;
+  let sawNoAssignment = false;
+  for (const row of q.rows) {
+    const ds = row.attendance_date;
+    const isoWeekday = isoWeekdayFromDateString(ds);
+    if (isoWeekday == null) continue;
+    if (row.has_shift) sawShift = true;
+    else if (row.has_assignment) sawAssignmentWithoutShift = true;
+    else sawNoAssignment = true;
+    if (holidayDates.has(ds)) continue;
+    const workingDays = normalizeWorkingDays(row.working_days);
+    if (workingDays.includes(isoWeekday)) countedDates.push(ds);
+  }
+
+  const scheduleSource = sawShift
+    ? 'shift'
+    : (sawAssignmentWithoutShift ? 'assignment_fallback' : (sawNoAssignment ? 'fallback' : 'none'));
+  return {
+    days: countedDates.length,
+    countedDates,
+    scheduleSource,
+    holidayDates: Array.from(holidayDates).sort(),
+  };
 }
 
 /** Synchronous fallback (Mon–Fri only), used where async is not possible. */
@@ -524,12 +612,13 @@ function formatDayCount(days) {
   return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/\.?0+$/, '');
 }
 
-async function workingDaysWithinYear(client, startStr, endStr, year) {
+async function workingDaysWithinYear(client, userId, startStr, endStr, year) {
   if (!startStr || !endStr) return 0;
   const from = maxIsoDate(startStr, `${year}-01-01`);
   const to = minIsoDate(endStr, `${year}-12-31`);
   if (!from || !to || to < from) return 0;
-  return (await computeNumberOfDays(from, to, client)) ?? 0;
+  const result = await computeEmployeeLeaveWorkingDays(client, userId, from, to);
+  return result.days ?? 0;
 }
 
 async function assertSpecialPrivilegeLeaveAnnualLimit(
@@ -565,14 +654,14 @@ async function assertSpecialPrivilegeLeaveAnnualLimit(
   );
 
   for (const year of years) {
-    const requestedDays = await workingDaysWithinYear(client, startStr, endStr, year);
+    const requestedDays = await workingDaysWithinYear(client, userId, startStr, endStr, year);
     if (requestedDays <= 0) continue;
 
     let usedDays = 0;
     for (const row of existing.rows) {
       const existingStart = toIsoDateStr(row.start_date);
       const existingEnd = toIsoDateStr(row.end_date);
-      usedDays += await workingDaysWithinYear(client, existingStart, existingEnd, year);
+      usedDays += await workingDaysWithinYear(client, userId, existingStart, existingEnd, year);
     }
 
     const remaining = Math.max(0, SPECIAL_PRIVILEGE_LEAVE_ANNUAL_LIMIT - usedDays);
@@ -627,6 +716,7 @@ function leaveTypeRuleDefaults(name) {
     requires_attachment: true,
     requires_attachment_when_over_days: null,
     max_days: null,
+    minimum_advance_days: null,
     affects_dtr_normally: true,
     sex_eligibility: defaultSexEligibilityForLeaveType(name),
   };
@@ -711,6 +801,10 @@ function leaveTypeRowToApi(row = {}) {
         : fallback.requires_attachment_when_over_days ?? null,
     max_days:
       row.max_days != null ? parseFloat(row.max_days) : fallback.max_days ?? null,
+    minimum_advance_days:
+      row.minimum_advance_days != null
+        ? parseInt(row.minimum_advance_days, 10)
+        : fallback.minimum_advance_days ?? null,
     affects_dtr_normally:
       row.affects_dtr_normally != null
         ? row.affects_dtr_normally === true
@@ -781,6 +875,17 @@ async function getUserSexForLeaveValidation(client, userId) {
   return result.rows[0]?.sex || null;
 }
 
+function readMaternityDeliveryType(details) {
+  if (!details || typeof details !== 'object') return null;
+  return (
+    details.maternity_delivery_type ||
+    details.maternityDeliveryType ||
+    details.maternity_delivery ||
+    details.delivery_type ||
+    null
+  );
+}
+
 function validateEmployeeLeaveRequestWithRule(opts) {
   const {
     rule,
@@ -789,6 +894,7 @@ function validateEmployeeLeaveRequestWithRule(opts) {
     startDateStr,
     numberOfDays,
     userSex,
+    maternityDeliveryType,
   } = opts;
 
   if (!rule) return { valid: true };
@@ -839,9 +945,25 @@ function validateEmployeeLeaveRequestWithRule(opts) {
       };
     }
   }
-  if (rule.max_days != null && Number.isFinite(parseFloat(rule.max_days)) && numberOfDays != null) {
+  const advanceError = minimumAdvanceDaysFilingError({
+    rule,
+    leaveType,
+    leaveTypeLabel: rule.display_name,
+    startDateStr,
+  });
+  if (advanceError) {
+    return {
+      valid: false,
+      error: advanceError,
+    };
+  }
+  const maxDays = effectiveMaxDaysForRule({
+    rule,
+    leaveType,
+    maternityDeliveryType,
+  });
+  if (maxDays != null && numberOfDays != null) {
     const days = parseFloat(numberOfDays);
-    const maxDays = parseFloat(rule.max_days);
     if (!Number.isNaN(days) && days > maxDays) {
       return {
         valid: false,
@@ -979,6 +1101,17 @@ const uploadLeaveAttachment = multer({
   },
 });
 
+const uploadLeaveAttachmentMemory = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_LEAVE_ATTACHMENT_SIZE },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const ok = ['.pdf', '.jpg', '.jpeg', '.png'].includes(ext);
+    if (!ok) cb(new Error('Allowed file types: PDF, JPG, JPEG, PNG'), false);
+    else cb(null, true);
+  },
+});
+
 function uploadLeaveAttachmentMw(req, res, next) {
   uploadLeaveAttachment.single('file')(req, res, (err) => {
     if (err) {
@@ -994,6 +1127,56 @@ function uploadLeaveAttachmentMw(req, res, next) {
   });
 }
 
+function uploadLeaveAttachmentMemoryMw(req, res, next) {
+  uploadLeaveAttachmentMemory.single('file')(req, res, (err) => {
+    if (err) {
+      if (err.message === 'Allowed file types: PDF, JPG, JPEG, PNG') {
+        return res.status(400).json({ error: err.message });
+      }
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ error: 'File too large. Max 10MB.' });
+      }
+      return next(err);
+    }
+    next();
+  });
+}
+
+function storedLeaveAttachmentFromMemoryFile(file) {
+  if (!file || !Buffer.isBuffer(file.buffer)) return null;
+  const ext = path.extname(file.originalname || '').toLowerCase();
+  const safeExt = ['.pdf', '.jpg', '.jpeg', '.png'].includes(ext) ? ext : '.pdf';
+  const filename = `lr_${uuidv4()}${safeExt}`;
+  const filePath = path.join(leaveAttachmentDir, filename);
+  fs.writeFileSync(filePath, file.buffer);
+  return {
+    originalName: file.originalname || filename,
+    relPath: `${LEAVE_ATTACHMENT_SUBDIR}/${filename}`,
+    mimeType: file.mimetype || null,
+  };
+}
+
+function cleanupStoredLeaveAttachment(relPath) {
+  if (!relPath) return;
+  try {
+    const filePath = path.join(UPLOAD_DIR, relPath);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  } catch (err) {
+    console.error('[leave attachment cleanup]', err);
+  }
+}
+
+function parseJsonBodyField(value) {
+  if (value == null || typeof value !== 'string') return value;
+  const text = value.trim();
+  if (!text) return value;
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    return value;
+  }
+}
+
 function leaveTypePayloadFromBody(body = {}, existing = null) {
   const displayName = (body.display_name ?? body.displayName ?? body.description ?? '').toString().trim();
   const rawName = (body.name ?? '').toString().trim();
@@ -1004,18 +1187,34 @@ function leaveTypePayloadFromBody(body = {}, existing = null) {
     return key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
   }
 
+  function bodyField(key) {
+    const camel = camelKey(key);
+    if (Object.prototype.hasOwnProperty.call(body, key)) return body[key];
+    if (Object.prototype.hasOwnProperty.call(body, camel)) return body[camel];
+    return undefined;
+  }
+
   function boolField(key, fallback) {
-    const value = body[key] ?? body[camelKey(key)];
-    if (value == null) return fallback;
+    const value = bodyField(key);
+    if (value === undefined || value == null) return fallback;
     if (typeof value === 'boolean') return value;
     return ['true', '1', 'yes', 'y'].includes(String(value).trim().toLowerCase());
   }
 
   function numberField(key, fallback = null) {
-    const value = body[key] ?? body[camelKey(key)];
-    if (value == null || value === '') return fallback;
+    const value = bodyField(key);
+    if (value === undefined) return fallback;
+    if (value == null || value === '') return null;
     const n = parseFloat(value);
     return Number.isFinite(n) ? n : fallback;
+  }
+
+  function integerField(key, fallback = null) {
+    const value = bodyField(key);
+    if (value === undefined) return fallback;
+    if (value == null || value === '') return null;
+    const n = parseInt(value, 10);
+    return Number.isFinite(n) && n >= 0 ? n : fallback;
   }
 
   return {
@@ -1033,6 +1232,10 @@ function leaveTypePayloadFromBody(body = {}, existing = null) {
       existing?.requires_attachment_when_over_days ?? base.requires_attachment_when_over_days ?? null
     ),
     maxDays: numberField('max_days', existing?.max_days ?? base.max_days ?? null),
+    minimumAdvanceDays: integerField(
+      'minimum_advance_days',
+      existing?.minimum_advance_days ?? base.minimum_advance_days ?? null
+    ),
     affectsDtrNormally: boolField('affects_dtr_normally', existing?.affects_dtr_normally ?? base.affects_dtr_normally !== false),
     balanceLedgerType: normalizeLedgerType(body.balance_ledger_type ?? body.balanceLedgerType ?? existing?.balance_ledger_type, name),
     sexEligibility: normalizeSexEligibility(
@@ -1082,7 +1285,7 @@ router.post('/types', protect, requireAdminOrHr, async (req, res) => {
           name, display_name, description, is_active, is_system,
           employee_can_file, admin_only, allows_past_dates,
           requires_attachment, requires_attachment_when_over_days,
-          max_days, affects_dtr_normally, balance_ledger_type,
+          max_days, minimum_advance_days, affects_dtr_normally, balance_ledger_type,
           sex_eligibility,
           created_at, updated_at
         )
@@ -1090,8 +1293,8 @@ router.post('/types', protect, requireAdminOrHr, async (req, res) => {
           $1, $2, $3, $4, false,
           $5, $6, $7,
           $8, $9,
-          $10, $11, $12,
-          $13,
+          $10, $11, $12, $13,
+          $14,
           now(), now()
         )
         RETURNING *`,
@@ -1106,6 +1309,7 @@ router.post('/types', protect, requireAdminOrHr, async (req, res) => {
         payload.requiresAttachment,
         payload.requiresAttachmentWhenOverDays,
         payload.maxDays,
+        payload.minimumAdvanceDays,
         payload.affectsDtrNormally,
         payload.balanceLedgerType,
         payload.sexEligibility,
@@ -1157,11 +1361,12 @@ router.put('/types/:id', protect, requireAdminOrHr, async (req, res) => {
            requires_attachment = $9,
            requires_attachment_when_over_days = $10,
            max_days = $11,
-           affects_dtr_normally = $12,
-           balance_ledger_type = $13,
-           sex_eligibility = $14,
+           minimum_advance_days = $12,
+           affects_dtr_normally = $13,
+           balance_ledger_type = $14,
+           sex_eligibility = $15,
            updated_at = now()
-       WHERE id = $15::uuid
+       WHERE id = $16::uuid
        RETURNING *`,
       [
         nextName,
@@ -1175,6 +1380,7 @@ router.put('/types/:id', protect, requireAdminOrHr, async (req, res) => {
         payload.requiresAttachment,
         payload.requiresAttachmentWhenOverDays,
         payload.maxDays,
+        payload.minimumAdvanceDays,
         payload.affectsDtrNormally,
         nextBalanceLedgerType,
         isSystem ? defaultSexEligibilityForLeaveType(nextName) : payload.sexEligibility,
@@ -1561,6 +1767,35 @@ async function applyApprovedLeaveToDtr(client, userId, leaveRequestId, startDate
 // EMPLOYEE ENDPOINTS
 // ============================
 
+// GET /api/leave/working-days?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+// Counts leave days using the employee's effective shift working days and holidays.
+router.get('/working-days', protect, async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+  const startStr = toIsoDateStr(req.query.start_date || req.query.startDate);
+  const endStr = toIsoDateStr(req.query.end_date || req.query.endDate);
+  if (!startStr || !endStr) {
+    return res.status(400).json({ error: 'start_date and end_date are required' });
+  }
+  try {
+    const result = await computeEmployeeLeaveWorkingDays(pool, userId, startStr, endStr);
+    if (result.days == null) {
+      return res.status(400).json({ error: 'Invalid date range' });
+    }
+    res.json({
+      start_date: startStr,
+      end_date: endStr,
+      working_days_applied: result.days,
+      counted_dates: result.countedDates,
+      holiday_dates: result.holidayDates || [],
+      schedule_source: result.scheduleSource,
+    });
+  } catch (err) {
+    console.error('[leave GET /working-days]', err);
+    res.status(500).json({ error: 'Failed to compute working days' });
+  }
+});
+
 // POST /api/leave/draft
 router.post('/draft', protect, async (req, res) => {
   const userId = req.user?.id;
@@ -1584,9 +1819,8 @@ router.post('/draft', protect, async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      // #12: Recompute with holiday awareness now that we have a DB client.
-      const daysHolidayAware = await computeNumberOfDays(startStr, endStr, client);
-      const effectiveDaysDraft = daysHolidayAware ?? days;
+      const workingDayResult = await computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr);
+      const effectiveDaysDraft = workingDayResult.days ?? days;
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
       if (!leaveTypeId) {
         await client.query('ROLLBACK');
@@ -1596,6 +1830,7 @@ router.post('/draft', protect, async (req, res) => {
         ? details
         : { ...rest, leave_type, start_date: startStr, end_date: endStr };
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
+      const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
       const leaveRule = await getLeaveTypeDefinition(client, leave_type);
       const userSex = await getUserSexForLeaveValidation(client, userId);
       const validation = validateEmployeeLeaveRequestWithRule({
@@ -1607,6 +1842,7 @@ router.post('/draft', protect, async (req, res) => {
         numberOfDays: effectiveDaysDraft,
         hasAttachment: false,
         userSex,
+        maternityDeliveryType,
       });
       if (!validation.valid) {
         await client.query('ROLLBACK');
@@ -1694,8 +1930,7 @@ router.post('/submit', protect, async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      // #12: Holiday-aware recompute inside transaction.
-      const daysHolidayAwareSubmit = await computeNumberOfDays(startStr, endStr, client);
+      const workingDayResult = await computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr);
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
       if (!leaveTypeId) {
         await client.query('ROLLBACK');
@@ -1705,9 +1940,10 @@ router.post('/submit', protect, async (req, res) => {
         ? details
         : { ...rest, leave_type, start_date: startStr, end_date: endStr };
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
+      const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
 
       // Validate the server-computed, holiday-aware working day count.
-      const effectiveDaysSubmit = daysHolidayAwareSubmit ?? days;
+      const effectiveDaysSubmit = workingDayResult.days ?? days;
       if (effectiveDaysSubmit == null || effectiveDaysSubmit <= 0) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Number of working days must be greater than 0.' });
@@ -1724,6 +1960,7 @@ router.post('/submit', protect, async (req, res) => {
         numberOfDays: effectiveDaysSubmit,
         hasAttachment: false,
         userSex,
+        maternityDeliveryType,
       });
       if (!validation.valid) {
         await client.query('ROLLBACK');
@@ -1848,6 +2085,228 @@ router.post('/submit', protect, async (req, res) => {
   }
 });
 
+// POST /api/leave/submit-with-attachment
+// Creates a submitted leave request and links the supporting document in one action.
+router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded. Allowed: PDF, JPG, JPEG, PNG (max 10MB).' });
+  }
+
+  let storedAttachmentRelPath = null;
+  try {
+    const body = { ...(req.body || {}) };
+    body.details = parseJsonBodyField(body.details);
+    const {
+      leave_type,
+      start_date,
+      end_date,
+      reason,
+      details,
+      ...rest
+    } = body;
+
+    const startStr = toIsoDateStr(start_date);
+    const endStr = toIsoDateStr(end_date);
+    if (!startStr || !endStr) {
+      return res.status(400).json({ error: 'start_date and end_date are required' });
+    }
+    const days = computeNumberOfDaysSync(startStr, endStr);
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const workingDayResult = await computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr);
+      const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
+      if (!leaveTypeId) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Invalid leave type' });
+      }
+
+      const payloadDetails = details && typeof details === 'object'
+        ? details
+        : { ...rest, leave_type, start_date: startStr, end_date: endStr };
+      const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
+      const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
+
+      const effectiveDaysSubmit = workingDayResult.days ?? days;
+      if (effectiveDaysSubmit == null || effectiveDaysSubmit <= 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Number of working days must be greater than 0.' });
+      }
+
+      const leaveRule = await getLeaveTypeDefinition(client, leave_type);
+      const userSex = await getUserSexForLeaveValidation(client, userId);
+      const validation = validateEmployeeLeaveRequestWithRule({
+        rule: leaveRule,
+        leaveType: leave_type,
+        otherPurpose: otherPurpose || null,
+        startDateStr: startStr,
+        endDateStr: endStr,
+        numberOfDays: effectiveDaysSubmit,
+        hasAttachment: true,
+        userSex,
+        maternityDeliveryType,
+      });
+      if (!validation.valid) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: validation.error });
+      }
+
+      if (mustBlockMissingAttachment(leaveRule, leave_type, effectiveDaysSubmit, true)) {
+        await client.query('ROLLBACK');
+        const label = leaveRule?.display_name || leave_type || 'This leave type';
+        return res.status(400).json({
+          error: `${label} requires a supporting document before submission.`,
+        });
+      }
+
+      const hasOverlap = await hasOverlappingLeaveRequest(client, userId, startStr, endStr, null);
+      if (hasOverlap) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Overlapping leave request exists' });
+      }
+
+      await assertSpecialPrivilegeLeaveAnnualLimit(client, {
+        userId,
+        leaveTypeName: String(leave_type),
+        startStr,
+        endStr,
+      });
+
+      const storedAttachment = storedLeaveAttachmentFromMemoryFile(req.file);
+      if (!storedAttachment) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Could not read uploaded attachment.' });
+      }
+      storedAttachmentRelPath = storedAttachment.relPath;
+
+      const q = await client.query(
+        `INSERT INTO leave_requests (
+            employee_id,
+            user_id,
+            leave_type_id,
+            start_date,
+            end_date,
+            total_days,
+            number_of_days,
+            reason,
+            details,
+            attachment_name,
+            attachment_path,
+            attachment_mime_type,
+            attachment_uploaded_at,
+            status,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            $1::uuid, $1::uuid, $2::uuid, $3::date, $4::date,
+            $5::numeric, $5::numeric, $6::text, $7::jsonb,
+            $8::text, $9::text, $10::text, now(),
+            'draft', now(), now()
+          )
+          RETURNING *`,
+        [
+          userId,
+          leaveTypeId,
+          startStr,
+          endStr,
+          effectiveDaysSubmit,
+          reason || null,
+          payloadDetails,
+          storedAttachment.originalName,
+          storedAttachment.relPath,
+          storedAttachment.mimeType,
+        ]
+      );
+
+      const row = q.rows[0];
+      const deptHeadInfo = await getDepartmentHeadForEmployee(client, userId);
+      const submitStatus = deptHeadInfo ? 'pending_department_head' : 'pending_hr';
+
+      await client.query(
+        `UPDATE leave_requests SET status = $1, updated_at = now() WHERE id = $2`,
+        [submitStatus, row.id]
+      );
+      row.status = submitStatus;
+
+      await insertLeaveRequestHistory(client, {
+        leaveRequestId: row.id,
+        action: 'submitted',
+        fromStatus: null,
+        toStatus: submitStatus,
+        actedBy: userId,
+        remarks: reason || null,
+        metadataJson: {
+          leave_type: leave_type || null,
+          start_date: startStr,
+          end_date: endStr,
+          number_of_days: effectiveDaysSubmit,
+          attachment_name: storedAttachment.originalName,
+          department_head: deptHeadInfo ? deptHeadInfo.departmentHeadUserId : null,
+        },
+      });
+
+      if (effectiveDaysSubmit != null && effectiveDaysSubmit > 0) {
+        const leaveTypeName = leave_type ? String(leave_type) : null;
+        if (leaveTypeName) {
+          await reservePendingLeaveBalance(client, {
+            userId,
+            leaveTypeName,
+            days: effectiveDaysSubmit,
+            leaveRequestId: row.id,
+            actorUserId: userId,
+            actorKind: 'user',
+            action: 'leave_submitted',
+            metadataJson: {
+              number_of_days: effectiveDaysSubmit,
+              attachment_name: storedAttachment.originalName,
+            },
+          });
+        }
+      }
+
+      const typeName = leave_type ? String(leave_type) : null;
+      await client.query('COMMIT');
+      storedAttachmentRelPath = null;
+
+      const nameRow = await pool.query('SELECT full_name FROM users WHERE id = $1', [userId]);
+      const submitEmpName = nameRow.rows[0]?.full_name || 'Employee';
+      notifySafe(() =>
+        leaveNotifications.notifyAfterSubmit(pool, {
+          leaveRequestId: row.id,
+          status: row.status,
+          employeeUserId: userId,
+          employeeName: submitEmpName,
+          leaveTypeName: typeName,
+          startDateStr: startStr,
+          endDateStr: endStr,
+          departmentHeadUserId: deptHeadInfo?.departmentHeadUserId ?? null,
+        })
+      );
+      const mapped = mapLeaveRowToApi({ ...row, leave_type_name: typeName });
+      broadcastLeaveUpdated('submitted', mapped);
+      res.status(201).json(mapped);
+    } catch (e) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (_) { }
+      cleanupStoredLeaveAttachment(storedAttachmentRelPath);
+      storedAttachmentRelPath = null;
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    cleanupStoredLeaveAttachment(storedAttachmentRelPath);
+    console.error('[leave POST /submit-with-attachment]', err);
+    if (err && err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to submit leave request with attachment' });
+  }
+});
+
 // PUT /api/leave/:id (employee updates draft/returned)
 router.put('/:id', protect, async (req, res) => {
   const userId = req.user?.id;
@@ -1874,7 +2333,7 @@ router.put('/:id', protect, async (req, res) => {
     }
     const startStr = toIsoDateStr(start_date);
     const endStr = toIsoDateStr(end_date);
-    const days = await computeNumberOfDays(startStr, endStr);
+    const days = computeNumberOfDaysSync(startStr, endStr);
     let effectiveDays = days;
 
     const client = await pool.connect();
@@ -1890,9 +2349,10 @@ router.put('/:id', protect, async (req, res) => {
         ? details
         : { ...rest, leave_type, start_date: startStr, end_date: endStr };
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
+      const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
       if (startStr && endStr) {
-        const computedDays = await computeNumberOfDays(startStr, endStr, client);
-        effectiveDays = computedDays ?? days;
+        const workingDayResult = await computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr);
+        effectiveDays = workingDayResult.days ?? days;
 
         // Validate the server-computed, holiday-aware working day count.
         if (effectiveDays == null || effectiveDays <= 0) {
@@ -1914,6 +2374,7 @@ router.put('/:id', protect, async (req, res) => {
           numberOfDays: effectiveDays,
           hasAttachment: false,
           userSex,
+          maternityDeliveryType,
         });
         if (!validation.valid) {
           await client.query('ROLLBACK');
@@ -2672,6 +3133,18 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
         leaveTypeName: mappedDhApprove.leave_type_name || mappedDhApprove.leave_type,
         startDateStr: mappedDhApprove.start_date,
         endDateStr: mappedDhApprove.end_date,
+      })
+    );
+    notifySafe(() =>
+      leaveNotifications.notifyEmployee(pool, {
+        employeeUserId: r.user_id || r.employee_id,
+        leaveRequestId: id,
+        type: 'leave_endorsed_department_head',
+        title: 'Leave request endorsed by department head',
+        body: remarks
+          ? `Your leave request has been endorsed by your department head and forwarded to HR for final approval. ${remarks}`
+          : 'Your leave request has been endorsed by your department head and forwarded to HR for final approval.',
+        metadata: { reviewer_remarks: remarks },
       })
     );
     broadcastLeaveUpdated('department_head_approved', mappedDhApprove);
@@ -3850,7 +4323,7 @@ router.delete('/:id/attachment', protect, async (req, res) => {
   }
 });
 
-// GET /api/leave/:id/attachment - download attachment (owner or admin)
+// GET /api/leave/:id/attachment - download attachment (owner, admin/HR, or reviewing department head)
 router.get('/:id/attachment', protect, async (req, res) => {
   const userId = req.user?.id;
   const role = req.user?.role;
@@ -3859,11 +4332,21 @@ router.get('/:id/attachment', protect, async (req, res) => {
   try {
     const isAdmin = role === 'admin' || role === 'hr';
     const rows = await pool.query(
-      'SELECT attachment_path, attachment_name, attachment_mime_type FROM leave_requests WHERE id = $1 AND ($2 = true OR user_id = $3 OR employee_id = $3)',
-      [id, isAdmin, userId]
+      'SELECT user_id, employee_id, attachment_path, attachment_name, attachment_mime_type FROM leave_requests WHERE id = $1',
+      [id]
     );
     if (rows.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
     const row = rows.rows[0];
+    const targetUserId = row.user_id || row.employee_id;
+    let canAccess = isAdmin || targetUserId === userId;
+    if (!canAccess) {
+      const deptInfo = await isDepartmentHead(pool, userId);
+      if (deptInfo?.isDeptHead && deptInfo.departmentId && targetUserId) {
+        const employeeDept = await getEmployeeDepartment(pool, targetUserId);
+        canAccess = employeeDept?.departmentId === deptInfo.departmentId;
+      }
+    }
+    if (!canAccess) return res.status(404).json({ error: 'Leave request not found' });
     if (!row.attachment_path) return res.status(404).json({ error: 'No attachment for this request' });
     const filePath = path.join(UPLOAD_DIR, row.attachment_path);
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Attachment file not found' });

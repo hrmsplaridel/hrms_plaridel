@@ -12,6 +12,7 @@ class LeaveTypeDefinition {
     this.requiresAttachment = false,
     this.requiresAttachmentWhenOverDays,
     this.maxDays,
+    this.minimumAdvanceDays,
     this.affectsDtrNormally = true,
     this.balanceLedgerType = 'none',
     this.sexEligibility = 'any',
@@ -29,6 +30,7 @@ class LeaveTypeDefinition {
   final bool requiresAttachment;
   final double? requiresAttachmentWhenOverDays;
   final double? maxDays;
+  final int? minimumAdvanceDays;
   final bool affectsDtrNormally;
   final String balanceLedgerType;
   final String sexEligibility;
@@ -61,6 +63,9 @@ class LeaveTypeDefinition {
             json['requiresAttachmentWhenOverDays'],
       ),
       maxDays: _parseDouble(json['max_days'] ?? json['maxDays']),
+      minimumAdvanceDays: _parseInt(
+        json['minimum_advance_days'] ?? json['minimumAdvanceDays'],
+      ),
       affectsDtrNormally:
           json['affects_dtr_normally'] != false &&
           json['affectsDtrNormally'] != false,
@@ -88,6 +93,7 @@ class LeaveTypeDefinition {
       'requires_attachment': requiresAttachment,
       'requires_attachment_when_over_days': requiresAttachmentWhenOverDays,
       'max_days': maxDays,
+      'minimum_advance_days': minimumAdvanceDays,
       'affects_dtr_normally': affectsDtrNormally,
       'balance_ledger_type': balanceLedgerType,
       'sex_eligibility': sexEligibility,
@@ -107,6 +113,7 @@ class LeaveTypeDefinition {
     bool? requiresAttachment,
     double? requiresAttachmentWhenOverDays,
     double? maxDays,
+    int? minimumAdvanceDays,
     bool? affectsDtrNormally,
     String? balanceLedgerType,
     String? sexEligibility,
@@ -125,6 +132,7 @@ class LeaveTypeDefinition {
       requiresAttachmentWhenOverDays:
           requiresAttachmentWhenOverDays ?? this.requiresAttachmentWhenOverDays,
       maxDays: maxDays ?? this.maxDays,
+      minimumAdvanceDays: minimumAdvanceDays ?? this.minimumAdvanceDays,
       affectsDtrNormally: affectsDtrNormally ?? this.affectsDtrNormally,
       balanceLedgerType: balanceLedgerType ?? this.balanceLedgerType,
       sexEligibility: sexEligibility ?? this.sexEligibility,
@@ -135,6 +143,13 @@ class LeaveTypeDefinition {
     if (value == null) return null;
     if (value is num) return value.toDouble();
     return double.tryParse(value.toString());
+  }
+
+  static int? _parseInt(dynamic value) {
+    if (value == null) return null;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString());
   }
 }
 

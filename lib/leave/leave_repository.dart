@@ -305,6 +305,13 @@ abstract class LeaveRepository {
   /// Submit a leave request for HR/admin review.
   Future<LeaveRequest> submitRequest(LeaveRequest request);
 
+  /// Submit a leave request and supporting attachment in one request.
+  Future<LeaveRequest> submitRequestWithAttachment({
+    required LeaveRequest request,
+    required List<int> fileBytes,
+    required String fileName,
+  });
+
   /// Update an editable request before final review.
   Future<LeaveRequest> updateRequest(LeaveRequest request);
 

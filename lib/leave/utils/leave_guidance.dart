@@ -84,7 +84,7 @@ class LeaveGuidance {
           'Medical certificate or birth/delivery record. Marriage certificate (if applicable). '
           'Notify your agency before the expected delivery.',
       limits:
-          'Up to 105 days; extended to 120 days for solo parents. 30-day optional extension without pay.',
+          'Normal delivery: up to 105 working days. Caesarean section: up to 115 working days.',
       advanceFiling:
           'Notify your supervisor at least 30 days before the expected delivery date.',
       notes: 'Covers normal delivery, caesarean section, and miscarriage.',
@@ -235,9 +235,7 @@ class LeaveGuidance {
                 'Custom leave type configured by HR/Admin. Use this when your request matches the office rule for ${definition.displayName}.',
       requirements: _requirementsForDefinition(definition, base),
       limits: _limitForDefinition(definition, base),
-      advanceFiling: definition.allowsPastDates
-          ? base?.advanceFiling
-          : 'File before the intended leave date.',
+      advanceFiling: _advanceFilingForDefinition(definition, base),
       notes: notes.isEmpty ? null : notes.join(' '),
     );
   }
@@ -274,11 +272,30 @@ class LeaveGuidance {
     LeaveTypeDefinition definition,
     LeaveTypeGuidance? base,
   ) {
+    if (leaveTypeFromString(definition.name) == LeaveType.maternityLeave) {
+      return base?.limits ??
+          'Normal delivery: up to $kMaternityNormalDeliveryWorkingDays working days. '
+              'Caesarean section: up to $kMaternityCaesareanSectionWorkingDays working days.';
+    }
     final maxDays = definition.maxDays;
     if (maxDays != null) {
       return 'Maximum ${_formatDays(maxDays)} working day(s).';
     }
     return base?.limits;
+  }
+
+  static String? _advanceFilingForDefinition(
+    LeaveTypeDefinition definition,
+    LeaveTypeGuidance? base,
+  ) {
+    final minimumDays = definition.minimumAdvanceDays;
+    if (minimumDays != null && minimumDays > 0) {
+      final unit = minimumDays == 1 ? 'day' : 'days';
+      return 'File at least $minimumDays $unit before the intended leave date.';
+    }
+    return definition.allowsPastDates
+        ? base?.advanceFiling
+        : 'File before the intended leave date.';
   }
 
   static String _formatDays(num value) {
@@ -307,11 +324,16 @@ class LeaveGuidance {
       title: 'Filing Deadlines',
       icon: 'schedule',
       items: [
-        'Vacation Leave — at least 5 days in advance.',
-        'Sick Leave — upon return to duty or during absence.',
+        'Vacation Leave — at least 5 days in advance whenever possible.',
+        'Sick Leave — immediately upon return; attach a medical certificate if filed in advance or for 5 days or more.',
         'Maternity Leave — notify HR at least 30 days before the expected delivery.',
         'Paternity Leave — within 60 days of delivery.',
-        'Special Emergency Leave — within 5 days after the calamity event.',
+        'Special Privilege Leave — at least 1 week before availment, except emergency cases.',
+        'Solo Parent Leave — in advance, whenever possible 5 days before going on leave.',
+        'VAWC Leave — in advance or immediately upon return.',
+        'Rehabilitation Privilege — within 1 week from the accident, unless a longer period is warranted.',
+        'Special Leave Benefits for Women — at least 5 days before scheduled surgery, or immediately upon return in emergency cases.',
+        'Special Emergency Leave — within 30 days from the calamity/disaster occurrence.',
         'Other leave types — as soon as practicable or as indicated in agency orders.',
       ],
     ),
@@ -337,7 +359,7 @@ class LeaveGuidance {
       items: [
         'Vacation Leave & Sick Leave: 1.25 days accrued per month each (15 days total after 12 months of service — not a starting lump sum).',
         'Mandatory/Forced Leave: 5 working days minimum per year.',
-        'Maternity Leave: 105 days (120 for solo parents). 30-day optional extension without pay.',
+        'Maternity Leave: 105 working days for normal delivery; 115 working days for caesarean section.',
         'Paternity Leave: 7 working days within 60 days of delivery.',
         'Special Privilege Leave: 3 days per year, non-cumulative.',
         'Solo Parent Leave: 7 working days per year.',

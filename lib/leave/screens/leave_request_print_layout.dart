@@ -1888,7 +1888,10 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
         return false;
       }
     }
-    final maxDays = _leaveType.maxDays;
+    final maxDays = maxWorkingDaysForLeaveDetails(
+      _leaveType,
+      maternityDeliveryType: _maternityDeliveryType,
+    );
     if (maxDays != null && _workingDaysApplied != null) {
       final days = _workingDaysApplied!;
       if (days > maxDays) {

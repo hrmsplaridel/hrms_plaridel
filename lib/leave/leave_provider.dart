@@ -22,16 +22,14 @@ List<LeaveBalance> _filterDisplayBalances(List<LeaveBalance> raw) {
     'adoptionLeave',
     'others',
   };
-  return raw
-      .where((b) {
-        final typeName = b.effectiveLeaveTypeName;
-        if (typeName == LeaveType.vacationLeave.value ||
-            typeName == LeaveType.sickLeave.value) {
-          return true;
-        }
-        return !noCreditSystemTypes.contains(typeName);
-      })
-      .toList();
+  return raw.where((b) {
+    final typeName = b.effectiveLeaveTypeName;
+    if (typeName == LeaveType.vacationLeave.value ||
+        typeName == LeaveType.sickLeave.value) {
+      return true;
+    }
+    return !noCreditSystemTypes.contains(typeName);
+  }).toList();
 }
 
 class _LeaveCacheEntry<T> {
@@ -141,7 +139,9 @@ class LeaveProvider extends ChangeNotifier {
   LeaveBalance? balanceForType(LeaveType leaveType) {
     try {
       final ledger = leaveType.balanceLedgerType;
-      return _balances.firstWhere((b) => b.effectiveLeaveTypeName == ledger.value);
+      return _balances.firstWhere(
+        (b) => b.effectiveLeaveTypeName == ledger.value,
+      );
     } catch (_) {
       return null;
     }
@@ -447,6 +447,37 @@ class LeaveProvider extends ChangeNotifier {
     notifyListeners();
     try {
       final saved = await _repository.submitRequest(request);
+      _selectedRequest = saved;
+      _upsertRequest(saved);
+      _notifyMutation();
+      return saved;
+    } catch (e) {
+      _error =
+          e is Exception &&
+              e.toString().replaceFirst('Exception: ', '').isNotEmpty
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
+      return null;
+    } finally {
+      _submitting = false;
+      notifyListeners();
+    }
+  }
+
+  Future<LeaveRequest?> submitRequestWithAttachment({
+    required LeaveRequest request,
+    required List<int> fileBytes,
+    required String fileName,
+  }) async {
+    _submitting = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final saved = await _repository.submitRequestWithAttachment(
+        request: request,
+        fileBytes: fileBytes,
+        fileName: fileName,
+      );
       _selectedRequest = saved;
       _upsertRequest(saved);
       _notifyMutation();
