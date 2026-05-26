@@ -25,6 +25,11 @@ class DocuTrackerDocument {
     this.workflowVersion,
     this.escalationLevel = 0,
     this.needsAdminIntervention = false,
+    this.sourceModule,
+    this.sourceTable,
+    this.sourceRecordId,
+    this.sourceTitle,
+    this.sourceOnly = false,
   });
 
   final String? id;
@@ -72,6 +77,14 @@ class DocuTrackerDocument {
 
   /// Step 6: Flag for admin when max escalation reached
   final bool needsAdminIntervention;
+
+  /// Source-module metadata for records surfaced from L&D/RSP/DTR before they
+  /// become persisted DocuTracker documents.
+  final String? sourceModule;
+  final String? sourceTable;
+  final String? sourceRecordId;
+  final String? sourceTitle;
+  final bool sourceOnly;
 
   static const String tableName = 'docutracker_documents';
 
@@ -128,6 +141,13 @@ class DocuTrackerDocument {
       workflowVersion: (json['workflow_version'] as num?)?.toInt(),
       escalationLevel: (json['escalation_level'] as num?)?.toInt() ?? 0,
       needsAdminIntervention: json['needs_admin_intervention'] == true,
+      sourceModule: json['source_module']?.toString(),
+      sourceTable: json['source_table']?.toString(),
+      sourceRecordId: json['source_record_id']?.toString(),
+      sourceTitle: json['source_title']?.toString(),
+      sourceOnly:
+          json['source_only'] == true ||
+          (json['id']?.toString().startsWith('source:') == true),
     );
   }
 
@@ -149,6 +169,11 @@ class DocuTrackerDocument {
     if (workflowVersion != null) 'workflow_version': workflowVersion,
     'escalation_level': escalationLevel,
     'needs_admin_intervention': needsAdminIntervention,
+    if (sourceModule != null) 'source_module': sourceModule,
+    if (sourceTable != null) 'source_table': sourceTable,
+    if (sourceRecordId != null) 'source_record_id': sourceRecordId,
+    if (sourceTitle != null) 'source_title': sourceTitle,
+    'source_only': sourceOnly,
     'updated_at': DateTime.now().toIso8601String(),
   };
 
@@ -174,6 +199,11 @@ class DocuTrackerDocument {
     int? workflowVersion,
     int? escalationLevel,
     bool? needsAdminIntervention,
+    String? sourceModule,
+    String? sourceTable,
+    String? sourceRecordId,
+    String? sourceTitle,
+    bool? sourceOnly,
   }) {
     return DocuTrackerDocument(
       id: id ?? this.id,
@@ -198,6 +228,11 @@ class DocuTrackerDocument {
       escalationLevel: escalationLevel ?? this.escalationLevel,
       needsAdminIntervention:
           needsAdminIntervention ?? this.needsAdminIntervention,
+      sourceModule: sourceModule ?? this.sourceModule,
+      sourceTable: sourceTable ?? this.sourceTable,
+      sourceRecordId: sourceRecordId ?? this.sourceRecordId,
+      sourceTitle: sourceTitle ?? this.sourceTitle,
+      sourceOnly: sourceOnly ?? this.sourceOnly,
     );
   }
 }

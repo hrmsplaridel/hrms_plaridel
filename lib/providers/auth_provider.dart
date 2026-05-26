@@ -107,7 +107,14 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return null;
     } on DioException catch (e) {
-      debugPrint('AuthProvider.login error: ${e.response?.data}');
+      debugPrint(
+        'AuthProvider.login error: '
+        'type=${e.type}, '
+        'status=${e.response?.statusCode}, '
+        'message=${e.message}, '
+        'data=${e.response?.data}, '
+        'error=${e.error}',
+      );
       final body = e.response?.data;
       if (body is Map && body['error'] is String) {
         return body['error'] as String;

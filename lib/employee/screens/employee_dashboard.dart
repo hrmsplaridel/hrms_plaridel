@@ -13,7 +13,10 @@ import '../../../docutracker/docutracker_main.dart';
 import '../../../docutracker/docutracker_provider.dart';
 import '../../../docutracker/screens/docutracker_dashboard_screen.dart';
 import '../../../leave/leave_main.dart';
+import '../../../leave/models/leave_request.dart';
 import '../../../leave/leave_provider.dart';
+import '../../../leave/screens/leave_request_form_screen.dart';
+import '../../../leave/utils/responsive_leave_form_host.dart';
 import '../../../notifications/notification_provider.dart';
 import '../../../notifications/notification_tap_result.dart';
 import '../../../notifications/open_notifications_panel.dart';
@@ -110,6 +113,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
   static const int _profileNavIndex = 6;
   static const _settingsPanelKey = PageStorageKey<String>('employee_settings');
   final GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
+  final GlobalKey<State<StatefulWidget>> _locatorSlipKey =
+      GlobalKey<State<StatefulWidget>>();
 
   Widget _settingsPanel() => DashboardProfilePanel(
         key: _settingsPanelKey,
@@ -231,7 +236,77 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
     DashboardContentNavigator.showHome(_contentNavKey);
   }
 
-  Widget _employeeMainChild({required String displayName}) {
+  void _openEmployeeLocatorRequestForm() {
+    final state = _locatorSlipKey.currentState;
+    if (state == null) return;
+    try {
+      final result = (state as dynamic).openCreateForm();
+      if (result is Future<void>) {
+        unawaited(result);
+      }
+    } catch (_) {
+      // The locator page owns the form. If it is not mounted yet, do nothing.
+    }
+  }
+
+  Future<void> _openEmployeeLeaveRequestForm() async {
+    final result = await openResponsiveLeaveFormHost<String?>(
+      context: context,
+      builder: (_) => _buildEmployeeLeaveRequestForm(),
+    );
+    if (!mounted || result == null) return;
+    if (result != kLeaveFormResultDraftSaved &&
+        result != kLeaveFormResultSubmitted) {
+      return;
+    }
+    final userId = context.read<AuthProvider>().user?.id;
+    if (userId != null && userId.isNotEmpty) {
+      await context.read<LeaveProvider>().loadMyLeaveData(userId);
+    }
+    if (!mounted) return;
+    showLeaveFormSuccessSnackBar(context, result);
+  }
+
+  Widget _buildEmployeeLeaveRequestForm() {
+    return LeaveRequestFormScreen(
+      onSaveDraft: (LeaveRequest request) async {
+        final provider = context.read<LeaveProvider>();
+        if (request.id != null && request.id!.isNotEmpty) {
+          final updated = await provider.updateRequest(request);
+          return updated != null;
+        }
+        final saved = await provider.saveDraft(request);
+        return saved != null;
+      },
+      onSubmitRequest: (LeaveRequest request) async {
+        final provider = context.read<LeaveProvider>();
+        if (request.id != null && request.id!.isNotEmpty) {
+          final updated = await provider.updateRequest(
+            request.copyWith(status: LeaveRequestStatus.pending),
+          );
+          return updated != null;
+        }
+        final saved = await provider.submitRequest(request);
+        return saved != null;
+      },
+      onSubmitRequestWithAttachment:
+          (LeaveRequest request, List<int> fileBytes, String fileName) async {
+            final provider = context.read<LeaveProvider>();
+            final saved = await provider.submitRequestWithAttachment(
+              request: request,
+              fileBytes: fileBytes,
+              fileName: fileName,
+            );
+            return saved != null;
+          },
+    );
+  }
+
+  Widget _employeeMainChild({
+    required String displayName,
+    required bool useMobileLeaveFab,
+    required bool useMobileLocatorFab,
+  }) {
     switch (_selectedNavIndex) {
       case 0:
         return _EmployeeDashboardContent(
@@ -244,9 +319,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
         return _EmployeeLeaveMainEntry(
           key: ValueKey(_leaveNavKey),
           initialSection: _leaveInitialSection,
+          onFileLeavePressed: _openEmployeeLeaveRequestForm,
+          hideFileLeaveAction: useMobileLeaveFab,
         );
       case 3:
-        return const EmployeeLocatorSlipScreen();
+        return EmployeeLocatorSlipScreen(
+          key: _locatorSlipKey,
+        );
       case 4:
         return const TrainingDailyReportEmployeeScreen();
       case 5:
@@ -276,9 +355,26 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
     );
     final width = MediaQuery.of(context).size.width;
     final isWide = width > 900;
+    final useMobileLeaveFab = width < 600 && _selectedNavIndex == 2;
+    final useMobileLocatorFab = !isWide && _selectedNavIndex == 3;
 
     return Scaffold(
       backgroundColor: AppTheme.dashCanvasOf(context),
+      floatingActionButton: useMobileLeaveFab || useMobileLocatorFab
+          ? FloatingActionButton.extended(
+              heroTag: useMobileLeaveFab
+                  ? 'employee-dashboard-file-leave-fab'
+                  : 'employee-dashboard-file-locator-fab',
+              onPressed: useMobileLeaveFab
+                  ? _openEmployeeLeaveRequestForm
+                  : _openEmployeeLocatorRequestForm,
+              icon: const Icon(Icons.add_rounded),
+              label: Text(useMobileLeaveFab ? 'File Leave' : 'File Request'),
+              backgroundColor: AppTheme.primaryNavy,
+              foregroundColor: Colors.white,
+            )
+          : null,
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       bottomNavigationBar: isWide
           ? null
           : DashboardMobileBottomNav(
@@ -331,8 +427,11 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                             color: AppTheme.dashCanvasOf(context),
                             child: DashboardContentNavigator(
                               navigatorKey: _contentNavKey,
-                              homeBuilder: () =>
-                                  _employeeMainChild(displayName: displayName),
+                              homeBuilder: () => _employeeMainChild(
+                                displayName: displayName,
+                                useMobileLeaveFab: useMobileLeaveFab,
+                                useMobileLocatorFab: useMobileLocatorFab,
+                              ),
                               settingsPanel: _settingsPanel(),
                               homeScrollPadding: _employeeMainScrollPadding(
                                 context,
@@ -369,8 +468,11 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
                       color: AppTheme.dashCanvasOf(context),
                       child: DashboardContentNavigator(
                         navigatorKey: _contentNavKey,
-                        homeBuilder: () =>
-                            _employeeMainChild(displayName: displayName),
+                        homeBuilder: () => _employeeMainChild(
+                          displayName: displayName,
+                          useMobileLeaveFab: useMobileLeaveFab,
+                          useMobileLocatorFab: useMobileLocatorFab,
+                        ),
                         settingsPanel: _settingsPanel(),
                         homeScrollPadding: _employeeMainScrollPadding(
                           context,
@@ -532,9 +634,16 @@ class EmployeeAttendanceDetailsSection extends StatelessWidget {
 }
 
 class _EmployeeLeaveMainEntry extends StatefulWidget {
-  const _EmployeeLeaveMainEntry({super.key, this.initialSection});
+  const _EmployeeLeaveMainEntry({
+    super.key,
+    this.initialSection,
+    this.onFileLeavePressed,
+    this.hideFileLeaveAction = false,
+  });
 
   final LeaveSection? initialSection;
+  final VoidCallback? onFileLeavePressed;
+  final bool hideFileLeaveAction;
 
   @override
   State<_EmployeeLeaveMainEntry> createState() =>
@@ -583,6 +692,8 @@ class _EmployeeLeaveMainEntryState extends State<_EmployeeLeaveMainEntry> {
           isAdmin: false,
           isDepartmentHead: isDeptHead,
           initialSection: widget.initialSection,
+          onFileLeavePressed: widget.onFileLeavePressed,
+          hideEmployeeFileLeaveAction: widget.hideFileLeaveAction,
         );
       },
     );
@@ -912,7 +1023,7 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
           displayName: widget.displayName,
           isNarrow: isNarrow,
         ),
-        SizedBox(height: isNarrow ? 22 : 28),
+        SizedBox(height: isNarrow ? 14 : 28),
         EmployeeAttendanceOverviewCard(
           onViewMore: widget.onViewAttendance,
           summaryCards: _EmployeeSummaryCards(
@@ -921,22 +1032,25 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
           ),
           upcomingLeave: const _EmployeeUpcomingLeaveCard(embedded: true),
         ),
-        SizedBox(height: isNarrow ? 22 : 28),
+        SizedBox(height: isNarrow ? 18 : 28),
         EmployeeSectionHeader(
           title: 'DocuTracker',
           icon: Icons.folder_copy_outlined,
           subtitle: 'Your documents and routing status',
         ),
-        const SizedBox(height: 14),
+        SizedBox(height: isNarrow ? 10 : 14),
         Container(
-          padding: EdgeInsets.all(_employeeSectionCardPadding(context)),
+          padding: EdgeInsets.all(
+            isNarrow ? 12 : _employeeSectionCardPadding(context),
+          ),
           decoration: EmployeeDashUi.elevatedPanel(context),
           child: const DocuTrackerDashboardScreen(
             isAdmin: false,
             showTitle: false,
+            embedded: true,
           ),
         ),
-        const SizedBox(height: 32),
+        SizedBox(height: isNarrow ? 20 : 32),
       ],
     );
   }
@@ -957,9 +1071,28 @@ class _EmployeeSummaryCards extends StatelessWidget {
     final twoRows = w < 800 && !singleColumn;
     final cardGap = w < 600 ? 12.0 : 16.0;
 
-    Widget clockIn = _ClockInCard();
-    Widget attendance = _AttendanceCard(onViewAttendance: onViewAttendance);
-    Widget leaveBalance = _LeaveBalanceCard();
+    Widget clockIn = _ClockInCard(compact: w < 600);
+    Widget attendance = _AttendanceCard(
+      onViewAttendance: onViewAttendance,
+      compact: w < 600,
+    );
+    Widget leaveBalance = _LeaveBalanceCard(compact: w < 600);
+    if (w < 600) {
+      return Column(
+        children: [
+          clockIn,
+          SizedBox(height: cardGap),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: attendance),
+              SizedBox(width: cardGap),
+              Expanded(child: leaveBalance),
+            ],
+          ),
+        ],
+      );
+    }
     if (singleColumn) {
       return Column(
         children: [
@@ -1009,7 +1142,10 @@ String _formatTime(DateTime? dt) {
 }
 
 class _ClockInCard extends StatelessWidget {
+  const _ClockInCard({this.compact = false});
+
   static const int _noonHour = 12;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -1083,10 +1219,11 @@ class _ClockInCard extends StatelessWidget {
         final isShiftDisabled = onTap != null && dtr.isOutsideShiftWindow;
 
         final narrow = MediaQuery.sizeOf(context).width < 600;
-        final detailFontSize = narrow ? 10.0 : 11.0;
+        final compactLayout = compact || narrow;
+        final detailFontSize = compactLayout ? 10.0 : 11.0;
 
         return Container(
-          padding: EdgeInsets.all(_employeeCardPadding(context)),
+          padding: EdgeInsets.all(compactLayout ? 12 : _employeeCardPadding(context)),
           decoration: EmployeeDashUi.summaryCard(
             context: context,
             tint: const Color(0xFFFFF7ED),
@@ -1110,7 +1247,7 @@ class _ClockInCard extends StatelessWidget {
                     ),
                   ),
                 ),
-              const SizedBox(height: 12),
+              SizedBox(height: compactLayout ? 8 : 12),
               Text(
                 _formatTime(
                   record?.timeOut ??
@@ -1120,7 +1257,7 @@ class _ClockInCard extends StatelessWidget {
                 ),
                 style: TextStyle(
                   color: AppTheme.dashTextPrimaryOf(context),
-                  fontSize: 26,
+                  fontSize: compactLayout ? 22 : 26,
                   fontWeight: FontWeight.w800,
                 ),
               ),
@@ -1143,15 +1280,17 @@ class _ClockInCard extends StatelessWidget {
                   AttendanceSourceBadge(source: record.source, compact: true),
                 ],
               ],
-              const SizedBox(height: 6),
-              Text(
-                'Location: —',
-                style: TextStyle(
-                  color: AppTheme.dashTextSecondaryOf(context),
-                  fontSize: 12,
+              if (!compactLayout) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'Location: —',
+                  style: TextStyle(
+                    color: AppTheme.dashTextSecondaryOf(context),
+                    fontSize: 12,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
+              ],
+              SizedBox(height: compactLayout ? 10 : 16),
               if (isShiftDisabled &&
                   dtr.isBeforeShiftStart &&
                   dtr.myShiftStartFormatted != null)
@@ -1227,7 +1366,9 @@ class _ClockInCard extends StatelessWidget {
                   style: FilledButton.styleFrom(
                     backgroundColor: AppTheme.primaryNavy,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    padding: EdgeInsets.symmetric(
+                      vertical: compactLayout ? 10 : 12,
+                    ),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -1260,9 +1401,10 @@ class _ClockInCard extends StatelessWidget {
 }
 
 class _AttendanceCard extends StatelessWidget {
-  const _AttendanceCard({this.onViewAttendance});
+  const _AttendanceCard({this.onViewAttendance, this.compact = false});
 
   final VoidCallback? onViewAttendance;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -1275,90 +1417,148 @@ class _AttendanceCard extends StatelessWidget {
         final monthLabel =
             '${now.year}-${now.month.toString().padLeft(2, '0')}';
 
-        return Container(
-          padding: EdgeInsets.all(_employeeCardPadding(context)),
+        final compactLayout = compact || MediaQuery.sizeOf(context).width < 600;
+        final content = Container(
+          padding: EdgeInsets.all(compactLayout ? 12 : _employeeCardPadding(context)),
           decoration: EmployeeDashUi.summaryCard(
             context: context,
             tint: const Color(0xFFE8F5E9),
             accent: AttendanceOverviewColors.present,
           ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
+          child: compactLayout
+              ? Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      'ATTENDANCE',
-                      style: EmployeeDashUi.metricLabel(context),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'ATTENDANCE',
+                            style: EmployeeDashUi.metricLabel(context),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const Icon(
+                          Icons.event_available_rounded,
+                          color: AttendanceOverviewColors.present,
+                          size: 20,
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     Text(
                       '$presentCount',
                       style: TextStyle(
                         color: AppTheme.dashTextPrimaryOf(context),
-                        fontSize: 28,
+                        fontSize: 24,
                         fontWeight: FontWeight.w800,
                       ),
                     ),
-                    const SizedBox(height: 4),
                     Text(
                       'Present Days',
                       style: TextStyle(
                         color: AppTheme.dashTextSecondaryOf(context),
-                        fontSize: 12,
+                        fontSize: 11,
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AttendanceOverviewColors.present.withValues(
-                          alpha: 0.08,
-                        ),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        monthLabel,
-                        style: TextStyle(
-                          color: AppTheme.dashTextSecondaryOf(context),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextButton(
-                      onPressed: onViewAttendance,
-                      style: TextButton.styleFrom(
-                        foregroundColor: AppTheme.primaryNavy,
-                        padding: EdgeInsets.zero,
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text('View details'),
-                          SizedBox(width: 4),
-                          Icon(Icons.arrow_forward_rounded, size: 16),
-                        ],
+                    const SizedBox(height: 8),
+                    Text(
+                      monthLabel,
+                      style: TextStyle(
+                        color: AppTheme.dashTextSecondaryOf(context),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
+                )
+              : Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'ATTENDANCE',
+                            style: EmployeeDashUi.metricLabel(context),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            '$presentCount',
+                            style: TextStyle(
+                              color: AppTheme.dashTextPrimaryOf(context),
+                              fontSize: 28,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Present Days',
+                            style: TextStyle(
+                              color: AppTheme.dashTextSecondaryOf(context),
+                              fontSize: 12,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AttendanceOverviewColors.present
+                                  .withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              monthLabel,
+                              style: TextStyle(
+                                color: AppTheme.dashTextSecondaryOf(context),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextButton(
+                            onPressed: onViewAttendance,
+                            style: TextButton.styleFrom(
+                              foregroundColor: AppTheme.primaryNavy,
+                              padding: EdgeInsets.zero,
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text('View details'),
+                                SizedBox(width: 4),
+                                Icon(Icons.arrow_forward_rounded, size: 16),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    const EmployeeSummaryIconAccent(
+                      icon: Icons.event_available_rounded,
+                      color: AttendanceOverviewColors.present,
+                    ),
+                  ],
                 ),
-              ),
-              const SizedBox(width: 12),
-              const EmployeeSummaryIconAccent(
-                icon: Icons.event_available_rounded,
-                color: AttendanceOverviewColors.present,
-              ),
-            ],
+        );
+
+        if (!compactLayout || onViewAttendance == null) return content;
+        return Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onViewAttendance,
+            borderRadius: BorderRadius.circular(EmployeeDashUi.radiusMd),
+            child: content,
           ),
         );
       },
@@ -1367,10 +1567,15 @@ class _AttendanceCard extends StatelessWidget {
 }
 
 class _LeaveBalanceCard extends StatelessWidget {
+  const _LeaveBalanceCard({this.compact = false});
+
+  final bool compact;
+
   @override
   Widget build(BuildContext context) {
     return Consumer<LeaveProvider>(
       builder: (context, leave, _) {
+        final compactLayout = compact || MediaQuery.sizeOf(context).width < 600;
         final totalRemaining = leave.balances.fold<double>(
           0,
           (sum, b) => sum + b.remainingDays,
@@ -1389,80 +1594,132 @@ class _LeaveBalanceCard extends StatelessWidget {
         final hasData = leave.balances.isNotEmpty;
         if (leave.loading && !hasData) {
           return LeaveBalanceSummaryCardSkeleton(
-            padding: EdgeInsets.all(_employeeCardPadding(context)),
+            padding: EdgeInsets.all(
+              compactLayout ? 12 : _employeeCardPadding(context),
+            ),
           );
         }
         return Container(
-          padding: EdgeInsets.all(_employeeCardPadding(context)),
+          padding: EdgeInsets.all(compactLayout ? 12 : _employeeCardPadding(context)),
           decoration: EmployeeDashUi.summaryCard(
             context: context,
             tint: const Color(0xFFF3E5F5),
             accent: AttendanceOverviewColors.onLeave,
           ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
+          child: compactLayout
+              ? Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      'LEAVE BALANCE',
-                      style: EmployeeDashUi.metricLabel(context),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'LEAVE',
+                            style: EmployeeDashUi.metricLabel(context),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const Icon(
+                          Icons.event_note_rounded,
+                          color: AttendanceOverviewColors.onLeave,
+                          size: 20,
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     Text(
                       hasData ? totalRemaining.toStringAsFixed(1) : '—',
                       style: TextStyle(
                         color: AppTheme.dashTextPrimaryOf(context),
-                        fontSize: 28,
+                        fontSize: 24,
                         fontWeight: FontWeight.w800,
                       ),
                     ),
-                    const SizedBox(height: 4),
                     Text(
                       'Remaining Days',
                       style: TextStyle(
                         color: AppTheme.dashTextSecondaryOf(context),
-                        fontSize: 12,
+                        fontSize: 11,
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: _LeaveBalanceMiniLine(
-                            icon: Icons.beach_access_rounded,
-                            label: 'Vacation',
-                            value: vacationDays != null
-                                ? vacationDays.toStringAsFixed(1)
-                                : '—',
+                    const SizedBox(height: 8),
+                    Text(
+                      'VL ${vacationDays != null ? vacationDays.toStringAsFixed(1) : '—'} / SL ${sickDays != null ? sickDays.toStringAsFixed(1) : '—'}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppTheme.dashTextSecondaryOf(context),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                )
+              : Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'LEAVE BALANCE',
+                            style: EmployeeDashUi.metricLabel(context),
                           ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: _LeaveBalanceMiniLine(
-                            icon: Icons.medical_services_outlined,
-                            label: 'Sick',
-                            value: sickDays != null
-                                ? sickDays.toStringAsFixed(1)
-                                : '—',
+                          const SizedBox(height: 12),
+                          Text(
+                            hasData ? totalRemaining.toStringAsFixed(1) : '—',
+                            style: TextStyle(
+                              color: AppTheme.dashTextPrimaryOf(context),
+                              fontSize: 28,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
-                        ),
-                      ],
+                          const SizedBox(height: 4),
+                          Text(
+                            'Remaining Days',
+                            style: TextStyle(
+                              color: AppTheme.dashTextSecondaryOf(context),
+                              fontSize: 12,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: _LeaveBalanceMiniLine(
+                                  icon: Icons.beach_access_rounded,
+                                  label: 'Vacation',
+                                  value: vacationDays != null
+                                      ? vacationDays.toStringAsFixed(1)
+                                      : '—',
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: _LeaveBalanceMiniLine(
+                                  icon: Icons.medical_services_outlined,
+                                  label: 'Sick',
+                                  value: sickDays != null
+                                      ? sickDays.toStringAsFixed(1)
+                                      : '—',
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    const EmployeeSummaryIconAccent(
+                      icon: Icons.event_note_rounded,
+                      color: AttendanceOverviewColors.onLeave,
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(width: 12),
-              const EmployeeSummaryIconAccent(
-                icon: Icons.event_note_rounded,
-                color: AttendanceOverviewColors.onLeave,
-              ),
-            ],
-          ),
         );
       },
     );
@@ -1843,6 +2100,46 @@ class _EmployeeAttendanceContentState
     return '${d.day} $weekday';
   }
 
+  Widget _buildMobileAttendanceList(List<TimeRecord> records) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var i = 0; i < records.length; i++) ...[
+          _EmployeeAttendanceMobileCard(
+            dateLabel: _formatDate(records[i].recordDate),
+            amIn: _formatTimeWithLocator(
+              records[i],
+              records[i].timeIn?.toLocal(),
+              'AM IN',
+            ),
+            amOut: _formatTimeWithLocator(
+              records[i],
+              records[i].breakOut?.toLocal(),
+              'AM OUT',
+            ),
+            pmIn: _formatTimeWithLocator(
+              records[i],
+              records[i].breakIn?.toLocal(),
+              'PM IN',
+            ),
+            pmOut: _formatTimeWithLocator(
+              records[i],
+              records[i].timeOut?.toLocal(),
+              'PM OUT',
+            ),
+            late: formatLateMinutes(records[i]),
+            undertime: formatUndertimeMinutes(records[i]),
+            remark: getAttendanceRemark(records[i]),
+            isHoliday:
+                records[i].status == 'holiday' || records[i].holidayId != null,
+            source: records[i].source,
+          ),
+          if (i != records.length - 1) const SizedBox(height: 12),
+        ],
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final dtr = context.watch<DtrProvider>();
@@ -2149,6 +2446,10 @@ class _EmployeeAttendanceContentState
         if (!dtr.loading && visibleRecords.isNotEmpty)
           LayoutBuilder(
             builder: (context, constraints) {
+              if (constraints.maxWidth < 600) {
+                return _buildMobileAttendanceList(visibleRecords);
+              }
+
               const minTableWidth = 860.0;
               final tableWidth = constraints.maxWidth < minTableWidth
                   ? minTableWidth
@@ -2397,6 +2698,289 @@ class _EmployeeAttendanceContentState
             },
           ),
       ],
+    );
+  }
+}
+
+class _EmployeeAttendanceMobileCard extends StatelessWidget {
+  const _EmployeeAttendanceMobileCard({
+    required this.dateLabel,
+    required this.amIn,
+    required this.amOut,
+    required this.pmIn,
+    required this.pmOut,
+    required this.late,
+    required this.undertime,
+    required this.remark,
+    required this.isHoliday,
+    required this.source,
+  });
+
+  final String dateLabel;
+  final String amIn;
+  final String amOut;
+  final String pmIn;
+  final String pmOut;
+  final String late;
+  final String undertime;
+  final String remark;
+  final bool isHoliday;
+  final String? source;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+        boxShadow: dark
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 12,
+                  offset: const Offset(0, 5),
+                ),
+              ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: AttendanceOverviewColors.present.withValues(
+                    alpha: dark ? 0.24 : 0.12,
+                  ),
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: Icon(
+                  Icons.calendar_today_rounded,
+                  color: AttendanceOverviewColors.present,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      dateLabel,
+                      style: TextStyle(
+                        color: AppTheme.dashTextPrimaryOf(context),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Daily time record',
+                      style: TextStyle(
+                        color: AppTheme.dashTextSecondaryOf(context),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                fit: FlexFit.loose,
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: AttendanceRemarksChip(
+                    remark: remark,
+                    isHoliday: isHoliday,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final tileWidth = (constraints.maxWidth - 8) / 2;
+              return Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  SizedBox(
+                    width: tileWidth,
+                    child: _EmployeeAttendanceTimeTile(
+                      icon: Icons.login_rounded,
+                      label: 'AM In',
+                      value: amIn,
+                    ),
+                  ),
+                  SizedBox(
+                    width: tileWidth,
+                    child: _EmployeeAttendanceTimeTile(
+                      icon: Icons.logout_rounded,
+                      label: 'AM Out',
+                      value: amOut,
+                    ),
+                  ),
+                  SizedBox(
+                    width: tileWidth,
+                    child: _EmployeeAttendanceTimeTile(
+                      icon: Icons.login_rounded,
+                      label: 'PM In',
+                      value: pmIn,
+                    ),
+                  ),
+                  SizedBox(
+                    width: tileWidth,
+                    child: _EmployeeAttendanceTimeTile(
+                      icon: Icons.logout_rounded,
+                      label: 'PM Out',
+                      value: pmOut,
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              _EmployeeAttendanceMetaChip(
+                icon: Icons.timer_outlined,
+                label: 'Late',
+                value: late,
+              ),
+              _EmployeeAttendanceMetaChip(
+                icon: Icons.hourglass_bottom_rounded,
+                label: 'Undertime',
+                value: undertime,
+              ),
+              if ((source ?? '').trim().isNotEmpty)
+                AttendanceSourceBadge(source: source, compact: true),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmployeeAttendanceTimeTile extends StatelessWidget {
+  const _EmployeeAttendanceTimeTile({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasValue = value != '—';
+    return Container(
+      constraints: const BoxConstraints(minHeight: 62),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+      decoration: BoxDecoration(
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            size: 16,
+            color: hasValue
+                ? AppTheme.primaryNavy
+                : AppTheme.dashTextSecondaryOf(context),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.dashTextSecondaryOf(context),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: hasValue
+                        ? AppTheme.dashTextPrimaryOf(context)
+                        : AppTheme.dashTextSecondaryOf(context),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmployeeAttendanceMetaChip extends StatelessWidget {
+  const _EmployeeAttendanceMetaChip({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+      decoration: BoxDecoration(
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: AppTheme.dashTextSecondaryOf(context)),
+          const SizedBox(width: 5),
+          Text(
+            '$label: $value',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: AppTheme.dashTextPrimaryOf(context),
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

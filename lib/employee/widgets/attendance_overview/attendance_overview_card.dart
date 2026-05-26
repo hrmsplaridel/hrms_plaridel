@@ -159,7 +159,7 @@ class _EmployeeAttendanceOverviewCardState
   Widget build(BuildContext context) {
     final w = MediaQuery.sizeOf(context).width;
     final narrow = w < 560;
-    final pad = narrow ? 14.0 : 18.0;
+    final pad = narrow ? 12.0 : 18.0;
     final monthTitle = attendanceOverviewMonthTitle(_year, _month);
     final summaryStrip = widget.summaryCards;
     final leaveSection = widget.upcomingLeave;
@@ -172,13 +172,13 @@ class _EmployeeAttendanceOverviewCardState
         children: [
           if (summaryStrip != null) ...[
             summaryStrip,
-            SizedBox(height: narrow ? 14 : 18),
+            SizedBox(height: narrow ? 12 : 18),
             Divider(
               height: 1,
               thickness: 1,
               color: AppTheme.dashHairlineOf(context),
             ),
-            SizedBox(height: narrow ? 14 : 18),
+            SizedBox(height: narrow ? 12 : 18),
           ],
           _AttendanceOverviewHeader(
             narrow: narrow,
@@ -250,13 +250,13 @@ class _EmployeeAttendanceOverviewCardState
             },
           ),
           if (leaveSection != null) ...[
-            SizedBox(height: narrow ? 14 : 18),
+            SizedBox(height: narrow ? 12 : 18),
             Divider(
               height: 1,
               thickness: 1,
               color: AppTheme.dashHairlineOf(context),
             ),
-            SizedBox(height: narrow ? 12 : 14),
+            SizedBox(height: narrow ? 10 : 14),
             leaveSection,
           ],
         ],
@@ -288,7 +288,7 @@ class _AttendanceOverviewHeader extends StatelessWidget {
       color: AppTheme.dashTextPrimaryOf(context),
       fontWeight: FontWeight.w800,
       fontSize: narrow ? 16 : 17,
-      letterSpacing: -0.3,
+      letterSpacing: 0,
     );
     final subtitleStyle = TextStyle(
       color: AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.92),

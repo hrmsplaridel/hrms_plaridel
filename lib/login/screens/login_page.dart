@@ -635,11 +635,9 @@ class _LoginMobileBackButton extends StatelessWidget {
 
 class _LoginBackButton extends StatelessWidget {
   const _LoginBackButton({
-    this.compact = false,
     this.showLabel = false,
   });
 
-  final bool compact;
   final bool showLabel;
 
   @override
@@ -654,24 +652,24 @@ class _LoginBackButton extends StatelessWidget {
             child: InkWell(
               onTap: () => Navigator.of(context).pop(),
               child: Padding(
-                padding: EdgeInsets.symmetric(
-                  horizontal: compact ? 12 : 14,
-                  vertical: compact ? 8 : 10,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(
+                    const Icon(
                       Icons.arrow_back_rounded,
-                      size: compact ? 18 : 20,
+                      size: 20,
                       color: Colors.white,
                     ),
                     const SizedBox(width: 6),
-                    Text(
+                    const Text(
                       'Back',
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: compact ? 13 : 14,
+                        fontSize: 14,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -688,11 +686,11 @@ class _LoginBackButton extends StatelessWidget {
       color: Colors.black.withValues(alpha: 0.28),
       shape: const CircleBorder(),
       child: IconButton(
-        padding: EdgeInsets.all(compact ? 8 : 10),
+        padding: const EdgeInsets.all(10),
         onPressed: () => Navigator.of(context).pop(),
-        icon: Icon(
+        icon: const Icon(
           Icons.arrow_back_rounded,
-          size: compact ? 22 : 24,
+          size: 24,
           color: Colors.white,
         ),
         tooltip: 'Back',
@@ -950,56 +948,10 @@ class _LoginFormContent extends StatelessWidget {
           ),
         ),
         SizedBox(height: compact ? 14 : 22),
-        Row(
-          children: [
-            SizedBox(
-              height: 22,
-              width: 22,
-              child: Checkbox(
-                value: rememberMe,
-                onChanged: onRememberMeChanged,
-                activeColor: LoginTheme.bluePrimary,
-                checkColor: Colors.white,
-                side: const BorderSide(
-                  color: Color(0xFFADB5BD),
-                  width: 1.5,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(5),
-                ),
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-            ),
-            const SizedBox(width: 10),
-            GestureDetector(
-              onTap: () => onRememberMeChanged(!rememberMe),
-              child: Text(
-                'Remember me',
-                style: TextStyle(
-                  color: AppTheme.textPrimary.withValues(alpha: 0.85),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-            const Spacer(),
-            TextButton(
-              onPressed: onForgotPassword,
-              style: TextButton.styleFrom(
-                foregroundColor: LoginTheme.bluePrimary,
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              child: const Text(
-                'Forgot password?',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                ),
-              ),
-            ),
-          ],
+        _LoginRememberForgotRow(
+          rememberMe: rememberMe,
+          onRememberMeChanged: onRememberMeChanged,
+          onForgotPassword: onForgotPassword,
         ),
         SizedBox(height: compact ? 16 : 26),
         _LoginToHrmsButton(
@@ -1020,6 +972,131 @@ class _LoginFormContent extends StatelessWidget {
     return _LoginFormCard(
       isMobileLayout: isMobileLayout,
       child: fields,
+    );
+  }
+}
+
+class _LoginRememberForgotRow extends StatelessWidget {
+  const _LoginRememberForgotRow({
+    required this.rememberMe,
+    required this.onRememberMeChanged,
+    required this.onForgotPassword,
+  });
+
+  final bool rememberMe;
+  final ValueChanged<bool?> onRememberMeChanged;
+  final VoidCallback onForgotPassword;
+
+  @override
+  Widget build(BuildContext context) {
+    final rememberControl = _RememberMeControl(
+      rememberMe: rememberMe,
+      onChanged: onRememberMeChanged,
+    );
+    final forgotButton = _ForgotPasswordButton(onPressed: onForgotPassword);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 280) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              rememberControl,
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: forgotButton,
+              ),
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            Flexible(child: rememberControl),
+            const SizedBox(width: 12),
+            forgotButton,
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _RememberMeControl extends StatelessWidget {
+  const _RememberMeControl({
+    required this.rememberMe,
+    required this.onChanged,
+  });
+
+  final bool rememberMe;
+  final ValueChanged<bool?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        SizedBox(
+          height: 22,
+          width: 22,
+          child: Checkbox(
+            value: rememberMe,
+            onChanged: onChanged,
+            activeColor: LoginTheme.bluePrimary,
+            checkColor: Colors.white,
+            side: const BorderSide(
+              color: Color(0xFFADB5BD),
+              width: 1.5,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(5),
+            ),
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Flexible(
+          child: GestureDetector(
+            onTap: () => onChanged(!rememberMe),
+            child: Text(
+              'Remember me',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppTheme.textPrimary.withValues(alpha: 0.85),
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ForgotPasswordButton extends StatelessWidget {
+  const _ForgotPasswordButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        foregroundColor: LoginTheme.bluePrimary,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      child: const Text(
+        'Forgot password?',
+        style: TextStyle(
+          fontWeight: FontWeight.w600,
+          fontSize: 14,
+        ),
+      ),
     );
   }
 }

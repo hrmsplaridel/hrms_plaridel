@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const net = require('net');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const {
@@ -42,6 +43,16 @@ function createTokenId() {
     : crypto.randomBytes(16).toString('hex');
 }
 
+function normalizeIpForDb(value) {
+  if (!value) return null;
+  let ip = String(value).split(',')[0].trim();
+  if (!ip) return null;
+  if (ip.startsWith('::ffff:')) ip = ip.slice('::ffff:'.length);
+  const zoneIndex = ip.indexOf('%');
+  if (zoneIndex >= 0) ip = ip.slice(0, zoneIndex);
+  return net.isIP(ip) ? ip : null;
+}
+
 /**
  * Issue access + refresh JWTs and persist refresh token hash.
  */
@@ -74,8 +85,7 @@ async function issueTokensForUser(user, req, db = pool) {
   const clientHint = req.get('x-hrms-device');
   const devicePayload = buildDeviceInfoPayload(ua, clientHint);
   const deviceInfoStored = JSON.stringify(devicePayload);
-  const rawIp = req.ip || req.socket?.remoteAddress;
-  const ipForDb = rawIp && String(rawIp).trim() !== '' ? String(rawIp) : null;
+  const ipForDb = normalizeIpForDb(req.ip || req.socket?.remoteAddress);
 
   await db.query(
     `INSERT INTO auth_refresh_tokens (user_id, token_hash, expires_at, device_info, ip_address)

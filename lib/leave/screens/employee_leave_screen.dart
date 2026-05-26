@@ -38,9 +38,14 @@ const _leaveRequestFilterOptions = <RequestFilterOption<LeaveRequestStatus>>[
 /// - pending/upcoming requests
 /// - recent leave request history
 class EmployeeLeaveScreen extends StatefulWidget {
-  const EmployeeLeaveScreen({super.key, this.onFileLeavePressed});
+  const EmployeeLeaveScreen({
+    super.key,
+    this.onFileLeavePressed,
+    this.showFileLeaveAction = true,
+  });
 
   final VoidCallback? onFileLeavePressed;
+  final bool showFileLeaveAction;
 
   @override
   State<EmployeeLeaveScreen> createState() => _EmployeeLeaveScreenState();
@@ -119,6 +124,7 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
         ? auth.displayName
         : 'Employee';
     final width = MediaQuery.of(context).size.width;
+    final mobile = width < 600;
     final compact = width < 820;
     final showLeaveSkeleton =
         provider.loading &&
@@ -137,13 +143,25 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
         ? provider.upcomingApprovedRequests.first
         : null;
 
+    if (mobile) {
+      return _buildMobileLayout(
+        provider: provider,
+        showLeaveSkeleton: showLeaveSkeleton,
+        totalAvailable: totalAvailable,
+        totalPendingDays: totalPendingDays,
+        nextApproved: nextApproved,
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _LeavePageHeader(
           displayName: displayName,
           pendingCount: provider.pendingCount,
-          onFileLeavePressed: widget.onFileLeavePressed,
+          onFileLeavePressed: widget.showFileLeaveAction
+              ? widget.onFileLeavePressed
+              : null,
         ),
         if (provider.error != null) ...[
           const SizedBox(height: 16),
@@ -237,6 +255,65 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
                 onPrint: _printLeaveForm,
               ),
             ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildMobileLayout({
+    required LeaveProvider provider,
+    required bool showLeaveSkeleton,
+    required double totalAvailable,
+    required double totalPendingDays,
+    required LeaveRequest? nextApproved,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'My Leave',
+          style: TextStyle(
+            color: AppTheme.dashTextPrimaryOf(context),
+            fontSize: 22,
+            fontWeight: FontWeight.w800,
+            height: 1.2,
+          ),
+        ),
+        const SizedBox(height: 16),
+        if (provider.error != null) ...[
+          _ErrorBanner(message: provider.error!, onDismiss: provider.clearError),
+          const SizedBox(height: 16),
+        ],
+        if (showLeaveSkeleton)
+          const MyLeaveLoadingSkeleton(compact: true)
+        else ...[
+          _MobileLeaveSummaryStrip(
+            totalAvailable: totalAvailable,
+            pendingCount: provider.pendingCount,
+            totalPendingDays: totalPendingDays,
+            nextApproved: nextApproved,
+          ),
+          const SizedBox(height: 22),
+          _MobileBalancesPanel(
+            balances: provider.balances,
+            loading: provider.loading,
+            onBalanceHistory: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) =>
+                      const LeaveBalanceHistoryScreen(isAdmin: false),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 16),
+          _RequestsPanel(
+            requests: provider.requests,
+            loading: provider.loading,
+            onEdit: (request) => _editRequest(context, request),
+            onCancel: (request) => _cancelRequest(context, request),
+            onPrint: _printLeaveForm,
           ),
         ],
       ],
@@ -464,11 +541,12 @@ class _LeavePageHeader extends StatelessWidget {
               ],
             ),
           ),
-          FilledButton.icon(
-            onPressed: onFileLeavePressed,
-            icon: const Icon(Icons.add_task_rounded),
-            label: const Text('File Leave Request'),
-          ),
+          if (onFileLeavePressed != null)
+            FilledButton.icon(
+              onPressed: onFileLeavePressed,
+              icon: const Icon(Icons.add_task_rounded),
+              label: const Text('File Leave Request'),
+            ),
         ],
       ),
     );
@@ -526,6 +604,386 @@ class _SummaryCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _MobileLeaveSummaryStrip extends StatelessWidget {
+  const _MobileLeaveSummaryStrip({
+    required this.totalAvailable,
+    required this.pendingCount,
+    required this.totalPendingDays,
+    required this.nextApproved,
+  });
+
+  final double totalAvailable;
+  final int pendingCount;
+  final double totalPendingDays;
+  final LeaveRequest? nextApproved;
+
+  @override
+  Widget build(BuildContext context) {
+    final nextLabel = nextApproved?.leaveTypeLabel ?? 'None';
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      clipBehavior: Clip.none,
+      child: Row(
+        children: [
+          _MobileSummaryCard(
+            title: 'Available Credits',
+            value: totalAvailable.toStringAsFixed(1),
+            icon: Icons.account_balance_wallet_outlined,
+            accent: AppTheme.primaryNavy,
+          ),
+          const SizedBox(width: 12),
+          _MobileSummaryCard(
+            title: 'Pending Requests',
+            value: '$pendingCount',
+            icon: Icons.pending_actions_outlined,
+            accent: const Color(0xFF795548),
+            footer: totalPendingDays > 0
+                ? '${totalPendingDays.toStringAsFixed(1)} day(s)'
+                : null,
+          ),
+          const SizedBox(width: 12),
+          _MobileSummaryCard(
+            title: 'Next Approved',
+            value: nextLabel,
+            icon: Icons.event_available_outlined,
+            accent: const Color(0xFF2E7D32),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MobileSummaryCard extends StatelessWidget {
+  const _MobileSummaryCard({
+    required this.title,
+    required this.value,
+    required this.icon,
+    required this.accent,
+    this.footer,
+  });
+
+  final String title;
+  final String value;
+  final IconData icon;
+  final Color accent;
+  final String? footer;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
+    return Container(
+      width: 138,
+      height: 96,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: dark ? 0.28 : 0.045),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: dark ? 0.18 : 0.10),
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: Icon(icon, size: 14, color: accent),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.dashTextSecondaryOf(context),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    height: 1.15,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const Spacer(),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: AppTheme.dashTextPrimaryOf(context),
+              fontSize: value.length > 6 ? 18 : 25,
+              fontWeight: FontWeight.w800,
+              height: 1,
+            ),
+          ),
+          if (footer != null) ...[
+            const SizedBox(height: 3),
+            Text(
+              footer!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppTheme.dashTextSecondaryOf(context),
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _MobileBalancesPanel extends StatelessWidget {
+  const _MobileBalancesPanel({
+    required this.balances,
+    required this.loading,
+    required this.onBalanceHistory,
+  });
+
+  final List<LeaveBalance> balances;
+  final bool loading;
+  final VoidCallback onBalanceHistory;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Leave Balances',
+                style: TextStyle(
+                  color: AppTheme.dashTextPrimaryOf(context),
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  height: 1.2,
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: onBalanceHistory,
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavyDark,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text(
+                'Balance History',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (loading && balances.isEmpty)
+          const _CenteredState(message: 'Loading leave balances...')
+        else if (balances.isEmpty)
+          const _CenteredState(message: 'No leave balances available yet.')
+        else
+          Column(
+            children: List.generate(balances.length, (index) {
+              final balance = balances[index];
+              return Padding(
+                padding: EdgeInsets.only(
+                  bottom: index == balances.length - 1 ? 0 : 12,
+                ),
+                child: _MobileLeaveBalanceCard(balance: balance),
+              );
+            }),
+          ),
+      ],
+    );
+  }
+}
+
+class _MobileLeaveBalanceCard extends StatelessWidget {
+  const _MobileLeaveBalanceCard({required this.balance});
+
+  final LeaveBalance balance;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = _leaveBalanceAccent(balance.leaveType);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 13),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(
+              alpha: AppTheme.dashIsDark(context) ? 0.28 : 0.035,
+            ),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  color: accent,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  balance.leaveTypeLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.dashTextPrimaryOf(context),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    height: 1.2,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final tileWidth = (constraints.maxWidth - 18) / 4;
+              return Row(
+                children: [
+                  _MobileBalanceStatTile(
+                    width: tileWidth,
+                    label: 'Earned',
+                    value: balance.earnedDays.toStringAsFixed(1),
+                  ),
+                  const SizedBox(width: 6),
+                  _MobileBalanceStatTile(
+                    width: tileWidth,
+                    label: 'Used',
+                    value: balance.usedDays.toStringAsFixed(1),
+                  ),
+                  const SizedBox(width: 6),
+                  _MobileBalanceStatTile(
+                    width: tileWidth,
+                    label: 'Pending',
+                    value: balance.pendingDays.toStringAsFixed(1),
+                  ),
+                  const SizedBox(width: 6),
+                  _MobileBalanceStatTile(
+                    width: tileWidth,
+                    label: 'Available',
+                    value: balance.availableDays.toStringAsFixed(1),
+                    accent: accent,
+                    emphasized: true,
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MobileBalanceStatTile extends StatelessWidget {
+  const _MobileBalanceStatTile({
+    required this.width,
+    required this.label,
+    required this.value,
+    this.accent,
+    this.emphasized = false,
+  });
+
+  final double width;
+  final String label;
+  final String value;
+  final Color? accent;
+  final bool emphasized;
+
+  @override
+  Widget build(BuildContext context) {
+    final effectiveAccent = accent ?? AppTheme.dashTextPrimaryOf(context);
+    return SizedBox(
+      width: width,
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+        decoration: BoxDecoration(
+          color: emphasized
+              ? effectiveAccent.withValues(
+                  alpha: AppTheme.dashIsDark(context) ? 0.18 : 0.10,
+                )
+              : AppTheme.dashMutedSurfaceOf(context),
+          borderRadius: BorderRadius.circular(7),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                maxLines: 1,
+                style: TextStyle(
+                  color: emphasized
+                      ? effectiveAccent
+                      : AppTheme.dashTextSecondaryOf(context),
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w700,
+                  height: 1,
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                value,
+                maxLines: 1,
+                style: TextStyle(
+                  color: emphasized
+                      ? effectiveAccent
+                      : AppTheme.dashTextPrimaryOf(context),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  height: 1,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -626,6 +1084,7 @@ class _RequestsPanelState extends State<_RequestsPanel> {
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.sizeOf(context).height;
     final screenWidth = MediaQuery.sizeOf(context).width;
+    final isMobile = screenWidth < 600;
     final maxListHeight = screenWidth < 600
         ? (screenHeight * 0.38).clamp(260.0, 420.0)
         : screenWidth < 1024
@@ -645,28 +1104,39 @@ class _RequestsPanelState extends State<_RequestsPanel> {
       title: 'My Requests',
       subtitle: 'Recent leave applications and their current status.',
       icon: Icons.event_note_rounded,
-      headerTrailing: SectionHeaderActions(
-        children: [
-          SectionHeaderActionButton.outlined(
-            context: context,
-            onPressed: selectedRequest == null
-                ? null
-                : () => _showDetails(context, selectedRequest!),
-            label: 'View Details',
-          ),
-          SectionHeaderActionButton.outlined(
-            context: context,
-            onPressed: selectedRequest == null
-                ? null
-                : () => _showHistory(context, selectedRequest!),
-            label: 'View History',
-          ),
-        ],
-      ),
+      headerTrailing: isMobile
+          ? null
+          : SectionHeaderActions(
+              children: [
+                SectionHeaderActionButton.outlined(
+                  context: context,
+                  onPressed: selectedRequest == null
+                      ? null
+                      : () => _showDetails(context, selectedRequest!),
+                  label: 'View Details',
+                ),
+                SectionHeaderActionButton.outlined(
+                  context: context,
+                  onPressed: selectedRequest == null
+                      ? null
+                      : () => _showHistory(context, selectedRequest!),
+                  label: 'View History',
+                ),
+                if (selectedRequest != null &&
+                    _canEmployeeCancel(selectedRequest))
+                  SectionHeaderActionButton.outlined(
+                    context: context,
+                    onPressed: () => widget.onCancel(selectedRequest!),
+                    label: 'Cancel',
+                    icon: Icons.cancel_outlined,
+                  ),
+              ],
+            ),
       child: _buildRequestsContent(
         filteredRequests: filteredRequests,
         useScrollableList: useScrollableList,
         maxListHeight: maxListHeight,
+        openOnTap: isMobile,
       ),
     );
   }
@@ -700,6 +1170,7 @@ class _RequestsPanelState extends State<_RequestsPanel> {
     required List<LeaveRequest> filteredRequests,
     required bool useScrollableList,
     required double maxListHeight,
+    required bool openOnTap,
   }) {
     final filters = _buildRequestFiltersBar(filteredRequests.length);
 
@@ -726,8 +1197,11 @@ class _RequestsPanelState extends State<_RequestsPanel> {
             ),
             child: _EmployeeRequestItem(
               request: request,
-              isSelected: _requestKey(request) == _selectedRequestKey,
-              onTap: () => _toggleSelection(request),
+              isSelected:
+                  !openOnTap && _requestKey(request) == _selectedRequestKey,
+              onTap: () => openOnTap
+                  ? _showDetails(context, request)
+                  : _toggleSelection(request),
             ),
           );
         }),
@@ -746,8 +1220,11 @@ class _RequestsPanelState extends State<_RequestsPanel> {
             ),
             child: _EmployeeRequestItem(
               request: request,
-              isSelected: _requestKey(request) == _selectedRequestKey,
-              onTap: () => _toggleSelection(request),
+              isSelected:
+                  !openOnTap && _requestKey(request) == _selectedRequestKey,
+              onTap: () => openOnTap
+                  ? _showDetails(context, request)
+                  : _toggleSelection(request),
             ),
           );
         }),
@@ -872,7 +1349,11 @@ class _RequestsPanelState extends State<_RequestsPanel> {
       builder: (_) => _EmployeeLeaveDetailsDialog(
         request: request,
         canEdit: canEdit,
+        canCancel: _canEmployeeCancel(request),
+        canPrint: request.status == LeaveRequestStatus.approved,
         onEdit: () => widget.onEdit(request),
+        onHistory: () => _showHistory(context, request),
+        onCancel: () => widget.onCancel(request),
         onPrint: () => widget.onPrint(request),
       ),
     );
@@ -996,13 +1477,21 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
   const _EmployeeLeaveDetailsDialog({
     required this.request,
     required this.canEdit,
+    required this.canCancel,
+    required this.canPrint,
     required this.onEdit,
+    required this.onHistory,
+    required this.onCancel,
     required this.onPrint,
   });
 
   final LeaveRequest request;
   final bool canEdit;
+  final bool canCancel;
+  final bool canPrint;
   final VoidCallback onEdit;
+  final VoidCallback onHistory;
+  final VoidCallback onCancel;
   final VoidCallback onPrint;
 
   String get _leaveTypeText {
@@ -1177,6 +1666,14 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      onHistory();
+                    },
+                    icon: const Icon(Icons.history_rounded, size: 18),
+                    label: const Text('History'),
+                  ),
                   if (canEdit)
                     OutlinedButton.icon(
                       onPressed: () {
@@ -1186,14 +1683,24 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
                       icon: const Icon(Icons.edit_rounded, size: 18),
                       label: const Text('Edit'),
                     ),
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      onPrint();
-                    },
-                    icon: const Icon(Icons.print_rounded, size: 18),
-                    label: const Text('Print'),
-                  ),
+                  if (canCancel)
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        onCancel();
+                      },
+                      icon: const Icon(Icons.cancel_outlined, size: 18),
+                      label: const Text('Cancel'),
+                    ),
+                  if (canPrint)
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        onPrint();
+                      },
+                      icon: const Icon(Icons.print_rounded, size: 18),
+                      label: const Text('Print'),
+                    ),
                   FilledButton(
                     onPressed: () => Navigator.of(context).pop(),
                     child: const Text('Done'),
@@ -1570,6 +2077,40 @@ String _formatDate(DateTime value) {
     'Dec',
   ];
   return '${months[value.month - 1]} ${value.day}, ${value.year}';
+}
+
+Color _leaveBalanceAccent(LeaveType type) {
+  return switch (type) {
+    LeaveType.sickLeave => const Color(0xFFE53935),
+    LeaveType.vacationLeave => AppTheme.primaryNavyLight,
+    LeaveType.maternityLeave => const Color(0xFFD81B60),
+    LeaveType.paternityLeave => const Color(0xFF5E35B1),
+    LeaveType.specialPrivilegeLeave => const Color(0xFF00897B),
+    LeaveType.soloParentLeave => const Color(0xFF3949AB),
+    LeaveType.studyLeave => const Color(0xFF1E88E5),
+    LeaveType.tenDayVawcLeave => const Color(0xFF8E24AA),
+    LeaveType.rehabilitationPrivilege => const Color(0xFF43A047),
+    LeaveType.specialLeaveBenefitsForWomen => const Color(0xFFC2185B),
+    LeaveType.specialEmergencyCalamityLeave => const Color(0xFFF4511E),
+    LeaveType.adoptionLeave => const Color(0xFF6D4C41),
+    LeaveType.mandatoryForcedLeave => const Color(0xFFFB8C00),
+    LeaveType.others => AppTheme.primaryNavy,
+  };
+}
+
+bool _canEmployeeCancel(LeaveRequest request) {
+  return switch (request.status) {
+    LeaveRequestStatus.draft ||
+    LeaveRequestStatus.pending ||
+    LeaveRequestStatus.pendingDepartmentHead ||
+    LeaveRequestStatus.pendingHr ||
+    LeaveRequestStatus.returned => true,
+    LeaveRequestStatus.approved ||
+    LeaveRequestStatus.rejectedByDepartmentHead ||
+    LeaveRequestStatus.rejectedByHr ||
+    LeaveRequestStatus.rejected ||
+    LeaveRequestStatus.cancelled => false,
+  };
 }
 
 String _formatLeaveRequestRange(LeaveRequest request) {

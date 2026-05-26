@@ -699,12 +699,18 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             decoration: BoxDecoration(
               color: const Color(0xFFFFF3E0),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFFEF6C00).withValues(alpha: 0.4)),
+              border: Border.all(
+                color: const Color(0xFFEF6C00).withValues(alpha: 0.4),
+              ),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFFEF6C00)),
+                const Icon(
+                  Icons.warning_amber_rounded,
+                  size: 18,
+                  color: Color(0xFFEF6C00),
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -1234,7 +1240,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/biometric-devices',
-        queryParameters: const {'status': 'Active'},
+        queryParameters: const {'status': 'Active', 'probe_online': '0'},
       );
       if (!mounted) return;
       final list = res.data ?? [];
@@ -3410,6 +3416,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/biometric-devices',
+        queryParameters: const {'status': 'Active', 'probe_online': '0'},
       );
       if (!mounted) return;
       final list = res.data ?? [];
@@ -3587,9 +3594,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
       Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             _apiErrorMessageFromDio(e, fallback: 'Failed to update employee.'),
@@ -4161,7 +4166,10 @@ class _BiometricImportDialogState extends State<_BiometricImportDialog> {
 
   Future<void> _loadDevices() async {
     try {
-      final res = await ApiClient.instance.get('/api/biometric-devices');
+      final res = await ApiClient.instance.get(
+        '/api/biometric-devices',
+        queryParameters: const {'status': 'Active', 'probe_online': '0'},
+      );
       if (mounted) {
         setState(() {
           _devices = res.data ?? [];
@@ -4642,7 +4650,7 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/biometric-devices',
-        queryParameters: const {'status': 'Active'},
+        queryParameters: const {'status': 'Active', 'probe_online': '0'},
       );
       if (!mounted) return;
       setState(() {
