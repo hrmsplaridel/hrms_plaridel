@@ -494,6 +494,18 @@ class _AdminLeaveDetailGrid extends StatelessWidget {
       rows.add((label: label, value: value ?? '—'));
     }
 
+    void addRelevantDate({
+      required String label,
+      required DateTime? value,
+      required bool applies,
+    }) {
+      if (!applies && value == null) return;
+      rows.add((
+        label: label,
+        value: value != null ? formatAdminLeaveDate(value) : '—',
+      ));
+    }
+
     final leaveType = request.leaveType;
 
     addRelevant(
@@ -505,6 +517,26 @@ class _AdminLeaveDetailGrid extends StatelessWidget {
       label: 'Maternity Classification',
       value: request.maternityDeliveryType?.displayName,
       applies: leaveType == LeaveType.maternityLeave,
+    );
+    addRelevantDate(
+      label: 'Expected Delivery Date',
+      value: request.expectedDeliveryDate,
+      applies: leaveType == LeaveType.maternityLeave,
+    );
+    addRelevantDate(
+      label: 'Child Delivery Date',
+      value: request.childDeliveryDate,
+      applies: leaveType == LeaveType.paternityLeave,
+    );
+    addRelevantDate(
+      label: 'Accident Date',
+      value: request.accidentDate,
+      applies: leaveType == LeaveType.rehabilitationPrivilege,
+    );
+    addRelevantDate(
+      label: 'Calamity Occurrence Date',
+      value: request.calamityDate,
+      applies: leaveType == LeaveType.specialEmergencyCalamityLeave,
     );
     addRelevantEnum(
       label: 'Location',

@@ -55,6 +55,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   LeaveLocationOption? _locationOption;
   SickLeaveNature? _sickLeaveNature;
   MaternityDeliveryType? _maternityDeliveryType;
+  DateTime? _expectedDeliveryDate;
+  DateTime? _childDeliveryDate;
+  DateTime? _accidentDate;
+  DateTime? _calamityDate;
   StudyLeavePurpose? _studyPurpose;
   LeaveOtherPurpose? _otherPurpose;
   LeaveCommutationOption _commutation = LeaveCommutationOption.notRequested;
@@ -89,6 +93,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _locationOption = initial?.locationOption;
     _sickLeaveNature = initial?.sickLeaveNature;
     _maternityDeliveryType = initial?.maternityDeliveryType;
+    _expectedDeliveryDate = initial?.expectedDeliveryDate;
+    _childDeliveryDate = initial?.childDeliveryDate;
+    _accidentDate = initial?.accidentDate;
+    _calamityDate = initial?.calamityDate;
     _studyPurpose = initial?.studyPurpose;
     _otherPurpose = initial?.otherPurpose;
     _commutation = initial?.commutation ?? LeaveCommutationOption.notRequested;
@@ -160,6 +168,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _locationOption = null;
     _sickLeaveNature = null;
     _maternityDeliveryType = null;
+    _expectedDeliveryDate = null;
+    _childDeliveryDate = null;
+    _accidentDate = null;
+    _calamityDate = null;
     _studyPurpose = null;
     _otherPurpose = null;
     _customLeaveTypeController.clear();
@@ -544,6 +556,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       _showMessage('Please choose the maternity leave classification.');
       return;
     }
+    if (!_validateEventDateRules()) return;
     if (_shouldShowAttachmentSection() && !_hasAttachment()) {
       _showMessage('Attachment is required for this leave type.');
       return;
@@ -700,6 +713,111 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     return true;
   }
 
+  DateTime _onlyDate(DateTime value) =>
+      DateTime(value.year, value.month, value.day);
+
+  int _calendarDaysFrom(DateTime from, DateTime to) =>
+      _onlyDate(to).difference(_onlyDate(from)).inDays;
+
+  bool _validateEventDateRules() {
+    final start = _startDate;
+    final end = _endDate;
+    if (start == null || end == null) return false;
+
+    if (_leaveType == LeaveType.maternityLeave) {
+      final expected = _expectedDeliveryDate;
+      if (expected == null) {
+        _showMessage('Please enter the expected delivery date.');
+        return false;
+      }
+      return true;
+    }
+
+    if (_leaveType == LeaveType.paternityLeave) {
+      final delivery = _childDeliveryDate;
+      if (delivery == null) {
+        _showMessage('Please enter the child delivery or miscarriage date.');
+        return false;
+      }
+      final startDiff = _calendarDaysFrom(delivery, start);
+      final endDiff = _calendarDaysFrom(delivery, end);
+      if (startDiff < 0) {
+        _showMessage(
+          'Paternity Leave cannot start before the child delivery date.',
+        );
+        return false;
+      }
+      if (endDiff > 60) {
+        _showMessage(
+          'Paternity Leave must be availed within 60 days from delivery.',
+        );
+        return false;
+      }
+      return true;
+    }
+
+    if (_leaveType == LeaveType.rehabilitationPrivilege) {
+      final accident = _accidentDate;
+      if (accident == null) {
+        _showMessage('Please enter the accident date.');
+        return false;
+      }
+      final today = _onlyDate(DateTime.now());
+      final filingDiff = _calendarDaysFrom(accident, today);
+      if (filingDiff < 0) {
+        _showMessage('Accident date cannot be in the future.');
+        return false;
+      }
+      if (filingDiff > 7) {
+        _showMessage(
+          'Rehabilitation Privilege must be filed within 1 week from the accident. Contact HR if a longer period is warranted.',
+        );
+        return false;
+      }
+      return true;
+    }
+
+    if (_leaveType == LeaveType.specialEmergencyCalamityLeave) {
+      final calamity = _calamityDate;
+      if (calamity == null) {
+        _showMessage('Please enter the calamity/disaster occurrence date.');
+        return false;
+      }
+      final startDiff = _calendarDaysFrom(calamity, start);
+      final endDiff = _calendarDaysFrom(calamity, end);
+      if (startDiff < 0) {
+        _showMessage(
+          'Special Emergency Leave cannot start before the calamity date.',
+        );
+        return false;
+      }
+      if (endDiff > 30) {
+        _showMessage(
+          'Special Emergency Leave must be used within 30 days from the calamity occurrence.',
+        );
+        return false;
+      }
+      return true;
+    }
+
+    return true;
+  }
+
+  String _maternityExpectedDeliveryHelper() {
+    final expected = _expectedDeliveryDate;
+    if (expected == null) {
+      return 'Used for HR 30-day notice tracking.';
+    }
+    final diff = _calendarDaysFrom(DateTime.now(), expected);
+    if (diff >= 30) {
+      return 'Meets the 30-day HR notice window.';
+    }
+    if (diff >= 0) {
+      return 'Less than 30 days before expected delivery; HR will review the notice context.';
+    }
+    return 'Expected delivery date is already past; HR will review the notice context.';
+  }
+
   /// Fills CSC header fields (name, office, position, salary, date filed) from
   /// auth + active assignment + employee profile when the request does not
   /// already have them (e.g. first save).
@@ -834,6 +952,18 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         sickIllnessDetails: _sickIllnessController.text.trim(),
         maternityDeliveryType: _leaveType == LeaveType.maternityLeave
             ? _maternityDeliveryType
+            : null,
+        expectedDeliveryDate: _leaveType == LeaveType.maternityLeave
+            ? _expectedDeliveryDate
+            : null,
+        childDeliveryDate: _leaveType == LeaveType.paternityLeave
+            ? _childDeliveryDate
+            : null,
+        accidentDate: _leaveType == LeaveType.rehabilitationPrivilege
+            ? _accidentDate
+            : null,
+        calamityDate: _leaveType == LeaveType.specialEmergencyCalamityLeave
+            ? _calamityDate
             : null,
         womenIllnessDetails:
             _leaveType == LeaveType.specialLeaveBenefitsForWomen
@@ -1332,6 +1462,20 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     );
   }
 
+  Widget _buildHelperText(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: AppTheme.dashTextSecondaryOf(context),
+          fontSize: 12,
+          height: 1.35,
+        ),
+      ),
+    );
+  }
+
   Widget _buildDatePicker({
     required String label,
     required DateTime? value,
@@ -1440,6 +1584,13 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     } else if (_leaveType == LeaveType.maternityLeave) {
       children.addAll([
         const SizedBox(height: 16),
+        _buildDatePicker(
+          label: 'Expected Delivery Date',
+          value: _expectedDeliveryDate,
+          onChanged: (d) => setState(() => _expectedDeliveryDate = d),
+        ),
+        _buildHelperText(_maternityExpectedDeliveryHelper()),
+        const SizedBox(height: 16),
         Text(
           'Maternity Leave Classification',
           style: TextStyle(
@@ -1488,6 +1639,42 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
               ),
             ),
           ),
+      ]);
+    } else if (_leaveType == LeaveType.paternityLeave) {
+      children.addAll([
+        const SizedBox(height: 16),
+        _buildDatePicker(
+          label: 'Child Delivery / Miscarriage Date',
+          value: _childDeliveryDate,
+          onChanged: (d) => setState(() => _childDeliveryDate = d),
+        ),
+        _buildHelperText(
+          'Paternity Leave must be availed within 60 days from this date.',
+        ),
+      ]);
+    } else if (_leaveType == LeaveType.rehabilitationPrivilege) {
+      children.addAll([
+        const SizedBox(height: 16),
+        _buildDatePicker(
+          label: 'Accident Date',
+          value: _accidentDate,
+          onChanged: (d) => setState(() => _accidentDate = d),
+        ),
+        _buildHelperText(
+          'Employee filing is allowed within 1 week from the accident. Contact HR if a longer period is warranted.',
+        ),
+      ]);
+    } else if (_leaveType == LeaveType.specialEmergencyCalamityLeave) {
+      children.addAll([
+        const SizedBox(height: 16),
+        _buildDatePicker(
+          label: 'Calamity / Disaster Occurrence Date',
+          value: _calamityDate,
+          onChanged: (d) => setState(() => _calamityDate = d),
+        ),
+        _buildHelperText(
+          'Special Emergency Leave must be used within 30 days from this occurrence.',
+        ),
       ]);
     } else if (_leaveType == LeaveType.specialLeaveBenefitsForWomen) {
       children.addAll([

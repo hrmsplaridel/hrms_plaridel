@@ -10,6 +10,7 @@ const {
   LEAVE_TYPE_RULES,
   SPECIAL_PROCESS_PURPOSES,
   effectiveMaxDaysForRule,
+  leaveEventDateFilingError,
   minimumAdvanceDaysFilingError,
   mustBlockMissingAttachment,
 } = require('./leaveTypeRules');
@@ -886,15 +887,56 @@ function readMaternityDeliveryType(details) {
   );
 }
 
+function readFirstDetailValue(details, keys) {
+  if (!details || typeof details !== 'object') return null;
+  for (const key of keys) {
+    const value = details[key];
+    if (value != null && `${value}`.trim() !== '') return value;
+  }
+  return null;
+}
+
+function readLeaveEventDates(details) {
+  return {
+    expectedDeliveryDate: readFirstDetailValue(details, [
+      'expected_delivery_date',
+      'expectedDeliveryDate',
+      'maternity_expected_delivery_date',
+      'maternityExpectedDeliveryDate',
+    ]),
+    childDeliveryDate: readFirstDetailValue(details, [
+      'child_delivery_date',
+      'childDeliveryDate',
+      'delivery_date',
+      'deliveryDate',
+      'spouse_delivery_date',
+      'spouseDeliveryDate',
+    ]),
+    accidentDate: readFirstDetailValue(details, [
+      'accident_date',
+      'accidentDate',
+    ]),
+    calamityDate: readFirstDetailValue(details, [
+      'calamity_date',
+      'calamityDate',
+      'calamity_occurrence_date',
+      'calamityOccurrenceDate',
+    ]),
+  };
+}
+
 function validateEmployeeLeaveRequestWithRule(opts) {
   const {
     rule,
     leaveType,
     otherPurpose,
     startDateStr,
+    endDateStr,
     numberOfDays,
     userSex,
     maternityDeliveryType,
+    eventDates,
+    enforceEventDateRules = false,
   } = opts;
 
   if (!rule) return { valid: true };
@@ -956,6 +998,21 @@ function validateEmployeeLeaveRequestWithRule(opts) {
       valid: false,
       error: advanceError,
     };
+  }
+  if (enforceEventDateRules) {
+    const eventDateError = leaveEventDateFilingError({
+      leaveType,
+      leaveTypeLabel: rule.display_name,
+      startDateStr,
+      endDateStr,
+      eventDates,
+    });
+    if (eventDateError) {
+      return {
+        valid: false,
+        error: eventDateError,
+      };
+    }
   }
   const maxDays = effectiveMaxDaysForRule({
     rule,
@@ -1831,6 +1888,7 @@ router.post('/draft', protect, async (req, res) => {
         : { ...rest, leave_type, start_date: startStr, end_date: endStr };
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
       const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
+      const eventDates = readLeaveEventDates(payloadDetails);
       const leaveRule = await getLeaveTypeDefinition(client, leave_type);
       const userSex = await getUserSexForLeaveValidation(client, userId);
       const validation = validateEmployeeLeaveRequestWithRule({
@@ -1843,6 +1901,8 @@ router.post('/draft', protect, async (req, res) => {
         hasAttachment: false,
         userSex,
         maternityDeliveryType,
+        eventDates,
+        enforceEventDateRules: false,
       });
       if (!validation.valid) {
         await client.query('ROLLBACK');
@@ -1941,6 +2001,7 @@ router.post('/submit', protect, async (req, res) => {
         : { ...rest, leave_type, start_date: startStr, end_date: endStr };
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
       const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
+      const eventDates = readLeaveEventDates(payloadDetails);
 
       // Validate the server-computed, holiday-aware working day count.
       const effectiveDaysSubmit = workingDayResult.days ?? days;
@@ -1961,6 +2022,8 @@ router.post('/submit', protect, async (req, res) => {
         hasAttachment: false,
         userSex,
         maternityDeliveryType,
+        eventDates,
+        enforceEventDateRules: true,
       });
       if (!validation.valid) {
         await client.query('ROLLBACK');
@@ -2129,6 +2192,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
         : { ...rest, leave_type, start_date: startStr, end_date: endStr };
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
       const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
+      const eventDates = readLeaveEventDates(payloadDetails);
 
       const effectiveDaysSubmit = workingDayResult.days ?? days;
       if (effectiveDaysSubmit == null || effectiveDaysSubmit <= 0) {
@@ -2148,6 +2212,8 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
         hasAttachment: true,
         userSex,
         maternityDeliveryType,
+        eventDates,
+        enforceEventDateRules: true,
       });
       if (!validation.valid) {
         await client.query('ROLLBACK');
@@ -2350,6 +2416,7 @@ router.put('/:id', protect, async (req, res) => {
         : { ...rest, leave_type, start_date: startStr, end_date: endStr };
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
       const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
+      const eventDates = readLeaveEventDates(payloadDetails);
       if (startStr && endStr) {
         const workingDayResult = await computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr);
         effectiveDays = workingDayResult.days ?? days;
@@ -2375,6 +2442,11 @@ router.put('/:id', protect, async (req, res) => {
           hasAttachment: false,
           userSex,
           maternityDeliveryType,
+          eventDates,
+          enforceEventDateRules:
+            nextStatus === 'pending' ||
+            nextStatus === 'pending_department_head' ||
+            nextStatus === 'pending_hr',
         });
         if (!validation.valid) {
           await client.query('ROLLBACK');

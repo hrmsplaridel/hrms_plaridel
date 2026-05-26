@@ -1089,6 +1089,36 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
                         label: 'Classification',
                         value: request.maternityDeliveryType!.displayName,
                       ),
+                    if (request.leaveType == LeaveType.maternityLeave &&
+                        request.expectedDeliveryDate != null)
+                      _LeaveDetailTile(
+                        icon: Icons.child_friendly_rounded,
+                        label: 'Expected delivery date',
+                        value: _formatDate(request.expectedDeliveryDate!),
+                      ),
+                    if (request.leaveType == LeaveType.paternityLeave &&
+                        request.childDeliveryDate != null)
+                      _LeaveDetailTile(
+                        icon: Icons.child_care_rounded,
+                        label: 'Child delivery date',
+                        value: _formatDate(request.childDeliveryDate!),
+                      ),
+                    if (request.leaveType ==
+                            LeaveType.rehabilitationPrivilege &&
+                        request.accidentDate != null)
+                      _LeaveDetailTile(
+                        icon: Icons.healing_rounded,
+                        label: 'Accident date',
+                        value: _formatDate(request.accidentDate!),
+                      ),
+                    if (request.leaveType ==
+                            LeaveType.specialEmergencyCalamityLeave &&
+                        request.calamityDate != null)
+                      _LeaveDetailTile(
+                        icon: Icons.warning_amber_rounded,
+                        label: 'Calamity occurrence date',
+                        value: _formatDate(request.calamityDate!),
+                      ),
                     _LeaveDetailTile(
                       icon: Icons.date_range_rounded,
                       label: 'Date range',

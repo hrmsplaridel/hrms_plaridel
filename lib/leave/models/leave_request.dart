@@ -116,6 +116,10 @@ class LeaveRequest {
     this.sickLeaveNature,
     this.sickIllnessDetails,
     this.maternityDeliveryType,
+    this.expectedDeliveryDate,
+    this.childDeliveryDate,
+    this.accidentDate,
+    this.calamityDate,
     this.womenIllnessDetails,
     this.studyPurpose,
     this.studyPurposeDetails,
@@ -170,6 +174,10 @@ class LeaveRequest {
   final SickLeaveNature? sickLeaveNature;
   final String? sickIllnessDetails;
   final MaternityDeliveryType? maternityDeliveryType;
+  final DateTime? expectedDeliveryDate;
+  final DateTime? childDeliveryDate;
+  final DateTime? accidentDate;
+  final DateTime? calamityDate;
   final String? womenIllnessDetails;
   final StudyLeavePurpose? studyPurpose;
   final String? studyPurposeDetails;
@@ -235,6 +243,22 @@ class LeaveRequest {
         json['maternity_delivery_type']?.toString() ??
             json['maternityDeliveryType']?.toString(),
       ),
+      expectedDeliveryDate: _parseDate(
+        json['expected_delivery_date'] ?? json['expectedDeliveryDate'],
+      ),
+      childDeliveryDate: _parseDate(
+        json['child_delivery_date'] ??
+            json['childDeliveryDate'] ??
+            json['delivery_date'] ??
+            json['deliveryDate'],
+      ),
+      accidentDate: _parseDate(json['accident_date'] ?? json['accidentDate']),
+      calamityDate: _parseDate(
+        json['calamity_date'] ??
+            json['calamityDate'] ??
+            json['calamity_occurrence_date'] ??
+            json['calamityOccurrenceDate'],
+      ),
       womenIllnessDetails: json['women_illness_details']?.toString(),
       studyPurpose: studyLeavePurposeFromString(
         json['study_purpose']?.toString(),
@@ -295,6 +319,10 @@ class LeaveRequest {
       'sick_leave_nature': sickLeaveNature?.value,
       'sick_illness_details': _trimOrNull(sickIllnessDetails),
       'maternity_delivery_type': maternityDeliveryType?.value,
+      'expected_delivery_date': _dateOnly(expectedDeliveryDate),
+      'child_delivery_date': _dateOnly(childDeliveryDate),
+      'accident_date': _dateOnly(accidentDate),
+      'calamity_date': _dateOnly(calamityDate),
       'women_illness_details': _trimOrNull(womenIllnessDetails),
       'study_purpose': studyPurpose?.value,
       'study_purpose_details': _trimOrNull(studyPurposeDetails),
@@ -346,6 +374,10 @@ class LeaveRequest {
     SickLeaveNature? sickLeaveNature,
     String? sickIllnessDetails,
     MaternityDeliveryType? maternityDeliveryType,
+    DateTime? expectedDeliveryDate,
+    DateTime? childDeliveryDate,
+    DateTime? accidentDate,
+    DateTime? calamityDate,
     String? womenIllnessDetails,
     StudyLeavePurpose? studyPurpose,
     String? studyPurposeDetails,
@@ -396,6 +428,10 @@ class LeaveRequest {
       sickIllnessDetails: sickIllnessDetails ?? this.sickIllnessDetails,
       maternityDeliveryType:
           maternityDeliveryType ?? this.maternityDeliveryType,
+      expectedDeliveryDate: expectedDeliveryDate ?? this.expectedDeliveryDate,
+      childDeliveryDate: childDeliveryDate ?? this.childDeliveryDate,
+      accidentDate: accidentDate ?? this.accidentDate,
+      calamityDate: calamityDate ?? this.calamityDate,
       womenIllnessDetails: womenIllnessDetails ?? this.womenIllnessDetails,
       studyPurpose: studyPurpose ?? this.studyPurpose,
       studyPurposeDetails: studyPurposeDetails ?? this.studyPurposeDetails,

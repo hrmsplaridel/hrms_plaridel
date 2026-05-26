@@ -137,7 +137,6 @@ const LEAVE_TYPE_RULES = {
     minimum_advance_days: null,
     affects_dtr_normally: true,
     sex_eligibility: 'any',
-    // TODO: If field exists, validate within 30 days from calamity occurrence
   },
   adoptionLeave: {
     employee_can_file: true,
@@ -200,6 +199,86 @@ function calendarDayDifference(startDateStr, baseDateStr = todayIsoDateInTimeZon
   const baseMs = isoDateToUtcDayMs(baseDateStr);
   if (startMs == null || baseMs == null) return null;
   return Math.round((startMs - baseMs) / (24 * 60 * 60 * 1000));
+}
+
+function calendarDaySpan(fromDateStr, toDateStr) {
+  return calendarDayDifference(toDateStr, fromDateStr);
+}
+
+function normalizeIsoDateString(value) {
+  const text = (value || '').toString().trim().slice(0, 10);
+  return isoDateToUtcDayMs(text) == null ? null : text;
+}
+
+function leaveEventDateFilingError({
+  leaveType,
+  leaveTypeLabel,
+  startDateStr,
+  endDateStr,
+  eventDates = {},
+}) {
+  const label = (leaveTypeLabel || leaveType || 'This leave type').toString().trim();
+  const start = normalizeIsoDateString(startDateStr);
+  const end = normalizeIsoDateString(endDateStr || startDateStr);
+  if (!start || !end) return null;
+
+  if (leaveType === 'maternityLeave') {
+    const expected = normalizeIsoDateString(eventDates.expectedDeliveryDate);
+    if (!expected) {
+      return `${label} requires the expected delivery date.`;
+    }
+    return null;
+  }
+
+  if (leaveType === 'paternityLeave') {
+    const delivery = normalizeIsoDateString(eventDates.childDeliveryDate);
+    if (!delivery) {
+      return `${label} requires the child delivery or miscarriage date.`;
+    }
+    const startDiff = calendarDaySpan(delivery, start);
+    const endDiff = calendarDaySpan(delivery, end);
+    if (startDiff == null || endDiff == null) return 'Invalid child delivery date.';
+    if (startDiff < 0) {
+      return `${label} cannot start before the child delivery date.`;
+    }
+    if (endDiff > 60) {
+      return `${label} must be availed within 60 days from delivery.`;
+    }
+    return null;
+  }
+
+  if (leaveType === 'rehabilitationPrivilege') {
+    const accident = normalizeIsoDateString(eventDates.accidentDate);
+    if (!accident) return `${label} requires the accident date.`;
+    const filingDiff = calendarDaySpan(accident, todayIsoDateInTimeZone());
+    if (filingDiff == null) return 'Invalid accident date.';
+    if (filingDiff < 0) return 'Accident date cannot be in the future.';
+    if (filingDiff > 7) {
+      return `${label} must be filed within 1 week from the accident. Contact HR if a longer period is warranted.`;
+    }
+    return null;
+  }
+
+  if (leaveType === 'specialEmergencyCalamityLeave') {
+    const calamity = normalizeIsoDateString(eventDates.calamityDate);
+    if (!calamity) {
+      return `${label} requires the calamity/disaster occurrence date.`;
+    }
+    const startDiff = calendarDaySpan(calamity, start);
+    const endDiff = calendarDaySpan(calamity, end);
+    if (startDiff == null || endDiff == null) {
+      return 'Invalid calamity/disaster occurrence date.';
+    }
+    if (startDiff < 0) {
+      return `${label} cannot start before the calamity date.`;
+    }
+    if (endDiff > 30) {
+      return `${label} must be used within 30 days from the calamity occurrence.`;
+    }
+    return null;
+  }
+
+  return null;
 }
 
 function normalizeMaternityDeliveryType(value) {
@@ -279,6 +358,7 @@ function validateEmployeeLeaveRequest(opts) {
     numberOfDays,
     hasAttachment = false,
     maternityDeliveryType,
+    eventDates,
   } = opts;
   const rule = getRule(leaveType);
 
@@ -324,6 +404,17 @@ function validateEmployeeLeaveRequest(opts) {
   });
   if (advanceError) {
     return { valid: false, error: advanceError };
+  }
+
+  const eventDateError = leaveEventDateFilingError({
+    leaveType,
+    leaveTypeLabel: rule.display_name,
+    startDateStr,
+    endDateStr,
+    eventDates,
+  });
+  if (eventDateError) {
+    return { valid: false, error: eventDateError };
   }
 
   // Max days check
@@ -386,6 +477,7 @@ module.exports = {
   getRule,
   validateEmployeeLeaveRequest,
   minimumAdvanceDaysFilingError,
+  leaveEventDateFilingError,
   normalizeMaternityDeliveryType,
   maternityMaxDaysForDeliveryType,
   effectiveMaxDaysForRule,
