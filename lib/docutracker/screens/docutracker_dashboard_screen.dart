@@ -141,6 +141,7 @@ class _DocuTrackerDashboardScreenState
                     escalated: provider.escalatedDocuments.length,
                   ),
                   activity: _buildRecentActivityPreview(provider),
+                  equalizeHeights: true,
                 ),
                 const SizedBox(height: 16),
                 _buildNotificationsBar(provider, unreadCount),
@@ -673,12 +674,13 @@ class _DocuTrackerDashboardScreenState
       ),
     ];
 
-    return _buildSummaryGrid(cards, minCardWidth: 180);
+    return _buildSummaryGrid(cards, minCardWidth: 180, itemHeight: 182);
   }
 
   Widget _buildOverviewPanel({
     required Widget summary,
     required Widget activity,
+    bool equalizeHeights = false,
   }) {
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -692,24 +694,39 @@ class _DocuTrackerDashboardScreenState
             ],
           );
         }
-        // On wide screens, treat activity as a right rail. Keep it readable and
-        // capped, so summary metrics can use the remaining space.
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(child: summary),
-            const SizedBox(width: _panelGap),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: SizedBox(width: double.infinity, child: activity),
-            ),
-          ],
+        // On wide screens, treat activity as a right rail. When [equalizeHeights]
+        // is enabled, cap the rail and summary row to the same height so the
+        // metric cards can extend down and avoid a bottom gap.
+        final rowHeight = equalizeHeights ? 182.0 : null;
+        return SizedBox(
+          height: rowHeight,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: summary),
+              const SizedBox(width: _panelGap),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: rowHeight,
+                  child: equalizeHeights
+                      ? SingleChildScrollView(child: activity)
+                      : activity,
+                ),
+              ),
+            ],
+          ),
         );
       },
     );
   }
 
-  Widget _buildSummaryGrid(List<Widget> cards, {required double minCardWidth}) {
+  Widget _buildSummaryGrid(
+    List<Widget> cards, {
+    required double minCardWidth,
+    double? itemHeight,
+  }) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
@@ -722,6 +739,7 @@ class _DocuTrackerDashboardScreenState
             for (final card in cards)
               SizedBox(
                 width: itemWidth,
+                height: itemHeight,
                 child: _HoverLift(child: card),
               ),
           ],
