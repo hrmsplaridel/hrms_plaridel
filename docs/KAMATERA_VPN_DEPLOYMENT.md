@@ -409,7 +409,7 @@ If you see `Command 'psql' not found`, the package is not installed yet; run the
 Test from the VPS to the office over Tailscale (use **your** port and password):
 
 ```bash
-psql "postgresql://YOUR_DB_USER:YOUR_DB_PASSWORD@YOUR_OFFICE_TAILSCALE_IP:YOUR_DB_PORT/hrms_plaridel" -c "SELECT 1;"
+    psql "postgresql://YOUR_DB_USER:YOUR_DB_PASSWORD@YOUR_OFFICE_TAILSCALE_IP:YOUR_DB_PORT/hrms_plaridel" -c "SELECT 1;"
 ```
 
 Example with port `5433`:
