@@ -53,6 +53,14 @@ async function hasUsersOfficeIdColumn() {
   return usersOfficeColumnReady;
 }
 
+async function ensureEmployeeProfileColumns() {
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS civil_status TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS nationality TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth DATE`);
+}
+
 function mapEmployeeListRow(r) {
   return {
     id: r.id,
@@ -63,12 +71,16 @@ function mapEmployeeListRow(r) {
     biometric_user_id: r.biometric_user_id ?? null,
     is_active: r.is_active ?? true,
     avatar_path: r.avatar_path,
+    first_name: r.first_name,
     middle_name: r.middle_name,
+    last_name: r.last_name,
     suffix: r.suffix,
     sex: r.sex,
     date_of_birth: r.date_of_birth,
     contact_number: r.contact_number,
     address: r.address,
+    civil_status: r.civil_status,
+    nationality: r.nationality,
     employment_type: r.employment_type,
     salary_grade: r.salary_grade,
     date_hired: r.date_hired,
@@ -205,6 +217,7 @@ function csvEscape(val) {
 // Optional: ?limit=&offset= — when limit is set, response is { employees, total } instead of a raw array.
 router.get('/', protect, async (req, res) => {
   try {
+    await ensureEmployeeProfileColumns();
     const biometricUserIdsRaw = req.query.biometric_user_ids;
 
     // When biometric_user_ids is provided, return only matching users (exact match).
@@ -213,7 +226,8 @@ router.get('/', protect, async (req, res) => {
       if (ids.length > 0) {
         const result = await pool.query(
           `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.biometric_user_id, u.is_active, u.avatar_path,
-                  u.middle_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
+                  u.first_name, u.middle_name, u.last_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
+                  u.civil_status, u.nationality,
                   u.employment_type, u.salary_grade, u.date_hired, u.employment_status,
                   cur.current_department_name, cur.current_position_name
            FROM users u
@@ -268,7 +282,9 @@ router.get('/', protect, async (req, res) => {
     const limitSql = usePaging ? ` LIMIT $${limitIdx} OFFSET $${limitIdx + 1}` : '';
 
     const result = await pool.query(
-      `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.biometric_user_id, u.is_active, u.avatar_path, u.middle_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
+      `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.biometric_user_id, u.is_active, u.avatar_path,
+              u.first_name, u.middle_name, u.last_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
+              u.civil_status, u.nationality,
               u.employment_type, u.salary_grade, u.date_hired, u.employment_status,
               cur.current_department_name, cur.current_position_name
        ${fromSql}
@@ -393,8 +409,11 @@ router.post('/bulk-status', protect, requireAdmin, async (req, res) => {
 // GET /api/employees/:id - get one employee (matches profiles + list row department/position)
 router.get('/:id', protect, async (req, res) => {
   try {
+    await ensureEmployeeProfileColumns();
     const result = await pool.query(
-      `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.is_active, u.avatar_path, u.middle_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
+      `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.is_active, u.avatar_path,
+              u.first_name, u.middle_name, u.last_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
+              u.civil_status, u.nationality,
               u.employment_type, u.salary_grade, u.date_hired, u.employment_status,
               cur.current_department_name, cur.current_position_name
        FROM users u
@@ -413,12 +432,16 @@ router.get('/:id', protect, async (req, res) => {
       email: r.email,
       is_active: r.is_active ?? true,
       avatar_path: r.avatar_path,
+      first_name: r.first_name,
       middle_name: r.middle_name,
+      last_name: r.last_name,
       suffix: r.suffix,
       sex: r.sex,
       date_of_birth: r.date_of_birth,
       contact_number: r.contact_number,
       address: r.address,
+      civil_status: r.civil_status,
+      nationality: r.nationality,
       employment_type: r.employment_type,
       salary_grade: r.salary_grade,
       date_hired: r.date_hired,
@@ -435,7 +458,8 @@ router.get('/:id', protect, async (req, res) => {
 // POST /api/employees - create employee (admin only); same as auth/register but admin creates
 router.post('/', protect, requireAdmin, async (req, res) => {
   try {
-    const { email, password, full_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address, employment_type, salary_grade, date_hired, employment_status, biometric_user_id } = req.body;
+    await ensureEmployeeProfileColumns();
+    const { email, password, first_name, full_name, last_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address, civil_status, nationality, employment_type, salary_grade, date_hired, employment_status, biometric_user_id } = req.body;
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
     }
@@ -447,20 +471,37 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     const empNo = await allocateEmployeeNumber();
 
     const result = await pool.query(
-      `INSERT INTO users (email, password_hash, role, full_name, middle_name, suffix, sex, date_of_birth, contact_number, address, is_active, employee_number, employment_type, salary_grade, date_hired, employment_status, biometric_user_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, true, $11, $12, $13, COALESCE($14::date, CURRENT_DATE), $15, $16)
-       RETURNING id, employee_number, email, role, full_name, avatar_path, is_active, middle_name, suffix, sex, date_of_birth, contact_number, address, employment_type, salary_grade, date_hired, employment_status, biometric_user_id`,
+      `INSERT INTO users (
+         email, password_hash, role, first_name, full_name, last_name, middle_name,
+         suffix, sex, date_of_birth, contact_number, address, civil_status,
+         nationality, is_active, employee_number, employment_type, salary_grade,
+         date_hired, employment_status, biometric_user_id
+       )
+       VALUES (
+         $1, $2, $3, $4, $5, $6, $7,
+         $8, $9, $10::date, $11, $12, $13,
+         $14, true, $15, $16, $17,
+         COALESCE($18::date, CURRENT_DATE), $19, $20
+       )
+       RETURNING id, employee_number, email, role, first_name, full_name, last_name,
+                 avatar_path, is_active, middle_name, suffix, sex, date_of_birth,
+                 contact_number, address, civil_status, nationality, employment_type,
+                 salary_grade, date_hired, employment_status, biometric_user_id`,
       [
         email.trim().toLowerCase(),
         passwordHash,
         role,
+        first_name?.trim() || null,
         full_name?.trim() || null,
+        last_name?.trim() || null,
         middle_name?.trim() || null,
         suffix?.trim() || null,
         sex?.trim() || null,
         date_of_birth || null,
         contact_number?.trim() || null,
         address?.trim() || null,
+        civil_status?.trim() || null,
+        nationality?.trim() || null,
         empNo,
         (employment_type && ['regular', 'contractual', 'job_order', 'casual'].includes(employment_type)) ? employment_type : null,
         salary_grade?.trim() || null,
@@ -499,9 +540,12 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 // PUT /api/employees/:id - update employee (admin only)
 router.put('/:id', protect, requireAdmin, async (req, res) => {
   try {
+    await ensureEmployeeProfileColumns();
     const { id } = req.params;
     const {
+      first_name,
       full_name,
+      last_name,
       role,
       email,
       is_active,
@@ -511,6 +555,8 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       date_of_birth,
       contact_number,
       address,
+      civil_status,
+      nationality,
       avatar_path,
       employment_type,
       salary_grade,
@@ -551,7 +597,9 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       : false;
 
     const fields = [
+      ['first_name', first_name],
       ['full_name', full_name],
+      ['last_name', last_name],
       ['role', role],
       ['email', email],
       ['is_active', is_active],
@@ -561,6 +609,8 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       ['date_of_birth', date_of_birth],
       ['contact_number', contact_number],
       ['address', address],
+      ['civil_status', civil_status],
+      ['nationality', nationality],
       ['avatar_path', avatar_path],
       ['employment_type', employment_type],
       ['salary_grade', salary_grade],
@@ -599,7 +649,9 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       'employee_number',
       'email',
       'role',
+      'first_name',
       'full_name',
+      'last_name',
       'avatar_path',
       'is_active',
       'middle_name',
@@ -608,6 +660,8 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       'date_of_birth',
       'contact_number',
       'address',
+      'civil_status',
+      'nationality',
       'employment_type',
       'salary_grade',
       'date_hired',

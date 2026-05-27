@@ -236,6 +236,18 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
     DashboardContentNavigator.showHome(_contentNavKey);
   }
 
+  void _openLeaveRequestsFromDashboard() {
+    setState(() {
+      _selectedNavIndex = 2;
+      _leaveInitialSection = LeaveSection.requests;
+      _leaveNavKey++;
+    });
+    DashboardContentNavigator.showHome(_contentNavKey);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() => _leaveInitialSection = null);
+    });
+  }
+
   void _openEmployeeLocatorRequestForm() {
     final state = _locatorSlipKey.currentState;
     if (state == null) return;
@@ -312,6 +324,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
         return _EmployeeDashboardContent(
           displayName: displayName,
           onViewAttendance: () => setState(() => _selectedNavIndex = 1),
+          onViewLeave: _openLeaveRequestsFromDashboard,
         );
       case 1:
         return const _EmployeeAttendanceContent();
@@ -957,10 +970,12 @@ class _EmployeeDashboardContent extends StatefulWidget {
   const _EmployeeDashboardContent({
     required this.displayName,
     this.onViewAttendance,
+    this.onViewLeave,
   });
 
   final String displayName;
   final VoidCallback? onViewAttendance;
+  final VoidCallback? onViewLeave;
 
   @override
   State<_EmployeeDashboardContent> createState() =>
@@ -1030,7 +1045,10 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
             isNarrow: isNarrow,
             onViewAttendance: widget.onViewAttendance,
           ),
-          upcomingLeave: const _EmployeeUpcomingLeaveCard(embedded: true),
+          upcomingLeave: _EmployeeUpcomingLeaveCard(
+            embedded: true,
+            onViewMore: widget.onViewLeave,
+          ),
         ),
         SizedBox(height: isNarrow ? 18 : 28),
         EmployeeSectionHeader(
@@ -1856,10 +1874,11 @@ class _PayslipCard extends StatelessWidget {
 }
 
 class _EmployeeUpcomingLeaveCard extends StatelessWidget {
-  const _EmployeeUpcomingLeaveCard({this.embedded = false});
+  const _EmployeeUpcomingLeaveCard({this.embedded = false, this.onViewMore});
 
   /// When true, omits outer card chrome (for use inside [EmployeeAttendanceOverviewCard]).
   final bool embedded;
+  final VoidCallback? onViewMore;
 
   @override
   Widget build(BuildContext context) {
@@ -1874,89 +1893,334 @@ class _EmployeeUpcomingLeaveCard extends StatelessWidget {
       );
     }
 
-    return LayoutBuilder(
-      builder: (context, c) {
-        final stackHeader = c.maxWidth < 400;
-        final content = Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (stackHeader) ...[
-              titleRow(),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () {},
-                  style: EmployeeDashUi.ghostAction(context),
-                  child: const Text('View More'),
-                ),
-              ),
-            ] else
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(child: titleRow()),
-                  const SizedBox(width: 8),
-                  TextButton(
-                    onPressed: () {},
-                    style: EmployeeDashUi.ghostAction(context),
-                    child: const Text('View More'),
-                  ),
-                ],
-              ),
-            SizedBox(height: stackHeader ? 12 : 16),
-            Container(
-              padding: EdgeInsets.all(innerPad),
-              decoration: BoxDecoration(
-                color: AppTheme.dashMutedSurfaceOf(context),
-                borderRadius: BorderRadius.circular(EmployeeDashUi.radiusMd),
-                border: Border.all(color: AppTheme.dashHairlineOf(context)),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'No upcoming leave.',
-                      style: TextStyle(
-                        color: AppTheme.dashTextSecondaryOf(context),
-                        fontSize: 14,
-                        height: 1.4,
-                      ),
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: AttendanceOverviewColors.onLeave.withValues(
-                        alpha: 0.1,
-                      ),
-                    ),
-                    child: Icon(
-                      Icons.event_rounded,
-                      color: AttendanceOverviewColors.onLeave.withValues(
-                        alpha: 0.55,
-                      ),
-                      size: 28,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        );
+    return Consumer<LeaveProvider>(
+      builder: (context, provider, _) {
+        final upcoming = provider.upcomingApprovedRequests;
+        final showLoading =
+            provider.loading && provider.requests.isEmpty && upcoming.isEmpty;
+        final showError =
+            provider.error != null && provider.requests.isEmpty && !showLoading;
 
-        if (embedded) {
-          return content;
+        Widget leaveBody() {
+          if (showLoading) {
+            return _UpcomingLeaveMessage(
+              icon: Icons.event_available_rounded,
+              message: 'Loading upcoming leave...',
+              showSpinner: true,
+            );
+          }
+
+          if (showError) {
+            return const _UpcomingLeaveMessage(
+              icon: Icons.event_busy_rounded,
+              message: 'Unable to load upcoming leave.',
+            );
+          }
+
+          if (upcoming.isEmpty) {
+            return const _UpcomingLeaveMessage(
+              icon: Icons.event_rounded,
+              message: 'No upcoming leave.',
+            );
+          }
+
+          final visible = upcoming.take(2).toList();
+          final remaining = upcoming.length - visible.length;
+          return Container(
+            padding: EdgeInsets.all(innerPad),
+            decoration: BoxDecoration(
+              color: AppTheme.dashMutedSurfaceOf(context),
+              borderRadius: BorderRadius.circular(EmployeeDashUi.radiusMd),
+              border: Border.all(color: AppTheme.dashHairlineOf(context)),
+            ),
+            child: Column(
+              children: [
+                for (var i = 0; i < visible.length; i++) ...[
+                  _UpcomingLeaveTile(request: visible[i]),
+                  if (i < visible.length - 1)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: Divider(
+                        height: 1,
+                        color: AppTheme.dashHairlineOf(context),
+                      ),
+                    ),
+                ],
+                if (remaining > 0) ...[
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '+$remaining more scheduled',
+                      style: TextStyle(
+                        color: AppTheme.primaryNavy,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          );
         }
 
-        return Container(
-          padding: EdgeInsets.all(pad),
-          decoration: EmployeeDashUi.elevatedPanel(context),
-          child: content,
+        return LayoutBuilder(
+          builder: (context, c) {
+            final stackHeader = c.maxWidth < 400;
+            final content = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (stackHeader) ...[
+                  titleRow(),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: onViewMore,
+                      style: EmployeeDashUi.ghostAction(context),
+                      child: const Text('View More'),
+                    ),
+                  ),
+                ] else
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: titleRow()),
+                      const SizedBox(width: 8),
+                      TextButton(
+                        onPressed: onViewMore,
+                        style: EmployeeDashUi.ghostAction(context),
+                        child: const Text('View More'),
+                      ),
+                    ],
+                  ),
+                SizedBox(height: stackHeader ? 12 : 16),
+                leaveBody(),
+              ],
+            );
+
+            if (embedded) {
+              return content;
+            }
+
+            return Container(
+              padding: EdgeInsets.all(pad),
+              decoration: EmployeeDashUi.elevatedPanel(context),
+              child: content,
+            );
+          },
         );
       },
     );
   }
+}
+
+class _UpcomingLeaveMessage extends StatelessWidget {
+  const _UpcomingLeaveMessage({
+    required this.icon,
+    required this.message,
+    this.showSpinner = false,
+  });
+
+  final IconData icon;
+  final String message;
+  final bool showSpinner;
+
+  @override
+  Widget build(BuildContext context) {
+    final innerPad = MediaQuery.sizeOf(context).width < 600 ? 12.0 : 16.0;
+    return Container(
+      padding: EdgeInsets.all(innerPad),
+      decoration: BoxDecoration(
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(EmployeeDashUi.radiusMd),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Row(
+        children: [
+          if (showSpinner) ...[
+            SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.4,
+                color: AttendanceOverviewColors.onLeave,
+              ),
+            ),
+            const SizedBox(width: 12),
+          ],
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                color: AppTheme.dashTextSecondaryOf(context),
+                fontSize: 14,
+                height: 1.4,
+              ),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: AttendanceOverviewColors.onLeave.withValues(alpha: 0.1),
+            ),
+            child: Icon(
+              icon,
+              color: AttendanceOverviewColors.onLeave.withValues(alpha: 0.55),
+              size: 28,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _UpcomingLeaveTile extends StatelessWidget {
+  const _UpcomingLeaveTile({required this.request});
+
+  final LeaveRequest request;
+
+  @override
+  Widget build(BuildContext context) {
+    final typeLabel = _employeeLeaveTypeLabel(request);
+    final dateLabel = _employeeLeaveDateRange(request);
+    final daysLabel = _employeeLeaveDaysLabel(request);
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            color: AttendanceOverviewColors.onLeave.withValues(alpha: 0.1),
+          ),
+          child: Icon(
+            Icons.event_available_rounded,
+            color: AttendanceOverviewColors.onLeave,
+            size: 22,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                typeLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppTheme.dashTextPrimaryOf(context),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  height: 1.2,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                dateLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppTheme.dashTextSecondaryOf(context),
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (daysLabel != null) ...[
+                const SizedBox(height: 3),
+                Text(
+                  daysLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.dashTextSecondaryOf(
+                      context,
+                    ).withValues(alpha: 0.88),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(width: 10),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: AttendanceOverviewColors.onLeave.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            'Approved',
+            style: TextStyle(
+              color: AttendanceOverviewColors.onLeave,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+String _employeeLeaveTypeLabel(LeaveRequest request) {
+  final custom = request.customLeaveTypeText?.trim();
+  if (custom != null && custom.isNotEmpty) return custom;
+  final display = request.leaveTypeDisplayName?.trim();
+  if (display != null && display.isNotEmpty) return display;
+  return request.leaveType.displayName;
+}
+
+String _employeeLeaveDateRange(LeaveRequest request) {
+  final start = request.startDate;
+  final end = request.endDate;
+  if (start == null && end == null) return 'Date not set';
+  if (start == null) return _employeeLeaveDate(end!);
+  if (end == null || _sameEmployeeLeaveDate(start, end)) {
+    return _employeeLeaveDate(start);
+  }
+  return '${_employeeLeaveDate(start)} - ${_employeeLeaveDate(end)}';
+}
+
+String _employeeLeaveDate(DateTime date) {
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  return '${months[date.month - 1]} ${date.day}, ${date.year}';
+}
+
+bool _sameEmployeeLeaveDate(DateTime a, DateTime b) =>
+    a.year == b.year && a.month == b.month && a.day == b.day;
+
+String? _employeeLeaveDaysLabel(LeaveRequest request) {
+  final approvedWithPay = request.approvedDaysWithPay;
+  final approvedWithoutPay = request.approvedDaysWithoutPay;
+  final hasApprovedDays = approvedWithPay != null || approvedWithoutPay != null;
+  final days = hasApprovedDays
+      ? (approvedWithPay ?? 0) + (approvedWithoutPay ?? 0)
+      : request.workingDaysApplied;
+  if (days == null || !days.isFinite || days <= 0) return null;
+  final whole = days.roundToDouble();
+  final value = (days - whole).abs() < 0.01
+      ? whole.toStringAsFixed(0)
+      : days.toStringAsFixed(1);
+  return '$value ${days == 1 ? 'day' : 'days'}';
 }
 
 const List<String> _attendanceMonths = [

@@ -42,6 +42,11 @@ class AuthProvider extends ChangeNotifier {
   /// Storage path for avatar.
   String? get avatarPath => _user?.avatarPath;
 
+  void replaceUser(AppUser user) {
+    _user = user;
+    notifyListeners();
+  }
+
   /// Restore session from stored JWT. Call before runApp.
   Future<void> restoreSession() async {
     String? token;
@@ -101,9 +106,8 @@ class AuthProvider extends ChangeNotifier {
       final userData = data['user'] as Map<String, dynamic>?;
       if (userData != null) {
         _user = AppUser.fromJson(userData);
-      } else {
-        await refreshUser();
       }
+      await refreshUser();
       notifyListeners();
       return null;
     } on DioException catch (e) {

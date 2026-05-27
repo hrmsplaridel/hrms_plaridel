@@ -28,7 +28,9 @@ class _EmployeeProfile {
     this.email,
     this.isActive = true,
     this.avatarPath,
+    this.firstName,
     this.middleName,
+    this.lastName,
     this.suffix,
     this.sex,
     this.dateOfBirth,
@@ -51,7 +53,9 @@ class _EmployeeProfile {
   final String? email;
   final bool isActive;
   final String? avatarPath;
+  final String? firstName;
   final String? middleName;
+  final String? lastName;
   final String? suffix;
   final String? sex;
   final DateTime? dateOfBirth;
@@ -329,7 +333,9 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       final body = <String, dynamic>{
         'email': email,
         'password': password,
+        'first_name': firstName,
         'full_name': fullName,
+        'last_name': lastName,
         'role': role,
         if (middleName.isNotEmpty) 'middle_name': middleName,
         if (_suffix != null && _suffix != 'None') 'suffix': _suffix,
@@ -1088,7 +1094,9 @@ _EmployeeProfile _employeeProfileFromJson(Map<String, dynamic> m) {
     email: m['email'] as String?,
     isActive: m['is_active'] as bool? ?? true,
     avatarPath: m['avatar_path'] as String?,
+    firstName: m['first_name'] as String?,
     middleName: m['middle_name'] as String?,
+    lastName: m['last_name'] as String?,
     suffix: m['suffix'] as String?,
     sex: m['sex'] as String?,
     dateOfBirth: dob != null ? DateTime.tryParse(dob.toString()) : null,
@@ -3396,8 +3404,14 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
       _middleNameController,
       _lastNameController,
     );
+    if ((_profile.firstName ?? '').trim().isNotEmpty) {
+      _firstNameController.text = _profile.firstName!.trim();
+    }
     if (_profile.middleName != null && _profile.middleName!.isNotEmpty) {
       _middleNameController.text = _profile.middleName!;
+    }
+    if ((_profile.lastName ?? '').trim().isNotEmpty) {
+      _lastNameController.text = _profile.lastName!.trim();
     }
     _contactController.text = _profile.contactNumber ?? '';
     _salaryGradeController.text = _profile.salaryGrade ?? '';
@@ -3546,7 +3560,9 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
       final encodedAddress =
           _addressFormKey.currentState?.composeEncoded() ?? '';
       final body = <String, dynamic>{
+        'first_name': firstName,
         'full_name': fullName,
+        'last_name': lastName,
         'role': role,
         if (middleName.isNotEmpty) 'middle_name': middleName,
         if (_suffix != null && _suffix != 'None') 'suffix': _suffix,

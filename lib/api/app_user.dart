@@ -59,11 +59,14 @@ class AppUser {
 
   factory AppUser.fromJson(Map<String, dynamic> json) {
     final meta = json['user_metadata'] as Map<String, dynamic>?;
+    final fullName =
+        json['full_name'] as String? ?? meta?['full_name'] as String?;
+    final parsedName = _parseFullName(fullName);
     return AppUser(
       id: json['id'] as String? ?? '',
       email: json['email'] as String? ?? '',
       role: json['role'] as String?,
-      fullName: json['full_name'] as String? ?? meta?['full_name'] as String?,
+      fullName: fullName,
       avatarPath: json['avatar_path'] as String? ?? meta?['avatar_path'] as String?,
       contactNumber: json['contact_number'] as String? ?? meta?['phone'] as String?,
       employeeNumber: _parseInt(json['employee_number']),
@@ -77,11 +80,32 @@ class AppUser {
       address: json['address'] as String?,
       civilStatus: json['civil_status'] as String?,
       nationality: json['nationality'] as String?,
-      firstName: json['first_name'] as String?,
-      middleName: json['middle_name'] as String? ?? meta?['middle_name'] as String?,
-      lastName: json['last_name'] as String?,
+      firstName: _cleanString(json['first_name']) ?? parsedName[0],
+      middleName:
+          _cleanString(json['middle_name']) ??
+          _cleanString(meta?['middle_name']) ??
+          parsedName[1],
+      lastName: _cleanString(json['last_name']) ?? parsedName[2],
       suffix: json['suffix'] as String? ?? meta?['suffix'] as String?,
     );
+  }
+
+  static String? _cleanString(dynamic v) {
+    if (v == null) return null;
+    final s = v.toString().trim();
+    return s.isEmpty ? null : s;
+  }
+
+  static List<String?> _parseFullName(String? fullName) {
+    final parts = (fullName ?? '')
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return const [null, null, null];
+    if (parts.length == 1) return [parts.first, null, null];
+    if (parts.length == 2) return [parts.first, null, parts.last];
+    return [parts.first, parts.sublist(1, parts.length - 1).join(' '), parts.last];
   }
 
   static int? _parseInt(dynamic v) {

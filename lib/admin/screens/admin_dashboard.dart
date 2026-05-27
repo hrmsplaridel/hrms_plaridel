@@ -2107,13 +2107,6 @@ class _DtrContentState extends State<_DtrContent> {
                       onTap: () => _openDtrSection(5),
                     ),
                     FeatureCard(
-                      title: 'Office',
-                      subtitle:
-                          'Manage branch or site offices (DocuTracker routing).',
-                      icon: Icons.domain_rounded,
-                      onTap: () => setState(() => _dtrSectionIndex = 13),
-                    ),
-                    FeatureCard(
                       title: 'Position',
                       subtitle: 'Manage positions.',
                       icon: Icons.work_rounded,

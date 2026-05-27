@@ -9,9 +9,16 @@ import '../../landingpage/screens/landing_page.dart';
 import '../../login/screens/login_page.dart';
 import '../../providers/auth_provider.dart';
 
-/// Full-screen sign-out experience — soft glow, HRMS mark, animated dots.
+/// Full-screen HRMS loading experience — soft glow, HRMS mark, animated dots.
 class SignOutLoadingOverlay extends StatefulWidget {
-  const SignOutLoadingOverlay({super.key});
+  const SignOutLoadingOverlay({
+    super.key,
+    this.title = 'Ending your session',
+    this.subtitle = 'Securing your account before you leave',
+  });
+
+  final String title;
+  final String subtitle;
 
   @override
   State<SignOutLoadingOverlay> createState() => _SignOutLoadingOverlayState();
@@ -146,7 +153,7 @@ class _SignOutLoadingOverlayState extends State<SignOutLoadingOverlay>
                         ),
                         SizedBox(height: isNarrow ? 28 : 36),
                         Text(
-                          'Ending your session',
+                          widget.title,
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: textPrimary,
@@ -158,7 +165,7 @@ class _SignOutLoadingOverlayState extends State<SignOutLoadingOverlay>
                         ),
                         const SizedBox(height: 10),
                         Text(
-                          'Securing your account before you leave',
+                          widget.subtitle,
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: textSecondary.withValues(alpha: 0.9),

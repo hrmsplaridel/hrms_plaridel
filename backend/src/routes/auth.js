@@ -26,11 +26,17 @@ const JWT_REFRESH_EXPIRATION = process.env.JWT_REFRESH_EXPIRATION || '30d';
 
 async function ensurePersonalInfoColumns() {
   // Safe, idempotent additions so older DBs don't break /auth/me + PATCH /auth/me.
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS middle_name TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS suffix TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS sex TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS contact_number TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS civil_status TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS nationality TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth DATE`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`);
 }
 
 function hashRefreshToken(token) {
@@ -485,7 +491,7 @@ router.patch('/me', authMiddleware, async (req, res) => {
       values.push(suffix);
     }
     if (date_of_birth !== undefined) {
-      updates.push(`date_of_birth = $${i++}`);
+      updates.push(`date_of_birth = $${i++}::date`);
       values.push(date_of_birth);
     }
     // If name parts are provided, also keep full_name in sync.
@@ -530,6 +536,7 @@ router.patch('/me', authMiddleware, async (req, res) => {
       full_name: row.full_name,
       avatar_path: row.avatar_path,
       is_active: row.is_active,
+      contact_number: row.contact_number,
       address: row.address,
       sex: row.sex,
       civil_status: row.civil_status,

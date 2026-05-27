@@ -223,12 +223,13 @@ class ApiClient {
   Future<Response<T>> uploadFile<T>(
     String path, {
     required String filePath,
+    String? fileName,
     String fieldName = 'file',
     Map<String, dynamic>? extraFields,
     Options? options,
   }) async {
     final formData = FormData.fromMap({
-      fieldName: await MultipartFile.fromFile(filePath),
+      fieldName: await MultipartFile.fromFile(filePath, filename: fileName),
       ...?extraFields,
     });
     return _dio.post<T>(
