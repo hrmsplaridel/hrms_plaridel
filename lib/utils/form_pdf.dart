@@ -29,6 +29,8 @@ class FormPdf {
   static Future<void>? _warmupFuture;
 
   /// Preloads logos, letterhead rasters, and IDP fonts so first Print is fast.
+  /// If a previous attempt failed (e.g. plugin not ready on first web load),
+  /// the cached future is cleared so the next call retries cleanly.
   static Future<void> warmupPrintAssets() {
     _warmupFuture ??= Future.wait([
       ensureLogoLoaded(),
@@ -36,7 +38,10 @@ class FormPdf {
       _ensureIdpPdfFonts(),
       _loadIdpBuildingImage(),
       _loadIdpTemplateBackground(),
-    ]);
+    ]).catchError((Object e, StackTrace st) {
+      _warmupFuture = null; // reset so the next call retries
+      Error.throwWithStackTrace(e, st);
+    });
     return _warmupFuture!;
   }
 
@@ -524,10 +529,22 @@ class FormPdf {
 
     showLoading();
     try {
-      await warmupPrintAssets();
+      // Warmup errors are swallowed — every asset has a programmatic fallback.
+      // This prevents a first-load plugin initialisation failure from blocking print.
+      try {
+        await warmupPrintAssets();
+      } catch (_) {
+        // Proceed; fallback rendering is used for any un-cached assets.
+      }
+
       final doc = await buildDocument();
       final bytes = await doc.save();
       hideLoading();
+      if (!context.mounted) return;
+
+      // On web, the browser needs at least one rendered frame after the loading
+      // dialog closes before the print window can open reliably.
+      await Future.delayed(const Duration(milliseconds: 80));
       if (!context.mounted) return;
 
       await Printing.layoutPdf(
@@ -543,7 +560,6 @@ class FormPdf {
           SnackBar(content: Text('Print failed: $e')),
         );
       }
-      rethrow;
     }
   }
 

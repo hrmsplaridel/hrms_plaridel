@@ -1735,11 +1735,85 @@ class _RecruitmentOverviewCard extends StatelessWidget {
   }
 }
 
-class _PendingApplicationsCard extends StatelessWidget {
+class _PendingApplicationsCard extends StatefulWidget {
+  @override
+  State<_PendingApplicationsCard> createState() => _PendingApplicationsCardState();
+}
+
+class _PendingApplicationsCardState extends State<_PendingApplicationsCard> {
+  bool _loading = true;
+  bool _refreshing = false;
+  String? _error;
+  List<RecruitmentApplication> _all = const [];
+
+  List<RecruitmentApplication> get _pending => _all
+      .where((a) => a.status == 'submitted')
+      .toList()
+    ..sort(
+      (a, b) =>
+          (b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0)).compareTo(
+            a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0),
+          ),
+    );
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load({bool refresh = false}) async {
+    if (refresh) {
+      setState(() => _refreshing = true);
+    } else {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+
+    try {
+      final apps = await RecruitmentRepo.instance.listApplications();
+      if (!mounted) return;
+      setState(() {
+        _all = apps;
+        _error = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = userFacingApiError(e));
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _refreshing = false;
+      });
+    }
+  }
+
+  String _dateLabel(BuildContext context, DateTime? dt) {
+    if (dt == null) return '—';
+    return MaterialLocalizations.of(
+      context,
+    ).formatMediumDate(dt.toLocal());
+  }
+
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
     final isCompact = width < 480;
+    final pending = _pending;
+    final pendingPreview = pending.take(5).toList();
+    final allCount = _all.length;
+    final pendingCount = pending.length;
+    final inProgressCount = _all
+        .where(
+          (a) =>
+              a.status == 'document_approved' ||
+              a.status == 'exam_taken' ||
+              a.status == 'passed',
+        )
+        .length;
 
     return Container(
       padding: const EdgeInsets.all(24),
@@ -1753,127 +1827,295 @@ class _PendingApplicationsCard extends StatelessWidget {
             subtitle: 'Applicants awaiting document review',
             trailing: isCompact
                 ? null
-                : TextButton.icon(
-                    onPressed: () {},
-                    icon: const Icon(Icons.arrow_forward_rounded, size: 16),
-                    label: const Text('View All'),
-                    style: _AdminDashUi.ghostAction(context),
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'Refresh list',
+                        onPressed: _refreshing ? null : () => _load(refresh: true),
+                        icon: _refreshing
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.refresh_rounded, size: 18),
+                      ),
+                      const SizedBox(width: 6),
+                      TextButton.icon(
+                        onPressed: () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Open the Recruitment module to review all applicants.',
+                              ),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+                        label: const Text('View All'),
+                        style: _AdminDashUi.ghostAction(context),
+                      ),
+                    ],
                   ),
           ),
           if (isCompact) ...[
             const SizedBox(height: 10),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: () {},
-                icon: const Icon(Icons.arrow_forward_rounded, size: 16),
-                label: const Text('View All'),
-                style: _AdminDashUi.ghostAction(context),
-              ),
-            ),
-          ],
-          const SizedBox(height: 22),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final needScroll = constraints.maxWidth < 500;
-              final table = ClipRRect(
-                borderRadius: BorderRadius.circular(_AdminDashUi.radiusMd),
-                child: Table(
-                  columnWidths: const {
-                    0: FlexColumnWidth(2),
-                    1: FlexColumnWidth(2),
-                    2: FlexColumnWidth(1.5),
-                    3: FlexColumnWidth(1.2),
-                  },
-                  children: [
-                    TableRow(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            AppTheme.primaryNavy.withValues(alpha: 0.08),
-                            AppTheme.dashMutedSurfaceOf(context),
-                          ],
+            Row(
+              children: [
+                IconButton(
+                  tooltip: 'Refresh list',
+                  onPressed: _refreshing ? null : () => _load(refresh: true),
+                  icon: _refreshing
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh_rounded, size: 18),
+                ),
+                TextButton.icon(
+                  onPressed: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Open the Recruitment module to review all applicants.',
                         ),
                       ),
-                      children: [
-                        _TableHeader('Applicant'),
-                        _TableHeader('Type'),
-                        _TableHeader('Date'),
-                        _TableHeader('Status'),
-                      ],
-                    ),
-                    TableRow(
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                            vertical: 16,
-                            horizontal: 16,
-                          ),
-                          child: Text(
-                            'No applications yet',
-                            style: TextStyle(
-                              color: AppTheme.dashTextSecondaryOf(context),
-                              fontSize: 14,
-                            ),
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                            vertical: 16,
-                            horizontal: 8,
-                          ),
-                          child: Text(
-                            '—',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: AppTheme.dashTextSecondaryOf(context),
-                            ),
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                            vertical: 16,
-                            horizontal: 8,
-                          ),
-                          child: Text(
-                            '—',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: AppTheme.dashTextSecondaryOf(context),
-                            ),
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                            vertical: 16,
-                            horizontal: 8,
-                          ),
-                          child: Text(
-                            '—',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: AppTheme.dashTextSecondaryOf(context),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+                    );
+                  },
+                  icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+                  label: const Text('View All'),
+                  style: _AdminDashUi.ghostAction(context),
                 ),
-              );
-              if (needScroll) {
-                return SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(minWidth: 400),
-                    child: table,
-                  ),
-                );
-              }
-              return table;
-            },
+              ],
+            ),
+          ],
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _PendingKpiChip(
+                label: 'Pending Review',
+                value: '$pendingCount',
+                icon: Icons.hourglass_top_rounded,
+                color: AppTheme.primaryNavy,
+              ),
+              _PendingKpiChip(
+                label: 'In Progress',
+                value: '$inProgressCount',
+                icon: Icons.timelapse_rounded,
+                color: const Color(0xFF1565C0),
+              ),
+              _PendingKpiChip(
+                label: 'Total Applicants',
+                value: '$allCount',
+                icon: Icons.groups_rounded,
+                color: const Color(0xFF6A1B9A),
+              ),
+            ],
           ),
           const SizedBox(height: 18),
+          if (_loading)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 20),
+                child: CircularProgressIndicator(),
+              ),
+            )
+          else if (_error != null)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(_AdminDashUi.radiusMd),
+                border: Border.all(color: Colors.red.withValues(alpha: 0.25)),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.error_outline_rounded,
+                    color: Colors.red.shade700,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Could not load applications. $_error',
+                      style: TextStyle(
+                        color: Colors.red.shade900,
+                        fontSize: 13,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final needScroll = constraints.maxWidth < 560;
+                final table = ClipRRect(
+                  borderRadius: BorderRadius.circular(_AdminDashUi.radiusMd),
+                  child: Table(
+                    columnWidths: const {
+                      0: FlexColumnWidth(2.3),
+                      1: FlexColumnWidth(1.5),
+                      2: FlexColumnWidth(1.4),
+                      3: FlexColumnWidth(1.2),
+                    },
+                    children: [
+                      TableRow(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              AppTheme.primaryNavy.withValues(alpha: 0.1),
+                              AppTheme.dashMutedSurfaceOf(context),
+                            ],
+                          ),
+                        ),
+                        children: const [
+                          _TableHeader('Applicant'),
+                          _TableHeader('Type'),
+                          _TableHeader('Date'),
+                          _TableHeader('Status'),
+                        ],
+                      ),
+                      if (pendingPreview.isEmpty)
+                        TableRow(
+                          decoration: BoxDecoration(
+                            color: AppTheme.dashPanelOf(context),
+                          ),
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 20,
+                                horizontal: 16,
+                              ),
+                              child: Text(
+                                'No pending applications',
+                                style: TextStyle(
+                                  color: AppTheme.dashTextSecondaryOf(context),
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            _PendingCell(text: '—'),
+                            _PendingCell(text: '—'),
+                            _PendingCell(text: '—'),
+                          ],
+                        )
+                      else
+                        ...pendingPreview.map(
+                          (a) => TableRow(
+                            decoration: BoxDecoration(
+                              color: AppTheme.dashPanelOf(context),
+                              border: Border(
+                                top: BorderSide(
+                                  color: AppTheme.dashHairlineOf(context),
+                                ),
+                              ),
+                            ),
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                  horizontal: 16,
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      a.fullName.trim().isEmpty
+                                          ? '(Unnamed applicant)'
+                                          : a.fullName.trim(),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: AppTheme.dashTextPrimaryOf(context),
+                                        fontSize: 13.5,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      a.email,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: AppTheme.dashTextSecondaryOf(context),
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              _PendingCell(
+                                text: (a.positionAppliedFor?.trim().isNotEmpty ??
+                                        false)
+                                    ? a.positionAppliedFor!.trim()
+                                    : 'Recruitment',
+                              ),
+                              _PendingCell(
+                                text: _dateLabel(context, a.createdAt),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 12,
+                                  horizontal: 8,
+                                ),
+                                child: Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 5,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.primaryNavy.withValues(
+                                        alpha: 0.12,
+                                      ),
+                                      borderRadius: BorderRadius.circular(999),
+                                      border: Border.all(
+                                        color: AppTheme.primaryNavy.withValues(
+                                          alpha: 0.25,
+                                        ),
+                                      ),
+                                    ),
+                                    child: const Text(
+                                      'Pending',
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppTheme.primaryNavy,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                );
+                if (needScroll) {
+                  return SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minWidth: 520),
+                      child: table,
+                    ),
+                  );
+                }
+                return table;
+              },
+            ),
+          const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
             decoration: BoxDecoration(
@@ -1893,7 +2135,7 @@ class _PendingApplicationsCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: const Icon(
-                    Icons.info_outline_rounded,
+                    Icons.tips_and_updates_rounded,
                     size: 18,
                     color: AppTheme.primaryNavy,
                   ),
@@ -1901,15 +2143,88 @@ class _PendingApplicationsCard extends StatelessWidget {
                 const SizedBox(width: 14),
                 Expanded(
                   child: Text(
-                    'Applications from the recruitment process will appear here when you connect the backend.',
+                    pendingCount > 0
+                        ? 'You have $pendingCount application(s) waiting for document review. Open Recruitment > RSP to approve or decline documents.'
+                        : 'No documents are waiting for review right now. New recruitment submissions will appear here automatically.',
                     style: TextStyle(
                       color: AppTheme.dashTextSecondaryOf(context),
-                      fontSize: 14,
+                      fontSize: 13.5,
                       height: 1.45,
                     ),
                   ),
                 ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PendingCell extends StatelessWidget {
+  const _PendingCell({required this.text});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 13,
+          color: AppTheme.dashTextSecondaryOf(context),
+        ),
+      ),
+    );
+  }
+}
+
+class _PendingKpiChip extends StatelessWidget {
+  const _PendingKpiChip({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.color,
+  });
+
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.22)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: color),
+          const SizedBox(width: 6),
+          Text(
+            value,
+            style: TextStyle(
+              color: color,
+              fontSize: 13.5,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: AppTheme.dashTextSecondaryOf(context),
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],

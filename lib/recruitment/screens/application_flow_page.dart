@@ -124,7 +124,10 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   Timer? _step1StatusTimer;
 
   Timer? _draftDebounce;
+  Timer? _duplicateCheckDebounce;
   bool _hasLocalDraft = false;
+  bool _duplicateApplicantExists = false;
+  bool _checkingDuplicateApplicant = false;
 
   /// From [GET /api/rsp/email-verification/config]. `null` before first fetch.
   bool? _serverRequiresEmailOtp;
@@ -171,10 +174,14 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   void initState() {
     super.initState();
     _firstNameController.addListener(_scheduleDraftSave);
+    _firstNameController.addListener(_scheduleDuplicateApplicantCheck);
     _middleNameController.addListener(_scheduleDraftSave);
+    _middleNameController.addListener(_scheduleDuplicateApplicantCheck);
     _lastNameController.addListener(_scheduleDraftSave);
+    _lastNameController.addListener(_scheduleDuplicateApplicantCheck);
     _emailController.addListener(_scheduleDraftSave);
     _emailController.addListener(_onEmailMaybeInvalidateOtp);
+    _emailController.addListener(_scheduleDuplicateApplicantCheck);
     _phoneController.addListener(_scheduleDraftSave);
     _continueEmailController.addListener(_scheduleDraftSave);
     _continueEmailController.addListener(_onContinueEmailChangedForPreview);
@@ -716,11 +723,16 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     _step1StatusTimer?.cancel();
     _beiGradingPollTimer?.cancel();
     _draftDebounce?.cancel();
+    _duplicateCheckDebounce?.cancel();
     _firstNameController.removeListener(_scheduleDraftSave);
+    _firstNameController.removeListener(_scheduleDuplicateApplicantCheck);
     _middleNameController.removeListener(_scheduleDraftSave);
+    _middleNameController.removeListener(_scheduleDuplicateApplicantCheck);
     _lastNameController.removeListener(_scheduleDraftSave);
+    _lastNameController.removeListener(_scheduleDuplicateApplicantCheck);
     _emailController.removeListener(_scheduleDraftSave);
     _emailController.removeListener(_onEmailMaybeInvalidateOtp);
+    _emailController.removeListener(_scheduleDuplicateApplicantCheck);
     _phoneController.removeListener(_scheduleDraftSave);
     _continueEmailController.removeListener(_scheduleDraftSave);
     _continueEmailController.removeListener(_onContinueEmailChangedForPreview);
@@ -833,6 +845,73 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     return digits.length >= 10 && digits.length <= 15;
   }
 
+  void _scheduleDuplicateApplicantCheck() {
+    if (!_isVacancyApplication) return;
+    _duplicateCheckDebounce?.cancel();
+    _duplicateCheckDebounce = Timer(
+      const Duration(milliseconds: 350),
+      _checkDuplicateApplicantExists,
+    );
+  }
+
+  Future<void> _checkDuplicateApplicantExists() async {
+    if (!_isVacancyApplication) return;
+    final first = _firstNameController.text.trim().toLowerCase();
+    final middle = _middleNameController.text.trim().toLowerCase();
+    final last = _lastNameController.text.trim().toLowerCase();
+    final suffix = (_suffixValue ?? '').trim().toLowerCase();
+    final email = _emailController.text.trim().toLowerCase();
+    final pos = (widget.selectedPositionHeadline ?? '').trim().toLowerCase();
+
+    if (first.isEmpty || last.isEmpty || !_isValidEmailFormat(email)) {
+      if (mounted) {
+        setState(() {
+          _duplicateApplicantExists = false;
+          _checkingDuplicateApplicant = false;
+        });
+      }
+      return;
+    }
+
+    if (mounted) setState(() => _checkingDuplicateApplicant = true);
+    try {
+      final lookup = await RecruitmentRepo.instance.getApplicationByEmail(email);
+      if (!mounted) return;
+      if (lookup == null) {
+        setState(() {
+          _duplicateApplicantExists = false;
+          _checkingDuplicateApplicant = false;
+        });
+        return;
+      }
+      final existing = lookup.application;
+      final existingFirst = (existing.firstName ?? '').trim().toLowerCase();
+      final existingMiddle = (existing.middleName ?? '').trim().toLowerCase();
+      final existingLast = (existing.lastName ?? '').trim().toLowerCase();
+      final existingSuffix = (existing.suffix ?? '').trim().toLowerCase();
+      final existingPos = (existing.positionAppliedFor ?? '')
+          .trim()
+          .toLowerCase();
+      final sameIdentity =
+          existingFirst == first &&
+          existingMiddle == middle &&
+          existingLast == last &&
+          existingSuffix == suffix;
+      final samePosition = existingPos == pos;
+
+      setState(() {
+        _duplicateApplicantExists = sameIdentity && samePosition;
+        _checkingDuplicateApplicant = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _duplicateApplicantExists = false;
+        _checkingDuplicateApplicant = false;
+      });
+    }
+  }
+
   static String _docKindLabel(RspApplicationDocKind kind) {
     switch (kind) {
       case RspApplicationDocKind.applicationLetter:
@@ -911,9 +990,63 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         return;
       }
     }
+    final pos = widget.selectedPositionHeadline?.trim();
+    final existingLookup = await RecruitmentRepo.instance.getApplicationByEmail(
+      email,
+    );
+    if (existingLookup != null) {
+      final existing = existingLookup.application;
+      final normalizedExistingFirst = (existing.firstName ?? '')
+          .trim()
+          .toLowerCase();
+      final normalizedExistingMiddle = (existing.middleName ?? '')
+          .trim()
+          .toLowerCase();
+      final normalizedExistingLast = (existing.lastName ?? '')
+          .trim()
+          .toLowerCase();
+      final normalizedExistingSuffix = (existing.suffix ?? '')
+          .trim()
+          .toLowerCase();
+      final normalizedExistingPos = (existing.positionAppliedFor ?? '')
+          .trim()
+          .toLowerCase();
+
+      final normalizedFirst = first.toLowerCase();
+      final normalizedMiddle = middle.toLowerCase();
+      final normalizedLast = last.toLowerCase();
+      final normalizedSuffix = (_suffixValue ?? '').trim().toLowerCase();
+      final normalizedPos = (pos ?? '').trim().toLowerCase();
+
+      final sameIdentity =
+          normalizedExistingFirst == normalizedFirst &&
+          normalizedExistingMiddle == normalizedMiddle &&
+          normalizedExistingLast == normalizedLast &&
+          normalizedExistingSuffix == normalizedSuffix;
+      final samePosition = normalizedExistingPos == normalizedPos;
+
+      if (sameIdentity && samePosition) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Application rejected: this applicant already submitted for this position. Please use Track Application instead of applying again.',
+            ),
+          ),
+        );
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'An application already exists for this email. Please use Continue/Track Application instead of creating a new one.',
+          ),
+        ),
+      );
+      return;
+    }
     setState(() => _submitting = true);
     try {
-      final pos = widget.selectedPositionHeadline?.trim();
       final id = await RecruitmentRepo.instance.insertApplication(
         RecruitmentApplication(
           id: '',
@@ -2684,7 +2817,10 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             items: _suffixOptions
                 .map((s) => DropdownMenuItem(value: s, child: Text(s)))
                 .toList(),
-            onChanged: (v) => setState(() => _suffixValue = v),
+            onChanged: (v) {
+              setState(() => _suffixValue = v);
+              _scheduleDuplicateApplicantCheck();
+            },
             decoration: _step1FieldDecoration(
               'Suffix',
               hintText: 'Select suffix (optional)',
@@ -2885,10 +3021,26 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           );
         }),
         const SizedBox(height: 24),
+        if (_duplicateApplicantExists)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(
+              'You already submitted an application for this position. Use Track/Continue Application instead.',
+              style: TextStyle(
+                color: Colors.red.shade700,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
         SizedBox(
           width: double.infinity,
           child: FilledButton(
-            onPressed: _submitting ? null : _submitStep1,
+            onPressed: (_submitting ||
+                    _checkingDuplicateApplicant ||
+                    _duplicateApplicantExists)
+                ? null
+                : _submitStep1,
             style: FilledButton.styleFrom(
               backgroundColor: AppTheme.primaryNavy,
               foregroundColor: Colors.white,

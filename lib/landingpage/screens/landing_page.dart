@@ -98,6 +98,14 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
     );
   }
 
+  void _onTrackApplication() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const ApplicationFlowPage(),
+      ),
+    );
+  }
+
   void _onLogin() {
     Navigator.of(
       context,
@@ -135,6 +143,7 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
                         height: constraints.maxHeight,
                         onViewVacanciesTap: () => _scrollTo(_jobVacanciesKey),
                         onScrollToVacancies: () => _scrollTo(_jobVacanciesKey),
+                        onTrackApplicationTap: _onTrackApplication,
                       ),
                       const SizedBox(height: 18),
                       FutureBuilder<JobVacancyAnnouncement>(

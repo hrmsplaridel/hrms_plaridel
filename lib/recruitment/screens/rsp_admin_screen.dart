@@ -7850,7 +7850,7 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
           item.training.text = v.training ?? '';
           item.closingDate.text = v.closingDate != null
               ? '${v.closingDate!.year.toString().padLeft(4, '0')}-${v.closingDate!.month.toString().padLeft(2, '0')}-${v.closingDate!.day.toString().padLeft(2, '0')}'
-              : '';
+              : _autoCloseDate();
           if (item.education.text.isEmpty &&
               item.experience.text.isEmpty &&
               item.training.text.isEmpty) {
@@ -7871,6 +7871,7 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
         if (legacy != null && legacy.isNotEmpty) {
           item.education.text = legacy;
         }
+        item.closingDate.text = _autoCloseDate();
         next.add(item);
       }
       if (mounted) {
@@ -7898,9 +7899,17 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
     super.dispose();
   }
 
+  /// Returns "YYYY-MM-DD" for [n] days from today.
+  static String _autoCloseDate([int days = 15]) {
+    final d = DateTime.now().add(Duration(days: days));
+    return '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  }
+
   void _addVacancy() {
+    final item = _VacancyFormItem();
+    item.closingDate.text = _autoCloseDate();
     setState(() {
-      _vacancies.add(_VacancyFormItem());
+      _vacancies.add(item);
       _vacancyExpanded.add(true);
     });
   }
@@ -8662,7 +8671,7 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
                                                       'Due date (auto-close)',
                                                     ),
                                                     Text(
-                                                      'After this date, the system will automatically stop accepting applicants for this position.',
+                                                      'Automatically closes 15 days after the position is posted. The system will stop accepting applicants on this date.',
                                                       style: TextStyle(
                                                         color: AppTheme
                                                             .dashTextSecondaryOf(
@@ -8673,61 +8682,45 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
                                                       ),
                                                     ),
                                                     const SizedBox(height: 10),
-                                                    TextField(
-                                                      controller: v.closingDate,
-                                                      readOnly: true,
-                                                      onTap: () async {
-                                                      final now =
-                                                          DateTime.now();
-                                                      final parsed =
-                                                          DateTime.tryParse(
-                                                            v.closingDate.text
-                                                                .trim(),
-                                                          );
-                                                      final initial =
-                                                          parsed ??
-                                                          DateTime(
-                                                            now.year,
-                                                            now.month,
-                                                            now.day,
-                                                          );
-                                                      final picked =
-                                                          await showDatePicker(
-                                                            context: context,
-                                                            initialDate:
-                                                                initial,
-                                                            firstDate: DateTime(
-                                                              now.year - 1,
-                                                              1,
-                                                              1,
+                                                    Container(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+                                                      decoration: BoxDecoration(
+                                                        color: AppTheme.dashMutedSurfaceOf(context),
+                                                        borderRadius: BorderRadius.circular(14),
+                                                        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+                                                      ),
+                                                      child: Row(
+                                                        children: [
+                                                          Icon(Icons.event_rounded, size: 20, color: AppTheme.dashTextSecondaryOf(context)),
+                                                          const SizedBox(width: 10),
+                                                          Expanded(
+                                                            child: Text(
+                                                              v.closingDate.text.isNotEmpty
+                                                                  ? v.closingDate.text
+                                                                  : _autoCloseDate(),
+                                                              style: TextStyle(
+                                                                color: AppTheme.dashTextPrimaryOf(context),
+                                                                fontSize: 15,
+                                                                fontWeight: FontWeight.w600,
+                                                              ),
                                                             ),
-                                                            lastDate: DateTime(
-                                                              now.year + 5,
-                                                              12,
-                                                              31,
+                                                          ),
+                                                          TextButton.icon(
+                                                            onPressed: () => setState(() {
+                                                              v.closingDate.text = _autoCloseDate();
+                                                            }),
+                                                            icon: const Icon(Icons.refresh_rounded, size: 16),
+                                                            label: const Text('Reset', style: TextStyle(fontSize: 13)),
+                                                            style: TextButton.styleFrom(
+                                                              foregroundColor: AppTheme.primaryNavy,
+                                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                                              minimumSize: Size.zero,
+                                                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                                             ),
-                                                            helpText:
-                                                                'Select due date',
-                                                          );
-                                                      if (!mounted) return;
-                                                      if (picked == null)
-                                                        return;
-                                                      setState(() {
-                                                        v.closingDate.text =
-                                                            '${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
-                                                      });
-                                                    },
-                                                    decoration: _vacancyInput(
-                                                      context,
-                                                      hint:
-                                                          'Select a date (YYYY-MM-DD)',
-                                                      suffixIcon: const Icon(
-                                                        Icons
-                                                            .calendar_month_rounded,
+                                                          ),
+                                                        ],
                                                       ),
                                                     ),
-                                                    maxLines: 1,
-                                                  ),
                                                   const SizedBox(height: 18),
                                                   _vacancyFieldLabel(
                                                     context,
@@ -8875,10 +8868,65 @@ class _RspApplicationsMonitor extends StatefulWidget {
 class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   List<RecruitmentApplication> _applications = [];
   Map<String, RecruitmentExamResult> _examResults = {};
+  String? _selectedPositionFilter;
+  DateTime? _selectedAppliedDate;
 
   bool _loading = true;
   bool _syncing = false;
   final ScrollController _horizontalScrollController = ScrollController();
+
+  Set<String> get _positionFilterOptions {
+    final out = <String>{};
+    for (final app in _applications) {
+      final p = (app.positionAppliedFor ?? '').trim();
+      if (p.isNotEmpty) out.add(p);
+    }
+    return out;
+  }
+
+  bool _isSameLocalDate(DateTime a, DateTime b) {
+    final la = a.toLocal();
+    final lb = b.toLocal();
+    return la.year == lb.year && la.month == lb.month && la.day == lb.day;
+  }
+
+  List<RecruitmentApplication> get _filteredApplications {
+    return _applications.where((app) {
+      final position = (app.positionAppliedFor ?? '').trim();
+      if (_selectedPositionFilter != null &&
+          _selectedPositionFilter!.isNotEmpty &&
+          position != _selectedPositionFilter) {
+        return false;
+      }
+      if (_selectedAppliedDate != null) {
+        final createdAt = app.createdAt;
+        if (createdAt == null ||
+            !_isSameLocalDate(createdAt, _selectedAppliedDate!)) {
+          return false;
+        }
+      }
+      return true;
+    }).toList();
+  }
+
+  String _formatDateShort(DateTime date) {
+    const monthNames = <String>[
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    final d = date.toLocal();
+    return '${monthNames[d.month - 1]} ${d.day}, ${d.year}';
+  }
 
   static Map<String, dynamic>? _examAnswersSubsection(
     Map<String, dynamic>? answersJson,
@@ -9758,6 +9806,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
           ? AppTheme.primaryNavyLight
           : AppTheme.letterheadNavy,
     );
+    final filteredApplications = _filteredApplications;
 
     final viewScoreBtn = Tooltip(
       message:
@@ -9800,6 +9849,35 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
               : AppTheme.primaryNavy,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         ),
+      ),
+    );
+
+    final dateFilterBtn = OutlinedButton.icon(
+      onPressed: _loading
+          ? null
+          : () async {
+              final now = DateTime.now();
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: _selectedAppliedDate ?? now,
+                firstDate: DateTime(now.year - 10),
+                lastDate: DateTime(now.year + 1),
+                helpText: 'Filter by applied date',
+              );
+              if (picked == null || !mounted) return;
+              setState(() => _selectedAppliedDate = picked);
+            },
+      icon: const Icon(Icons.event_outlined, size: 18),
+      label: Text(
+        _selectedAppliedDate == null
+            ? 'Applied date'
+            : _formatDateShort(_selectedAppliedDate!),
+      ),
+      style: OutlinedButton.styleFrom(
+        side: BorderSide(color: hairline),
+        foregroundColor: AppTheme.dashTextPrimaryOf(context),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
 
@@ -9906,6 +9984,73 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                     viewScoreBtn,
                     const SizedBox(height: 10),
                     syncBtn,
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<String>(
+                      initialValue: _selectedPositionFilter,
+                      decoration: InputDecoration(
+                        labelText: 'Filter position',
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                      items: <DropdownMenuItem<String>>[
+                        const DropdownMenuItem<String>(
+                          value: null,
+                          child: Text('All positions'),
+                        ),
+                        ...(_positionFilterOptions.toList()
+                              ..sort(
+                                (a, b) =>
+                                    a.toLowerCase().compareTo(b.toLowerCase()),
+                              ))
+                            .map(
+                              (p) =>
+                                  DropdownMenuItem<String>(value: p, child: Text(p)),
+                            ),
+                      ],
+                      onChanged: _loading
+                          ? null
+                          : (value) {
+                              setState(() => _selectedPositionFilter = value);
+                            },
+                    ),
+                    const SizedBox(height: 10),
+                    dateFilterBtn,
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        TextButton.icon(
+                          onPressed: _loading
+                              ? null
+                              : () => setState(
+                                  () => _selectedAppliedDate = DateTime.now(),
+                                ),
+                          icon: const Icon(Icons.today_outlined, size: 18),
+                          label: const Text('Today'),
+                        ),
+                        TextButton.icon(
+                          onPressed: (_loading ||
+                                  (_selectedPositionFilter == null &&
+                                      _selectedAppliedDate == null))
+                              ? null
+                              : () {
+                                  setState(() {
+                                    _selectedPositionFilter = null;
+                                    _selectedAppliedDate = null;
+                                  });
+                                },
+                          icon: const Icon(Icons.clear_all_rounded, size: 18),
+                          label: const Text('Clear filters'),
+                        ),
+                      ],
+                    ),
                   ],
                 );
               }
@@ -9918,6 +10063,80 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
               );
             },
           ),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            SizedBox(
+              width: 320,
+              child: DropdownButtonFormField<String>(
+                initialValue: _selectedPositionFilter,
+                decoration: InputDecoration(
+                  labelText: 'Position',
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 12,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: hairline),
+                  ),
+                ),
+                items: <DropdownMenuItem<String>>[
+                  const DropdownMenuItem<String>(
+                    value: null,
+                    child: Text('All positions'),
+                  ),
+                  ...(_positionFilterOptions.toList()
+                        ..sort(
+                          (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
+                        ))
+                      .map(
+                        (p) => DropdownMenuItem<String>(value: p, child: Text(p)),
+                      ),
+                ],
+                onChanged: _loading
+                    ? null
+                    : (value) {
+                        setState(() => _selectedPositionFilter = value);
+                      },
+              ),
+            ),
+            dateFilterBtn,
+            TextButton.icon(
+              onPressed: _loading
+                  ? null
+                  : () => setState(() => _selectedAppliedDate = DateTime.now()),
+              icon: const Icon(Icons.today_outlined, size: 18),
+              label: const Text('Today'),
+            ),
+            TextButton.icon(
+              onPressed: (_loading ||
+                      (_selectedPositionFilter == null &&
+                          _selectedAppliedDate == null))
+                  ? null
+                  : () {
+                      setState(() {
+                        _selectedPositionFilter = null;
+                        _selectedAppliedDate = null;
+                      });
+                    },
+              icon: const Icon(Icons.clear_all_rounded, size: 18),
+              label: const Text('Clear filters'),
+            ),
+            Text(
+              '${filteredApplications.length} shown',
+              style: TextStyle(
+                color: secondary,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 20),
         Container(
@@ -9962,6 +10181,20 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                   child: Center(
                     child: Text(
                       'No applications yet. Applicants will appear here after they submit Step 1 from the recruitment flow.',
+                      style: TextStyle(
+                        color: secondary.withValues(alpha: 0.92),
+                        fontSize: 14,
+                        height: 1.45,
+                      ),
+                    ),
+                  ),
+                )
+              else if (filteredApplications.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Center(
+                    child: Text(
+                      'No applicants match the selected filters. Try another position or date.',
                       style: TextStyle(
                         color: secondary.withValues(alpha: 0.92),
                         fontSize: 14,
@@ -10124,8 +10357,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                       ),
                                     ],
                                   ),
-                                  ...List.generate(_applications.length, (ri) {
-                                    final app = _applications[ri];
+                                  ...List.generate(
+                                    filteredApplications.length,
+                                    (ri) {
+                                    final app = filteredApplications[ri];
                                     final exam =
                                         _examResults[app.id.toLowerCase()];
                                     final textStyle = TextStyle(
@@ -10483,7 +10718,8 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         ),
                                       ],
                                     );
-                                  }),
+                                    },
+                                  ),
                                 ],
                               ),
                             ),
