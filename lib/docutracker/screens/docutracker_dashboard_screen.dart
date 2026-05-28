@@ -939,6 +939,7 @@ class _DocumentTileState extends State<_DocumentTile> {
 
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 700;
     final isOverdue =
         widget.document.status == DocumentStatus.overdue ||
         (widget.document.deadlineTime != null &&
@@ -1172,8 +1173,6 @@ class _DocumentTileState extends State<_DocumentTile> {
           onExit: (_) => setState(() => _hovering = false),
           child: Material(color: Colors.transparent, child: child),
         );
-      },
-    );
   }
 }
 
