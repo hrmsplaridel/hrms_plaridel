@@ -24,6 +24,40 @@ if (!fs.existsSync(trainingReportDir)) {
   fs.mkdirSync(trainingReportDir, { recursive: true });
 }
 
+function removeOldAvatarIfDifferent(oldRelPath, newRelPath) {
+  if (!oldRelPath || oldRelPath === newRelPath) return;
+  const oldPath = path.resolve(UPLOAD_DIR, oldRelPath);
+  removeAvatarFile(oldPath, 'old avatar');
+}
+
+function removeAvatarFile(filePath, label) {
+  const allowedRoot = path.resolve(avatarDir);
+  const resolved = path.resolve(filePath);
+  if (!resolved.startsWith(`${allowedRoot}${path.sep}`)) return;
+  fs.unlink(resolved, (err) => {
+    if (err && err.code !== 'ENOENT') {
+      console.warn(`[upload avatar] failed to delete ${label}`, err);
+    }
+  });
+}
+
+const updateAvatarSql = `
+  WITH old_user AS (
+    SELECT avatar_path AS old_avatar_path
+    FROM users
+    WHERE id = $2
+  ),
+  updated_user AS (
+    UPDATE users
+    SET avatar_path = $1, updated_at = now()
+    WHERE id = $2
+    RETURNING id, avatar_path AS new_avatar_path
+  )
+  SELECT updated_user.id, updated_user.new_avatar_path, old_user.old_avatar_path
+  FROM updated_user
+  LEFT JOIN old_user ON true
+`;
+
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, avatarDir),
   filename: (_req, file, cb) => {
@@ -70,6 +104,7 @@ const trainingUpload = multer({
  * Updates user's avatar_path and returns path.
  */
 router.post('/avatar', authMiddleware, upload.single('file'), async (req, res) => {
+  let avatarUpdated = false;
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
@@ -77,16 +112,23 @@ router.post('/avatar', authMiddleware, upload.single('file'), async (req, res) =
 
     const relPath = `${AVATAR_SUBDIR}/${req.file.filename}`;
 
-    await pool.query(
-      'UPDATE users SET avatar_path = $1, updated_at = now() WHERE id = $2',
-      [relPath, req.user.id]
-    );
+    const result = await pool.query(updateAvatarSql, [relPath, req.user.id]);
+    if (result.rowCount === 0) {
+      removeAvatarFile(req.file.path, 'avatar for missing user');
+      return res.status(404).json({ error: 'User not found' });
+    }
+    avatarUpdated = true;
+    const row = result.rows[0];
+    removeOldAvatarIfDifferent(row.old_avatar_path, row.new_avatar_path);
 
     res.json({
       path: relPath,
       url: `/api/files/avatar/${req.user.id}`,
     });
   } catch (err) {
+    if (!avatarUpdated && req.file?.path) {
+      removeAvatarFile(req.file.path, 'failed avatar upload');
+    }
     console.error('[upload avatar]', err);
     res.status(500).json({ error: 'Failed to upload avatar' });
   }
@@ -102,6 +144,7 @@ router.post(
   requireAdmin,
   upload.single('file'),
   async (req, res) => {
+    let avatarUpdated = false;
     try {
       if (!req.file) {
         return res.status(400).json({ error: 'No file uploaded' });
@@ -109,18 +152,22 @@ router.post(
       const targetUserId = req.params.userId;
       const relPath = `${AVATAR_SUBDIR}/${req.file.filename}`;
 
-      const result = await pool.query(
-        'UPDATE users SET avatar_path = $1, updated_at = now() WHERE id = $2 RETURNING id',
-        [relPath, targetUserId]
-      );
+      const result = await pool.query(updateAvatarSql, [relPath, targetUserId]);
       if (result.rowCount === 0) {
+        removeAvatarFile(req.file.path, 'avatar for missing user');
         return res.status(404).json({ error: 'User not found' });
       }
+      avatarUpdated = true;
+      const row = result.rows[0];
+      removeOldAvatarIfDifferent(row.old_avatar_path, row.new_avatar_path);
       res.json({
         path: relPath,
         url: `/api/files/avatar/${targetUserId}`,
       });
     } catch (err) {
+      if (!avatarUpdated && req.file?.path) {
+        removeAvatarFile(req.file.path, 'failed avatar upload');
+      }
       console.error('[upload avatar for]', err);
       res.status(500).json({ error: 'Failed to upload avatar' });
     }

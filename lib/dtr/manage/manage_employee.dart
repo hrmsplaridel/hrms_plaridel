@@ -28,7 +28,9 @@ class _EmployeeProfile {
     this.email,
     this.isActive = true,
     this.avatarPath,
+    this.firstName,
     this.middleName,
+    this.lastName,
     this.suffix,
     this.sex,
     this.dateOfBirth,
@@ -51,7 +53,9 @@ class _EmployeeProfile {
   final String? email;
   final bool isActive;
   final String? avatarPath;
+  final String? firstName;
   final String? middleName;
+  final String? lastName;
   final String? suffix;
   final String? sex;
   final DateTime? dateOfBirth;
@@ -329,7 +333,9 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       final body = <String, dynamic>{
         'email': email,
         'password': password,
+        'first_name': firstName,
         'full_name': fullName,
+        'last_name': lastName,
         'role': role,
         if (middleName.isNotEmpty) 'middle_name': middleName,
         if (_suffix != null && _suffix != 'None') 'suffix': _suffix,
@@ -699,12 +705,18 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             decoration: BoxDecoration(
               color: const Color(0xFFFFF3E0),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFFEF6C00).withValues(alpha: 0.4)),
+              border: Border.all(
+                color: const Color(0xFFEF6C00).withValues(alpha: 0.4),
+              ),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFFEF6C00)),
+                const Icon(
+                  Icons.warning_amber_rounded,
+                  size: 18,
+                  color: Color(0xFFEF6C00),
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -1082,7 +1094,9 @@ _EmployeeProfile _employeeProfileFromJson(Map<String, dynamic> m) {
     email: m['email'] as String?,
     isActive: m['is_active'] as bool? ?? true,
     avatarPath: m['avatar_path'] as String?,
+    firstName: m['first_name'] as String?,
     middleName: m['middle_name'] as String?,
+    lastName: m['last_name'] as String?,
     suffix: m['suffix'] as String?,
     sex: m['sex'] as String?,
     dateOfBirth: dob != null ? DateTime.tryParse(dob.toString()) : null,
@@ -1234,7 +1248,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/biometric-devices',
-        queryParameters: const {'status': 'Active'},
+        queryParameters: const {'status': 'Active', 'probe_online': '0'},
       );
       if (!mounted) return;
       final list = res.data ?? [];
@@ -3390,8 +3404,14 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
       _middleNameController,
       _lastNameController,
     );
+    if ((_profile.firstName ?? '').trim().isNotEmpty) {
+      _firstNameController.text = _profile.firstName!.trim();
+    }
     if (_profile.middleName != null && _profile.middleName!.isNotEmpty) {
       _middleNameController.text = _profile.middleName!;
+    }
+    if ((_profile.lastName ?? '').trim().isNotEmpty) {
+      _lastNameController.text = _profile.lastName!.trim();
     }
     _contactController.text = _profile.contactNumber ?? '';
     _salaryGradeController.text = _profile.salaryGrade ?? '';
@@ -3410,6 +3430,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/biometric-devices',
+        queryParameters: const {'status': 'Active', 'probe_online': '0'},
       );
       if (!mounted) return;
       final list = res.data ?? [];
@@ -3539,7 +3560,9 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
       final encodedAddress =
           _addressFormKey.currentState?.composeEncoded() ?? '';
       final body = <String, dynamic>{
+        'first_name': firstName,
         'full_name': fullName,
+        'last_name': lastName,
         'role': role,
         if (middleName.isNotEmpty) 'middle_name': middleName,
         if (_suffix != null && _suffix != 'None') 'suffix': _suffix,
@@ -3587,9 +3610,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
       Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             _apiErrorMessageFromDio(e, fallback: 'Failed to update employee.'),
@@ -4161,7 +4182,10 @@ class _BiometricImportDialogState extends State<_BiometricImportDialog> {
 
   Future<void> _loadDevices() async {
     try {
-      final res = await ApiClient.instance.get('/api/biometric-devices');
+      final res = await ApiClient.instance.get(
+        '/api/biometric-devices',
+        queryParameters: const {'status': 'Active', 'probe_online': '0'},
+      );
       if (mounted) {
         setState(() {
           _devices = res.data ?? [];
@@ -4642,7 +4666,7 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/biometric-devices',
-        queryParameters: const {'status': 'Active'},
+        queryParameters: const {'status': 'Active', 'probe_online': '0'},
       );
       if (!mounted) return;
       setState(() {

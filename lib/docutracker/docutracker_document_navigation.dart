@@ -36,7 +36,7 @@ Future<bool> openDocuTrackerDocumentDetail(
     return false;
   }
 
-  if (!isAdmin) {
+  if (!isAdmin && !document.sourceOnly) {
     final allowed = await DocuTrackerRepository.instance.canAccessDocument(
       userId: userId,
       documentId: docId,

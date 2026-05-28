@@ -39,32 +39,11 @@ class _EmpRow {
   final String name;
 }
 
-class _OfficeRow {
-  const _OfficeRow({required this.id, required this.name});
-  final String id;
-  final String name;
-}
-
 class _WorkflowStepEditorPanelState extends State<WorkflowStepEditorPanel> {
-  static const _rolePresets = [
-    'admin',
-    'hr',
-    'supervisor',
-    'employee',
-    'manager',
-  ];
-
   late bool _enabled;
-  late String _assigneeType;
   String? _dialogError;
 
   final _labelController = TextEditingController();
-  final _roleCustomController = TextEditingController();
-  String? _rolePreset;
-  List<_OfficeRow> _offices = [];
-  String? _officeDropdownValue;
-  final _officeManualController = TextEditingController();
-  bool _officesLoading = false;
   final _usersManualController = TextEditingController();
   final _deadlineController = TextEditingController();
   final _empSearchController = TextEditingController();
@@ -90,16 +69,8 @@ class _WorkflowStepEditorPanelState extends State<WorkflowStepEditorPanel> {
     super.initState();
     final s = widget.initial;
     _enabled = s.enabled;
-    var t = s.assigneeType.trim().toLowerCase();
-    if (!const {'role', 'department', 'user', 'office'}.contains(t)) {
-      t = 'role';
-    }
-    _assigneeType = t;
 
     _labelController.text = s.label ?? '';
-    final oid = (s.officeId ?? '').trim();
-    _officeDropdownValue = oid.isEmpty ? null : oid;
-    _officeManualController.text = oid;
     _deadlineController.text = s.deadlineHours?.toString() ?? '';
     final rawIds = (s.userIds ?? const [])
         .map((e) => e.trim())
@@ -112,18 +83,6 @@ class _WorkflowStepEditorPanelState extends State<WorkflowStepEditorPanel> {
       }
     }
     _usersManualController.text = rawIds.join(', ');
-
-    final rid = (s.roleId ?? '').trim();
-    if (rid.isEmpty) {
-      _rolePreset = 'admin';
-      _roleCustomController.clear();
-    } else if (_rolePresets.contains(rid)) {
-      _rolePreset = rid;
-      _roleCustomController.clear();
-    } else {
-      _rolePreset = null;
-      _roleCustomController.text = rid;
-    }
 
     final did = (s.departmentId ?? '').trim();
     _departmentDropdownValue = did.isEmpty ? null : did;
@@ -140,8 +99,6 @@ class _WorkflowStepEditorPanelState extends State<WorkflowStepEditorPanel> {
     _empSearchDebounce?.cancel();
     _empSearchController.removeListener(_scheduleEmpSearch);
     _labelController.dispose();
-    _roleCustomController.dispose();
-    _officeManualController.dispose();
     _usersManualController.dispose();
     _deadlineController.dispose();
     _empSearchController.dispose();
@@ -179,7 +136,7 @@ class _WorkflowStepEditorPanelState extends State<WorkflowStepEditorPanel> {
           _ensureDepartmentValueValid();
         });
       }
-      if (mounted && _assigneeType == 'user') {
+      if (mounted) {
         await _loadDepartmentRoster();
       }
     } on DioException catch (_) {
@@ -201,45 +158,6 @@ class _WorkflowStepEditorPanelState extends State<WorkflowStepEditorPanel> {
     ];
   }
 
-  Future<void> _loadOffices() async {
-    setState(() => _officesLoading = true);
-    try {
-      final res = await ApiClient.instance.get<List<dynamic>>('/api/offices');
-      final data = res.data ?? [];
-      final rows = <_OfficeRow>[];
-      for (final e in data) {
-        final m = e as Map<String, dynamic>;
-        final id = m['id']?.toString();
-        if (id == null || id.isEmpty) continue;
-        final name = m['name']?.toString() ?? '—';
-        rows.add(_OfficeRow(id: id, name: name));
-      }
-      rows.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-      if (mounted) {
-        setState(() {
-          _offices = rows;
-          _ensureOfficeValueValid();
-        });
-      }
-    } on DioException catch (_) {
-      if (mounted) setState(() => _offices = []);
-    } catch (_) {
-      if (mounted) setState(() => _offices = []);
-    } finally {
-      if (mounted) setState(() => _officesLoading = false);
-    }
-  }
-
-  void _ensureOfficeValueValid() {
-    final v = _officeDropdownValue;
-    if (v == null || v.isEmpty) return;
-    if (_offices.any((o) => o.id == v)) return;
-    _offices = [
-      _OfficeRow(id: v, name: 'Current id (not in list)'),
-      ..._offices,
-    ];
-  }
-
   Future<void> _fetchEmployees() async {
     setState(() => _employeesLoading = true);
     try {
@@ -253,7 +171,7 @@ class _WorkflowStepEditorPanelState extends State<WorkflowStepEditorPanel> {
           'limit': 100,
           'offset': 0,
           if (q.isNotEmpty) 'q': q,
-          if (_assigneeType == 'user' && dept.isNotEmpty) 'department_id': dept,
+          if (dept.isNotEmpty) 'department_id': dept,
           'sort': 'full_name',
           'order': 'asc',
         },
@@ -513,9 +431,8 @@ class _WorkflowStepEditorPanelState extends State<WorkflowStepEditorPanel> {
                               _enabled = v;
                               _dialogError = null;
                             }),
-                            activeTrackColor: DocuTrackerTokens.brand.withValues(
-                              alpha: 0.8,
-                            ),
+                            activeTrackColor: DocuTrackerTokens.brand
+                                .withValues(alpha: 0.8),
                           ),
                         ],
                       ),
@@ -532,392 +449,386 @@ class _WorkflowStepEditorPanelState extends State<WorkflowStepEditorPanel> {
                     onChanged: (_) => setState(() => _dialogError = null),
                   ),
                   const SizedBox(height: 12),
-                  if (_assigneeType == 'user') ...[
-                    _WorkflowStepSectionLabel(
-                      stepNumber: 1,
-                      title: 'Department',
-                      subtitle:
-                          'Pick the department this step belongs to. Only people from this '
-                          'list can be assigned.',
+                  _WorkflowStepSectionLabel(
+                    stepNumber: 1,
+                    title: 'Department',
+                    subtitle:
+                        'Pick the department this step belongs to. Only people from this '
+                        'list can be assigned.',
+                  ),
+                  const SizedBox(height: 8),
+                  if (_departmentsLoading)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Center(
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  else if (_departments.isNotEmpty)
+                    DropdownButtonFormField<String>(
+                      key: ValueKey<String>(
+                        'user-dept-$_departmentDropdownValue',
+                      ),
+                      initialValue: _departmentDropdownValue,
+                      decoration: DocuTrackerStyles.dropdownDecoration(
+                        context,
+                        'Department',
+                      ),
+                      hint: const Text('Select department'),
+                      isExpanded: true,
+                      items: _departments
+                          .map(
+                            (d) => DropdownMenuItem(
+                              value: d.id,
+                              child: Text(
+                                d.name,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) {
+                        setState(() {
+                          _departmentDropdownValue = v;
+                          if (v != null) _departmentManualController.text = v;
+                          _dialogError = null;
+                        });
+                        _fetchEmployees();
+                        _loadDepartmentRoster();
+                      },
+                    )
+                  else
+                    TextField(
+                      controller: _departmentManualController,
+                      decoration: DocuTrackerStyles.inputDecoration(
+                        context,
+                        'Department id (UUID)',
+                        Icons.apartment_rounded,
+                      ),
+                      onChanged: (_) {
+                        setState(() => _dialogError = null);
+                        _loadDepartmentRoster();
+                        _fetchEmployees();
+                      },
                     ),
-                    const SizedBox(height: 8),
-                    if (_departmentsLoading)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 12),
-                        child: Center(
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      )
-                    else if (_departments.isNotEmpty)
+                  const SizedBox(height: 16),
+                  _WorkflowStepSectionLabel(
+                    stepNumber: 2,
+                    title: 'Primary reviewer',
+                    subtitle:
+                        'One person is responsible for moving the document forward.',
+                  ),
+                  const SizedBox(height: 8),
+                  if (_rosterLoading)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 10),
+                      child: Center(
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  else if (!_rosterLoading &&
+                      (_departmentDropdownValue ??
+                              _departmentManualController.text)
+                          .trim()
+                          .isEmpty)
+                    Text(
+                      'Select a department in step 1 to load people.',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                      ),
+                    )
+                  else if (!_rosterLoading && _departmentRoster.isEmpty)
+                    Text(
+                      'No active employees found for this department.',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                      ),
+                    )
+                  else
+                    DropdownButtonFormField<String>(
+                      key: ValueKey<String>(
+                        'primary-$_departmentDropdownValue-$_primaryUserId',
+                      ),
+                      initialValue: _primaryUserId,
+                      decoration: DocuTrackerStyles.dropdownDecoration(
+                        context,
+                        'Primary reviewer',
+                      ),
+                      hint: const Text('Choose a person'),
+                      isExpanded: true,
+                      items: [
+                        if (_primaryUserId != null &&
+                            !_departmentRoster.any(
+                              (e) => e.id == _primaryUserId,
+                            ))
+                          DropdownMenuItem(
+                            value: _primaryUserId,
+                            child: Text(
+                              'Current: ${_userIdToName[_primaryUserId!] ?? _primaryUserId}',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        for (final e in _departmentRoster)
+                          DropdownMenuItem(
+                            value: e.id,
+                            child: Text(
+                              e.name,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (v) {
+                        setState(() {
+                          _primaryUserId = v;
+                          if (v != null) {
+                            _userIdToName[v] =
+                                _lookupRosterName(v) ?? _userIdToName[v] ?? '';
+                            _backupUserIds.remove(v);
+                          }
+                          _refreshManualUserLine();
+                          _dialogError = null;
+                        });
+                      },
+                    ),
+                  const SizedBox(height: 16),
+                  _WorkflowStepSectionLabel(
+                    stepNumber: 3,
+                    title: 'Backup reviewers (optional)',
+                    subtitle:
+                        'If the primary is unavailable, these people can help — '
+                        'you finalize who can approve in “Manage step assignees”.',
+                  ),
+                  const SizedBox(height: 8),
+                  if (_departmentRoster.isNotEmpty) ...[
+                    if (_departmentRoster.any(
+                      (e) =>
+                          e.id != _primaryUserId &&
+                          !_backupUserIds.contains(e.id),
+                    ))
                       DropdownButtonFormField<String>(
                         key: ValueKey<String>(
-                          'user-dept-$_departmentDropdownValue',
+                          'add-backup-${_backupUserIds.length}',
                         ),
-                        initialValue: _departmentDropdownValue,
+                        initialValue: null,
                         decoration: DocuTrackerStyles.dropdownDecoration(
                           context,
-                          'Department',
+                          'Add backup',
                         ),
-                        hint: const Text('Select department'),
+                        hint: const Text('Choose someone to add'),
                         isExpanded: true,
-                        items: _departments
-                            .map(
-                              (d) => DropdownMenuItem(
-                                value: d.id,
+                        items: [
+                          for (final e in _departmentRoster)
+                            if (e.id != _primaryUserId &&
+                                !_backupUserIds.contains(e.id))
+                              DropdownMenuItem(
+                                value: e.id,
                                 child: Text(
-                                  d.name,
+                                  e.name,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                            )
-                            .toList(),
-                        onChanged: (v) {
-                          setState(() {
-                            _departmentDropdownValue = v;
-                            if (v != null) _departmentManualController.text = v;
-                            _dialogError = null;
-                          });
-                          _fetchEmployees();
-                          _loadDepartmentRoster();
-                        },
-                      )
-                    else
-                      TextField(
-                        controller: _departmentManualController,
-                        decoration: DocuTrackerStyles.inputDecoration(
-                          context,
-                          'Department id (UUID)',
-                          Icons.apartment_rounded,
-                        ),
-                        onChanged: (_) {
-                          setState(() => _dialogError = null);
-                          _loadDepartmentRoster();
-                          _fetchEmployees();
-                        },
-                      ),
-                    const SizedBox(height: 16),
-                    _WorkflowStepSectionLabel(
-                      stepNumber: 2,
-                      title: 'Primary reviewer',
-                      subtitle:
-                          'One person is responsible for moving the document forward.',
-                    ),
-                    const SizedBox(height: 8),
-                    if (_rosterLoading)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 10),
-                        child: Center(
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      )
-                    else if (!_rosterLoading &&
-                        (_departmentDropdownValue ??
-                                _departmentManualController.text)
-                            .trim()
-                            .isEmpty)
-                      Text(
-                        'Select a department in step 1 to load people.',
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 12,
-                        ),
-                      )
-                    else if (!_rosterLoading && _departmentRoster.isEmpty)
-                      Text(
-                        'No active employees found for this department.',
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 12,
-                        ),
-                      )
-                    else
-                      DropdownButtonFormField<String>(
-                        key: ValueKey<String>(
-                          'primary-$_departmentDropdownValue-$_primaryUserId',
-                        ),
-                        initialValue: _primaryUserId,
-                        decoration: DocuTrackerStyles.dropdownDecoration(
-                          context,
-                          'Primary reviewer',
-                        ),
-                        hint: const Text('Choose a person'),
-                        isExpanded: true,
-                        items: [
-                          if (_primaryUserId != null &&
-                              !_departmentRoster.any(
-                                (e) => e.id == _primaryUserId,
-                              ))
-                            DropdownMenuItem(
-                              value: _primaryUserId,
-                              child: Text(
-                                'Current: ${_userIdToName[_primaryUserId!] ?? _primaryUserId}',
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          for (final e in _departmentRoster)
-                            DropdownMenuItem(
-                              value: e.id,
-                              child: Text(
-                                e.name,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
                         ],
                         onChanged: (v) {
+                          if (v == null) return;
                           setState(() {
-                            _primaryUserId = v;
-                            if (v != null) {
-                              _userIdToName[v] =
-                                  _lookupRosterName(v) ??
-                                  _userIdToName[v] ??
-                                  '';
-                              _backupUserIds.remove(v);
+                            _userIdToName[v] = _lookupRosterName(v) ?? '';
+                            if (!_backupUserIds.contains(v)) {
+                              _backupUserIds.add(v);
                             }
                             _refreshManualUserLine();
                             _dialogError = null;
                           });
                         },
-                      ),
-                    const SizedBox(height: 16),
-                    _WorkflowStepSectionLabel(
-                      stepNumber: 3,
-                      title: 'Backup reviewers (optional)',
-                      subtitle:
-                          'If the primary is unavailable, these people can help — '
-                          'you finalize who can approve in “Manage step assignees”.',
-                    ),
-                    const SizedBox(height: 8),
-                    if (_departmentRoster.isNotEmpty) ...[
-                      if (_departmentRoster.any(
-                        (e) =>
-                            e.id != _primaryUserId &&
-                            !_backupUserIds.contains(e.id),
-                      ))
-                        DropdownButtonFormField<String>(
-                          key: ValueKey<String>(
-                            'add-backup-${_backupUserIds.length}',
-                          ),
-                          initialValue: null,
-                          decoration: DocuTrackerStyles.dropdownDecoration(
-                            context,
-                            'Add backup',
-                          ),
-                          hint: const Text('Choose someone to add'),
-                          isExpanded: true,
-                          items: [
-                            for (final e in _departmentRoster)
-                              if (e.id != _primaryUserId &&
-                                  !_backupUserIds.contains(e.id))
-                                DropdownMenuItem(
-                                  value: e.id,
-                                  child: Text(
-                                    e.name,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                          ],
-                          onChanged: (v) {
-                            if (v == null) return;
-                            setState(() {
-                              _userIdToName[v] = _lookupRosterName(v) ?? '';
-                              if (!_backupUserIds.contains(v)) {
-                                _backupUserIds.add(v);
-                              }
-                              _refreshManualUserLine();
-                              _dialogError = null;
-                            });
-                          },
-                        )
-                      else
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 6),
-                          child: Text(
-                            'Everyone in this department is already listed on this step.',
-                            style: TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 12,
-                            ),
+                      )
+                    else
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        child: Text(
+                          'Everyone in this department is already listed on this step.',
+                          style: TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 12,
                           ),
                         ),
-                    ],
-                    if (_backupUserIds.isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: [
-                          for (final id in _backupUserIds)
-                            InputChip(
-                              label: Text(
-                                _userIdToName[id] ??
-                                    (id.length > 12
-                                        ? '${id.substring(0, 8)}…'
-                                        : id),
-                                style: const TextStyle(fontSize: 12),
-                              ),
-                              onDeleted: () => setState(() {
-                                _backupUserIds.remove(id);
-                                _refreshManualUserLine();
-                                _dialogError = null;
-                              }),
-                            ),
-                        ],
                       ),
-                    ],
-                    const SizedBox(height: 8),
-                    Text(
-                      'Total: ${_orderedUserIds.length} reviewer(s) · '
-                      'Primary first, then backups in order.',
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 11,
-                        height: 1.3,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    _WorkflowStepSectionLabel(
-                      stepNumber: 4,
-                      title: 'Find by name (optional)',
-                      subtitle: 'Use search if the dropdown list is long.',
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _empSearchController,
-                      decoration: DocuTrackerStyles.inputDecoration(
-                        context,
-                        'Search employees (name)',
-                        Icons.search_rounded,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    SizedBox(
-                      height: 160,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                            color: Colors.black.withValues(alpha: 0.08),
-                          ),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: _employeesLoading
-                            ? const Center(
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : ListView.builder(
-                                itemCount: _employeeHits.length,
-                                itemBuilder: (ctx, i) {
-                                  final e = _employeeHits[i];
-                                  final isPrimary = _primaryUserId == e.id;
-                                  final isBackup = _backupUserIds.contains(
-                                    e.id,
-                                  );
-                                  return ListTile(
-                                    dense: true,
-                                    title: Text(
-                                      e.name,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    subtitle: Text(
-                                      isPrimary
-                                          ? 'Primary'
-                                          : isBackup
-                                          ? 'Backup'
-                                          : 'Tap to add as backup',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: AppTheme.textSecondary
-                                            .withValues(alpha: 0.95),
-                                      ),
-                                    ),
-                                    trailing: isPrimary
-                                        ? Icon(
-                                            Icons.star_rounded,
-                                            color: DocuTrackerTokens.brand,
-                                            size: 20,
-                                          )
-                                        : isBackup
-                                        ? Icon(
-                                            Icons.check_circle_outline_rounded,
-                                            color: Colors.green.shade700,
-                                            size: 20,
-                                          )
-                                        : IconButton(
-                                            icon: const Icon(
-                                              Icons.add_circle_outline_rounded,
-                                            ),
-                                            onPressed: () {
-                                              if (_primaryUserId == null) {
-                                                setState(() {
-                                                  _primaryUserId = e.id;
-                                                  _userIdToName[e.id] = e.name;
-                                                  _refreshManualUserLine();
-                                                });
-                                              } else if (!_backupUserIds
-                                                      .contains(e.id) &&
-                                                  e.id != _primaryUserId) {
-                                                setState(() {
-                                                  _backupUserIds.add(e.id);
-                                                  _userIdToName[e.id] = e.name;
-                                                  _refreshManualUserLine();
-                                                });
-                                              }
-                                            },
-                                          ),
-                                    onTap: () {
-                                      if (isPrimary) return;
-                                      if (_primaryUserId == null) {
-                                        setState(() {
-                                          _primaryUserId = e.id;
-                                          _userIdToName[e.id] = e.name;
-                                          _refreshManualUserLine();
-                                        });
-                                      } else if (!isBackup &&
-                                          e.id != _primaryUserId) {
-                                        setState(() {
-                                          _backupUserIds.add(e.id);
-                                          _userIdToName[e.id] = e.name;
-                                          _refreshManualUserLine();
-                                        });
-                                      }
-                                    },
-                                  );
-                                },
-                              ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    ExpansionTile(
-                      title: Text(
-                        'Advanced: paste IDs',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
+                  ],
+                  if (_backupUserIds.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
                       children: [
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: TextField(
-                            controller: _usersManualController,
-                            maxLines: 2,
-                            decoration: DocuTrackerStyles.inputDecoration(
-                              context,
-                              'User IDs — first = primary, rest = backups (comma-separated)',
-                              Icons.edit_note_rounded,
+                        for (final id in _backupUserIds)
+                          InputChip(
+                            label: Text(
+                              _userIdToName[id] ??
+                                  (id.length > 12
+                                      ? '${id.substring(0, 8)}…'
+                                      : id),
+                              style: const TextStyle(fontSize: 12),
                             ),
-                            onChanged: (_) => setState(() {
-                              _syncPrimaryBackupsFromManual();
+                            onDeleted: () => setState(() {
+                              _backupUserIds.remove(id);
+                              _refreshManualUserLine();
                               _dialogError = null;
                             }),
                           ),
-                        ),
                       ],
                     ),
                   ],
+                  const SizedBox(height: 8),
+                  Text(
+                    'Total: ${_orderedUserIds.length} reviewer(s) · '
+                    'Primary first, then backups in order.',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 11,
+                      height: 1.3,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _WorkflowStepSectionLabel(
+                    stepNumber: 4,
+                    title: 'Find by name (optional)',
+                    subtitle: 'Use search if the dropdown list is long.',
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _empSearchController,
+                    decoration: DocuTrackerStyles.inputDecoration(
+                      context,
+                      'Search employees (name)',
+                      Icons.search_rounded,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    height: 160,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: Colors.black.withValues(alpha: 0.08),
+                        ),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: _employeesLoading
+                          ? const Center(
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : ListView.builder(
+                              itemCount: _employeeHits.length,
+                              itemBuilder: (ctx, i) {
+                                final e = _employeeHits[i];
+                                final isPrimary = _primaryUserId == e.id;
+                                final isBackup = _backupUserIds.contains(e.id);
+                                return ListTile(
+                                  dense: true,
+                                  title: Text(
+                                    e.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  subtitle: Text(
+                                    isPrimary
+                                        ? 'Primary'
+                                        : isBackup
+                                        ? 'Backup'
+                                        : 'Tap to add as backup',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: AppTheme.textSecondary.withValues(
+                                        alpha: 0.95,
+                                      ),
+                                    ),
+                                  ),
+                                  trailing: isPrimary
+                                      ? Icon(
+                                          Icons.star_rounded,
+                                          color: DocuTrackerTokens.brand,
+                                          size: 20,
+                                        )
+                                      : isBackup
+                                      ? Icon(
+                                          Icons.check_circle_outline_rounded,
+                                          color: Colors.green.shade700,
+                                          size: 20,
+                                        )
+                                      : IconButton(
+                                          icon: const Icon(
+                                            Icons.add_circle_outline_rounded,
+                                          ),
+                                          onPressed: () {
+                                            if (_primaryUserId == null) {
+                                              setState(() {
+                                                _primaryUserId = e.id;
+                                                _userIdToName[e.id] = e.name;
+                                                _refreshManualUserLine();
+                                              });
+                                            } else if (!_backupUserIds.contains(
+                                                  e.id,
+                                                ) &&
+                                                e.id != _primaryUserId) {
+                                              setState(() {
+                                                _backupUserIds.add(e.id);
+                                                _userIdToName[e.id] = e.name;
+                                                _refreshManualUserLine();
+                                              });
+                                            }
+                                          },
+                                        ),
+                                  onTap: () {
+                                    if (isPrimary) return;
+                                    if (_primaryUserId == null) {
+                                      setState(() {
+                                        _primaryUserId = e.id;
+                                        _userIdToName[e.id] = e.name;
+                                        _refreshManualUserLine();
+                                      });
+                                    } else if (!isBackup &&
+                                        e.id != _primaryUserId) {
+                                      setState(() {
+                                        _backupUserIds.add(e.id);
+                                        _userIdToName[e.id] = e.name;
+                                        _refreshManualUserLine();
+                                      });
+                                    }
+                                  },
+                                );
+                              },
+                            ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  ExpansionTile(
+                    title: Text(
+                      'Advanced: paste IDs',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: TextField(
+                          controller: _usersManualController,
+                          maxLines: 2,
+                          decoration: DocuTrackerStyles.inputDecoration(
+                            context,
+                            'User IDs — first = primary, rest = backups (comma-separated)',
+                            Icons.edit_note_rounded,
+                          ),
+                          onChanged: (_) => setState(() {
+                            _syncPrimaryBackupsFromManual();
+                            _dialogError = null;
+                          }),
+                        ),
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: _deadlineController,

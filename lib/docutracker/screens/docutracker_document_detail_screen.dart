@@ -83,7 +83,7 @@ class _DocuTrackerDocumentDetailScreenState
     final userId = auth.user?.id ?? '';
     final roleId = auth.user?.role;
     final documentId = doc.id;
-    if (documentId == null || documentId.isEmpty) {
+    if (doc.sourceOnly || documentId == null || documentId.isEmpty) {
       if (!mounted) return;
       setState(() {
         _canViewAuditTrail = false;
@@ -95,6 +95,7 @@ class _DocuTrackerDocumentDetailScreenState
         _canReturnAction = false;
         _canDownloadAttachment = false;
         _canModifyAttachment = false;
+        _permissionsLoading = false;
       });
       return;
     }
@@ -154,6 +155,21 @@ class _DocuTrackerDocumentDetailScreenState
       final repo = DocuTrackerRepository.instance;
       final userId = auth.user?.id ?? '';
       final docId = widget.document.id!;
+
+      if (widget.document.sourceOnly) {
+        if (mounted) {
+          setState(() {
+            _routingLoading = false;
+            _workflowConfigIssue = null;
+          });
+        }
+        await _refreshEffectivePermissions(
+          doc: widget.document,
+          auth: auth,
+          isAdmin: widget.isAdmin,
+        );
+        return;
+      }
 
       _routingRecords = await repo.getDocumentRoutingRecords(docId);
       if (mounted) setState(() => _routingLoading = false);
@@ -410,10 +426,8 @@ class _DocuTrackerDocumentDetailScreenState
         workflowReady && !isPending && canAct && _canApproveAction;
     final canForward =
         workflowReady && !isPending && canAct && _canForwardAction;
-    final canReject =
-        workflowReady && !isPending && canAct && _canRejectAction;
-    final canReturn =
-        workflowReady && !isPending && canAct && _canReturnAction;
+    final canReject = workflowReady && !isPending && canAct && _canRejectAction;
+    final canReturn = workflowReady && !isPending && canAct && _canReturnAction;
 
     final showYourTurn =
         canAct &&
@@ -599,7 +613,9 @@ class _DocuTrackerDocumentDetailScreenState
       }
     }
 
-    final savedLabel = docuTrackerFormatRelativeSaved(doc.updatedAt ?? doc.createdAt);
+    final savedLabel = docuTrackerFormatRelativeSaved(
+      doc.updatedAt ?? doc.createdAt,
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -644,16 +660,10 @@ class _DocuTrackerDocumentDetailScreenState
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            DocuTrackerStatusBadge(
-              status: doc.status,
-              dotStyle: true,
-            ),
+            DocuTrackerStatusBadge(status: doc.status, dotStyle: true),
             if (savedLabel.isNotEmpty) ...[
               const SizedBox(height: 6),
-              Text(
-                savedLabel,
-                style: DocuTrackerTokens.metaStyle(),
-              ),
+              Text(savedLabel, style: DocuTrackerTokens.metaStyle()),
             ],
             if (deadlineLabel.isNotEmpty) ...[
               const SizedBox(height: 8),
@@ -819,10 +829,7 @@ class _DocuTrackerDocumentDetailScreenState
     );
   }
 
-  void _showWorkflowMapDialog(
-    List<WorkflowStep> steps,
-    int current,
-  ) {
+  void _showWorkflowMapDialog(List<WorkflowStep> steps, int current) {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1269,7 +1276,8 @@ class _DocuTrackerDocumentDetailScreenState
     final isDraft = DocuTrackerDocumentVisibility.isWorkInProgressDraft(doc);
     final showQuickAccess = _canEdit || _canDownloadAttachment;
 
-    Widget fullWidth(Widget child) => SizedBox(width: double.infinity, child: child);
+    Widget fullWidth(Widget child) =>
+        SizedBox(width: double.infinity, child: child);
 
     return DocuTrackerDetailSectionCard(
       icon: Icons.touch_app_outlined,
@@ -1769,7 +1777,9 @@ class _CurrentAssignmentCard extends StatelessWidget {
                         ),
                       ),
                       backgroundColor: Colors.white,
-                      side: const BorderSide(color: DocuTrackerTokens.borderSubtle),
+                      side: const BorderSide(
+                        color: DocuTrackerTokens.borderSubtle,
+                      ),
                       visualDensity: VisualDensity.compact,
                     ),
                   )
@@ -2074,7 +2084,8 @@ class _TimelineItem extends StatelessWidget {
                                   color: DocuTrackerTokens.textSecondary,
                                 ),
                               ),
-                            if ((entry.fromStep != null || entry.toStep != null) &&
+                            if ((entry.fromStep != null ||
+                                    entry.toStep != null) &&
                                 (entry.fromStatus != null ||
                                     entry.toStatus != null))
                               const SizedBox(height: 6),
@@ -2195,11 +2206,7 @@ class _TimelineItem extends StatelessWidget {
 }
 
 class _QuickAccessChip extends StatelessWidget {
-  const _QuickAccessChip({
-    required this.label,
-    required this.icon,
-    this.onTap,
-  });
+  const _QuickAccessChip({required this.label, required this.icon, this.onTap});
 
   final String label;
   final IconData icon;

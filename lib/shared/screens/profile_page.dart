@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -181,29 +182,31 @@ class _ProfileContentState extends State<ProfileContent> {
     }
   }
 
+  void _applyUserProfile(AppUser u) {
+    _firstNameController.text = u.firstName ?? '';
+    _middleNameController.text = u.middleName ?? '';
+    _lastNameController.text = u.lastName ?? '';
+    _suffixValue = (u.suffix ?? '').trim().isEmpty ? null : u.suffix!.trim();
+    _birthdateValue = u.dateOfBirth;
+    _birthdateController.text = _formatYmd(_birthdateValue);
+    _avatarPath = context.read<AuthProvider>().avatarPath;
+    _phoneController.text = u.contactNumber ?? '';
+    _nationalityValue =
+        (u.nationality ?? '').trim().isEmpty ? null : u.nationality!.trim();
+    _sexValue = _normalizeSex(u.sex);
+    _civilStatusValue = _normalizeCivilStatus(u.civilStatus);
+    _avatarUrl = _avatarUrlFor(u.id);
+    _addressFormKey.currentState?.applyRawAddress(u.address);
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (!_loadedFromAuth) {
       final auth = context.read<AuthProvider>();
       if (auth.user != null) {
-        final u = auth.user!;
-        _firstNameController.text = u.firstName ?? '';
-        _middleNameController.text = u.middleName ?? '';
-        _lastNameController.text = u.lastName ?? '';
-        _suffixValue = (u.suffix ?? '').trim().isEmpty ? null : u.suffix!.trim();
-        _birthdateValue = u.dateOfBirth;
-        _birthdateController.text = _formatYmd(_birthdateValue);
-        _avatarPath = auth.avatarPath;
-        _phoneController.text = u.contactNumber ?? '';
-        _nationalityValue =
-            (u.nationality ?? '').trim().isEmpty ? null : u.nationality!.trim();
-        _streetController.text = '';
-        _sexValue = _normalizeSex(u.sex);
-        _civilStatusValue = _normalizeCivilStatus(u.civilStatus);
+        _applyUserProfile(auth.user!);
         _loadedFromAuth = true;
-        // Always try avatar URL when we have userId; Image.network errorBuilder handles 404
-        _avatarUrl = _avatarUrlFor(u.id);
       }
     }
   }
@@ -503,21 +506,27 @@ class _ProfileContentState extends State<ProfileContent> {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.image,
       allowMultiple: false,
-      withData: true,
+      withData: kIsWeb,
     );
     if (result == null || result.files.isEmpty) return;
 
     final picked = result.files.single;
-    List<int>? bytes = picked.bytes;
-    if (bytes == null || bytes.isEmpty) {
-      final path = picked.path;
-      if (path != null && path.isNotEmpty) {
-        try {
-          bytes = await picked.xFile.readAsBytes();
-        } catch (_) {}
-      }
+    final uploadName = _avatarUploadFileName(picked.name);
+    final filePath = picked.path;
+    final canUploadFromPath =
+        !kIsWeb && filePath != null && filePath.isNotEmpty;
+    final bytes = picked.bytes;
+    const maxAvatarBytes = 5 * 1024 * 1024;
+    if (picked.size > maxAvatarBytes) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Profile photo must be 5 MB or smaller.'),
+        ),
+      );
+      return;
     }
-    if (bytes == null || bytes.isEmpty) {
+    if (!canUploadFromPath && (bytes == null || bytes.isEmpty)) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -529,17 +538,24 @@ class _ProfileContentState extends State<ProfileContent> {
       return;
     }
 
-    final uploadName = _avatarUploadFileName(picked.name);
     setState(() {
       _imageLoading = true;
       _message = null;
     });
     try {
-      await ApiClient.instance.uploadBytes(
-        '/api/upload/avatar',
-        bytes: bytes,
-        fileName: uploadName,
-      );
+      if (canUploadFromPath) {
+        await ApiClient.instance.uploadFile(
+          '/api/upload/avatar',
+          filePath: filePath,
+          fileName: uploadName,
+        );
+      } else {
+        await ApiClient.instance.uploadBytes(
+          '/api/upload/avatar',
+          bytes: bytes!,
+          fileName: uploadName,
+        );
+      }
       if (mounted) {
         await context.read<AuthProvider>().refreshUser();
         _avatarPath = context.read<AuthProvider>().avatarPath;
@@ -594,7 +610,7 @@ class _ProfileContentState extends State<ProfileContent> {
       _message = null;
     });
     try {
-      await ApiClient.instance.patch(
+      final res = await ApiClient.instance.patch<Map<String, dynamic>>(
         '/auth/me',
         data: {
           'first_name': first,
@@ -610,8 +626,16 @@ class _ProfileContentState extends State<ProfileContent> {
         },
       );
       if (mounted) {
+        final patchedUser = res.data != null ? AppUser.fromJson(res.data!) : null;
+        if (patchedUser != null) {
+          context.read<AuthProvider>().replaceUser(patchedUser);
+        }
         await context.read<AuthProvider>().refreshUser();
+        final refreshed = context.read<AuthProvider>().user ?? patchedUser;
         setState(() {
+          if (refreshed != null) {
+            _applyUserProfile(refreshed);
+          }
           _loading = false;
         });
         ScaffoldMessenger.of(
@@ -620,12 +644,32 @@ class _ProfileContentState extends State<ProfileContent> {
       }
     } catch (e) {
       if (mounted) {
+        final msg = _profileSaveErrorMessage(e);
         setState(() {
           _loading = false;
-          _message = 'Failed: $e';
+          _message = msg;
         });
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       }
     }
+  }
+
+  String _profileSaveErrorMessage(Object e) {
+    if (e is DioException) {
+      final data = e.response?.data;
+      if (data is Map && data['error'] != null) {
+        return data['error'].toString();
+      }
+      if (e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout) {
+        return 'Could not reach the server. Check that the backend is running.';
+      }
+      if (e.message != null && e.message!.trim().isNotEmpty) {
+        return e.message!;
+      }
+    }
+    return 'Profile update failed. Please try again.';
   }
 
   Future<void> _changePassword() async {
@@ -900,6 +944,7 @@ class _ProfileContentState extends State<ProfileContent> {
                 ),
                 col(
                   DropdownButtonFormField<String>(
+                    key: ValueKey('suffix-${_suffixValue ?? ''}'),
                     initialValue: _suffixValue,
                     items: _suffixOptions
                         .map(
@@ -916,6 +961,7 @@ class _ProfileContentState extends State<ProfileContent> {
                 ),
                 col(
                   DropdownButtonFormField<String>(
+                    key: ValueKey('sex-${_sexValue ?? ''}'),
                     initialValue: _sexValue,
                     style: fieldStyle,
                     dropdownColor: AppTheme.dashPanelOf(context),
@@ -950,6 +996,7 @@ class _ProfileContentState extends State<ProfileContent> {
                 ),
                 col(
                   DropdownButtonFormField<String>(
+                    key: ValueKey('civil-${_civilStatusValue ?? ''}'),
                     initialValue: _civilStatusValue,
                     style: fieldStyle,
                     dropdownColor: AppTheme.dashPanelOf(context),
@@ -1378,6 +1425,7 @@ class _ProfileContentState extends State<ProfileContent> {
     }) dec,
   ) {
     return Autocomplete<String>(
+      key: ValueKey('nationality-${_nationalityValue ?? ''}'),
       initialValue: _nationalityValue != null
           ? TextEditingValue(text: _nationalityValue!)
           : null,

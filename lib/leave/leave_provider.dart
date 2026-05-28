@@ -105,11 +105,23 @@ class LeaveProvider extends ChangeNotifier {
     final today = DateTime.now();
     final startOfToday = DateTime(today.year, today.month, today.day);
     return approvedRequests
-        .where(
-          (r) => r.startDate != null && !r.startDate!.isBefore(startOfToday),
-        )
+        .where((r) {
+          final start = r.startDate;
+          if (start == null) return false;
+          final end = r.endDate ?? start;
+          final endDateOnly = DateTime(end.year, end.month, end.day);
+          return !endDateOnly.isBefore(startOfToday);
+        })
         .toList()
-      ..sort((a, b) => a.startDate!.compareTo(b.startDate!));
+      ..sort((a, b) {
+        final aStart = a.startDate!;
+        final bStart = b.startDate!;
+        final aDate = DateTime(aStart.year, aStart.month, aStart.day);
+        final bDate = DateTime(bStart.year, bStart.month, bStart.day);
+        final aSortDate = aDate.isBefore(startOfToday) ? startOfToday : aDate;
+        final bSortDate = bDate.isBefore(startOfToday) ? startOfToday : bDate;
+        return aSortDate.compareTo(bSortDate);
+      });
   }
 
   int get pendingCount => pendingRequests.length;

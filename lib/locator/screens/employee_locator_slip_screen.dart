@@ -35,10 +35,10 @@ class EmployeeLocatorSlipScreen extends StatefulWidget {
 
   @override
   State<EmployeeLocatorSlipScreen> createState() =>
-      _EmployeeLocatorSlipScreenState();
+      EmployeeLocatorSlipScreenState();
 }
 
-class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
+class EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
   final List<_LocatorSlipDraft> _slips = [];
   final List<_LocatorSlipDraft> _deptHeadQueue = [];
   Future<bool>? _isDeptHeadFuture;
@@ -63,6 +63,14 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
 
   Color _mutedColor(BuildContext context) =>
       AppTheme.dashTextSecondaryOf(context);
+
+  Future<void> openCreateForm() async {
+    final auth = context.read<AuthProvider>();
+    final displayName = auth.displayName.trim().isEmpty
+        ? 'Employee'
+        : auth.displayName.trim();
+    await _openCreateForm(context, displayName);
+  }
 
   @override
   void didChangeDependencies() {
@@ -172,6 +180,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
             _LocatorHeader(
               employeeName: displayName,
               onCreatePressed: () => _openCreateForm(context, displayName),
+              showCreateAction: width >= 1024,
             ),
             if (isDepartmentHead) ...[
               const SizedBox(height: 16),
@@ -198,6 +207,7 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
 
   Widget _buildMyRequests({required double width, required bool compact}) {
     final screenHeight = MediaQuery.sizeOf(context).height;
+    final isMobile = width < 600;
     final maxListHeight = width < 600
         ? (screenHeight * 0.38).clamp(260.0, 420.0)
         : width < 1024
@@ -219,32 +229,34 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
       subtitle:
           'Use filters to quickly find requests by status, date, type, office, or reason.',
       icon: Icons.receipt_long_rounded,
-      headerTrailing: SectionHeaderActions(
-        children: [
-          SectionHeaderActionButton.outlined(
-            context: context,
-            onPressed: selectedSlip == null
-                ? null
-                : () => _showSlipDetails(context, selectedSlip!),
-            label: 'View Details',
-          ),
-          SectionHeaderActionButton.outlined(
-            context: context,
-            onPressed: selectedSlip == null
-                ? null
-                : () => _showSlipHistory(context, selectedSlip!),
-            label: 'View History',
-          ),
-          SectionHeaderActionButton.outlined(
-            context: context,
-            onPressed: !canCancelSelected
-                ? null
-                : () => _cancelSlip(selectedSlip!),
-            icon: Icons.close_rounded,
-            label: 'Cancel',
-          ),
-        ],
-      ),
+      headerTrailing: isMobile
+          ? null
+          : SectionHeaderActions(
+              children: [
+                SectionHeaderActionButton.outlined(
+                  context: context,
+                  onPressed: selectedSlip == null
+                      ? null
+                      : () => _showSlipDetails(context, selectedSlip!),
+                  label: 'View Details',
+                ),
+                SectionHeaderActionButton.outlined(
+                  context: context,
+                  onPressed: selectedSlip == null
+                      ? null
+                      : () => _showSlipHistory(context, selectedSlip!),
+                  label: 'View History',
+                ),
+                SectionHeaderActionButton.outlined(
+                  context: context,
+                  onPressed: !canCancelSelected
+                      ? null
+                      : () => _cancelSlip(selectedSlip!),
+                  icon: Icons.close_rounded,
+                  label: 'Cancel',
+                ),
+              ],
+            ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -313,7 +325,12 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
   void _showSlipDetails(BuildContext context, _LocatorSlipDraft item) {
     showDialog<void>(
       context: context,
-      builder: (dialogContext) => _LocatorSlipDetailsDialog(item: item),
+      builder: (dialogContext) => _LocatorSlipDetailsDialog(
+        item: item,
+        canCancel: _canCancelSlip(item),
+        onHistory: () => _showSlipHistory(context, item),
+        onCancel: () => _cancelSlip(item),
+      ),
     );
   }
 
@@ -669,6 +686,14 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
     required double maxHeight,
     required bool useScrollableList,
   }) {
+    if (MediaQuery.sizeOf(context).width < 600) {
+      return _myRequestsMobileList(
+        items: items,
+        maxHeight: maxHeight,
+        useScrollableList: useScrollableList,
+      );
+    }
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final tableWidth = constraints.maxWidth < 900
@@ -723,6 +748,42 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _myRequestsMobileList({
+    required List<_LocatorSlipDraft> items,
+    required double maxHeight,
+    required bool useScrollableList,
+  }) {
+    final list = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: List.generate(items.length, (index) {
+        final item = items[index];
+        return Padding(
+          padding: EdgeInsets.only(bottom: index == items.length - 1 ? 0 : 12),
+          child: _LocatorRequestMobileCard(
+            item: item,
+            isSelected: _slipSelectionKey(item) == _selectedSlipId,
+            segmentsText: _approvalSegmentsText(item),
+            statusPill: _myRequestStatusPill(item),
+            onTap: () => _showSlipDetails(context, item),
+          ),
+        );
+      }),
+    );
+
+    if (!useScrollableList) return list;
+
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      child: SingleChildScrollView(
+        primary: false,
+        physics: const BouncingScrollPhysics(
+          parent: AlwaysScrollableScrollPhysics(),
+        ),
+        child: list,
+      ),
     );
   }
 
@@ -1416,11 +1477,19 @@ class _EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
   }
 }
 
-/// Locator slip details — layout/positioning (theme borders and typography only).
+/// Locator slip details — mobile-first presentation for the employee request list.
 class _LocatorSlipDetailsDialog extends StatelessWidget {
-  const _LocatorSlipDetailsDialog({required this.item});
+  const _LocatorSlipDetailsDialog({
+    required this.item,
+    required this.canCancel,
+    required this.onHistory,
+    required this.onCancel,
+  });
 
   final _LocatorSlipDraft item;
+  final bool canCancel;
+  final VoidCallback onHistory;
+  final VoidCallback onCancel;
 
   String _segmentsLine() {
     final parts = <String>[];
@@ -1433,271 +1502,809 @@ class _LocatorSlipDetailsDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final borderColor = theme.dividerColor;
-    final maxH = MediaQuery.sizeOf(context).height * 0.85;
+    final screen = MediaQuery.sizeOf(context);
+    final dark = AppTheme.dashIsDark(context);
+    final maxH = screen.height * 0.88;
+    final maxW = (screen.width - 28).clamp(320.0, 640.0);
+    final panelColor = AppTheme.dashPanelOf(context);
+    final borderColor = AppTheme.dashHairlineOf(context);
+    final (statusBg, statusBorder, statusText) = _statusColors(item.status);
 
-    Widget slipInformation() {
-      return _LocatorDetailPanel(
-        title: 'Slip Information',
-        borderColor: borderColor,
-        children: [
-          _LocatorDetailLabeledBlock(
-            label: 'Date',
-            value: _formatDate(item.date),
-          ),
-          Divider(height: 1, thickness: 1, color: borderColor),
-          _LocatorDetailLabeledBlock(
-            label: 'Type',
-            value: item.requestType.label,
-          ),
-          Divider(height: 1, thickness: 1, color: borderColor),
-          _LocatorDetailLabeledBlock(
-            label: item.requestType.locationLabel,
-            value: item.office,
-          ),
-          Divider(height: 1, thickness: 1, color: borderColor),
-          _LocatorDetailLabeledBlock(
-            label: 'Applicable Time Segment(s)',
-            value: _segmentsLine(),
-          ),
-        ],
-      );
-    }
-
-    Widget statusFiling() {
-      return _LocatorDetailPanel(
-        title: 'Status & Filing',
-        borderColor: borderColor,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Status', style: theme.textTheme.bodySmall),
-                const SizedBox(height: 8),
-                _LocatorStatusBadgeOutline(status: item.status),
-              ],
-            ),
-          ),
-        ],
-      );
-    }
-
-    Widget reasonPurpose() {
-      return _LocatorDetailPanel(
-        title: 'Reason/Purpose',
-        borderColor: borderColor,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Text(item.remarks, style: theme.textTheme.bodyMedium),
-          ),
-        ],
+    void printForm() {
+      LocatorSlipPrint.printForm(
+        context: context,
+        id: item.id,
+        employeeName: item.employeeName,
+        dateText: _formatDate(item.date),
+        requestTypeLabel: item.requestType.label,
+        locationLabel: item.requestType.locationLabel,
+        office: item.office,
+        remarks: item.remarks,
+        amIn: item.amIn,
+        amOut: item.amOut,
+        pmIn: item.pmIn,
+        pmOut: item.pmOut,
       );
     }
 
     return Dialog(
-      backgroundColor: Colors.white,
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 22),
       child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: 640, maxHeight: maxH),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 4, 0),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Request Details',
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    tooltip: 'Close',
-                    icon: const Icon(Icons.close),
-                  ),
-                ],
-              ),
-            ),
-            Divider(height: 1, thickness: 1, color: borderColor),
-            Flexible(
-              fit: FlexFit.loose,
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final wide = constraints.maxWidth >= 520;
-                    final top = wide
-                        ? Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(child: slipInformation()),
-                              const SizedBox(width: 12),
-                              Expanded(child: statusFiling()),
-                            ],
-                          )
-                        : Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              slipInformation(),
-                              const SizedBox(height: 12),
-                              statusFiling(),
-                            ],
-                          );
-                    return Column(
+        constraints: BoxConstraints(maxWidth: maxW, maxHeight: maxH),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(28),
+          child: Material(
+            color: panelColor,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _LocatorDetailHeader(
+                  item: item,
+                  statusBg: statusBg,
+                  statusBorder: statusBorder,
+                  statusText: statusText,
+                  onClose: () => Navigator.of(context).pop(),
+                ),
+                Flexible(
+                  fit: FlexFit.loose,
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        top,
+                        _LocatorDetailSection(
+                          title: 'Slip Information',
+                          icon: Icons.receipt_long_rounded,
+                          children: [
+                            _LocatorDetailTile(
+                              icon: Icons.calendar_today_rounded,
+                              label: 'Date',
+                              value: _formatDate(item.date),
+                            ),
+                            _LocatorDetailTile(
+                              icon: Icons.category_rounded,
+                              label: 'Type',
+                              value: item.requestType.label,
+                            ),
+                            _LocatorDetailTile(
+                              icon: Icons.place_rounded,
+                              label: item.requestType.locationLabel,
+                              value: item.office.trim().isEmpty
+                                  ? 'Not specified'
+                                  : item.office.trim(),
+                            ),
+                            _LocatorDetailTile(
+                              icon: Icons.schedule_rounded,
+                              label: 'Time Segments',
+                              value: _segmentsLine(),
+                            ),
+                          ],
+                        ),
                         const SizedBox(height: 12),
-                        reasonPurpose(),
+                        _LocatorStatusPanel(
+                          status: item.status,
+                          statusBg: statusBg,
+                          statusBorder: statusBorder,
+                          statusText: statusText,
+                          createdAt: item.createdAt,
+                          updatedAt: item.updatedAt,
+                        ),
+                        const SizedBox(height: 12),
+                        _LocatorReasonPanel(
+                          text: item.remarks.trim().isEmpty
+                              ? 'No reason provided.'
+                              : item.remarks.trim(),
+                        ),
                       ],
-                    );
-                  },
+                    ),
+                  ),
+                ),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: dark
+                        ? AppTheme.dashMutedSurfaceOf(context)
+                        : AppTheme.offWhite,
+                    border: Border(top: BorderSide(color: borderColor)),
+                  ),
+                  child: SafeArea(
+                    top: false,
+                    child: _LocatorDetailActions(
+                      canCancel: canCancel,
+                      canPrint: item.status == _LocatorSlipStatus.approved,
+                      onClose: () => Navigator.of(context).pop(),
+                      onHistory: () {
+                        Navigator.of(context).pop();
+                        onHistory();
+                      },
+                      onCancel: () {
+                        Navigator.of(context).pop();
+                        onCancel();
+                      },
+                      onPrint: printForm,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LocatorDetailHeader extends StatelessWidget {
+  const _LocatorDetailHeader({
+    required this.item,
+    required this.statusBg,
+    required this.statusBorder,
+    required this.statusText,
+    required this.onClose,
+  });
+
+  final _LocatorSlipDraft item;
+  final Color statusBg;
+  final Color statusBorder;
+  final Color statusText;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 16, 8, 16),
+      decoration: BoxDecoration(
+        color: dark
+            ? AppTheme.primaryNavy.withValues(alpha: 0.18)
+            : AppTheme.primaryNavy.withValues(alpha: 0.07),
+        border: Border(bottom: BorderSide(color: AppTheme.dashHairlineOf(context))),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  'Request Details',
+                  style: TextStyle(
+                    color: AppTheme.dashTextPrimaryOf(context),
+                    fontSize: 24,
+                    fontWeight: FontWeight.w800,
+                    height: 1.05,
+                  ),
                 ),
               ),
-            ),
-            Divider(height: 1, thickness: 1, color: borderColor),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Center(
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  spacing: 40,
+              IconButton(
+                onPressed: onClose,
+                tooltip: 'Close',
+                icon: const Icon(Icons.close_rounded),
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryNavy.withValues(alpha: dark ? 0.24 : 0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(
+                  _locatorRequestTypeIcon(item.requestType),
+                  color: AppTheme.primaryNavy,
+                  size: 23,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('Close'),
-                    ),
-                    SizedBox(width: 12),
-                    FilledButton(
-                      onPressed: () => LocatorSlipPrint.printForm(
-                        context: context,
-                        id: item.id,
-                        employeeName: item.employeeName,
-                        dateText: _formatDate(item.date),
-                        requestTypeLabel: item.requestType.label,
-                        locationLabel: item.requestType.locationLabel,
-                        office: item.office,
-                        remarks: item.remarks,
-                        amIn: item.amIn,
-                        amOut: item.amOut,
-                        pmIn: item.pmIn,
-                        pmOut: item.pmOut,
+                    Text(
+                      item.requestType.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppTheme.dashTextPrimaryOf(context),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
                       ),
-                      child: const Text('Print Form'),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      _formatDate(item.date),
+                      style: TextStyle(
+                        color: AppTheme.dashTextSecondaryOf(context),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ],
                 ),
               ),
-            ),
-          ],
-        ),
+              const SizedBox(width: 8),
+              _LocatorDetailStatusPill(
+                status: item.status,
+                background: statusBg,
+                border: statusBorder,
+                foreground: statusText,
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
 }
 
-class _LocatorDetailPanel extends StatelessWidget {
-  const _LocatorDetailPanel({
+class _LocatorDetailSection extends StatelessWidget {
+  const _LocatorDetailSection({
     required this.title,
-    required this.borderColor,
+    required this.icon,
     required this.children,
   });
 
   final String title;
-  final Color borderColor;
-  final List<Widget> children;
+  final IconData icon;
+  final List<_LocatorDetailTile> children;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return DecoratedBox(
+    return Container(
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        border: Border.all(color: borderColor),
-        borderRadius: BorderRadius.circular(8),
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                border: Border(bottom: BorderSide(color: borderColor)),
-              ),
-              child: Text(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: AppTheme.primaryNavy),
+              const SizedBox(width: 8),
+              Text(
                 title,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w600,
+                style: TextStyle(
+                  color: AppTheme.dashTextPrimaryOf(context),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
                 ),
               ),
-            ),
-            ...children,
-          ],
-        ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final wide = constraints.maxWidth >= 470;
+              final tileWidth = wide
+                  ? (constraints.maxWidth - 10) / 2
+                  : constraints.maxWidth;
+              return Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  for (final child in children)
+                    SizedBox(width: tileWidth, child: child),
+                ],
+              );
+            },
+          ),
+        ],
       ),
     );
   }
 }
 
-class _LocatorDetailLabeledBlock extends StatelessWidget {
-  const _LocatorDetailLabeledBlock({required this.label, required this.value});
+class _LocatorDetailTile extends StatelessWidget {
+  const _LocatorDetailTile({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
 
+  final IconData icon;
   final String label;
   final String value;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
+    return Container(
+      constraints: const BoxConstraints(minHeight: 72),
       padding: const EdgeInsets.all(12),
-      child: Column(
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: theme.textTheme.bodySmall),
-          const SizedBox(height: 4),
-          Text(value, style: theme.textTheme.bodyMedium),
+          Icon(icon, size: 18, color: AppTheme.primaryNavy),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.dashTextSecondaryOf(context),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  value,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.dashTextPrimaryOf(context),
+                    fontSize: 14,
+                    height: 1.2,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 }
 
-class _LocatorStatusBadgeOutline extends StatelessWidget {
-  const _LocatorStatusBadgeOutline({required this.status});
+class _LocatorStatusPanel extends StatelessWidget {
+  const _LocatorStatusPanel({
+    required this.status,
+    required this.statusBg,
+    required this.statusBorder,
+    required this.statusText,
+    this.createdAt,
+    this.updatedAt,
+  });
 
   final _LocatorSlipStatus status;
+  final Color statusBg;
+  final Color statusBorder;
+  final Color statusText;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final icon = status == _LocatorSlipStatus.approved
-        ? Icons.check
-        : Icons.flag_outlined;
-    return DecoratedBox(
+    final subtitle = updatedAt != null
+        ? 'Updated ${_formatDateTime(updatedAt!)}'
+        : createdAt != null
+        ? 'Filed ${_formatDateTime(createdAt!)}'
+        : 'Current workflow status';
+
+    return Container(
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        border: Border.all(color: theme.dividerColor),
-        borderRadius: BorderRadius.circular(999),
+        color: statusBg,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: statusBorder),
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 16),
-            const SizedBox(width: 6),
-            Text(status.label),
-          ],
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: statusText.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(_locatorStatusIcon(status), color: statusText, size: 22),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  status.label,
+                  style: TextStyle(
+                    color: statusText,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    color: statusText.withValues(alpha: 0.82),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LocatorReasonPanel extends StatelessWidget {
+  const _LocatorReasonPanel({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.notes_rounded, size: 19, color: AppTheme.primaryNavy),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Reason / Purpose',
+                  style: TextStyle(
+                    color: AppTheme.dashTextSecondaryOf(context),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  text,
+                  style: TextStyle(
+                    color: AppTheme.dashTextPrimaryOf(context),
+                    fontSize: 14,
+                    height: 1.35,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LocatorDetailStatusPill extends StatelessWidget {
+  const _LocatorDetailStatusPill({
+    required this.status,
+    required this.background,
+    required this.border,
+    required this.foreground,
+  });
+
+  final _LocatorSlipStatus status;
+  final Color background;
+  final Color border;
+  final Color foreground;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(_locatorStatusIcon(status), size: 15, color: foreground),
+          const SizedBox(width: 5),
+          Text(
+            status.label,
+            style: TextStyle(
+              color: foreground,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LocatorDetailActions extends StatelessWidget {
+  const _LocatorDetailActions({
+    required this.canCancel,
+    required this.canPrint,
+    required this.onClose,
+    required this.onHistory,
+    required this.onCancel,
+    required this.onPrint,
+  });
+
+  final bool canCancel;
+  final bool canPrint;
+  final VoidCallback onClose;
+  final VoidCallback onHistory;
+  final VoidCallback onCancel;
+  final VoidCallback onPrint;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 430) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextButton(
+                        onPressed: onClose,
+                        child: const Text('Close'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: onHistory,
+                        icon: const Icon(Icons.history_rounded, size: 18),
+                        label: const Text('History'),
+                      ),
+                    ),
+                  ],
+                ),
+                if (canCancel) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: onCancel,
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                      label: const Text('Cancel Request'),
+                    ),
+                  ),
+                ],
+                if (canPrint) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: onPrint,
+                      icon: const Icon(Icons.print_rounded, size: 18),
+                      label: const Text('Print'),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          );
+        }
+
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              TextButton(onPressed: onClose, child: const Text('Close')),
+              OutlinedButton.icon(
+                onPressed: onHistory,
+                icon: const Icon(Icons.history_rounded, size: 18),
+                label: const Text('History'),
+              ),
+              if (canCancel)
+                OutlinedButton.icon(
+                  onPressed: onCancel,
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                  label: const Text('Cancel'),
+                ),
+              if (canPrint)
+                FilledButton.icon(
+                  onPressed: onPrint,
+                  icon: const Icon(Icons.print_rounded, size: 18),
+                  label: const Text('Print'),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _LocatorRequestMobileCard extends StatelessWidget {
+  const _LocatorRequestMobileCard({
+    required this.item,
+    required this.isSelected,
+    required this.segmentsText,
+    required this.statusPill,
+    required this.onTap,
+  });
+
+  final _LocatorSlipDraft item;
+  final bool isSelected;
+  final String segmentsText;
+  final Widget statusPill;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
+    final selectedColor = dark
+        ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+        : AppTheme.primaryNavy.withValues(alpha: 0.08);
+    final borderColor = isSelected
+        ? AppTheme.primaryNavy.withValues(alpha: dark ? 0.75 : 0.4)
+        : AppTheme.dashHairlineOf(context);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: isSelected ? selectedColor : AppTheme.dashPanelOf(context),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: borderColor),
+            boxShadow: dark
+                ? null
+                : [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 12,
+                      offset: const Offset(0, 5),
+                    ),
+                  ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.requestType.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: AppTheme.dashTextPrimaryOf(context),
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            height: 1.2,
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          _formatDate(item.date),
+                          style: TextStyle(
+                            color: AppTheme.dashTextSecondaryOf(context),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  statusPill,
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                item.office.trim().isEmpty ? 'Location not set' : item.office,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppTheme.dashTextPrimaryOf(context),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              if (item.remarks.trim().isNotEmpty) ...[
+                const SizedBox(height: 5),
+                Text(
+                  item.remarks.trim(),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.dashTextSecondaryOf(context),
+                    fontSize: 12,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _LocatorMobileMetaChip(
+                    icon: Icons.schedule_rounded,
+                    label: segmentsText,
+                  ),
+                  _LocatorMobileMetaChip(
+                    icon: Icons.category_outlined,
+                    label: item.requestType.shortLabel,
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+}
+
+class _LocatorMobileMetaChip extends StatelessWidget {
+  const _LocatorMobileMetaChip({
+    required this.icon,
+    required this.label,
+  });
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+      decoration: BoxDecoration(
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 14,
+            color: AppTheme.dashTextSecondaryOf(context),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: AppTheme.dashTextPrimaryOf(context),
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1707,10 +2314,12 @@ class _LocatorHeader extends StatelessWidget {
   const _LocatorHeader({
     required this.employeeName,
     required this.onCreatePressed,
+    required this.showCreateAction,
   });
 
   final String employeeName;
   final VoidCallback onCreatePressed;
+  final bool showCreateAction;
 
   @override
   Widget build(BuildContext context) {
@@ -1745,11 +2354,12 @@ class _LocatorHeader extends StatelessWidget {
               ],
             ),
           ),
-          FilledButton.icon(
-            onPressed: onCreatePressed,
-            icon: const Icon(Icons.add_rounded),
-            label: const Text('File Request'),
-          ),
+          if (showCreateAction)
+            FilledButton.icon(
+              onPressed: onCreatePressed,
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('File Request'),
+            ),
         ],
       ),
     );
@@ -2748,5 +3358,24 @@ String _departmentHeadStatusLabel(_LocatorSlipDraft item) {
       Colors.grey.shade400,
       Colors.grey.shade800,
     ),
+  };
+}
+
+IconData _locatorStatusIcon(_LocatorSlipStatus status) {
+  return switch (status) {
+    _LocatorSlipStatus.draft => Icons.edit_note_rounded,
+    _LocatorSlipStatus.pendingDepartmentHead => Icons.supervisor_account_rounded,
+    _LocatorSlipStatus.pendingHr => Icons.hourglass_top_rounded,
+    _LocatorSlipStatus.approved => Icons.check_circle_rounded,
+    _LocatorSlipStatus.rejected => Icons.cancel_rounded,
+    _LocatorSlipStatus.cancelled => Icons.flag_rounded,
+  };
+}
+
+IconData _locatorRequestTypeIcon(LocatorRequestType type) {
+  return switch (type) {
+    LocatorRequestType.locator => Icons.near_me_rounded,
+    LocatorRequestType.passSlip => Icons.badge_rounded,
+    LocatorRequestType.workFromHome => Icons.home_work_rounded,
   };
 }

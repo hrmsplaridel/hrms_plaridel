@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'webview_platform_init_stub.dart'
     if (dart.library.html) 'webview_platform_init_web.dart'
     as webview_platform_init;
@@ -24,6 +23,7 @@ import 'realtime/app_realtime_bridge.dart';
 import 'realtime/app_realtime_provider.dart';
 import 'admin/screens/admin_dashboard.dart';
 import 'employee/screens/employee_dashboard.dart';
+import 'shared/widgets/sign_out_flow.dart';
 import 'utils/form_pdf.dart';
 
 /// Key for persisting last login role (Admin vs Employee) across sessions.
@@ -33,11 +33,11 @@ const String kLoginAsKey = 'hrms_login_as';
 final RouteObserver<ModalRoute<void>> routeObserver =
     RouteObserver<ModalRoute<void>>();
 
-/// Chooses the initial screen based on platform anCD d auth state.
+/// Chooses the initial screen based on platform and auth state.
 /// If user has a restored session (API), go to the appropriate dashboard
-/// based on the user's role from the API (not user choice).
-/// Otherwise: web → LandingPage, mobile → LoginPage.
-Widget _initialHome(AuthProvider auth, String storedLoginAs) {
+/// based on the user's role from the API.
+/// Otherwise: web/desktop → LandingPage, mobile → LoginPage.
+Widget _initialHome(AuthProvider auth) {
   if (auth.user != null) {
     final role = auth.user!.role ?? 'employee';
     final isPrivileged = role == 'admin' || role == 'hr';
@@ -64,20 +64,14 @@ Future<void> main() async {
     webview_platform_init.registerWebViewPlatform();
   }
 
-  await PhilippinePsgcData.loadIndex();
-
   ApiClient.instance.init();
 
   final auth = AuthProvider();
-  await auth.restoreSession();
-  final prefs = await SharedPreferences.getInstance();
-  final storedLoginAs = prefs.getString(kLoginAsKey) ?? 'Admin';
-  final themeNotifier = await ThemeModeNotifier.load();
+  final themeNotifier = ThemeModeNotifier(initial: ThemeMode.light);
 
   runApp(
     MyApp(
       auth: auth,
-      storedLoginAs: storedLoginAs,
       themeNotifier: themeNotifier,
     ),
   );
@@ -85,10 +79,10 @@ Future<void> main() async {
 
 /// Isolated [MaterialApp] so theme changes only rebuild this subtree.
 class _HrmsMaterialApp extends StatelessWidget {
-  const _HrmsMaterialApp({required this.auth, required this.storedLoginAs});
+  const _HrmsMaterialApp({required this.auth, required this.themeNotifier});
 
   final AuthProvider auth;
-  final String storedLoginAs;
+  final ThemeModeNotifier themeNotifier;
 
   @override
   Widget build(BuildContext context) {
@@ -120,7 +114,56 @@ class _HrmsMaterialApp extends StatelessWidget {
         }
         return null;
       },
-      home: _initialHome(auth, storedLoginAs),
+      home: _StartupGate(auth: auth, themeNotifier: themeNotifier),
+    );
+  }
+}
+
+class _StartupGate extends StatefulWidget {
+  const _StartupGate({required this.auth, required this.themeNotifier});
+
+  final AuthProvider auth;
+  final ThemeModeNotifier themeNotifier;
+
+  @override
+  State<_StartupGate> createState() => _StartupGateState();
+}
+
+class _StartupGateState extends State<_StartupGate> {
+  late final Future<void> _startup = _bootstrap();
+
+  Future<void> _bootstrap() async {
+    final themeModeFuture = ThemeModeNotifier.loadSavedMode();
+    final psgcFuture = PhilippinePsgcData.loadIndex();
+    final sessionFuture = widget.auth.restoreSession();
+
+    try {
+      final savedThemeMode = await themeModeFuture;
+      widget.themeNotifier.restorePersistedMode(savedThemeMode);
+    } catch (e, st) {
+      debugPrint('Theme preference restore failed: $e\n$st');
+    }
+
+    try {
+      await Future.wait<void>([psgcFuture, sessionFuture]);
+    } catch (e, st) {
+      debugPrint('Startup bootstrap failed: $e\n$st');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<void>(
+      future: _startup,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const SignOutLoadingOverlay(
+            title: 'Preparing your workspace',
+            subtitle: 'Loading HRMS Plaridel',
+          );
+        }
+        return _initialHome(widget.auth);
+      },
     );
   }
 }
@@ -166,12 +209,10 @@ class MyApp extends StatelessWidget {
   const MyApp({
     super.key,
     required this.auth,
-    required this.storedLoginAs,
     required this.themeNotifier,
   });
 
   final AuthProvider auth;
-  final String storedLoginAs;
   final ThemeModeNotifier themeNotifier;
 
   @override
@@ -200,7 +241,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => RecruitmentHirePrefill()),
       ],
       child: AppRealtimeBridge(
-        child: _HrmsMaterialApp(auth: auth, storedLoginAs: storedLoginAs),
+        child: _HrmsMaterialApp(auth: auth, themeNotifier: themeNotifier),
       ),
     );
   }

@@ -25,6 +25,10 @@ function normalizeLocatorRequestType(value) {
   return LOCATOR_REQUEST_TYPES.has(type) ? type : 'locator';
 }
 
+function isTruthyQueryFlag(value) {
+  return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+}
+
 function locatorRequestTypeLabel(value) {
   switch (normalizeLocatorRequestType(value)) {
     case 'pass_slip':
@@ -808,6 +812,7 @@ router.get('/', protect, async (req, res) => {
   try {
     const { start_date, end_date, employee_id, department_id, limit: limitRaw, offset: offsetRaw } = req.query;
     const hasDateRange = !!(start_date && end_date);
+    const recomputeExistingRows = isTruthyQueryFlag(req.query.recompute);
     const params = [];
     const conditions = [];
     let i = 1;
@@ -867,17 +872,36 @@ router.get('/', protect, async (req, res) => {
     const rawRows = result.rows;
     if (!hasCoverage) for (const r of rawRows) r.holiday_coverage = 'whole_day';
 
+    const startStr = start_date ? String(start_date).slice(0, 10) : null;
+    const endStr = end_date ? String(end_date).slice(0, 10) : null;
+    const rawEmployeeIds = [...new Set(rawRows.map((r) => r.employee_id).filter(Boolean))];
+    const rawDateStrings = rawRows
+      .map((r) => (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || toIsoDateStr(r.attendance_date))
+      .filter(Boolean)
+      .sort();
+    const rawRangeStart = startStr || rawDateStrings[0] || null;
+    const rawRangeEnd = endStr || rawDateStrings[rawDateStrings.length - 1] || null;
+    const rawAssignmentsByEmployee =
+      rawEmployeeIds.length > 0 && rawRangeStart && rawRangeEnd
+        ? await getAssignmentsForEmployeesInRange(rawEmployeeIds, rawRangeStart, rawRangeEnd)
+        : new Map();
+
     const rows = await Promise.all(rawRows.map(async (r) => {
       // Use the date-only text from SQL to avoid timezone shifting issues when JS receives Date objects.
       const dateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || toIsoDateStr(r.attendance_date);
-      const shiftInfo = dateStr ? await getAssignmentShiftForDate(r.employee_id, dateStr) : null;
+      const shiftInfo = dateStr
+        ? (
+            getShiftInfoForDateFromAssignments(rawAssignmentsByEmployee, r.employee_id, dateStr) ||
+            await getAssignmentShiftForDate(r.employee_id, dateStr)
+          )
+        : null;
       const coverage = r.holiday_coverage || 'whole_day';
       const isPartialSuspension = r.status === 'holiday' && (coverage === 'am_only' || coverage === 'pm_only');
       let lateMinutes = r.late_minutes != null ? parseInt(r.late_minutes, 10) : 0;
       let undertimeMinutes = r.undertime_minutes != null ? parseInt(r.undertime_minutes, 10) : 0;
-      if (dateStr && r.status !== 'on_leave' && (r.status !== 'holiday' || isPartialSuspension)) {
-        // Always recompute from current assignment/shift so shift changes
-        // immediately reflect in Time Logs (not only when stored values are zero).
+      if (recomputeExistingRows && dateStr && r.status !== 'on_leave' && (r.status !== 'holiday' || isPartialSuspension)) {
+        // Optional expensive path for after schedule/policy changes. The normal
+        // Time Logs view uses stored summary values for fast reads.
         lateMinutes = await computeLateMinutes(
           r.employee_id,
           dateStr,
@@ -951,8 +975,6 @@ router.get('/', protect, async (req, res) => {
     }));
 
     // Inject synthetic holiday rows for dates with no record
-    const startStr = start_date ? String(start_date).slice(0, 10) : null;
-    const endStr = end_date ? String(end_date).slice(0, 10) : null;
     if (startStr && endStr) {
       const existingKeys = new Set(
         rawRows.map((r) => {
@@ -1247,7 +1269,9 @@ router.get('/', protect, async (req, res) => {
           row.break_in,
           row.locator_slip_segments || []
         );
-        const shiftInfo = await getAssignmentShiftForDate(row.user_id, rowDateStr);
+        const shiftInfo =
+          getShiftInfoForDateFromAssignments(assignmentsByEmployee, row.user_id, rowDateStr) ||
+          await getAssignmentShiftForDate(row.user_id, rowDateStr);
         row.attendance_remark = await computeAttendanceRemark(
           row,
           shiftInfo,

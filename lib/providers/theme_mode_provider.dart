@@ -28,6 +28,13 @@ class ThemeModeNotifier extends ChangeNotifier {
     _persistInBackground();
   }
 
+  /// Applies a value loaded during app startup without rewriting preferences.
+  void restorePersistedMode(ThemeMode mode) {
+    if (_mode == mode) return;
+    _mode = mode;
+    notifyListeners();
+  }
+
   void _persistInBackground() {
     if (_persisting) return;
     _persisting = true;
@@ -41,12 +48,16 @@ class ThemeModeNotifier extends ChangeNotifier {
     }());
   }
 
-  /// Call from [main] after [SharedPreferences.getInstance].
+  /// Creates a notifier from the persisted app theme preference.
   static Future<ThemeModeNotifier> load() async {
+    final mode = await loadSavedMode();
+    return ThemeModeNotifier(initial: mode);
+  }
+
+  /// Reads the persisted app theme preference without creating a notifier.
+  static Future<ThemeMode> loadSavedMode() async {
     final p = await SharedPreferences.getInstance();
     final dark = p.getBool(_kDarkModePrefKey) ?? false;
-    return ThemeModeNotifier(
-      initial: dark ? ThemeMode.dark : ThemeMode.light,
-    );
+    return dark ? ThemeMode.dark : ThemeMode.light;
   }
 }

@@ -62,9 +62,7 @@ function canEmployeeCancel(currentStatus) {
     currentStatus === 'pending' ||
     currentStatus === 'pending_department_head' ||
     currentStatus === 'pending_hr' ||
-    currentStatus === 'returned' ||
-    currentStatus === 'rejected_by_department_head' ||
-    currentStatus === 'rejected_by_hr'
+    currentStatus === 'returned'
   );
 }
 
