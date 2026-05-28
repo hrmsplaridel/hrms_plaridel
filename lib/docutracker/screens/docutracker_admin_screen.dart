@@ -9,12 +9,10 @@ import '../models/document_action.dart';
 import '../models/document_permission.dart';
 import '../models/document_routing_config.dart';
 import '../models/document_type.dart';
-import '../models/workflow_step.dart';
 import '../security/docutracker_roles.dart';
 import '../services/employee_directory_lookup.dart';
 import '../theme/docutracker_tokens.dart';
 import '../widgets/docutracker_module_header.dart';
-import '../widgets/docutracker_press_scale.dart';
 import '../widgets/docutracker_warm_widgets.dart';
 import '../widgets/docutracker_admin_ui.dart';
 import 'docutracker_escalation_config_screen.dart';
@@ -25,9 +23,6 @@ import 'docutracker_step_assignees_editor_screen.dart';
 /// Groups list rows by role/user only (one row per person, all document types combined).
 String _permissionGroupKey(DocumentPermission p) =>
     '${p.roleId ?? ''}\x1F${p.userId ?? ''}';
-
-String _permissionDocumentTypeLabel(String documentType) =>
-    documentType == '*' ? 'All types' : documentType;
 
 /// Stable order: action name, then document type.
 List<DocumentPermission> _sortPermissionsForDisplay(
@@ -43,41 +38,6 @@ List<DocumentPermission> _sortPermissionsForDisplay(
     return a.documentType.compareTo(b.documentType);
   });
   return out;
-}
-
-List<String> _permissionDocumentTypes(List<DocumentPermission> items) {
-  final types = items.map((p) => p.documentType).toSet().toList();
-  types.sort((a, b) {
-    if (a == '*') return -1;
-    if (b == '*') return 1;
-    return a.toLowerCase().compareTo(b.toLowerCase());
-  });
-  return types;
-}
-
-Color _permissionActionColor(DocumentAction action) {
-  switch (action) {
-    case DocumentAction.approve:
-      return const Color(0xFF4CAF50);
-    case DocumentAction.reject:
-      return Colors.red.shade400;
-    case DocumentAction.forward:
-      return const Color(0xFF2196F3);
-    case DocumentAction.returnDoc:
-      return Colors.orange.shade600;
-    case DocumentAction.createDraft:
-      return const Color(0xFF9C27B0);
-    case DocumentAction.view:
-      return const Color(0xFF607D8B);
-    case DocumentAction.download:
-      return const Color(0xFF00BCD4);
-    case DocumentAction.edit:
-      return const Color(0xFF795548);
-    case DocumentAction.submit:
-      return const Color(0xFF009688);
-    case DocumentAction.delete:
-      return const Color(0xFFE53935);
-  }
 }
 
 /// Admin panel for DocuTracker (Step 4: Admin Privilege Management).
@@ -101,11 +61,6 @@ class DocuTrackerAdminScreen extends StatefulWidget {
 }
 
 class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
-  // Per your request: permissions are edited per employee only.
-  String _filterBy = 'user';
-  String? _selectedRoleId;
-  String? _selectedUserId;
-  String? _selectedDocumentType;
   /// Permissions table: filter rows by employee role (null = all).
   String? _permissionsRoleFilter;
   final _searchController = TextEditingController();
@@ -161,9 +116,9 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
     if (!mounted) return;
     await provider.loadPermissions(
       roleId: null,
-      userId: _selectedUserId,
+      userId: null,
       userOnly: true,
-      documentType: _selectedDocumentType,
+      documentType: null,
     );
     if (!mounted) return;
     final ids = provider.permissions
@@ -201,9 +156,9 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
       ..sort((ka, kb) {
         final aa = buckets[ka]!.first;
         final bb = buckets[kb]!.first;
-        return _formatPermissionTarget(aa)
-            .toLowerCase()
-            .compareTo(_formatPermissionTarget(bb).toLowerCase());
+        return _formatPermissionTarget(
+          aa,
+        ).toLowerCase().compareTo(_formatPermissionTarget(bb).toLowerCase());
       });
 
     var columnTypes = permissionMatrixColumnTypes(filtered);
@@ -375,40 +330,40 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
       child: SizedBox(
         width: double.infinity,
         child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Admin controls',
-            style: TextStyle(
-              color: DocuTrackerTokens.textPrimary,
-              fontSize: 13,
-              fontWeight: FontWeight.w800,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Admin controls',
+              style: TextStyle(
+                color: DocuTrackerTokens.textPrimary,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+              ),
             ),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            'Switch between routing workflows and access permissions.',
-            style: DocuTrackerTokens.subtitleStyle().copyWith(fontSize: 11.5),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            children: [
-              DocuTrackerWarmFilterChip(
-                label: 'Workflows',
-                icon: Icons.account_tree_outlined,
-                selected: _adminTab == 0,
-                onTap: () => setState(() => _adminTab = 0),
-              ),
-              DocuTrackerWarmFilterChip(
-                label: 'Permissions',
-                icon: Icons.lock_outline_rounded,
-                selected: _adminTab == 1,
-                onTap: () => setState(() => _adminTab = 1),
-              ),
-            ],
-          ),
-        ],
+            const SizedBox(height: 3),
+            Text(
+              'Switch between routing workflows and access permissions.',
+              style: DocuTrackerTokens.subtitleStyle().copyWith(fontSize: 11.5),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              children: [
+                DocuTrackerWarmFilterChip(
+                  label: 'Workflows',
+                  icon: Icons.account_tree_outlined,
+                  selected: _adminTab == 0,
+                  onTap: () => setState(() => _adminTab = 0),
+                ),
+                DocuTrackerWarmFilterChip(
+                  label: 'Permissions',
+                  icon: Icons.lock_outline_rounded,
+                  selected: _adminTab == 1,
+                  onTap: () => setState(() => _adminTab = 1),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -610,8 +565,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
       children: [
         DocuTrackerAdminSectionHeader(
           title: 'Document Permissions',
-          subtitle:
-              'One row per person; columns show access by document type.',
+          subtitle: 'One row per person; columns show access by document type.',
           trailing: DocuTrackerAdminFilterPill(
             label: 'Filter by Role:',
             value: _permissionsRoleFilter,
@@ -696,8 +650,9 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                         vertical: 14,
                       ),
                       decoration: BoxDecoration(
-                        color: DocuTrackerTokens.highlightPeach
-                            .withValues(alpha: 0.5),
+                        color: DocuTrackerTokens.highlightPeach.withValues(
+                          alpha: 0.5,
+                        ),
                         borderRadius: const BorderRadius.vertical(
                           top: Radius.circular(DocuTrackerTokens.radiusLg),
                         ),
@@ -786,9 +741,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        border: Border(
-          top: BorderSide(color: DocuTrackerTokens.borderSubtle),
-        ),
+        border: Border(top: BorderSide(color: DocuTrackerTokens.borderSubtle)),
       ),
       child: Row(
         children: [
@@ -833,40 +786,6 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
           borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide.none,
         ),
-      ),
-    );
-  }
-
-  Widget _buildFilterDropdown<T>(
-    String displayValue,
-    T? value,
-    List<T> options,
-    ValueChanged<T?> onChanged, {
-    List<String>? labels,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppTheme.lightGray.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.transparent),
-      ),
-      child: DropdownButton<T>(
-        value: value,
-        hint: Text(
-          displayValue,
-          style: TextStyle(fontSize: 14, color: AppTheme.textPrimary),
-        ),
-        underline: const SizedBox.shrink(),
-        isDense: true,
-        isExpanded: true,
-        items: options.asMap().entries.map((e) {
-          final label = labels != null && e.key < labels.length
-              ? labels[e.key]
-              : e.value?.toString() ?? 'All';
-          return DropdownMenuItem(value: e.value, child: Text(label));
-        }).toList(),
-        onChanged: onChanged,
       ),
     );
   }
@@ -1018,8 +937,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                 onTap: () => _openAdminTool(() async {
                   await Navigator.of(context).push(
                     MaterialPageRoute<void>(
-                      builder: (_) =>
-                          const DocuTrackerEscalationConfigScreen(),
+                      builder: (_) => const DocuTrackerEscalationConfigScreen(),
                     ),
                   );
                 }),
@@ -1050,10 +968,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                 progress: totalSteps == 0 ? 0 : 0.85,
               ),
               const SizedBox(height: 8),
-              Text(
-                'Throughput',
-                style: DocuTrackerTokens.metaStyle(),
-              ),
+              Text('Throughput', style: DocuTrackerTokens.metaStyle()),
               Text(
                 configs.length >= 2 ? 'High' : 'Building',
                 style: const TextStyle(
@@ -1110,290 +1025,16 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
   Future<void> _openPermissionEditorForRow(
     DocumentPermission permission,
   ) async {
-    final uid = permission.userId ?? _selectedUserId;
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => DocuTrackerPermissionEditorScreen(
-          initialUserId: uid,
+          initialUserId: permission.userId,
           initialDocumentType: permission.documentType,
           initialTabIsUserOverride: true,
         ),
       ),
     );
     if (mounted) _load();
-  }
-
-  // ignore: unused_element
-  void _showAddPermissionDialog(
-    BuildContext context,
-    DocuTrackerProvider provider,
-  ) {
-    DocumentAction action = DocumentAction.view;
-    String documentType = '*';
-    bool granted = true;
-    String? roleId;
-    String? userId;
-
-    final size = MediaQuery.of(context).size;
-    final dialogWidth = (size.width * 0.5).clamp(420.0, 560.0);
-    final dialogHeight = (size.height * 0.55).clamp(400.0, 580.0);
-
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setState) => Dialog(
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 24,
-            vertical: 48,
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: SizedBox(
-              width: dialogWidth,
-              height: dialogHeight,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(
-                    child: SingleChildScrollView(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.fromLTRB(24, 20, 24, 14),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              border: Border(
-                                bottom: BorderSide(
-                                  color: Colors.black.withValues(alpha: 0.06),
-                                ),
-                              ),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Add permission',
-                                  style: TextStyle(
-                                    color: AppTheme.textPrimary,
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Create a role-based or user-specific access rule for DocuTracker.',
-                                  style: TextStyle(
-                                    color: AppTheme.textSecondary,
-                                    fontSize: 12,
-                                    height: 1.35,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                Text(
-                                  'Action',
-                                  style: TextStyle(
-                                    color: AppTheme.textSecondary,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                DropdownButtonFormField<DocumentAction>(
-                                  initialValue: action,
-                                  decoration:
-                                      DocuTrackerStyles.dropdownDecoration(
-                                        context,
-                                        'Select action',
-                                      ),
-                                  items: DocumentAction.values
-                                      .map(
-                                        (a) => DropdownMenuItem(
-                                          value: a,
-                                          child: Text(a.displayName),
-                                        ),
-                                      )
-                                      .toList(),
-                                  onChanged: (v) => v != null
-                                      ? setState(() => action = v)
-                                      : null,
-                                ),
-                                const SizedBox(height: 20),
-                                Text(
-                                  'Document Type',
-                                  style: TextStyle(
-                                    color: AppTheme.textSecondary,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                DropdownButtonFormField<String>(
-                                  initialValue: documentType,
-                                  decoration:
-                                      DocuTrackerStyles.dropdownDecoration(
-                                        context,
-                                        'Select type',
-                                      ),
-                                  items: [
-                                    const DropdownMenuItem(
-                                      value: '*',
-                                      child: Text('All (*)'),
-                                    ),
-                                    ...DocumentType.values.map(
-                                      (t) => DropdownMenuItem(
-                                        value: t.value,
-                                        child: Text(t.displayName),
-                                      ),
-                                    ),
-                                  ],
-                                  onChanged: (v) => v != null
-                                      ? setState(() => documentType = v)
-                                      : null,
-                                ),
-                                const SizedBox(height: 20),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 12,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.offWhite,
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: Colors.black.withValues(
-                                        alpha: 0.08,
-                                      ),
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Text(
-                                        'Granted',
-                                        style: TextStyle(
-                                          color: AppTheme.textPrimary,
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                      Switch(
-                                        value: granted,
-                                        onChanged: (v) =>
-                                            setState(() => granted = v),
-                                        activeTrackColor: DocuTrackerTokens
-                                            .terracotta
-                                            .withValues(alpha: 0.6),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(height: 20),
-                                Text(
-                                  'Specify Role or User (at least one required)',
-                                  style: TextStyle(
-                                    color: AppTheme.textSecondary,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                TextField(
-                                  decoration: DocuTrackerStyles.inputDecoration(
-                                    context,
-                                    'Role ID (e.g. admin, hr_staff)',
-                                    Icons.badge_outlined,
-                                  ),
-                                  onChanged: (v) => roleId = v.trim().isEmpty
-                                      ? null
-                                      : v.trim(),
-                                ),
-                                const SizedBox(height: 16),
-                                TextField(
-                                  decoration: DocuTrackerStyles.inputDecoration(
-                                    context,
-                                    'User ID (optional)',
-                                    Icons.person_outline_rounded,
-                                  ),
-                                  onChanged: (v) => userId = v.trim().isEmpty
-                                      ? null
-                                      : v.trim(),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade50,
-                      border: Border(
-                        top: BorderSide(
-                          color: Colors.black.withValues(alpha: 0.06),
-                        ),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        OutlinedButton(
-                          onPressed: () => Navigator.of(ctx).pop(),
-                          style: DocuTrackerStyles.outlinedButtonStyle(),
-                          child: const Text('Cancel'),
-                        ),
-                        const SizedBox(width: 12),
-                        FilledButton(
-                          onPressed: () async {
-                            if (roleId == null && userId == null) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Specify Role ID or User ID'),
-                                ),
-                              );
-                              return;
-                            }
-                            final perm = DocumentPermission(
-                              roleId: roleId,
-                              userId: userId,
-                              documentType: documentType,
-                              action: action,
-                              granted: granted,
-                            );
-                            await provider.savePermission(perm);
-                            if (ctx.mounted) {
-                              Navigator.of(ctx).pop();
-                              _load();
-                            }
-                          },
-                          style: DocuTrackerStyles.primaryButtonStyle(),
-                          child: const Text('Add'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
   }
 
   static const _userGroups = <String, String>{
@@ -1746,410 +1387,10 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
   }
 }
 
-/// One row per person/role; actions shown as compact chips (✓ / ✗).
-class _PermissionGroupRow extends StatelessWidget {
-  const _PermissionGroupRow({
-    required this.permissions,
-    required this.targetLabel,
-    required this.onEdit,
-    this.isEven = false,
-  });
-
-  final List<DocumentPermission> permissions;
-  final String targetLabel;
-  final VoidCallback onEdit;
-  final bool isEven;
-
-  Widget _actionChip(DocumentPermission p, {required bool showDocumentType}) {
-    final ac = _permissionActionColor(p.action);
-    final typeLabel = _permissionDocumentTypeLabel(p.documentType);
-    final label = showDocumentType
-        ? '$typeLabel · ${p.action.displayName}'
-        : p.action.displayName;
-    return Tooltip(
-      message:
-          '${p.action.displayName} ($typeLabel): ${p.granted ? 'Granted' : 'Denied'}',
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: ac.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: ac.withValues(alpha: 0.35)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-                color: ac,
-              ),
-            ),
-            const SizedBox(width: 4),
-            Icon(
-              p.granted ? Icons.check_rounded : Icons.close_rounded,
-              size: 14,
-              color: p.granted ? Colors.green.shade700 : Colors.red.shade700,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _documentTypePill(String documentType) {
-    final isAll = documentType == '*';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: isAll
-            ? Colors.blueGrey.withValues(alpha: 0.1)
-            : DocuTrackerTokens.brandSoft,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isAll
-              ? Colors.blueGrey.withValues(alpha: 0.3)
-              : DocuTrackerTokens.brand.withValues(alpha: 0.25),
-        ),
-      ),
-      child: Text(
-        _permissionDocumentTypeLabel(documentType),
-        style: TextStyle(
-          fontSize: 11,
-          color: isAll ? Colors.blueGrey.shade700 : DocuTrackerTokens.brandDark,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final documentTypes = _permissionDocumentTypes(permissions);
-    final showTypeOnChips = documentTypes.length > 1;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-      decoration: BoxDecoration(
-        color: isEven
-            ? AppTheme.lightGray.withValues(alpha: 0.22)
-            : Colors.white.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.04)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            flex: 2,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                CircleAvatar(
-                  radius: 14,
-                  backgroundColor: DocuTrackerTokens.terracotta.withValues(
-                    alpha: 0.1,
-                  ),
-                  child: Text(
-                    targetLabel.isNotEmpty ? targetLabel[0].toUpperCase() : '?',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: DocuTrackerTokens.terracotta,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    targetLabel,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: AppTheme.textPrimary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            flex: 1,
-            child: Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (final dt in documentTypes) _documentTypePill(dt),
-              ],
-            ),
-          ),
-          Expanded(
-            flex: 3,
-            child: Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              alignment: WrapAlignment.start,
-              children: [
-                for (final p in permissions)
-                  _actionChip(p, showDocumentType: showTypeOnChips),
-              ],
-            ),
-          ),
-          SizedBox(
-            width: 40,
-            child: _PressableIconSurface(
-              tooltip: 'Edit permissions for this person',
-              icon: Icon(
-                Icons.edit_rounded,
-                size: 17,
-                color: AppTheme.textSecondary,
-              ),
-              onPressed: onEdit,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RoutingConfigCard extends StatelessWidget {
-  const _RoutingConfigCard({
-    required this.config,
-    required this.employeeDirectory,
-    required this.departmentNameById,
-  });
-
-  final DocumentRoutingConfig config;
-  final EmployeeDirectoryLookup employeeDirectory;
-  final Map<String, String> departmentNameById;
-
-  String _stepChipLabel(WorkflowStep s) {
-    final title = (s.label ?? '').trim().isNotEmpty ? s.label!.trim() : 'Step';
-    final t = s.assigneeType.trim().toLowerCase();
-    switch (t) {
-      case 'user':
-        final ids = s.userIds?.where((e) => e.trim().isNotEmpty).toList() ?? [];
-        if (ids.isNotEmpty) {
-          final line = employeeDirectory.formatUserLine(ids.first);
-          return '${s.stepOrder}. $title · $line';
-        }
-        final did = s.departmentId?.trim();
-        final dn = (did != null && did.isNotEmpty)
-            ? (departmentNameById[did] ?? did)
-            : null;
-        return '${s.stepOrder}. $title · ${dn ?? 'Choose department & people'}';
-      case 'department':
-        final did = s.departmentId?.trim();
-        final dn = (did != null && did.isNotEmpty)
-            ? (departmentNameById[did] ?? did)
-            : '—';
-        return '${s.stepOrder}. $title · Dept pool: $dn';
-      case 'office':
-        return '${s.stepOrder}. $title · Office routing';
-      case 'role':
-        final r = s.roleId?.trim();
-        return '${s.stepOrder}. $title · Role: ${r?.isNotEmpty == true ? r : '—'}';
-      default:
-        return '${s.stepOrder}. $title';
-    }
-  }
-
-  static Color _stepColor(int order) {
-    const colors = [
-      Color(0xFF3B82F6),
-      Color(0xFF8B5CF6),
-      Color(0xFF10B981),
-      Color(0xFFF59E0B),
-      Color(0xFFEF4444),
-      Color(0xFF06B6D4),
-    ];
-    return colors[(order - 1) % colors.length];
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final stepCount = config.steps.length;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: DocuTrackerStyles.panelPadding,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Row(
-                  children: [
-                    Text(
-                      config.documentType.displayName,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
-                        color: AppTheme.textPrimary,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 7,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: DocuTrackerTokens.terracotta.withValues(
-                          alpha: 0.08,
-                        ),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        'v${config.version}',
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          color: DocuTrackerTokens.terracotta,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 7,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        '${config.reviewDeadlineHours}h deadline',
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          color: Colors.orange.shade700,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 7,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.blueGrey.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        '$stepCount step${stepCount == 1 ? '' : 's'}',
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          color: Colors.blueGrey.shade700,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              _PressableIconSurface(
-                tooltip: 'Edit workflow',
-                icon: const Icon(Icons.edit_rounded, size: 20),
-                onPressed: () async {
-                  final saved = await Navigator.of(context).push<bool>(
-                    MaterialPageRoute<bool>(
-                      builder: (_) => DocuTrackerWorkflowEditorScreen(
-                        initialConfig: config,
-                      ),
-                    ),
-                  );
-                  if (saved == true && context.mounted) {
-                    await context
-                        .read<DocuTrackerProvider>()
-                        .loadRoutingConfigs();
-                  }
-                },
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: config.steps.map((s) {
-              final color = _stepColor(s.stepOrder);
-              return Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.07),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: color.withValues(alpha: 0.2)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 18,
-                      height: 18,
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Center(
-                        child: Text(
-                          '${s.stepOrder}',
-                          style: const TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      _stepChipLabel(s).replaceFirst('${s.stepOrder}. ', ''),
-                      style: TextStyle(
-                        fontSize: 12,
-                        height: 1.25,
-                        color: color.withValues(alpha: 0.9),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _HoverLift extends StatefulWidget {
-  const _HoverLift({required this.child, this.scale = 1.01});
+  const _HoverLift({required this.child});
 
   final Widget child;
-  final double scale;
 
   @override
   State<_HoverLift> createState() => _HoverLiftState();
@@ -2166,81 +1407,8 @@ class _HoverLiftState extends State<_HoverLift> {
       child: AnimatedScale(
         duration: const Duration(milliseconds: 160),
         curve: Curves.easeOutCubic,
-        scale: _hovering ? widget.scale : 1.0,
+        scale: _hovering ? 1.01 : 1.0,
         child: widget.child,
-      ),
-    );
-  }
-}
-
-class _PressableIconSurface extends StatelessWidget {
-  const _PressableIconSurface({
-    required this.icon,
-    required this.onPressed,
-    this.tooltip,
-  });
-
-  final Widget icon;
-  final VoidCallback onPressed;
-  final String? tooltip;
-
-  @override
-  Widget build(BuildContext context) {
-    final surface = Material(
-      color: DocuTrackerTokens.surfaceCream,
-      borderRadius: BorderRadius.circular(9),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(9),
-        splashColor: DocuTrackerTokens.terracotta.withValues(alpha: 0.15),
-        highlightColor: DocuTrackerTokens.terracotta.withValues(alpha: 0.08),
-        onTap: onPressed,
-        child: SizedBox(width: 36, height: 36, child: Center(child: icon)),
-      ),
-    );
-    return DocuTrackerPressScale(
-      pressedScale: 0.96,
-      child: tooltip == null
-          ? surface
-          : Tooltip(message: tooltip!, child: surface),
-    );
-  }
-}
-
-class _StatChip extends StatelessWidget {
-  const _StatChip({
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-
-  final String label;
-  final String value;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withValues(alpha: 0.2)),
-      ),
-      child: Column(
-        children: [
-          Text(
-            value,
-            style: DocuTrackerStyles.cardValueStyle(
-              color: color,
-            ).copyWith(fontSize: 19),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            style: DocuTrackerStyles.cardMetaStyle(color: color),
-            textAlign: TextAlign.center,
-          ),
-        ],
       ),
     );
   }
