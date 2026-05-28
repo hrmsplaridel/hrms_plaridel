@@ -82,6 +82,35 @@ const NOON_MINUTES = 12 * 60;
 
 /** Default timezone for interpreting shift rules vs log timestamps. */
 const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
+
+/**
+ * Returns today's date string (YYYY-MM-DD) in HRMS_TIMEZONE, not UTC.
+ * Prevents off-by-one issues when the server runs in UTC but the business
+ * timezone is e.g. Asia/Manila (+08:00).
+ */
+function todayInHrmsTimezone() {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: HRMS_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const y = parts.find((p) => p.type === 'year')?.value ?? '';
+  const m = parts.find((p) => p.type === 'month')?.value ?? '';
+  const d = parts.find((p) => p.type === 'day')?.value ?? '';
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Returns current minutes-from-midnight (0-1439) in HRMS_TIMEZONE.
+ * Uses the same Intl machinery as minutesFromMidnightInTimeZone() so
+ * the result is consistent with shift boundary comparisons throughout.
+ */
+function nowMinutesInHrmsTimezone() {
+  return minutesFromMidnightInTimeZone(new Date(), HRMS_TIMEZONE) ?? 0;
+}
+
 const ATTENDANCE_POLICY_CACHE_TTL_MS = 60 * 1000;
 let _cachedAttendancePolicy = null;
 let _cachedAttendancePolicyAt = 0;
@@ -440,9 +469,9 @@ async function computeUndertimeMinutes(
     (Array.isArray(locatorSegments) ? locatorSegments : [])
       .map((s) => String(s).toUpperCase().trim())
   );
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const now = new Date();
-  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  // Use HRMS_TIMEZONE so "today" matches the business calendar date, not UTC.
+  const todayStr = todayInHrmsTimezone();
+  const nowMinutes = nowMinutesInHrmsTimezone();
   let amUndertimePenalty = 0;
   if (type === 'full_day' && evalAm && shiftInfo.startMinutes != null) {
     const hasAmLogs =
@@ -478,8 +507,8 @@ async function computeUndertimeMinutes(
       if (type === 'full_day') {
         const lunchMinutes =
           shiftInfo.breakEndMinutes != null
-              ? Math.max(0, shiftInfo.breakEndMinutes - NOON_MINUTES)
-              : 60;
+            ? Math.max(0, shiftInfo.breakEndMinutes - NOON_MINUTES)
+            : 60;
         return Math.max(0, spanMinutes - lunchMinutes) + amUndertimePenalty;
       }
       return spanMinutes + amUndertimePenalty;
@@ -891,9 +920,9 @@ router.get('/', protect, async (req, res) => {
       const dateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || toIsoDateStr(r.attendance_date);
       const shiftInfo = dateStr
         ? (
-            getShiftInfoForDateFromAssignments(rawAssignmentsByEmployee, r.employee_id, dateStr) ||
-            await getAssignmentShiftForDate(r.employee_id, dateStr)
-          )
+          getShiftInfoForDateFromAssignments(rawAssignmentsByEmployee, r.employee_id, dateStr) ||
+          await getAssignmentShiftForDate(r.employee_id, dateStr)
+        )
         : null;
       const coverage = r.holiday_coverage || 'whole_day';
       const isPartialSuspension = r.status === 'holiday' && (coverage === 'am_only' || coverage === 'pm_only');
@@ -1088,9 +1117,9 @@ router.get('/', protect, async (req, res) => {
       }
 
       // 2) Inject synthetic "Absent" rows for working days with no record, only after shift end / for past dates
-      const todayStr = new Date().toISOString().slice(0, 10);
-      const now = new Date();
-      const nowMinutes = now.getHours() * 60 + now.getMinutes();
+      // Use HRMS_TIMEZONE so "today" matches the business calendar date, not the server's UTC date.
+      const todayStr = todayInHrmsTimezone();
+      const nowMinutes = nowMinutesInHrmsTimezone();
 
       const leaveKeys = await getApprovedLeaveKeysInRange(employeeIds, startStr, endStr);
       const locatorByKey = await getApprovedLocatorByDateInRange(
@@ -1312,7 +1341,7 @@ router.get('/', protect, async (req, res) => {
 // GET /api/dtr-daily-summary/summary - counts for dashboard (DTR + leave pipeline)
 router.get('/summary', protect, async (req, res) => {
   try {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayInHrmsTimezone();
     const present = await pool.query(
       `SELECT COUNT(*) AS c FROM dtr_daily_summary WHERE attendance_date = $1::date AND time_in IS NOT NULL`,
       [today]
@@ -1365,7 +1394,7 @@ router.get('/my-shift-today', protect, async (req, res) => {
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'Not authenticated' });
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayInHrmsTimezone();
     const shiftInfo = await getAssignmentShiftForDate(userId, today);
     if (!shiftInfo || shiftInfo.endMinutes == null) {
       return res.json({ start_time: null, end_time: null }); // no shift or no end = no restriction
@@ -1387,7 +1416,7 @@ router.get('/today', protect, async (req, res) => {
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'Not authenticated' });
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayInHrmsTimezone();
     const hasCoverage = await _holidaysHasCoverageColumn();
     const joinCols = hasCoverage
       ? 'h.name AS holiday_name, h.holiday_type AS holiday_type, h.coverage AS holiday_coverage'
@@ -1517,7 +1546,7 @@ router.post('/', protect, async (req, res) => {
     );
     const r = result.rows[0];
     const recordDateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || date;
-    
+
     broadcastBiometricUpdate('dtr_refresh', {
       action: 'manual_inserted',
       userId: String(r.employee_id),
@@ -1525,7 +1554,7 @@ router.post('/', protect, async (req, res) => {
       userIds: [String(r.employee_id)],
       dates: [recordDateStr],
     });
-    
+
     res.status(201).json({
       id: r.id,
       user_id: r.employee_id,
@@ -1665,7 +1694,7 @@ router.put('/:id', protect, async (req, res) => {
     );
     const r = result.rows[0];
     const recordDateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || toIsoDateStr(existing.attendance_date);
-    
+
     broadcastBiometricUpdate('dtr_refresh', {
       action: 'manual_updated',
       userId: String(r.employee_id),
@@ -1673,7 +1702,7 @@ router.put('/:id', protect, async (req, res) => {
       userIds: [String(r.employee_id)],
       dates: [recordDateStr],
     });
-    
+
     res.json({
       id: r.id,
       user_id: r.employee_id,
@@ -1743,7 +1772,7 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
   } catch (err) {
     try {
       await client.query('ROLLBACK');
-    } catch (_) {}
+    } catch (_) { }
     console.error('[dtr-daily-summary DELETE]', err);
     res.status(500).json({ error: 'Failed to delete DTR record' });
   } finally {
