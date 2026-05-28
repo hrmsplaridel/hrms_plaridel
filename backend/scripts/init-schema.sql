@@ -1661,6 +1661,7 @@ DO UPDATE SET
 -- INDEXES
 -- =========================================
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_lower_email ON users(LOWER(email));
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 CREATE INDEX IF NOT EXISTS idx_users_employee_number ON users(employee_number);
 CREATE INDEX IF NOT EXISTS idx_users_biometric_user_id ON users(biometric_user_id);
@@ -1683,6 +1684,10 @@ CREATE INDEX IF NOT EXISTS idx_assignments_position_id ON assignments(position_i
 CREATE INDEX IF NOT EXISTS idx_assignments_shift_id ON assignments(shift_id);
 CREATE INDEX IF NOT EXISTS idx_assignments_effective_from ON assignments(effective_from);
 CREATE INDEX IF NOT EXISTS idx_assignments_effective_to ON assignments(effective_to);
+CREATE INDEX IF NOT EXISTS idx_assignments_employee_active_dates
+ON assignments(employee_id, is_active, effective_from DESC, effective_to);
+CREATE INDEX IF NOT EXISTS idx_assignments_department_active_dates
+ON assignments(department_id, is_active, effective_from, effective_to, employee_id);
 
 CREATE INDEX IF NOT EXISTS idx_policy_assignments_employee_id ON policy_assignments(employee_id);
 CREATE INDEX IF NOT EXISTS idx_policy_assignments_department_id ON policy_assignments(department_id);
@@ -1696,6 +1701,8 @@ CREATE INDEX IF NOT EXISTS idx_leave_requests_employee_id ON leave_requests(empl
 CREATE INDEX IF NOT EXISTS idx_leave_requests_user_id ON leave_requests(user_id);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_status ON leave_requests(status);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_dates ON leave_requests(start_date, end_date);
+CREATE INDEX IF NOT EXISTS idx_leave_requests_status_employee_dates
+ON leave_requests(status, employee_id, start_date, end_date);
 
 -- Prevent duplicate pending/approved requests on the same date range.
 -- PARTIAL so draft/returned/cancelled/rejected records are not affected.
@@ -1706,6 +1713,8 @@ WHERE status IN ('pending', 'pending_department_head', 'pending_hr', 'approved')
 CREATE INDEX IF NOT EXISTS idx_biometric_attendance_logs_user_id ON biometric_attendance_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_biometric_attendance_logs_logged_at ON biometric_attendance_logs(logged_at);
 CREATE INDEX IF NOT EXISTS idx_biometric_attendance_logs_biometric_user_id ON biometric_attendance_logs(biometric_user_id);
+CREATE INDEX IF NOT EXISTS idx_biometric_logs_user_logged
+ON biometric_attendance_logs(user_id, logged_at);
 
 CREATE INDEX IF NOT EXISTS idx_dtr_logs_employee_id ON dtr_logs(employee_id);
 CREATE INDEX IF NOT EXISTS idx_dtr_logs_log_time ON dtr_logs(log_time);
@@ -1718,6 +1727,13 @@ CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_date ON dtr_daily_summary(atten
 CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_status ON dtr_daily_summary(status);
 CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_assignment_id ON dtr_daily_summary(assignment_id);
 CREATE INDEX IF NOT EXISTS idx_dtr_leave_request ON dtr_daily_summary(leave_request_id);
+CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_date_time
+ON dtr_daily_summary(attendance_date DESC, time_in DESC);
+CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_date_employee
+ON dtr_daily_summary(attendance_date, employee_id);
+
+CREATE INDEX IF NOT EXISTS idx_locator_slips_status_employee_date
+ON locator_slips(status, employee_id, slip_date);
 
 CREATE INDEX IF NOT EXISTS idx_dtr_corrections_employee_id ON dtr_corrections(employee_id);
 CREATE INDEX IF NOT EXISTS idx_dtr_corrections_status ON dtr_corrections(status);

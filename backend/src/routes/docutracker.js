@@ -38,6 +38,22 @@ if (!fs.existsSync(DOCUTRACKER_ATTACHMENT_DIR)) {
 
 const ALLOWED_DOCUTRACKER_ATTACHMENT_EXT = /\.(pdf|jpg|jpeg|png)$/i;
 const MAX_DOCUTRACKER_ATTACHMENT_SIZE = 10 * 1024 * 1024; // 10MB
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isUuid(value) {
+  return UUID_RE.test(String(value || '').trim());
+}
+
+function isSourceOnlyDocumentId(value) {
+  return String(value || '').trim().startsWith('source:');
+}
+
+function sourceOnlyDocumentResponse(res) {
+  return res.status(400).json({
+    error:
+      'This is a source-module record, not a DocuTracker draft. Create or open the linked DocuTracker document before attaching files.',
+  });
+}
 
 const docutrackerAttachmentStorage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, DOCUTRACKER_ATTACHMENT_DIR),
@@ -75,6 +91,7 @@ function uploadDocutrackerAttachmentMw(req, res, next) {
 }
 
 async function loadDocumentRowForAccess(documentId) {
+  if (!isUuid(documentId)) return null;
   const r = await pool.query('SELECT * FROM docutracker_documents WHERE id = $1', [documentId]);
   return r.rows[0] || null;
 }
@@ -258,6 +275,7 @@ function normalizeDocStatus(s) {
 }
 
 async function assertDocumentReadable(req, documentId) {
+  if (!isUuid(documentId)) return false;
   const isAdmin = req.user.role === 'admin';
   if (isAdmin) return true;
 
@@ -1874,6 +1892,8 @@ router.post('/documents/:id/transition', protect, async (req, res) => {
   const { id } = req.params;
   const b = req.body || {};
   try {
+    if (isSourceOnlyDocumentId(id)) return sourceOnlyDocumentResponse(res);
+    if (!isUuid(id)) return res.status(404).json({ error: 'Document not found' });
     const action = String(b.action || '').trim();
     if (!action) return res.status(400).json({ error: 'action is required' });
 
@@ -1903,6 +1923,8 @@ router.post('/documents/:id/remark', protect, async (req, res) => {
   const { id } = req.params;
   const b = req.body || {};
   try {
+    if (isSourceOnlyDocumentId(id)) return sourceOnlyDocumentResponse(res);
+    if (!isUuid(id)) return res.status(404).json({ error: 'Document not found' });
     const ok = await addDocumentRemark(pool, req.user, id, { remarks: b.remarks });
     return res.status(201).json({ ok: !!ok });
   } catch (err) {
@@ -1919,6 +1941,7 @@ router.post('/documents/:id/remark', protect, async (req, res) => {
 router.post('/documents/:id/attachment', protect, uploadDocutrackerAttachmentMw, async (req, res) => {
   const { id } = req.params;
   try {
+    if (isSourceOnlyDocumentId(id)) return sourceOnlyDocumentResponse(res);
     if (!req.file) {
       return res.status(400).json({
         error: 'No file uploaded. Allowed: PDF, JPG, JPEG, PNG (max 10MB).',
@@ -1960,6 +1983,7 @@ router.post('/documents/:id/attachment', protect, uploadDocutrackerAttachmentMw,
 router.delete('/documents/:id/attachment', protect, async (req, res) => {
   const { id } = req.params;
   try {
+    if (isSourceOnlyDocumentId(id)) return sourceOnlyDocumentResponse(res);
     const docRow = await loadDocumentRowForAccess(id);
     if (!docRow) return res.status(404).json({ error: 'Document not found' });
     if (!(await assertDocumentReadable(req, id))) {
@@ -1993,6 +2017,7 @@ router.delete('/documents/:id/attachment', protect, async (req, res) => {
 router.get('/documents/:id/attachment', protect, async (req, res) => {
   const { id } = req.params;
   try {
+    if (isSourceOnlyDocumentId(id)) return sourceOnlyDocumentResponse(res);
     const docRow = await loadDocumentRowForAccess(id);
     if (!docRow) return res.status(404).json({ error: 'Document not found' });
     if (!(await canDownloadDocumentFile(pool, docRow, req.user))) {

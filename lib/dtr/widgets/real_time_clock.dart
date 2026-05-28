@@ -7,10 +7,11 @@ const String _kClock12hrKey = 'dtr_clock_12hr';
 
 /// Real-time clock for DTR dashboards. Updates every second.
 class RealTimeClock extends StatefulWidget {
-  const RealTimeClock({super.key, this.accentColor});
+  const RealTimeClock({super.key, this.accentColor, this.compact = false});
 
   /// Icon and format-toggle accent (defaults to [AppTheme.primaryNavy]).
   final Color? accentColor;
+  final bool compact;
 
   @override
   State<RealTimeClock> createState() => _RealTimeClockState();
@@ -89,10 +90,13 @@ class _RealTimeClockState extends State<RealTimeClock> {
     final dark = AppTheme.dashIsDark(context);
     final accent = widget.accentColor ?? AppTheme.primaryNavy;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      padding: EdgeInsets.symmetric(
+        horizontal: widget.compact ? 10 : 20,
+        vertical: widget.compact ? 8 : 12,
+      ),
       decoration: BoxDecoration(
         color: dark ? AppTheme.dashPanelOf(context) : AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(widget.compact ? 10 : 12),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: dark ? 0.35 : 0.06),
@@ -112,14 +116,14 @@ class _RealTimeClockState extends State<RealTimeClock> {
             children: [
               Icon(
                 Icons.access_time_rounded,
-                size: 20,
+                size: widget.compact ? 16 : 20,
                 color: accent,
               ),
-              const SizedBox(width: 8),
+              SizedBox(width: widget.compact ? 5 : 8),
               Text(
                 _timeStr,
                 style: TextStyle(
-                  fontSize: 22,
+                  fontSize: widget.compact ? 15 : 22,
                   fontWeight: FontWeight.w700,
                   color: AppTheme.dashTextPrimaryOf(context),
                   fontFeatures: [const FontFeature.tabularFigures()],
@@ -134,12 +138,12 @@ class _RealTimeClockState extends State<RealTimeClock> {
               Text(
                 _dateStr,
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: widget.compact ? 10 : 12,
                   color: AppTheme.dashTextSecondaryOf(context),
                   fontWeight: FontWeight.w500,
                 ),
               ),
-              const SizedBox(width: 12),
+              SizedBox(width: widget.compact ? 6 : 12),
               TextButton(
                 onPressed: () async {
                   final next = !_use12Hour;
@@ -149,9 +153,9 @@ class _RealTimeClockState extends State<RealTimeClock> {
                 },
                 style: TextButton.styleFrom(
                   minimumSize: Size.zero,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: widget.compact ? 5 : 8,
+                    vertical: widget.compact ? 3 : 4,
                   ),
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   foregroundColor: accent,

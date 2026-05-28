@@ -106,6 +106,10 @@ flutter_launcher_icons:
   ios: true
   image_path: "assets/images/Plaridel Logo.jpg"
   min_sdk_android: 21
+  windows:
+    generate: true
+    image_path: "assets/images/hrmslogo.png"
+    icon_size: 48
 
   # To add custom fonts to your application, add a fonts section here,
   # in this "flutter" section. Each entry in this list should have a

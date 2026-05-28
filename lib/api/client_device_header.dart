@@ -11,7 +11,7 @@ class ClientDeviceHeader {
     if (_cached != null && _cached!.isNotEmpty) return _cached!;
     try {
       final info = await PackageInfo.fromPlatform();
-      _cached = '${_platformLabel()} · ${info.appName} ${info.version}';
+      _cached = '${_platformLabel()} - ${info.appName} ${info.version}';
     } catch (_) {
       _cached = _platformLabel();
     }

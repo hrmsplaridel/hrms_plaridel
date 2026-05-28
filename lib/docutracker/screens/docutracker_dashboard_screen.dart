@@ -28,10 +28,12 @@ class DocuTrackerDashboardScreen extends StatefulWidget {
     super.key,
     this.isAdmin = false,
     this.showTitle = true,
+    this.embedded = false,
   });
 
   final bool isAdmin;
   final bool showTitle;
+  final bool embedded;
 
   @override
   State<DocuTrackerDashboardScreen> createState() =>
@@ -98,50 +100,54 @@ class _DocuTrackerDashboardScreenState
     final provider = context.watch<DocuTrackerProvider>();
     final auth = context.watch<AuthProvider>();
     final userId = auth.user?.id ?? '';
-    final showFab = _canCreateDocuments == true;
+    final showFab = !widget.embedded && _canCreateDocuments == true;
+
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (widget.showTitle) ...[
+          DocuTrackerModuleHeader(
+            title: widget.isAdmin ? 'Dashboard' : 'My documents',
+            subtitle: widget.isAdmin
+                ? 'Organization-wide routing, SLA risk, and escalations.'
+                : 'Items assigned to you, deadlines, and completed work.',
+          ),
+          const SizedBox(height: 20),
+        ],
+        if (provider.error != null) ...[
+          DocuTrackerErrorBanner(
+            message: provider.error!,
+            onDismiss: () => provider.clearError(),
+          ),
+          const SizedBox(height: 16),
+        ],
+        if (widget.isAdmin) ...[
+          _buildOverviewPanel(
+            summary: _buildAdminSummaryCards(
+              provider: provider,
+              total: provider.documents.length,
+              overdue: provider.overdueDocuments.length,
+              escalated: provider.escalatedDocuments.length,
+            ),
+            activity: _buildRecentActivityPreview(provider),
+            equalizeHeights: true,
+          ),
+          const SizedBox(height: 16),
+          _buildAdminDashboard(provider, userId),
+        ] else ...[
+          _buildEmployeeDashboard(provider, userId),
+        ],
+      ],
+    );
+
+    if (widget.embedded) return content;
 
     return Stack(
       clipBehavior: Clip.none,
       children: [
         SingleChildScrollView(
           padding: EdgeInsets.only(bottom: showFab ? 88 : 0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (widget.showTitle) ...[
-                DocuTrackerModuleHeader(
-                  title: widget.isAdmin ? 'Dashboard' : 'My documents',
-                  subtitle: widget.isAdmin
-                      ? 'Organization-wide routing, SLA risk, and escalations.'
-                      : 'Items assigned to you, deadlines, and completed work.',
-                ),
-                const SizedBox(height: 20),
-              ],
-              if (provider.error != null) ...[
-                DocuTrackerErrorBanner(
-                  message: provider.error!,
-                  onDismiss: () => provider.clearError(),
-                ),
-                const SizedBox(height: 16),
-              ],
-              if (widget.isAdmin) ...[
-                _buildOverviewPanel(
-                  summary: _buildAdminSummaryCards(
-                    provider: provider,
-                    total: provider.documents.length,
-                    overdue: provider.overdueDocuments.length,
-                    escalated: provider.escalatedDocuments.length,
-                  ),
-                  activity: _buildRecentActivityPreview(provider),
-                  equalizeHeights: true,
-                ),
-                const SizedBox(height: 16),
-                _buildAdminDashboard(provider, userId),
-              ] else ...[
-                _buildEmployeeDashboard(provider, userId),
-              ],
-            ],
-          ),
+          child: content,
         ),
         if (showFab)
           Positioned(
@@ -171,6 +177,7 @@ class _DocuTrackerDashboardScreenState
   }
 
   Widget _buildEmployeeDashboard(DocuTrackerProvider provider, String userId) {
+    final compact = widget.embedded && MediaQuery.sizeOf(context).width < 600;
     final myDocs = provider.documents;
     final drafts = provider.myDraftsForUser(userId);
     final incoming = provider.incomingForUser(userId);
@@ -210,10 +217,15 @@ class _DocuTrackerDashboardScreenState
             inReview: inReview.length,
             overdue: overdue.length,
             approved: approved.length,
+            compact: compact,
           ),
-          activity: _buildRecentActivityPreview(provider),
+          activity: _buildRecentActivityPreview(
+            provider,
+            compact: compact,
+            showDownloadAction: !compact,
+          ),
         ),
-        const SizedBox(height: 20),
+        SizedBox(height: compact ? 14 : 20),
         if (drafts.isNotEmpty)
           _buildDocSection(
             'My drafts',
@@ -385,6 +397,7 @@ class _DocuTrackerDashboardScreenState
     required int inReview,
     required int overdue,
     required int approved,
+    bool compact = false,
   }) {
     final cards = <Widget>[
       DocuTrackerSummaryCard(
@@ -395,6 +408,7 @@ class _DocuTrackerDashboardScreenState
         icon: Icons.edit_note_rounded,
         backgroundColor: DocuTrackerTokens.surfaceCream,
         iconColor: DocuTrackerTokens.terracotta,
+        compact: compact,
       ),
       DocuTrackerSummaryCard(
         title: 'Pending',
@@ -404,6 +418,7 @@ class _DocuTrackerDashboardScreenState
         icon: Icons.hourglass_top_rounded,
         backgroundColor: DocuTrackerTokens.surface,
         iconColor: DocuTrackerTokens.textSecondary,
+        compact: compact,
       ),
       DocuTrackerSummaryCard(
         title: 'In Review',
@@ -413,6 +428,7 @@ class _DocuTrackerDashboardScreenState
         icon: Icons.manage_search_rounded,
         backgroundColor: const Color(0xFFEFF6FF),
         iconColor: DocuTrackerTokens.escalatedBlue,
+        compact: compact,
       ),
       DocuTrackerSummaryCard(
         title: 'Overdue',
@@ -424,6 +440,7 @@ class _DocuTrackerDashboardScreenState
         icon: Icons.warning_amber_rounded,
         backgroundColor: DocuTrackerTokens.overduePink,
         iconColor: DocuTrackerTokens.overdueAccent,
+        compact: compact,
       ),
       DocuTrackerSummaryCard(
         title: 'Approved',
@@ -433,19 +450,28 @@ class _DocuTrackerDashboardScreenState
         icon: Icons.check_circle_rounded,
         backgroundColor: const Color(0xFFECFDF5),
         iconColor: const Color(0xFF047857),
+        compact: compact,
       ),
     ];
 
-    return _buildSummaryGrid(cards, minCardWidth: 170);
+    return _buildSummaryGrid(
+      cards,
+      minCardWidth: compact ? 132 : 170,
+      compact: compact,
+    );
   }
 
-  Widget _buildRecentActivityPreview(DocuTrackerProvider provider) {
-    final items = provider.notifications.take(5).toList();
+  Widget _buildRecentActivityPreview(
+    DocuTrackerProvider provider, {
+    bool compact = false,
+    bool showDownloadAction = true,
+  }) {
+    final items = provider.notifications.take(compact ? 3 : 5).toList();
     return _HoverLift(
       child: Container(
         width: double.infinity,
         decoration: DocuTrackerTokens.cardDecoration(),
-        padding: const EdgeInsets.all(18),
+        padding: EdgeInsets.all(compact ? 12 : 18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -453,7 +479,9 @@ class _DocuTrackerDashboardScreenState
               children: [
                 Text(
                   'Recent Activity',
-                  style: DocuTrackerTokens.titleStyle(context),
+                  style: DocuTrackerTokens.titleStyle(context).copyWith(
+                    fontSize: compact ? 13.5 : 15,
+                  ),
                 ),
                 const Spacer(),
                 Container(
@@ -479,7 +507,7 @@ class _DocuTrackerDashboardScreenState
                 ),
               ],
             ),
-            const SizedBox(height: 14),
+            SizedBox(height: compact ? 10 : 14),
             if (items.isEmpty)
               Text(
                 'No recent workflow activity yet.',
@@ -488,7 +516,7 @@ class _DocuTrackerDashboardScreenState
             else
               for (final n in items)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
+                  padding: EdgeInsets.only(bottom: compact ? 9 : 12),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -535,30 +563,36 @@ class _DocuTrackerDashboardScreenState
                     ],
                   ),
                 ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Audit log export will be available soon.'),
+            if (showDownloadAction) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Audit log export will be available soon.',
+                        ),
+                      ),
+                    );
+                  },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: DocuTrackerTokens.terracotta,
+                    side: const BorderSide(
+                      color: DocuTrackerTokens.borderStrong,
                     ),
-                  );
-                },
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: DocuTrackerTokens.terracotta,
-                  side: const BorderSide(color: DocuTrackerTokens.borderStrong),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(
-                      DocuTrackerTokens.radiusSm,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(
+                        DocuTrackerTokens.radiusSm,
+                      ),
                     ),
                   ),
+                  child: const Text('Download Audit Log'),
                 ),
-                child: const Text('Download Audit Log'),
               ),
-            ),
+            ],
           ],
         ),
       ),
@@ -654,11 +688,14 @@ class _DocuTrackerDashboardScreenState
     return LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= 860;
+        final gap = widget.embedded && constraints.maxWidth < 600
+            ? 10.0
+            : _panelGap;
         if (!wide) {
           return Column(
             children: [
               summary,
-              const SizedBox(height: _panelGap),
+              SizedBox(height: gap),
               activity,
             ],
           );
@@ -673,7 +710,7 @@ class _DocuTrackerDashboardScreenState
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(child: summary),
-              const SizedBox(width: _panelGap),
+              SizedBox(width: gap),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 420),
                 child: SizedBox(
@@ -695,15 +732,19 @@ class _DocuTrackerDashboardScreenState
     List<Widget> cards, {
     required double minCardWidth,
     double? itemHeight,
+    bool compact = false,
   }) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        final columns = (width / minCardWidth).floor().clamp(1, cards.length);
-        final itemWidth = (width - (_panelGap * (columns - 1))) / columns;
+        final gap = compact ? 10.0 : _panelGap;
+        final columns = compact && width < 600
+            ? (cards.length == 1 ? 1 : 2)
+            : (width / minCardWidth).floor().clamp(1, cards.length);
+        final itemWidth = (width - (gap * (columns - 1))) / columns;
         return Wrap(
-          spacing: _panelGap,
-          runSpacing: _panelGap,
+          spacing: gap,
+          runSpacing: gap,
           children: [
             for (final card in cards)
               SizedBox(
@@ -778,6 +819,7 @@ class _DocuTrackerDashboardScreenState
     bool showHolder = false,
     String? sectionKey,
   }) {
+    final compact = widget.embedded && MediaQuery.sizeOf(context).width < 600;
     // Pick icon + accent per section type
     final (IconData icon, Color accent) = switch (title) {
       'Overdue' => (Icons.warning_amber_rounded, const Color(0xFFE53935)),
@@ -818,7 +860,7 @@ class _DocuTrackerDashboardScreenState
         ),
         if (docs.isEmpty)
           Container(
-            padding: const EdgeInsets.all(24),
+            padding: EdgeInsets.all(compact ? 16 : 24),
             decoration: DocuTrackerTokens.cardDecoration(),
             child: Center(
               child: Text(
@@ -832,7 +874,7 @@ class _DocuTrackerDashboardScreenState
             children: [
               for (final doc in visibleDocs) ...[
                 Container(
-                  margin: const EdgeInsets.only(bottom: 10),
+                  margin: EdgeInsets.only(bottom: compact ? 8 : 10),
                   decoration: DocuTrackerTokens.cardDecoration(
                     borderColor: highlightOverdue
                         ? DocuTrackerTokens.overdueAccent.withValues(
@@ -858,7 +900,7 @@ class _DocuTrackerDashboardScreenState
               ],
             ],
           ),
-        const SizedBox(height: 18),
+        SizedBox(height: compact ? 10 : 18),
       ],
     );
   }
@@ -900,183 +942,237 @@ class _DocumentTileState extends State<_DocumentTile> {
     final isOverdue =
         widget.document.status == DocumentStatus.overdue ||
         (widget.document.deadlineTime != null &&
-            DateTime.now().isAfter(widget.document.deadlineTime!) &&
-            widget.document.status != DocumentStatus.approved &&
-            widget.document.status != DocumentStatus.rejected &&
-            widget.document.status != DocumentStatus.cancelled);
+            DateTime.now().isAfter(widget.document.deadlineTime!));
 
-    final statusForUi = widget.document.status;
+    final statusForUi = isOverdue
+        ? DocumentStatus.overdue
+        : widget.document.status;
+
     final statusLabel = statusForUi.displayName.toUpperCase();
 
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovering = true),
-      onExit: (_) => setState(() => _hovering = false),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: _hovering
-              ? DocuTrackerTokens.surfaceCream.withValues(alpha: 0.5)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusMd),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
+        final leading = Container(
+          width: compact ? 34 : 40,
+          height: compact ? 34 : 40,
+          decoration: BoxDecoration(
+            color: DocuTrackerStatusTheme.chipBackground(statusForUi),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            DocuTrackerStatusTheme.icon(statusForUi),
+            color: DocuTrackerStatusTheme.foreground(statusForUi),
+            size: compact ? 18 : 20,
+          ),
+        );
+
+        final titleBlock = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: DocuTrackerStatusTheme.chipBackground(statusForUi),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                DocuTrackerStatusTheme.icon(statusForUi),
-                color: DocuTrackerStatusTheme.foreground(statusForUi),
-                size: 20,
+            Text(
+              widget.document.title,
+              maxLines: compact ? 2 : 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: compact ? 13 : 14,
+                color: DocuTrackerTokens.textPrimary,
+                height: 1.2,
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
+            const SizedBox(height: 2),
+            Text(
+              widget.document.documentNumber ?? '—',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: DocuTrackerTokens.metaStyle().copyWith(
+                fontWeight: FontWeight.w600,
+                fontSize: compact ? 11 : 12,
+              ),
+            ),
+            if (widget.showHolder && widget.document.assigneeName != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  'Holder: ${widget.document.assigneeName}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: DocuTrackerTokens.metaStyle(),
+                ),
+              ),
+          ],
+        );
+
+        final statusChip = Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: DocuTrackerStatusTheme.chipBackground(statusForUi),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(
+            statusLabel,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+              color: DocuTrackerStatusTheme.foreground(statusForUi),
+              letterSpacing: 0.3,
+            ),
+          ),
+        );
+
+        Widget child;
+        if (compact) {
+          child = InkWell(
+            onTap: _opening ? null : _handleOpen,
+            borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusMd),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    widget.document.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14,
-                      color: DocuTrackerTokens.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    widget.document.documentNumber ?? '—',
-                    style: DocuTrackerTokens.metaStyle().copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  if (widget.showHolder && widget.document.assigneeName != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(
-                        'Holder: ${widget.document.assigneeName}',
-                        style: DocuTrackerTokens.metaStyle(),
+                  leading,
+                  const SizedBox(width: 10),
+                  Expanded(child: titleBlock),
+                  const SizedBox(width: 8),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 100),
+                        child: statusChip,
                       ),
-                    ),
+                      const SizedBox(height: 8),
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        color: DocuTrackerTokens.textMuted,
+                        size: 22,
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
-            const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
+          );
+        } else {
+          child = AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOutCubic,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: _hovering
+                  ? DocuTrackerTokens.surfaceCream.withValues(alpha: 0.5)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusMd),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Text(
-                  'CURRENT STATUS:',
-                  style: DocuTrackerTokens.metaStyle().copyWith(
-                    fontSize: 9,
-                    letterSpacing: 0.4,
-                  ),
-                ),
-                Container(
-                  margin: const EdgeInsets.only(top: 2, bottom: 8),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    color: DocuTrackerStatusTheme.chipBackground(statusForUi),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    statusLabel,
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w800,
-                      color: DocuTrackerStatusTheme.foreground(statusForUi),
-                      letterSpacing: 0.3,
-                    ),
-                  ),
-                ),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
+                leading,
+                const SizedBox(width: 12),
+                Expanded(child: titleBlock),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    DocuTrackerPressScale(
-                      child: FilledButton.icon(
-                        onPressed: _opening ? null : _handleOpen,
-                        icon: _opening
-                            ? const SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Icon(Icons.open_in_new_rounded, size: 14),
-                        label: const Text('Open'),
-                        style: DocuTrackerTokens.terracottaFilledStyle()
-                            .copyWith(
-                              visualDensity: VisualDensity.compact,
-                              padding: WidgetStateProperty.all(
-                                const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 8,
-                                ),
-                              ),
-                            ),
+                    Text(
+                      'CURRENT STATUS:',
+                      style: DocuTrackerTokens.metaStyle().copyWith(
+                        fontSize: 9,
+                        letterSpacing: 0.4,
                       ),
                     ),
-                    const SizedBox(width: 6),
-                    DocuTrackerPressScale(
-                      child: OutlinedButton.icon(
-                        onPressed: widget.document.documentNumber == null
-                            ? null
-                            : () async {
-                                final number = widget.document.documentNumber!;
-                                await Clipboard.setData(
-                                  ClipboardData(text: number),
-                                );
-                                if (!context.mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      'Copied document number: $number',
+                    Container(
+                      margin: const EdgeInsets.only(top: 2, bottom: 8),
+                      child: statusChip,
+                    ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        DocuTrackerPressScale(
+                          child: FilledButton.icon(
+                            onPressed: _opening ? null : _handleOpen,
+                            icon: _opening
+                                ? const SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Icon(
+                                    Icons.open_in_new_rounded,
+                                    size: 14,
+                                  ),
+                            label: const Text('Open'),
+                            style: DocuTrackerTokens.terracottaFilledStyle()
+                                .copyWith(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: WidgetStateProperty.all(
+                                    const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 8,
                                     ),
                                   ),
-                                );
-                              },
-                        icon: const Icon(Icons.copy_rounded, size: 14),
-                        label: const Text('Copy No.'),
-                        style: DocuTrackerTokens.terracottaOutlinedStyle()
-                            .copyWith(
-                              visualDensity: VisualDensity.compact,
-                              padding: WidgetStateProperty.all(
-                                const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 8,
                                 ),
-                              ),
-                            ),
-                      ),
-                    ),
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      icon: const Icon(Icons.more_vert_rounded, size: 20),
-                      color: DocuTrackerTokens.textMuted,
-                      onPressed: _opening ? null : _handleOpen,
-                      tooltip: 'More actions',
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        DocuTrackerPressScale(
+                          child: OutlinedButton.icon(
+                            onPressed: widget.document.documentNumber == null
+                                ? null
+                                : () async {
+                                    final number =
+                                        widget.document.documentNumber!;
+                                    await Clipboard.setData(
+                                      ClipboardData(text: number),
+                                    );
+                                    if (!context.mounted) return;
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          'Copied document number: $number',
+                                        ),
+                                      ),
+                                    );
+                                  },
+                            icon: const Icon(Icons.copy_rounded, size: 14),
+                            label: const Text('Copy No.'),
+                            style: DocuTrackerTokens.terracottaOutlinedStyle()
+                                .copyWith(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: WidgetStateProperty.all(
+                                    const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 8,
+                                    ),
+                                  ),
+                                ),
+                          ),
+                        ),
+                        IconButton(
+                          visualDensity: VisualDensity.compact,
+                          icon: const Icon(Icons.more_vert_rounded, size: 20),
+                          color: DocuTrackerTokens.textMuted,
+                          onPressed: _opening ? null : _handleOpen,
+                          tooltip: 'More actions',
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ],
             ),
-          ],
-        ),
-      ),
+          );
+        }
+
+        return MouseRegion(
+          onEnter: (_) => setState(() => _hovering = true),
+          onExit: (_) => setState(() => _hovering = false),
+          child: Material(color: Colors.transparent, child: child),
+        );
+      },
     );
   }
 }

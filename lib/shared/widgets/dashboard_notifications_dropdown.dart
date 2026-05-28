@@ -251,7 +251,6 @@ class DashboardNotificationsDropdownPanel extends StatelessWidget {
             ),
           ),
           _DropdownFooter(
-            onClearAll: unread > 0 ? () => markAllRead() : null,
             onViewAll: onViewAll,
           ),
         ],
@@ -546,11 +545,9 @@ class _DropdownHeader extends StatelessWidget {
 class _DropdownFooter extends StatelessWidget {
   const _DropdownFooter({
     required this.onViewAll,
-    this.onClearAll,
   });
 
   final VoidCallback onViewAll;
-  final VoidCallback? onClearAll;
 
   @override
   Widget build(BuildContext context) {
@@ -562,23 +559,6 @@ class _DropdownFooter extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: onClearAll,
-              icon: const Icon(Icons.cleaning_services_outlined, size: 18),
-              label: const Text('Clear All'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: DocuTrackerTokens.brand,
-                disabledForegroundColor: DocuTrackerTokens.textMuted,
-                side: const BorderSide(color: DocuTrackerTokens.brand),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
           Expanded(
             child: FilledButton.icon(
               onPressed: onViewAll,

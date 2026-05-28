@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../constants/app_theme.dart';
@@ -12,6 +13,7 @@ class HeroSection extends StatelessWidget {
     this.height,
     this.onViewVacanciesTap,
     this.onScrollToVacancies,
+    this.onTrackApplicationTap,
   });
 
   static const String _heroFont = 'NotoSans';
@@ -22,6 +24,9 @@ class HeroSection extends StatelessWidget {
 
   final VoidCallback? onViewVacanciesTap;
   final VoidCallback? onScrollToVacancies;
+
+  /// Navigates to the track-application page.
+  final VoidCallback? onTrackApplicationTap;
 
   static double _resolveHeight(BuildContext context, double? height) {
     if (height != null && height.isFinite && height > 0) {
@@ -162,69 +167,253 @@ class HeroSection extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 36),
-                  Semantics(
-                    button: true,
-                    label: 'View job vacancies',
-                    child: FilledButton.icon(
-                      onPressed: onViewVacanciesTap,
-                      icon: const Icon(Icons.work_outline_rounded, size: 20),
-                      label: const Text('View job vacancies'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.primaryNavy,
-                        foregroundColor: Colors.white,
-                        padding: EdgeInsets.symmetric(
-                          horizontal: isNarrow ? 22 : 28,
-                          vertical: isNarrow ? 14 : 16,
-                        ),
-                        minimumSize: Size(0, isNarrow ? 48 : 50),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        elevation: 2,
-                      ),
-                    ),
+                  _TrackButton(
+                    onTap: onTrackApplicationTap,
+                    isNarrow: isNarrow,
+                    heroFont: _heroFont,
                   ),
                   SizedBox(height: isWide ? 56 : 40),
                   if (scrollToVacancies != null)
-                    Semantics(
-                      button: true,
-                      label: 'Scroll to job vacancies',
-                      child: InkWell(
-                        onTap: scrollToVacancies,
-                        borderRadius: BorderRadius.circular(24),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                'See openings',
-                                style: TextStyle(
-                                  fontFamily: _heroFont,
-                                  color: Colors.white.withValues(alpha: 0.88),
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  letterSpacing: 0.3,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Icon(
-                                Icons.keyboard_arrow_down_rounded,
-                                color: Colors.white.withValues(alpha: 0.9),
-                                size: 28,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
+                    _ScrollCue(
+                      onTap: scrollToVacancies,
+                      heroFont: _heroFont,
                     ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ── Modern animated "Track application status" CTA button ────────────────────
+
+class _TrackButton extends StatefulWidget {
+  const _TrackButton({
+    required this.onTap,
+    required this.isNarrow,
+    required this.heroFont,
+  });
+  final VoidCallback? onTap;
+  final bool isNarrow;
+  final String heroFont;
+
+  @override
+  State<_TrackButton> createState() => _TrackButtonState();
+}
+
+class _TrackButtonState extends State<_TrackButton>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _scale;
+  bool _hovering = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 120),
+      reverseDuration: const Duration(milliseconds: 200),
+    );
+    _scale = Tween<double>(begin: 1.0, end: 0.955).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _onTapDown(_) => _ctrl.forward();
+  void _onTapUp(_) => _ctrl.reverse();
+  void _onTapCancel() => _ctrl.reverse();
+
+  @override
+  Widget build(BuildContext context) {
+    final hPad = widget.isNarrow ? 28.0 : 36.0;
+    final vPad = widget.isNarrow ? 16.0 : 18.0;
+
+    return Semantics(
+      button: true,
+      label: 'Track application status',
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: kIsWeb ? (_) => setState(() => _hovering = true) : null,
+        onExit: kIsWeb ? (_) => setState(() => _hovering = false) : null,
+        child: GestureDetector(
+          onTap: widget.onTap,
+          onTapDown: _onTapDown,
+          onTapUp: _onTapUp,
+          onTapCancel: _onTapCancel,
+          child: AnimatedBuilder(
+            animation: _scale,
+            builder: (context, child) => Transform.scale(
+              scale: _scale.value,
+              child: child,
+            ),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: _hovering
+                      ? [
+                          AppTheme.primaryNavy,
+                          AppTheme.primaryNavyLight,
+                        ]
+                      : [
+                          AppTheme.primaryNavyDark,
+                          AppTheme.primaryNavy,
+                        ],
+                ),
+                borderRadius: BorderRadius.circular(50),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.primaryNavy.withValues(
+                      alpha: _hovering ? 0.65 : 0.45,
+                    ),
+                    blurRadius: _hovering ? 28 : 18,
+                    spreadRadius: _hovering ? 2 : 0,
+                    offset: const Offset(0, 6),
+                  ),
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.18),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.22),
+                  width: 1.5,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Icon in a frosted circle
+                  Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.2),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.35),
+                        width: 1,
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: const Icon(
+                      Icons.track_changes_rounded,
+                      color: Colors.white,
+                      size: 17,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Track application status',
+                    style: TextStyle(
+                      fontFamily: widget.heroFont,
+                      color: Colors.white,
+                      fontSize: widget.isNarrow ? 14.5 : 15.5,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.15,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Icon(
+                    Icons.arrow_forward_rounded,
+                    color: Colors.white.withValues(alpha: 0.85),
+                    size: 16,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Animated "See openings" scroll cue ───────────────────────────────────────
+
+class _ScrollCue extends StatefulWidget {
+  const _ScrollCue({required this.onTap, required this.heroFont});
+  final VoidCallback? onTap;
+  final String heroFont;
+
+  @override
+  State<_ScrollCue> createState() => _ScrollCueState();
+}
+
+class _ScrollCueState extends State<_ScrollCue>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _bounce;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    )..repeat(reverse: true);
+    _bounce = Tween<double>(begin: 0, end: 6).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'See openings',
+                style: TextStyle(
+                  fontFamily: widget.heroFont,
+                  color: Colors.white.withValues(alpha: 0.88),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.3,
+                ),
+              ),
+              const SizedBox(height: 4),
+              AnimatedBuilder(
+                animation: _bounce,
+                builder: (_, child) => Transform.translate(
+                  offset: Offset(0, _bounce.value),
+                  child: child,
+                ),
+                child: Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  color: Colors.white.withValues(alpha: 0.9),
+                  size: 28,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

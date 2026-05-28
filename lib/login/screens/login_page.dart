@@ -136,28 +136,36 @@ class _LoginPageState extends State<LoginPage>
             )
           : _LoginFormShell(
               isWeb: true,
+              contentPadding: EdgeInsets.zero,
+              maxContentWidth: null,
               child: Stack(
                 children: [
                   SafeArea(
                     child: LayoutBuilder(
                       builder: (context, constraints) {
                         final viewInsets = MediaQuery.viewInsetsOf(context);
+                        final viewport = MediaQuery.sizeOf(context);
                         final keyboardOpen = viewInsets.bottom > 80;
+                        final compactMobile =
+                            viewport.width < 430 || viewport.height < 820;
                         final formChild = FadeTransition(
                           opacity: _entranceFade,
                           child: form,
                         );
+                        final horizontalInset = compactMobile ? 8.0 : 10.0;
+                        final verticalInset = compactMobile ? 8.0 : 12.0;
+                        final cardWidth =
+                            constraints.maxWidth - horizontalInset * 2;
 
                         if (keyboardOpen) {
-                          final cardWidth = constraints.maxWidth - 20;
                           return SingleChildScrollView(
                             keyboardDismissBehavior:
                                 ScrollViewKeyboardDismissBehavior.onDrag,
                             padding: EdgeInsets.fromLTRB(
-                              10,
-                              12,
-                              10,
-                              viewInsets.bottom + 12,
+                              horizontalInset,
+                              verticalInset,
+                              horizontalInset,
+                              viewInsets.bottom + verticalInset,
                             ),
                             child: SizedBox(
                               width: cardWidth,
@@ -166,12 +174,11 @@ class _LoginPageState extends State<LoginPage>
                           );
                         }
 
-                        final cardWidth = constraints.maxWidth - 20;
                         return Center(
                           child: SingleChildScrollView(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 12,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: horizontalInset,
+                              vertical: verticalInset,
                             ),
                             child: SizedBox(
                               width: cardWidth,
@@ -497,10 +504,17 @@ class _LoginHeroFeatureChip extends StatelessWidget {
 }
 
 class _LoginFormShell extends StatelessWidget {
-  const _LoginFormShell({required this.child, this.isWeb = false});
+  const _LoginFormShell({
+    required this.child,
+    this.isWeb = false,
+    this.contentPadding,
+    this.maxContentWidth = 460,
+  });
 
   final Widget child;
   final bool isWeb;
+  final EdgeInsetsGeometry? contentPadding;
+  final double? maxContentWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -584,15 +598,20 @@ class _LoginFormShell extends StatelessWidget {
             child: isWeb
                 ? Center(
                     child: SingleChildScrollView(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 28,
-                        vertical: 12,
+                      padding: contentPadding ??
+                          const EdgeInsets.symmetric(
+                            horizontal: 28,
+                            vertical: 12,
+                          ),
+                      child: maxContentWidth == null
+                          ? child
+                          : ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: maxContentWidth!,
+                              ),
+                              child: child,
+                            ),
                       ),
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 460),
-                        child: child,
-                      ),
-                    ),
                   )
                 : Center(
                     child: SingleChildScrollView(
@@ -635,11 +654,9 @@ class _LoginMobileBackButton extends StatelessWidget {
 
 class _LoginBackButton extends StatelessWidget {
   const _LoginBackButton({
-    this.compact = false,
     this.showLabel = false,
   });
 
-  final bool compact;
   final bool showLabel;
 
   @override
@@ -654,24 +671,24 @@ class _LoginBackButton extends StatelessWidget {
             child: InkWell(
               onTap: () => Navigator.of(context).pop(),
               child: Padding(
-                padding: EdgeInsets.symmetric(
-                  horizontal: compact ? 12 : 14,
-                  vertical: compact ? 8 : 10,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(
+                    const Icon(
                       Icons.arrow_back_rounded,
-                      size: compact ? 18 : 20,
+                      size: 20,
                       color: Colors.white,
                     ),
                     const SizedBox(width: 6),
-                    Text(
+                    const Text(
                       'Back',
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: compact ? 13 : 14,
+                        fontSize: 14,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -688,11 +705,11 @@ class _LoginBackButton extends StatelessWidget {
       color: Colors.black.withValues(alpha: 0.28),
       shape: const CircleBorder(),
       child: IconButton(
-        padding: EdgeInsets.all(compact ? 8 : 10),
+        padding: const EdgeInsets.all(10),
         onPressed: () => Navigator.of(context).pop(),
-        icon: Icon(
+        icon: const Icon(
           Icons.arrow_back_rounded,
-          size: compact ? 22 : 24,
+          size: 24,
           color: Colors.white,
         ),
         tooltip: 'Back',
@@ -872,10 +889,25 @@ class _LoginFormContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final subtitleColor = AppTheme.textSecondary;
+    final viewport = MediaQuery.sizeOf(context);
     final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 80;
     final isCardForm = isWebLayout || isMobileLayout;
-    // Web uses compact spacing to fit the viewport; mobile uses full sizing.
-    final compact = isWebLayout;
+    final compactMobile =
+        isMobileLayout && (viewport.width < 430 || viewport.height < 820);
+    final veryCompactMobile =
+        isMobileLayout && (viewport.width < 360 || viewport.height < 720);
+    final compact = isWebLayout || compactMobile;
+
+    final logoGap = veryCompactMobile ? 8.0 : (compact ? 12.0 : 24.0);
+    final badgeGap = veryCompactMobile ? 10.0 : (compact ? 12.0 : 22.0);
+    final titleGap = compact ? 8.0 : 10.0;
+    final dividerBottomGap = veryCompactMobile ? 8.0 : (compact ? 10.0 : 14.0);
+    final subtitleGap = veryCompactMobile ? 14.0 : (compact ? 16.0 : 28.0);
+    final fieldGap = veryCompactMobile ? 10.0 : (compact ? 12.0 : 16.0);
+    final actionGap = veryCompactMobile ? 12.0 : (compact ? 14.0 : 22.0);
+    final buttonGap = veryCompactMobile ? 14.0 : (compact ? 16.0 : 26.0);
+    final footerTopGap = veryCompactMobile ? 8.0 : (compact ? 10.0 : 14.0);
+    final footerBottomGap = veryCompactMobile ? 8.0 : (compact ? 10.0 : 16.0);
 
     final fields = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -883,27 +915,29 @@ class _LoginFormContent extends StatelessWidget {
       children: [
         if (isCardForm) ...[
           Center(child: _LoginFormLogo(compact: compact)),
-          SizedBox(height: compact ? 14 : 24),
+          SizedBox(height: logoGap),
           Center(child: _LoginWebPortalBadge()),
-          SizedBox(height: compact ? 14 : 22),
+          SizedBox(height: badgeGap),
         ],
         Text(
           'Welcome back',
           textAlign: TextAlign.center,
           style: TextStyle(
             color: AppTheme.textPrimary,
-            fontSize: compact ? 26 : (isWebLayout ? 28 : 34),
+            fontSize: compact
+                ? (veryCompactMobile ? 25 : 26)
+                : (isWebLayout ? 28 : 34),
             fontWeight: FontWeight.w800,
             letterSpacing: -0.8,
             height: 1.05,
           ),
         ),
-        SizedBox(height: compact ? 8 : 10),
+        SizedBox(height: titleGap),
         Center(
           child: Container(
             width: compact ? 44 : 52,
             height: 3,
-            margin: EdgeInsets.only(bottom: compact ? 10 : 14),
+            margin: EdgeInsets.only(bottom: dividerBottomGap),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(2),
               gradient: const LinearGradient(
@@ -925,7 +959,7 @@ class _LoginFormContent extends StatelessWidget {
             fontWeight: FontWeight.w500,
           ),
         ),
-        SizedBox(height: compact ? 16 : 28),
+        SizedBox(height: subtitleGap),
         AutofillGroup(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -939,7 +973,7 @@ class _LoginFormContent extends StatelessWidget {
                 autofillHints: const [AutofillHints.email],
                 premium: isCardForm,
               ),
-              const SizedBox(height: 16),
+              SizedBox(height: fieldGap),
               _PasswordTextField(
                 controller: passwordController,
                 focusNode: passwordFocusNode,
@@ -949,70 +983,25 @@ class _LoginFormContent extends StatelessWidget {
             ],
           ),
         ),
-        SizedBox(height: compact ? 14 : 22),
-        Row(
-          children: [
-            SizedBox(
-              height: 22,
-              width: 22,
-              child: Checkbox(
-                value: rememberMe,
-                onChanged: onRememberMeChanged,
-                activeColor: LoginTheme.bluePrimary,
-                checkColor: Colors.white,
-                side: const BorderSide(
-                  color: Color(0xFFADB5BD),
-                  width: 1.5,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(5),
-                ),
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-            ),
-            const SizedBox(width: 10),
-            GestureDetector(
-              onTap: () => onRememberMeChanged(!rememberMe),
-              child: Text(
-                'Remember me',
-                style: TextStyle(
-                  color: AppTheme.textPrimary.withValues(alpha: 0.85),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-            const Spacer(),
-            TextButton(
-              onPressed: onForgotPassword,
-              style: TextButton.styleFrom(
-                foregroundColor: LoginTheme.bluePrimary,
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              child: const Text(
-                'Forgot password?',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                ),
-              ),
-            ),
-          ],
+        SizedBox(height: actionGap),
+        _LoginRememberForgotRow(
+          rememberMe: rememberMe,
+          onRememberMeChanged: onRememberMeChanged,
+          onForgotPassword: onForgotPassword,
+          compact: compactMobile,
         ),
-        SizedBox(height: compact ? 16 : 26),
+        SizedBox(height: buttonGap),
         _LoginToHrmsButton(
           onPressed: isLoading ? null : onLogin,
           isLoading: isLoading,
           premium: isCardForm,
-          compact: isWebLayout,
+          compact: compact,
         ),
         if (!keyboardOpen) ...[
-          SizedBox(height: compact ? 10 : 14),
+          SizedBox(height: footerTopGap),
           const Divider(height: 1, color: Color(0xFFEBEEF2)),
-          SizedBox(height: compact ? 10 : 16),
-          const _LoginFooterLinks(),
+          SizedBox(height: footerBottomGap),
+          _LoginFooterLinks(compact: compactMobile),
         ],
       ],
     );
@@ -1020,6 +1009,143 @@ class _LoginFormContent extends StatelessWidget {
     return _LoginFormCard(
       isMobileLayout: isMobileLayout,
       child: fields,
+    );
+  }
+}
+
+class _LoginRememberForgotRow extends StatelessWidget {
+  const _LoginRememberForgotRow({
+    required this.rememberMe,
+    required this.onRememberMeChanged,
+    required this.onForgotPassword,
+    this.compact = false,
+  });
+
+  final bool rememberMe;
+  final ValueChanged<bool?> onRememberMeChanged;
+  final VoidCallback onForgotPassword;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final rememberControl = _RememberMeControl(
+      rememberMe: rememberMe,
+      onChanged: onRememberMeChanged,
+      compact: compact,
+    );
+    final forgotButton = _ForgotPasswordButton(
+      onPressed: onForgotPassword,
+      compact: compact,
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 280) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              rememberControl,
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: forgotButton,
+              ),
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            Flexible(child: rememberControl),
+            SizedBox(width: compact ? 8 : 12),
+            forgotButton,
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _RememberMeControl extends StatelessWidget {
+  const _RememberMeControl({
+    required this.rememberMe,
+    required this.onChanged,
+    this.compact = false,
+  });
+
+  final bool rememberMe;
+  final ValueChanged<bool?> onChanged;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        SizedBox(
+          height: 22,
+          width: 22,
+          child: Checkbox(
+            value: rememberMe,
+            onChanged: onChanged,
+            activeColor: LoginTheme.bluePrimary,
+            checkColor: Colors.white,
+            side: const BorderSide(
+              color: Color(0xFFADB5BD),
+              width: 1.5,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(5),
+            ),
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Flexible(
+          child: GestureDetector(
+            onTap: () => onChanged(!rememberMe),
+            child: Text(
+              'Remember me',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppTheme.textPrimary.withValues(alpha: 0.85),
+                fontSize: compact ? 13 : 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ForgotPasswordButton extends StatelessWidget {
+  const _ForgotPasswordButton({
+    required this.onPressed,
+    this.compact = false,
+  });
+
+  final VoidCallback onPressed;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        foregroundColor: LoginTheme.bluePrimary,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      child: Text(
+        'Forgot password?',
+        style: TextStyle(
+          fontWeight: FontWeight.w600,
+          fontSize: compact ? 13 : 14,
+        ),
+      ),
     );
   }
 }
@@ -1036,18 +1162,32 @@ class _LoginFormCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.sizeOf(context).width;
+    final screenSize = MediaQuery.sizeOf(context);
+    final screenWidth = screenSize.width;
+    final compactMobile =
+        isMobileLayout && (screenSize.width < 430 || screenSize.height < 820);
+    final horizontalPadding = isMobileLayout
+        ? (compactMobile ? 22.0 : 28.0)
+        : 36.0;
+    final topPadding = isMobileLayout
+        ? (compactMobile ? 22.0 : 32.0)
+        : 32.0;
+    final bottomPadding = isMobileLayout
+        ? (compactMobile ? 20.0 : 28.0)
+        : 28.0;
     final card = Container(
       width: double.infinity,
       padding: EdgeInsets.fromLTRB(
-        isMobileLayout ? 28 : 36,
-        isMobileLayout ? 32 : 32,
-        isMobileLayout ? 28 : 36,
-        isMobileLayout ? 28 : 28,
+        horizontalPadding,
+        topPadding,
+        horizontalPadding,
+        bottomPadding,
       ),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(_kCardRadius),
+        borderRadius: BorderRadius.circular(
+          compactMobile ? 22 : _kCardRadius,
+        ),
         border: Border.all(color: const Color(0xFFE8ECF0)),
         gradient: LinearGradient(
           begin: Alignment.topCenter,
@@ -1075,7 +1215,9 @@ class _LoginFormCard extends StatelessWidget {
 
     return ConstrainedBox(
       constraints: BoxConstraints(
-        maxWidth: isMobileLayout ? screenWidth - 20 : 480,
+        maxWidth: isMobileLayout
+            ? screenWidth - (compactMobile ? 16 : 20)
+            : 480,
       ),
       child: card,
     );
@@ -1301,17 +1443,18 @@ class _MunicipalityLogoCircle extends StatelessWidget {
 }
 
 class _LoginFooterLinks extends StatelessWidget {
-  const _LoginFooterLinks();
+  const _LoginFooterLinks({this.compact = false});
 
   static const _muted = Color(0xFF6C757D);
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final base = TextStyle(
       color: _muted.withValues(alpha: 0.92),
-      fontSize: 12,
+      fontSize: compact ? 11 : 12,
       fontWeight: FontWeight.w500,
-      height: 1.4,
+      height: compact ? 1.25 : 1.4,
     );
 
     return Wrap(
@@ -1440,8 +1583,8 @@ class _LoginTextFieldState extends State<_LoginTextField> {
             letterSpacing: 0.15,
           ),
         ),
-        _LoginWebOneTapFocus(
-          enabled: kIsWeb && widget.premium,
+        _LoginOneTapFocus(
+          enabled: widget.premium,
           onFocus: _ensureFocus,
           child: field,
         ),
@@ -1556,8 +1699,8 @@ class _PasswordTextFieldState extends State<_PasswordTextField> {
             letterSpacing: 0.15,
           ),
         ),
-        _LoginWebOneTapFocus(
-          enabled: kIsWeb && widget.premium,
+        _LoginOneTapFocus(
+          enabled: widget.premium,
           onFocus: _ensureFocus,
           child: field,
         ),
@@ -1566,10 +1709,10 @@ class _PasswordTextFieldState extends State<_PasswordTextField> {
   }
 }
 
-/// On Flutter web, scaled layouts and prefix icons can require two clicks to
-/// focus a [TextField]. Request focus on the first pointer down instead.
-class _LoginWebOneTapFocus extends StatelessWidget {
-  const _LoginWebOneTapFocus({
+/// Scaled layouts and prefix icons can require two taps to focus a [TextField]
+/// on some Flutter targets. Request focus on the first pointer down instead.
+class _LoginOneTapFocus extends StatelessWidget {
+  const _LoginOneTapFocus({
     required this.enabled,
     required this.onFocus,
     required this.child,

@@ -149,7 +149,10 @@ class EmployeeWelcomeBanner extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          padding: EdgeInsets.symmetric(
+            horizontal: isNarrow ? 8 : 10,
+            vertical: isNarrow ? 4 : 5,
+          ),
           decoration: BoxDecoration(
             color: _EmployeeDashColors.accentOrange.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(20),
@@ -157,96 +160,95 @@ class EmployeeWelcomeBanner extends StatelessWidget {
               color: _EmployeeDashColors.accentOrange.withValues(alpha: 0.22),
             ),
           ),
-          child: const Text(
+          child: Text(
             'Employee Portal',
             style: TextStyle(
               color: _EmployeeDashColors.accentOrange,
-              fontSize: 11,
+              fontSize: isNarrow ? 10.5 : 11,
               fontWeight: FontWeight.w700,
               letterSpacing: 0.4,
             ),
           ),
         ),
-        const SizedBox(height: 12),
+        SizedBox(height: isNarrow ? 8 : 12),
         Text(
           greeting,
           style: TextStyle(
             color: primary,
-            fontSize: isNarrow ? 22 : 28,
+            fontSize: isNarrow ? 19 : 28,
             fontWeight: FontWeight.w800,
-            letterSpacing: -0.6,
             height: 1.15,
           ),
-          maxLines: 3,
+          maxLines: isNarrow ? 2 : 3,
           overflow: TextOverflow.ellipsis,
         ),
-        const SizedBox(height: 8),
+        SizedBox(height: isNarrow ? 5 : 8),
         Text(
           "Here's your latest overview of your HR activities.",
           style: TextStyle(
             color: secondary,
-            fontSize: isNarrow ? 14 : 15,
-            height: 1.45,
+            fontSize: isNarrow ? 12.5 : 15,
+            height: isNarrow ? 1.3 : 1.45,
           ),
+          maxLines: isNarrow ? 2 : null,
+          overflow: isNarrow ? TextOverflow.ellipsis : null,
         ),
       ],
     );
 
     return Container(
-      padding: EdgeInsets.all(isNarrow ? 20 : 26),
+      padding: EdgeInsets.all(isNarrow ? 14 : 26),
       decoration: EmployeeDashUi.welcomeBanner(context),
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          Positioned(
-            right: isNarrow ? -28 : -16,
-            top: isNarrow ? -36 : -24,
-            child: Container(
-              width: isNarrow ? 120 : 160,
-              height: isNarrow ? 120 : 160,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    _EmployeeDashColors.accentOrange.withValues(alpha: 0.12),
-                    Colors.transparent,
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            left: isNarrow ? -20 : -8,
-            bottom: isNarrow ? -24 : -16,
-            child: Container(
-              width: isNarrow ? 80 : 100,
-              height: isNarrow ? 80 : 100,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    AppTheme.letterheadNavy.withValues(alpha: 0.08),
-                    Colors.transparent,
-                  ],
-                ),
-              ),
-            ),
-          ),
           if (isNarrow)
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Align(
-                  alignment: Alignment.centerRight,
-                  child: RealTimeClock(
-                    accentColor: _EmployeeDashColors.accentOrange,
-                  ),
+                Expanded(child: copy),
+                const SizedBox(width: 10),
+                const RealTimeClock(
+                  compact: true,
+                  accentColor: _EmployeeDashColors.accentOrange,
                 ),
-                const SizedBox(height: 16),
-                copy,
               ],
             )
-          else
+          else ...[
+            Positioned(
+              right: -16,
+              top: -24,
+              child: Container(
+                width: 160,
+                height: 160,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [
+                      _EmployeeDashColors.accentOrange.withValues(alpha: 0.12),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              left: -8,
+              bottom: -16,
+              child: Container(
+                width: 100,
+                height: 100,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [
+                      AppTheme.letterheadNavy.withValues(alpha: 0.08),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+              ),
+            ),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -257,6 +259,7 @@ class EmployeeWelcomeBanner extends StatelessWidget {
                 ),
               ],
             ),
+          ],
         ],
       ),
     );

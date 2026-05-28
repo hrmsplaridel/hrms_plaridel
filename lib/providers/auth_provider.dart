@@ -42,6 +42,11 @@ class AuthProvider extends ChangeNotifier {
   /// Storage path for avatar.
   String? get avatarPath => _user?.avatarPath;
 
+  void replaceUser(AppUser user) {
+    _user = user;
+    notifyListeners();
+  }
+
   /// Restore session from stored JWT. Call before runApp.
   Future<void> restoreSession() async {
     String? token;
@@ -101,13 +106,19 @@ class AuthProvider extends ChangeNotifier {
       final userData = data['user'] as Map<String, dynamic>?;
       if (userData != null) {
         _user = AppUser.fromJson(userData);
-      } else {
-        await refreshUser();
       }
+      await refreshUser();
       notifyListeners();
       return null;
     } on DioException catch (e) {
-      debugPrint('AuthProvider.login error: ${e.response?.data}');
+      debugPrint(
+        'AuthProvider.login error: '
+        'type=${e.type}, '
+        'status=${e.response?.statusCode}, '
+        'message=${e.message}, '
+        'data=${e.response?.data}, '
+        'error=${e.error}',
+      );
       final body = e.response?.data;
       if (body is Map && body['error'] is String) {
         return body['error'] as String;

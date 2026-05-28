@@ -1,6 +1,26 @@
 # HRMS Plaridel Kamatera VPS hosting guide sheet
 
-This guide covers deployment where the Node.js API runs on a Kamatera VPS and PostgreSQL remains on the office LAN as the single source of truth. Remote users call HTTPS on the VPS. The VPS reaches PostgreSQL only over a private VPN mesh (this guide uses Tailscale).
+This guide covers two supported deployments where PostgreSQL remains on the office LAN as the single source of truth. Remote users call HTTPS on the VPS. Private traffic between the VPS and office uses Tailscale.
+
+Choose one architecture before following the backend/Nginx steps:
+
+## Architecture A: VPS backend, office PostgreSQL
+
+```text
+Users/mobile/web -> VPS Nginx HTTPS -> VPS Node backend -> Tailscale -> office PostgreSQL
+```
+
+Use this when you want the API process to run on Kamatera. It is simpler for Linux/systemd management, but data-heavy screens can be slower because every SQL query crosses Tailscale.
+
+## Architecture B: office backend, office PostgreSQL, VPS HTTPS gateway
+
+```text
+Users/mobile/web -> VPS Nginx HTTPS -> Tailscale -> office Node backend -> office PostgreSQL
+```
+
+Use this when the office database must remain the main truth and speed is the priority. The backend runs beside PostgreSQL, so SQL queries are local. The VPS only terminates public HTTPS and proxies to the office backend over Tailscale.
+
+If you are unsure, start with Architecture A. If data loading over VPN is too slow and the office PC can stay online 24/7, switch to Architecture B.
 
 Use these placeholders:
 
@@ -13,6 +33,7 @@ Use these placeholders:
 - `YOUR_DB_PASSWORD`: that role password (avoid raw `@` in passwords or encode as `%40` inside URLs)
 - `YOUR_DB_PORT`: PostgreSQL port on the office host, default `5432`; use `5433` if you installed PostgreSQL 18 alongside an older version on `5432`
 - `YOUR_EMAIL`: email for Let's Encrypt certificate notices
+- `YOUR_OFFICE_BACKEND_URL`: office backend URL over Tailscale for Architecture B, example `http://100.88.123.26:3000`
 
 Example names you can copy or rename:
 
@@ -22,16 +43,20 @@ Example names you can copy or rename:
 - Flutter web folder on VPS: `/var/www/hrms`
 - systemd service: `hrms-api`
 - Backend local bind: `127.0.0.1:3000`
+- Office backend bind for Architecture B: `0.0.0.0:3000` on the office PC, reachable from the VPS only over Tailscale/firewall allow rules
 - Public API root: `https://YOUR_DOMAIN`
 
 Important layout:
 
 - PostgreSQL runs in the office, not on the VPS.
 - Do not expose PostgreSQL (`5432`, `5433`, or any custom port) to the public internet. Only the VPS reaches it over Tailscale.
+- Do not expose the Node backend port (`3000`) to the public internet. For Architecture B, only the VPS Tailscale IP should be allowed to reach office port `3000`.
 - Tailscale runs on the Kamatera VPS and on the Windows PC that hosts PostgreSQL (machine name in Tailscale is often something like `earlbullet`). Install Tailscale on your dev laptop only if that laptop is not the DB host and you want admin access to the tailnet.
 - Node.js on the VPS (API runtime) and `postgresql-client` on the VPS (`psql` for tests) do not need to match the PostgreSQL server major version on the office PC. PostgreSQL 18 on the office with client tools 16 on the VPS is fine.
 
-**Deployment order (summary):** VPS basics (sections 1–5) → Node.js (6) → Tailscale VPS (7) → Tailscale office PC (8) → PostgreSQL config on office (9) → `psql` test from VPS (10) → clone app (11+) → DNS/HTTPS when Nginx is ready (16–17). DNS A records can point at the VPS before steps 16–17; Certbot needs Nginx on port 80 first.
+**Deployment order, Architecture A:** VPS basics (sections 1–5) → Node.js (6) → Tailscale VPS (7) → Tailscale office PC (8) → PostgreSQL config on office (9) → `psql` test from VPS (10) → clone app on VPS (11+) → DNS/HTTPS when Nginx is ready (16–17). DNS A records can point at the VPS before steps 16–17; Certbot needs Nginx on port 80 first.
+
+**Deployment order, Architecture B:** VPS basics (sections 1–5) → Tailscale VPS (7) → Tailscale office PC (8) → PostgreSQL config on office (9) → run backend on office PC (14.2) → test office backend from VPS (14.3) → configure VPS Nginx to proxy to office backend (15, Option B) → DNS/HTTPS (16–17). You do not need the VPS `hrms-api` systemd service for live traffic in Architecture B.
 
 ---
 
@@ -76,7 +101,7 @@ Backups:
 
 - Enable Kamatera provider snapshots when production traffic starts.
 - Keep the office Windows Task Scheduler backup as the primary backup when the office PostgreSQL database is the source of truth.
-- Use a VPS cron or systemd timer backup for VPS-owned data and optional offsite copies. See section 14.1.
+- Use a VPS cron or systemd timer backup for VPS-owned data and optional offsite copies. See section 14.4.
 
 ## 1.5 Advanced configuration
 
@@ -463,7 +488,11 @@ For private Git over HTTPS, use a GitHub personal access token as the password w
 
 ---
 
-# 12. Backend environment file
+# 12. Backend environment file on VPS (Architecture A)
+
+Use this section when the Node backend runs on the VPS.
+
+For Architecture B, the live backend `.env` is on the office PC instead. See section 14.2. You may still keep a VPS `.env` for tests or rollback, but VPS Nginx will proxy to the office backend and the VPS `hrms-api` service is not required for live traffic.
 
 Path:
 
@@ -514,7 +543,7 @@ Optional Flutter web production lock:
 CORS_ORIGINS=https://YOUR_DOMAIN
 ```
 
-Optional biometric punch ingestion from the office sync script on the VPS must match the same key:
+Optional biometric punch ingestion from the office sync script must match the same key:
 
 ```env
 BIO_SYNC_API_KEY=generate_a_long_random_secret
@@ -528,7 +557,7 @@ chmod 600 .env
 
 ---
 
-# 13. Install backend dependencies and smoke test
+# 13. Install backend dependencies and smoke test on VPS (Architecture A)
 
 Run on the VPS:
 
@@ -567,7 +596,7 @@ curl -s http://127.0.0.1:3000/health/db
 
 ---
 
-# 14. systemd service for the HRMS API
+# 14. systemd service for the HRMS API on VPS (Architecture A)
 
 Run on the VPS:
 
@@ -609,7 +638,140 @@ Logs:
 sudo journalctl -u hrms-api -n 80 --no-pager
 ```
 
-## 14.1 VPS backup scheduler
+## 14.2 Office backend setup (Architecture B)
+
+Use this section when the office PC is the live backend host and the VPS only proxies HTTPS traffic to it.
+
+On the office PC, keep the project at your normal local path, for example:
+
+```text
+C:\Users\Admin\hrms_plaridel
+```
+
+Install backend dependencies if needed:
+
+```powershell
+cd C:\Users\Admin\hrms_plaridel\backend
+npm install
+```
+
+Office backend `.env`:
+
+```env
+DATABASE_URL=postgresql://YOUR_DB_USER:YOUR_DB_PASSWORD@localhost:YOUR_DB_PORT/hrms_plaridel
+HOST=0.0.0.0
+PORT=3000
+TRUST_PROXY=1
+HRMS_TIMEZONE=Asia/Manila
+
+JWT_SECRET=SAME_VALUE_ON_OFFICE_AND_VPS
+JWT_REFRESH_SECRET=SAME_VALUE_ON_OFFICE_AND_VPS
+JWT_EXPIRATION=15m
+JWT_REFRESH_EXPIRATION=30d
+
+BIO_SYNC_API_KEY=SAME_VALUE_USED_BY_ZKTECO_SYNC
+HRMS_API_URL=http://localhost:3000
+ZK_POLL_INTERVAL=10
+ZK_TIMEZONE_OFFSET=+08:00
+```
+
+Important:
+
+- `DATABASE_URL` uses `localhost` because PostgreSQL is on the same office PC.
+- `HOST=0.0.0.0` allows the VPS to reach the office backend over Tailscale.
+- `JWT_SECRET` and `JWT_REFRESH_SECRET` should match any VPS backend values during migration. If they differ, users may need to log in again after switching traffic.
+- `HRMS_API_URL=http://localhost:3000` is for the office biometric sync script when it runs on the same PC as the office backend.
+
+Start the office backend:
+
+```powershell
+cd C:\Users\Admin\hrms_plaridel\backend
+npm start
+```
+
+Test locally on the office PC:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/health
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/health/db
+```
+
+Allow only the VPS Tailscale IP to reach the office backend port:
+
+```powershell
+New-NetFirewallRule `
+  -DisplayName "HRMS Office API from VPS Tailscale" `
+  -Direction Inbound `
+  -Action Allow `
+  -Protocol TCP `
+  -LocalPort 3000 `
+  -RemoteAddress YOUR_VPS_TAILSCALE_IP `
+  -Profile Any
+```
+
+For testing from phones on the same office Wi-Fi, you may also allow the LAN profile temporarily:
+
+```powershell
+cd C:\Users\Admin\hrms_plaridel
+Set-ExecutionPolicy -Scope Process Bypass -Force
+.\scripts\allow-backend-firewall-windows.ps1
+```
+
+Do not port-forward office port `3000` on the router.
+
+### Optional: run office backend automatically after reboot
+
+For quick operations, keep a visible PowerShell running `npm start`. For production-like use, run it with a service manager such as NSSM or a Windows Task Scheduler task.
+
+Simple Task Scheduler pattern:
+
+- Trigger: At startup
+- User: the Windows account that owns the project
+- Action/program: `powershell.exe`
+- Arguments:
+
+```text
+-NoProfile -ExecutionPolicy Bypass -Command "cd C:\Users\Admin\hrms_plaridel\backend; npm start"
+```
+
+If using Task Scheduler, test by rebooting the office PC and checking:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/health/db
+```
+
+## 14.3 Test office backend from the VPS (Architecture B)
+
+On the office PC, get its Tailscale IP:
+
+```powershell
+tailscale ip -4
+```
+
+On the VPS, test:
+
+```bash
+tailscale ping YOUR_OFFICE_TAILSCALE_IP
+curl -s http://YOUR_OFFICE_TAILSCALE_IP:3000/health
+curl -s http://YOUR_OFFICE_TAILSCALE_IP:3000/health/db
+```
+
+Expected:
+
+```json
+{"ok":true,"message":"HRMS API is running"}
+```
+
+and `/health/db` should report `PostgreSQL connection OK`.
+
+If `curl http://YOUR_OFFICE_TAILSCALE_IP:3000/health` fails:
+
+- Confirm the office backend is running.
+- Confirm office `.env` has `HOST=0.0.0.0`.
+- Confirm Windows Firewall allows `YOUR_VPS_TAILSCALE_IP` to TCP `3000`.
+- Confirm Tailscale is connected on both machines.
+
+## 14.4 VPS backup scheduler
 
 Use this only for data that lives on the VPS, or as a secondary/offsite backup through Tailscale. If PostgreSQL on the office Windows server is the source of truth, the primary backup must still run on that Windows server with Task Scheduler.
 
@@ -773,7 +935,11 @@ Create site:
 sudo nano /etc/nginx/sites-available/hrms-api
 ```
 
-HTTP-only first (Certbot will upgrade later):
+HTTP-only first (Certbot will upgrade later).
+
+## Option A: proxy to VPS backend
+
+Use this when the Node backend runs as `hrms-api` on the VPS:
 
 ```nginx
 server {
@@ -795,6 +961,40 @@ server {
 }
 ```
 
+## Option B: proxy to office backend over Tailscale
+
+Use this when the Node backend runs on the office PC beside PostgreSQL. Replace `YOUR_OFFICE_TAILSCALE_IP` with the office PC's Tailscale IP.
+
+```nginx
+server {
+    listen 80;
+    listen [::]:80;
+
+    server_name YOUR_DOMAIN www.YOUR_DOMAIN;
+
+    location / {
+        proxy_pass http://YOUR_OFFICE_TAILSCALE_IP:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 120s;
+        proxy_read_timeout 120s;
+    }
+}
+```
+
+For Architecture B, verify the target before reloading Nginx:
+
+```bash
+curl -s http://YOUR_OFFICE_TAILSCALE_IP:3000/health/db
+```
+
 Enable:
 
 ```bash
@@ -803,6 +1003,22 @@ sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t
 sudo systemctl reload nginx
 ```
+
+After enabling Architecture B, verify public HTTPS reaches the office backend:
+
+```bash
+curl -s https://YOUR_DOMAIN/health
+curl -s https://YOUR_DOMAIN/health/db
+```
+
+If these work, you can stop the VPS backend service to avoid confusion:
+
+```bash
+sudo systemctl stop hrms-api
+sudo systemctl disable hrms-api
+```
+
+Only stop `hrms-api` after `https://YOUR_DOMAIN/health/db` works through Nginx. Keep the project on the VPS for Nginx config, static web hosting, scripts, or rollback.
 
 ---
 
@@ -859,7 +1075,7 @@ https://YOUR_DOMAIN/health/db
 
 # 18. Nginx notes for Flutter web on the same domain
 
-If you later host Flutter web static files on this VPS under the same hostname, add a root and split locations so `/` serves web and API paths proxy to Node. Example pattern:
+If you later host Flutter web static files on this VPS under the same hostname, add a root and split locations so `/` serves web and API paths proxy to Node. In Architecture A, API paths proxy to `127.0.0.1:3000`. In Architecture B, API paths proxy to `http://YOUR_OFFICE_TAILSCALE_IP:3000`.
 
 - `location /api/` proxies to Node if your app used an `/api` prefix (this HRMS backend mounts auth at `/auth` and `/api/...` at paths like `/api/employees`; adjust to match your chosen URL layout).
 
@@ -941,18 +1157,27 @@ flutter build apk --release --split-per-abi --dart-define=API_BASE_URL=https://Y
 
 ---
 
-# 23. Office biometric sync script points to the public API
+# 23. Office biometric sync script
 
-On the office machine that runs `backend/scripts/zkteco-sync-py.py`, set the API base to the Kamatera HTTPS URL, not localhost.
+On the office machine that runs `backend/scripts/zkteco-sync-py.py`, choose the API base for your architecture.
 
-Example `.env` or environment for that script:
+Architecture A, VPS backend:
 
 ```env
-API_URL=https://YOUR_DOMAIN
+HRMS_API_URL=https://YOUR_DOMAIN
 BIO_SYNC_API_KEY=same_value_as_VPS_backend_env
 ```
 
 Office pushes punches to the VPS API; the VPS writes into PostgreSQL over Tailscale to the office DB.
+
+Architecture B, office backend:
+
+```env
+HRMS_API_URL=http://localhost:3000
+BIO_SYNC_API_KEY=same_value_as_office_backend_env
+```
+
+Office sync reads the biometric clock over LAN and posts directly to the office backend, which writes to local PostgreSQL. Public users still use `https://YOUR_DOMAIN`; VPS Nginx proxies that HTTPS traffic to the same office backend over Tailscale.
 
 ---
 
@@ -970,21 +1195,64 @@ Run extra scripts only if your deployment uses those modules, same as `backend/R
 
 # 25. Normal update workflow
 
-## 25.1 Backend code update
+## 25.1 Backend code update, Architecture A
 
 Push to Git from your dev machine, then on the VPS:
 
 ```bash
 cd /opt/hrms-plaridel
 git pull
-cd backend
-npm install
 sudo systemctl restart hrms-api
 sudo systemctl status hrms-api --no-pager
 curl -s http://127.0.0.1:3000/health/db
 ```
 
-## 25.2 Backend `.env` change
+Run dependency installation only if `backend/package.json` or `backend/package-lock.json` changed:
+
+```bash
+cd /opt/hrms-plaridel
+cd backend
+npm install
+```
+
+## 25.2 Backend code update, Architecture B
+
+Push to Git from your dev machine, then update the office PC backend:
+
+```powershell
+cd C:\Users\Admin\hrms_plaridel
+git pull
+```
+
+Run dependency installation only if `backend/package.json` or `backend/package-lock.json` changed:
+
+```powershell
+cd C:\Users\Admin\hrms_plaridel\backend
+npm install
+```
+
+Restart the office backend process. If you run it manually, stop the old `npm start` with `Ctrl+C`, then run:
+
+```powershell
+npm start
+```
+
+Then test on the office PC:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/health/db
+```
+
+Then test from the VPS:
+
+```bash
+curl -s http://YOUR_OFFICE_TAILSCALE_IP:3000/health/db
+curl -s https://YOUR_DOMAIN/health/db
+```
+
+For Architecture B, you usually do not need to pull backend source code on the VPS unless you also host Flutter web/static files there, keep a rollback copy, or changed Nginx/deployment docs.
+
+## 25.3 Backend `.env` change, Architecture A
 
 ```bash
 nano /opt/hrms-plaridel/backend/.env
@@ -992,13 +1260,31 @@ chmod 600 /opt/hrms-plaridel/backend/.env
 sudo systemctl restart hrms-api
 ```
 
+## 25.4 Backend `.env` change, Architecture B
+
+Edit the office PC file:
+
+```powershell
+notepad C:\Users\Admin\hrms_plaridel\backend\.env
+```
+
+Restart the office backend process after saving. Then verify from both sides:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/health/db
+```
+
+```bash
+curl -s https://YOUR_DOMAIN/health/db
+```
+
 ---
 
 # 26. Troubleshooting
 
-## 26.1 health/db returns 503 on VPS
+## 26.1 health/db returns 503
 
-Check API logs and database URL:
+Architecture A, VPS backend:
 
 ```bash
 sudo journalctl -u hrms-api -n 100 --no-pager
@@ -1010,6 +1296,23 @@ Test psql from VPS to office again (include `YOUR_DB_PORT`, not only 5432):
 ```bash
 psql "postgresql://YOUR_DB_USER:YOUR_DB_PASSWORD@YOUR_OFFICE_TAILSCALE_IP:YOUR_DB_PORT/hrms_plaridel" -c "SELECT 1;"
 ```
+
+Architecture B, office backend:
+
+On the office PC:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/health/db
+```
+
+On the VPS:
+
+```bash
+curl -s http://YOUR_OFFICE_TAILSCALE_IP:3000/health/db
+curl -s https://YOUR_DOMAIN/health/db
+```
+
+If the office test works but the VPS Tailscale test fails, check Tailscale and Windows Firewall for office port `3000`. If the Tailscale test works but HTTPS fails, check Nginx `proxy_pass`.
 
 ## 26.2 Tailscale works but Postgres refuses
 
@@ -1025,11 +1328,25 @@ If the password contains `@`, encode it as `%40` inside `DATABASE_URL`, or chang
 
 ## 26.5 Nginx 502 Bad Gateway
 
-Node is down or not listening:
+Architecture A, VPS backend: Node is down or not listening on the VPS:
 
 ```bash
 sudo systemctl status hrms-api --no-pager
 curl -s http://127.0.0.1:3000/health
+```
+
+Architecture B, office backend: the VPS cannot reach the office backend:
+
+```bash
+curl -s http://YOUR_OFFICE_TAILSCALE_IP:3000/health
+sudo nginx -T | grep proxy_pass
+```
+
+Then check on the office PC:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/health
+tailscale status
 ```
 
 ## 26.6 Flutter web CORS errors
@@ -1040,12 +1357,29 @@ Set `CORS_ORIGINS` in backend `.env` to the exact web origin including scheme an
 
 # 27. Quick final verification
 
-On the VPS:
+Architecture A, VPS backend:
 
 ```bash
 sudo systemctl status hrms-api --no-pager
 curl -s http://127.0.0.1:3000/health/db
 sudo nginx -t
+curl -s https://YOUR_DOMAIN/health/db
+```
+
+Architecture B, office backend:
+
+On the office PC:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/health/db
+```
+
+On the VPS:
+
+```bash
+curl -s http://YOUR_OFFICE_TAILSCALE_IP:3000/health/db
+sudo nginx -t
+curl -s https://YOUR_DOMAIN/health/db
 ```
 
 In a browser:
@@ -1062,11 +1396,18 @@ https://YOUR_DOMAIN/health/db
 These optional variables are documented in `backend/.env.example` and support this deployment:
 
 ```text
+HOST=127.0.0.1 for Architecture A, or 0.0.0.0 for Architecture B
+PORT=3000
 TRUST_PROXY=1
 CORS_ORIGINS=https://YOUR_DOMAIN
 PG_CONNECTION_TIMEOUT_MS=15000
 PG_POOL_MAX=20
+JWT_SECRET=...
+JWT_REFRESH_SECRET=...
 BIO_SYNC_API_KEY=...
+HRMS_API_URL=http://localhost:3000
+ZK_POLL_INTERVAL=10
+ZK_TIMEZONE_OFFSET=+08:00
 ```
 
 VPN itself does not need Node code changes. Tailscale provides the private path between VPS and office.

@@ -236,6 +236,12 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
     );
     pieces.push(...dtrRows);
 
+    const otParams = [];
+    const otWhere = ['1=1'];
+    if (user.role !== 'admin') {
+      otWhere.push(`o.employee_id = $${otParams.length + 1}`);
+      otParams.push(user.id);
+    }
     const otRows = await safeSourceQuery(
       'dtr.overtime_requests',
       `SELECT
@@ -251,8 +257,8 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
          o.status AS source_status
        FROM overtime_requests o
        JOIN users u ON u.id = o.employee_id
-       WHERE ${dtrWhere.join(' AND ')}`,
-      dtrParams
+       WHERE ${otWhere.join(' AND ')}`,
+      otParams
     );
     pieces.push(...otRows);
 

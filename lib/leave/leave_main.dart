@@ -36,6 +36,8 @@ class LeaveMain extends StatefulWidget {
     this.employeeRequestsContent,
     this.employeeBalancesContent,
     this.adminApprovalsContent,
+    this.onFileLeavePressed,
+    this.hideEmployeeFileLeaveAction = false,
   });
 
   /// Active section when controlled by sidebar navigation.
@@ -58,6 +60,13 @@ class LeaveMain extends StatefulWidget {
 
   /// Optional injected content for admin approvals.
   final Widget? adminApprovalsContent;
+
+  /// Optional external handler for filing leave, useful when a parent shell owns
+  /// the mobile floating action button.
+  final VoidCallback? onFileLeavePressed;
+
+  /// Hide the in-page File Leave button when the parent shell shows its own.
+  final bool hideEmployeeFileLeaveAction;
 
   @override
   State<LeaveMain> createState() => _LeaveMainState();
@@ -88,30 +97,40 @@ class _LeaveMainState extends State<LeaveMain> {
   @override
   Widget build(BuildContext context) {
     final useSidebarNav = widget.section != null;
+    final hideMobileEmployeeChrome =
+        MediaQuery.sizeOf(context).width < 600 &&
+        !widget.isAdmin &&
+        !widget.isDepartmentHead &&
+        !useSidebarNav;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Leave Management',
-          style: TextStyle(
-            color: AppTheme.dashTextPrimaryOf(context),
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
+        if (!hideMobileEmployeeChrome) ...[
+          Text(
+            'Leave Management',
+            style: TextStyle(
+              color: AppTheme.dashTextPrimaryOf(context),
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+            ),
           ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          (widget.isAdmin || widget.isDepartmentHead)
-              ? 'Review employee leave requests, balances, and approvals.'
-              : 'View leave balances, file requests, and track approvals.',
-          style: TextStyle(
-            color: AppTheme.dashTextSecondaryOf(context),
-            fontSize: 14,
+          const SizedBox(height: 8),
+          Text(
+            (widget.isAdmin || widget.isDepartmentHead)
+                ? 'Review employee leave requests, balances, and approvals.'
+                : 'View leave balances, file requests, and track approvals.',
+            style: TextStyle(
+              color: AppTheme.dashTextSecondaryOf(context),
+              fontSize: 14,
+            ),
           ),
-        ),
-        if (!useSidebarNav) ...[const SizedBox(height: 24), _buildSectionNav()],
-        const SizedBox(height: 24),
+          if (!useSidebarNav) ...[
+            const SizedBox(height: 24),
+            _buildSectionNav(),
+          ],
+          const SizedBox(height: 24),
+        ],
         _buildContent(),
       ],
     );
@@ -186,18 +205,26 @@ class _LeaveMainState extends State<LeaveMain> {
   };
 
   Widget _buildContent() {
+    final VoidCallback fileLeaveHandler =
+        widget.onFileLeavePressed ?? () => _openLeaveRequestForm();
     return ConstrainedBox(
       constraints: const BoxConstraints(minHeight: 220),
       child: switch (_activeSection) {
         LeaveSection.requests =>
           widget.employeeRequestsContent ??
-              EmployeeLeaveScreen(onFileLeavePressed: _openLeaveRequestForm),
+              EmployeeLeaveScreen(
+                onFileLeavePressed: fileLeaveHandler,
+                showFileLeaveAction: !widget.hideEmployeeFileLeaveAction,
+              ),
         LeaveSection.approvals =>
           widget.adminApprovalsContent ??
               AdminLeaveScreen(isDepartmentHead: widget.isDepartmentHead),
         LeaveSection.balances =>
           widget.employeeBalancesContent ??
-              EmployeeLeaveScreen(onFileLeavePressed: _openLeaveRequestForm),
+              EmployeeLeaveScreen(
+                onFileLeavePressed: fileLeaveHandler,
+                showFileLeaveAction: !widget.hideEmployeeFileLeaveAction,
+              ),
         LeaveSection.dashboard => _LeavePlaceholderCard(
           title: 'Leave Dashboard',
           subtitle:

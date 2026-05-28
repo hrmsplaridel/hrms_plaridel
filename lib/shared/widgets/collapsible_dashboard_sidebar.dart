@@ -560,8 +560,8 @@ class _CollapsedSectionGem extends StatelessWidget {
   }
 }
 
-/// Collapsed footer profile — avatar + spinning orange accent ring.
-class CollapsedSidebarProfileOrb extends StatelessWidget {
+/// Collapsed footer profile — clean avatar chip with subtle motion.
+class CollapsedSidebarProfileOrb extends StatefulWidget {
   const CollapsedSidebarProfileOrb({
     super.key,
     required this.displayName,
@@ -574,20 +574,90 @@ class CollapsedSidebarProfileOrb extends StatelessWidget {
   final String? avatarPath;
 
   @override
+  State<CollapsedSidebarProfileOrb> createState() =>
+      _CollapsedSidebarProfileOrbState();
+}
+
+class _CollapsedSidebarProfileOrbState extends State<CollapsedSidebarProfileOrb>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _float;
+
+  @override
+  void initState() {
+    super.initState();
+    _float = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2600),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _float.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final panel = AppTheme.dashPanelOf(context);
+    final hairline = AppTheme.dashHairlineOf(context);
+
     return Tooltip(
-      message: '$displayName\n$subtitle',
+      message: '${widget.displayName}\n${widget.subtitle}',
       waitDuration: const Duration(milliseconds: 400),
       child: Padding(
         padding: const EdgeInsets.only(bottom: 4),
-        child: SidebarRotatingAccentRing(
-          size: 44,
-          child: Padding(
-            padding: const EdgeInsets.all(3),
-            child: ClipOval(
-              child: _CollapsedAvatar(avatarPath: avatarPath),
-            ),
-          ),
+        child: AnimatedBuilder(
+          animation: _float,
+          builder: (context, _) {
+            final wave = math.sin(_float.value * 2 * math.pi);
+            final yOffset = wave * 1.6;
+            final scale = 1 + (wave * 0.015);
+            final barWidth = 16 + ((wave + 1) * 1.5);
+
+            return Transform.translate(
+              offset: Offset(0, yOffset),
+              child: Transform.scale(
+                scale: scale,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: panel,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: hairline, width: 1.6),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.08),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: ClipOval(
+                        child: _CollapsedAvatar(avatarPath: widget.avatarPath),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      width: barWidth,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppTheme.dashTextSecondaryOf(context).withValues(
+                          alpha: 0.35,
+                        ),
+                        borderRadius: BorderRadius.circular(99),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -637,6 +707,9 @@ class SidebarRotatingAccentRing extends StatefulWidget {
 class _SidebarRotatingAccentRingState extends State<SidebarRotatingAccentRing>
     with SingleTickerProviderStateMixin {
   late final AnimationController _spin;
+  static const Color _accentOrange = Color(0xFFFF7A00);
+  static const Color _accentOrangeLight = Color(0xFFFFA347);
+  static const Color _trackNeutral = Color(0xFFE6E6E6);
 
   @override
   void initState() {
@@ -659,9 +732,9 @@ class _SidebarRotatingAccentRingState extends State<SidebarRotatingAccentRing>
     final shadow = widget.boxShadow ??
         [
           BoxShadow(
-            color: AppTheme.primaryNavy.withValues(alpha: 0.18),
-            blurRadius: 12,
-            offset: const Offset(0, 3),
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
           ),
         ];
 
@@ -686,6 +759,9 @@ class _SidebarRotatingAccentRingState extends State<SidebarRotatingAccentRing>
                     size: Size(widget.size, widget.size),
                     painter: SidebarAccentRingPainter(
                       rotation: _spin.value * 2 * math.pi,
+                      trackColor: _trackNeutral,
+                      arcStartColor: _accentOrangeLight,
+                      arcEndColor: _accentOrange,
                     ),
                   );
                 },
@@ -703,8 +779,8 @@ class _SidebarRotatingAccentRingState extends State<SidebarRotatingAccentRing>
               borderRadius: BorderRadius.circular(2),
               gradient: const LinearGradient(
                 colors: [
-                  AppTheme.primaryNavyLight,
-                  AppTheme.primaryNavy,
+                  _accentOrangeLight,
+                  _accentOrange,
                 ],
               ),
             ),
@@ -720,10 +796,16 @@ class SidebarAccentRingPainter extends CustomPainter {
   const SidebarAccentRingPainter({
     required this.rotation,
     this.strokeWidth = 2.5,
+    this.trackColor = const Color(0xFFE6E6E6),
+    this.arcStartColor = const Color(0xFFFFA347),
+    this.arcEndColor = const Color(0xFFFF7A00),
   });
 
   final double rotation;
   final double strokeWidth;
+  final Color trackColor;
+  final Color arcStartColor;
+  final Color arcEndColor;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -731,22 +813,22 @@ class SidebarAccentRingPainter extends CustomPainter {
     final radius = size.width / 2 - 1.5;
 
     final trackPaint = Paint()
-      ..color = AppTheme.primaryNavy.withValues(alpha: 0.12)
+      ..color = trackColor
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2;
+      ..strokeWidth = 2.2;
 
     canvas.drawCircle(center, radius, trackPaint);
 
     final arcRect = Rect.fromCircle(center: center, radius: radius);
     final arcPaint = Paint()
-      ..shader = const SweepGradient(
+      ..shader = SweepGradient(
         colors: [
-          AppTheme.primaryNavyLight,
-          AppTheme.primaryNavy,
-          AppTheme.primaryNavyDark,
-          AppTheme.primaryNavyLight,
+          arcStartColor,
+          arcEndColor,
+          arcEndColor,
+          arcStartColor,
         ],
-        stops: [0, 0.4, 0.7, 1],
+        stops: const [0, 0.45, 0.75, 1],
       ).createShader(arcRect)
       ..style = PaintingStyle.stroke
       ..strokeWidth = strokeWidth
@@ -756,7 +838,7 @@ class SidebarAccentRingPainter extends CustomPainter {
     canvas.translate(center.dx, center.dy);
     canvas.rotate(rotation);
     canvas.translate(-center.dx, -center.dy);
-    canvas.drawArc(arcRect, -math.pi / 2, math.pi * 1.35, false, arcPaint);
+    canvas.drawArc(arcRect, -math.pi / 2, math.pi * 0.72, false, arcPaint);
     canvas.restore();
   }
 

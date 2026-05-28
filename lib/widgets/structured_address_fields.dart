@@ -39,6 +39,18 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
     _applyInitial(widget.initialRawAddress);
   }
 
+  @override
+  void didUpdateWidget(covariant StructuredAddressForm oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialRawAddress != widget.initialRawAddress) {
+      _applyInitial(widget.initialRawAddress);
+    }
+  }
+
+  Future<void> applyRawAddress(String? rawAddress) {
+    return _applyInitial(rawAddress);
+  }
+
   Future<void> _loadProvinceData(String province) async {
     setState(() {
       _loadingProvince = true;
