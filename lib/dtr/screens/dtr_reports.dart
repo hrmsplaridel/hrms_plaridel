@@ -233,24 +233,31 @@ class _DtrReportsState extends State<DtrReports> {
     return out;
   }
 
-  /// Last date in the selected month included in tardiness/absent/late stats. Days after "today"
-  /// are not treated as absent (no attendance record exists yet).
+  /// Last date in the selected month included in tardiness/absent/late stats. Days after this
+  /// cutoff are not treated as absent (no attendance record exists yet). We use *yesterday*
+  /// rather than today because the current day's shift may not have ended — the backend only
+  /// injects synthetic "Absent" rows after the shift is over. If the backend already sent a
+  /// record for today (employee clocked in, or post-shift absent), it still shows in the grid
+  /// because it exists in [recordsByDate]; this cutoff only governs the *client-side* fallback
+  /// when no record exists.
   DateTime _tardinessStatsInclusiveEnd() {
     final monthStart = DateTime(_selectedYear, _selectedMonth, 1);
     final lastDay = DateTime(_selectedYear, _selectedMonth + 1, 0).day;
     final monthEnd = DateTime(_selectedYear, _selectedMonth, lastDay);
-    final t = DateTime(
-      DateTime.now().year,
-      DateTime.now().month,
-      DateTime.now().day,
-    );
-    if (monthEnd.isBefore(t)) {
+    final now = DateTime.now();
+    // Use yesterday: today's shift may still be in progress.
+    final yesterday = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    ).subtract(const Duration(days: 1));
+    if (monthEnd.isBefore(yesterday)) {
       return monthEnd;
     }
-    if (t.isBefore(monthStart)) {
+    if (yesterday.isBefore(monthStart)) {
       return monthStart.subtract(const Duration(days: 1));
     }
-    return t.isAfter(monthEnd) ? monthEnd : t;
+    return yesterday.isAfter(monthEnd) ? monthEnd : yesterday;
   }
 
   /// Scheduled work days in the month on or before [inclusiveEnd].
