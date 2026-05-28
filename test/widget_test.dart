@@ -13,6 +13,7 @@ import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/providers/theme_mode_provider.dart';
 import 'package:hrms_plaridel/api/app_user.dart';
 
+
 class FakeAuthProvider extends AuthProvider {
   FakeAuthProvider(this._fakeUser);
 
@@ -41,7 +42,6 @@ void main() {
     // Build the app and trigger a frame.
     await tester.pumpWidget(MyApp(
       auth: auth,
-      storedLoginAs: 'Admin',
       themeNotifier: ThemeModeNotifier(initial: ThemeMode.light),
     ));
 
